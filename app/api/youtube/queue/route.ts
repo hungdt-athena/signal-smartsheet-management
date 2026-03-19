@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session || session.user.role !== 'manager') {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (session.user.role !== 'manager') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const webhookUrl = process.env.WEBHOOK_YTB_QUEUE

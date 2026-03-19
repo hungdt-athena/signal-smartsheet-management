@@ -3,10 +3,13 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session || session.user.role !== 'evaluator') {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (session.user.role !== 'evaluator') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const rows = await sql`
@@ -20,8 +23,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session || session.user.role !== 'evaluator') {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (session.user.role !== 'evaluator') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { start_date, end_date } = await req.json()

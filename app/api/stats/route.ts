@@ -4,7 +4,8 @@ import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 
 function verifyWebhookSecret(req: NextRequest) {
-  return req.headers.get('x-webhook-secret') === process.env.WEBHOOK_SECRET
+  const secret = process.env.WEBHOOK_SECRET
+  return !!secret && req.headers.get('x-webhook-secret') === secret
 }
 
 export async function POST(req: NextRequest) {
@@ -40,10 +41,13 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true })
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session || session.user.role !== 'manager') {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (session.user.role !== 'manager') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   // Global stats today

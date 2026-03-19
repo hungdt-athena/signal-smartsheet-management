@@ -20,27 +20,40 @@ export function TriggerButton({ label, workflow }: TriggerButtonProps) {
     setLoading(true)
     setResult(null)
 
-    const res = await fetch('/api/workflows/trigger', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workflow }),
-    })
-    const { triggered_at } = await res.json()
+    try {
+      const res = await fetch('/api/workflows/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflow }),
+      })
 
-    // Poll for result
-    const poll = setInterval(async () => {
-      const logRes = await fetch(`/api/logs?workflow=${workflow}&since=${triggered_at}`)
-      const logs = await logRes.json()
-      const done = logs.find((l: { status: string }) => l.status !== 'running')
-      if (done) {
-        clearInterval(poll)
-        setResult({ status: done.status, summary: done.summary, error_message: done.error_message })
+      if (!res.ok) {
+        const body = await res.json()
+        setResult({ status: 'error', error_message: body.error ?? 'Failed to trigger workflow' })
         setLoading(false)
+        return
       }
-    }, 5000)
 
-    // Stop polling after 10 minutes
-    setTimeout(() => { clearInterval(poll); setLoading(false) }, 600000)
+      const { triggered_at } = await res.json()
+
+      // Poll for result
+      const poll = setInterval(async () => {
+        const logRes = await fetch(`/api/logs?workflow=${workflow}&since=${triggered_at}`)
+        const logs = await logRes.json()
+        const done = logs.find((l: { status: string }) => l.status !== 'running')
+        if (done) {
+          clearInterval(poll)
+          setResult({ status: done.status, summary: done.summary, error_message: done.error_message })
+          setLoading(false)
+        }
+      }, 5000)
+
+      // Stop polling after 10 minutes
+      setTimeout(() => { clearInterval(poll); setLoading(false) }, 600000)
+    } catch {
+      setResult({ status: 'error', error_message: 'Network error' })
+      setLoading(false)
+    }
   }
 
   return (

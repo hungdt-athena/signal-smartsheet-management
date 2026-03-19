@@ -4,8 +4,11 @@ import { authOptions } from '@/lib/auth'
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions)
-  if (!session || session.user.role !== 'manager') {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (session.user.role !== 'manager') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { is_available } = await req.json()

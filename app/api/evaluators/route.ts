@@ -3,10 +3,13 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session || session.user.role !== 'manager') {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (session.user.role !== 'manager') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const webhookUrl = process.env.WEBHOOK_GET_EVALUATORS
@@ -16,13 +19,14 @@ export async function GET(req: NextRequest) {
   if (!n8nRes.ok) return NextResponse.json({ error: 'Failed to fetch evaluator list' }, { status: 502 })
   const evaluators: { name: string; email: string; is_available: boolean }[] = await n8nRes.json()
 
+  type StatRow = { evaluator_name: string; games_assigned: number; games_evaluated: number }
   const stats = await sql`
     SELECT evaluator_name, games_assigned, games_evaluated
     FROM daily_stats
     WHERE stat_date = CURRENT_DATE AND evaluator_name IS NOT NULL
-  `
+  ` as StatRow[]
 
-  const statsMap = Object.fromEntries(stats.map((s: { evaluator_name: string; games_assigned: number; games_evaluated: number }) => [s.evaluator_name, s]))
+  const statsMap = Object.fromEntries(stats.map((s) => [s.evaluator_name, s]))
 
   const merged = evaluators.map(ev => ({
     ...ev,

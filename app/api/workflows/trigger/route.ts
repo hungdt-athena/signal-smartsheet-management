@@ -14,13 +14,17 @@ function getWebhookMap(): Record<string, string | undefined> {
     assign_evaluator:  process.env.WEBHOOK_ASSIGN_EVALUATOR,
     assign_initial:    process.env.WEBHOOK_ASSIGN_INITIAL,
     clean_links:       process.env.WEBHOOK_CLEAN_LINKS,
+    upload_ytb:        process.env.WEBHOOK_YTB_TRIGGER,
   }
 }
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session || session.user.role !== 'manager') {
+  if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (session.user.role !== 'manager') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { workflow } = await req.json()
