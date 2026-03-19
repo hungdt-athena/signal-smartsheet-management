@@ -114,6 +114,27 @@ CREATE TABLE ops_logs (
 
 > `auto_assign` uses an array to support multi-evaluator assignment in a single run.
 
+### New table: `daily_stats`
+```sql
+CREATE TABLE daily_stats (
+  id              SERIAL PRIMARY KEY,
+  stat_date       DATE NOT NULL,
+  evaluator_name  VARCHAR(255),      -- NULL = global record (pulled/pushed totals)
+  games_pulled    INT DEFAULT 0,     -- global only: total games pulled that day
+  games_pushed    INT DEFAULT 0,     -- global only: total games pushed to Smartsheet
+  games_assigned  INT DEFAULT 0,     -- per evaluator: assigned that day
+  games_evaluated INT DEFAULT 0,     -- per evaluator: evaluated (from Smartsheet evaluate_date)
+  updated_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (stat_date, evaluator_name)
+);
+```
+
+**Write pattern:** n8n UPSERTs into this table at the end of each relevant workflow:
+- `import_daily_game` → UPSERT global row (`evaluator_name = NULL`), update `games_pulled`
+- `database_to_smartsheet` → UPSERT global row, update `games_pushed`
+- `auto_assign` → UPSERT one row per evaluator, update `games_assigned`
+- n8n reads Smartsheet `evaluate_date` column and UPSERTs `games_evaluated` daily (separate scheduled flow or at end of assign flow)
+
 **No changes to `game_info` table.**
 
 ### Migration
@@ -122,6 +143,7 @@ Run manually against Neon before first deploy:
 -- migrations/001_initial.sql
 CREATE TABLE users ( ... );
 CREATE TABLE ops_logs ( ... );
+CREATE TABLE daily_stats ( ... );
 ```
 
 ---
@@ -142,18 +164,29 @@ n8n HTTP Request node: add header `X-Webhook-Secret` = `{{ $env.DASHBOARD_WEBHOO
 3. API route inserts a `running` row into `ops_logs` with `created_at = now()` and returns `{ triggered_at: <ISO timestamp> }` to client
 4. Client stores `triggered_at` and polls `GET /api/logs?workflow=pull_ios&since=<triggered_at>` until a non-`running` entry appears
 
-### n8n → Dashboard (log)
-At the end of each workflow, add an HTTP Request node:
+### n8n → Dashboard (log + stats)
+At the end of each workflow, add HTTP Request nodes:
+
+**1. Write ops log** (`/api/logs`):
 ```
 POST https://<dashboard-url>/api/logs
 Headers: { X-Webhook-Secret: <secret> }
 Body: {
   "workflow_name": "database_to_smartsheet",
-  "triggered_by": "manager@athena.com",   // echo back what dashboard sent, or "scheduled"
+  "triggered_by": "manager@athena.com",
   "status": "success",
   "summary": { "total": 38, "puzzle": 18, "arcade": 12, "sim": 8 }
 }
 ```
+
+**2. Upsert daily stats** (`/api/stats`) — only for relevant workflows:
+```
+POST https://<dashboard-url>/api/stats
+Headers: { X-Webhook-Secret: <secret> }
+Body (global):     { "stat_date": "2026-03-19", "games_pulled": 45 }
+Body (evaluator):  { "stat_date": "2026-03-19", "evaluator_name": "Nam", "games_assigned": 12 }
+```
+The endpoint performs `INSERT ... ON CONFLICT (stat_date, evaluator_name) DO UPDATE`.
 
 ---
 
@@ -171,6 +204,7 @@ HTTP status codes: `400` bad input, `401` unauthenticated, `403` wrong role, `50
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/api/logs` | `X-Webhook-Secret` header | Write ops log entry from n8n |
+| POST | `/api/stats` | `X-Webhook-Secret` header | Upsert daily_stats row from n8n |
 | GET | `/api/logs` | manager session | Recent 20 log entries; accepts `?workflow=&since=` query params |
 | GET | `/api/stats` | manager session | Aggregated dashboard stats |
 | POST | `/api/workflows/trigger` | manager session | Trigger n8n webhook; returns `{ triggered_at }` |
@@ -198,24 +232,23 @@ HTTP status codes: `400` bad input, `401` unauthenticated, `403` wrong role, `50
   ]
 }
 ```
-Sourced entirely from `ops_logs`. Aggregation rules:
-- **Game counts** (`total`, `puzzle`, `arcade`, `sim`, `ios`, `android`): Take the **latest** `import_daily_game` run WHERE `created_at >= today 00:00 UTC+7` AND `status = 'success'`. Use that single run's summary values. Do **not** sum across multiple runs (avoids double-counting on re-runs).
-- **Workflow status list**: One entry per `workflow_name` — the most recent row regardless of status.
+Two sources:
+- **Game counts** (`games_pulled`, `games_pushed`): read from `daily_stats` WHERE `stat_date = today AND evaluator_name IS NULL`
+- **Workflow status list**: read from `ops_logs` — one entry per `workflow_name`, most recent row
 
 ```sql
--- latest successful import run today
-SELECT summary FROM ops_logs
-WHERE workflow_name = 'import_daily_game'
-  AND status = 'success'
-  AND created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh') AT TIME ZONE 'Asia/Ho_Chi_Minh'
-ORDER BY created_at DESC
-LIMIT 1;
+-- today's global stats
+SELECT games_pulled, games_pushed
+FROM daily_stats
+WHERE stat_date = CURRENT_DATE AND evaluator_name IS NULL;
 
--- last run per workflow for status row
+-- last run per workflow
 SELECT DISTINCT ON (workflow_name) workflow_name, status, created_at
 FROM ops_logs
 ORDER BY workflow_name, created_at DESC;
 ```
+
+> `total`, `puzzle`, `arcade`, `sim`, `ios`, `android` breakdowns still come from `ops_logs` `import_daily_game` summary JSONB (latest successful run today) — those are detailed import stats, not aggregated pull counts.
 
 ### `GET /api/evaluators` — Data Flow
 1. API route calls `WEBHOOK_GET_EVALUATORS` n8n webhook
@@ -226,20 +259,15 @@ ORDER BY workflow_name, created_at DESC;
   ...
 ]
 ```
-3. API route aggregates per-evaluator weekly stats from `ops_logs` using:
+3. API route reads per-evaluator stats from `daily_stats`:
 ```sql
-SELECT
-  elem->>'evaluator' AS evaluator,
-  SUM((elem->>'games_assigned')::int) AS games_assigned_week
-FROM ops_logs,
-  jsonb_array_elements(summary->'assignments') AS elem
-WHERE workflow_name = 'auto_assign'
-  AND created_at >= NOW() - INTERVAL '7 days'
-GROUP BY elem->>'evaluator'
+SELECT evaluator_name, games_assigned, games_evaluated
+FROM daily_stats
+WHERE stat_date = CURRENT_DATE AND evaluator_name IS NOT NULL;
 ```
-4. Merges weekly count into each evaluator entry by matching on `name` field (string equality).
-   > **Contract:** The `assignments[].evaluator` value written by n8n's `auto_assign` workflow must exactly match the `name` field returned by the Google Sheets evaluator list (same capitalisation, no extra spaces). This is an n8n-side responsibility enforced during workflow configuration.
-5. Returns merged response to client. If no `ops_logs` match for an evaluator, `games_assigned_week` defaults to `0`.
+4. Merges into each evaluator entry by matching on `name` field (string equality).
+   > **Contract:** `daily_stats.evaluator_name` must exactly match the `name` field from Google Sheets. This is an n8n-side responsibility.
+5. Returns merged response. If no `daily_stats` row for an evaluator, defaults to `0`.
 
 ### `POST /api/handover` — Security (C3 fix)
 - `evaluator_name` is **always taken from `session.user.name`** — client form value is ignored
@@ -290,8 +318,8 @@ UX flow:
 4. When status = `success` or `error` → show result inline, re-enable button
 
 ### Tab 3: Team (`/team`)
-- Fetches from `/api/evaluators` (n8n → Google Sheets + ops_logs aggregate)
-- Table columns: name, available toggle, games assigned this week, games checked today (today count − yesterday count from `ops_logs auto_assign` entries)
+- Fetches from `/api/evaluators` (n8n → Google Sheets availability + `daily_stats` for counts)
+- Table columns: name, available toggle, games assigned today, games evaluated today
 - Toggle → `PATCH /api/evaluators/:id` (uses `users.id`, not name) → n8n → Google Sheets
 
 ### Tab 4: YouTube (`/youtube`)
