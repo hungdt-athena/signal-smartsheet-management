@@ -11,12 +11,14 @@ export const authOptions: NextAuthOptions = {
   ],
   callbacks: {
     async signIn({ user }) {
+      if (!user.email) return false
       const rows = await sql`SELECT id, role FROM users WHERE email = ${user.email}`
       return rows.length > 0  // block if not in whitelist
     },
     async session({ session }) {
       if (!session.user?.email) return session
-      const rows = await sql`SELECT id, name, role FROM users WHERE email = ${session.user.email}`
+      const email = session.user.email
+      const rows = await sql`SELECT id, name, role FROM users WHERE email = ${email}`
       if (rows.length > 0) {
         session.user.id = rows[0].id
         session.user.role = rows[0].role
