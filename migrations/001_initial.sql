@@ -51,3 +51,17 @@ CREATE TABLE IF NOT EXISTS daily_stats (
   updated_at      TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (stat_date, evaluator_name)
 );
+
+-- smartsheet_sheets: cached capacity data, refreshed via n8n webhook
+CREATE TABLE IF NOT EXISTS smartsheet_sheets (
+  id           SERIAL PRIMARY KEY,
+  sheet_name   VARCHAR(50) NOT NULL UNIQUE,
+  sheet_id     VARCHAR(100),
+  row_count    INT,
+  col_count    INT,
+  max_rows     INT GENERATED ALWAYS AS (LEAST(20000, FLOOR(500000.0 / NULLIF(col_count, 0))::INT)) STORED,
+  remaining    INT GENERATED ALWAYS AS (LEAST(20000, FLOOR(500000.0 / NULLIF(col_count, 0))::INT) - COALESCE(row_count, 0)) STORED,
+  updated_at   TIMESTAMPTZ
+);
+INSERT INTO smartsheet_sheets (sheet_name) VALUES ('puzzle'), ('arcade'), ('simulation')
+ON CONFLICT (sheet_name) DO NOTHING;
