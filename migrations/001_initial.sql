@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS game_flow_logs (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pull_log ON game_flow_logs (log_date, period, platform) WHERE flow_type = 'pull';
-CREATE UNIQUE INDEX IF NOT EXISTS uq_push_log ON game_flow_logs (log_date, sheet, platform) WHERE flow_type = 'push';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_push_log ON game_flow_logs (log_date, sheet, platform, period) WHERE flow_type = 'push';
 
 CREATE TABLE IF NOT EXISTS daily_stats (
   id              SERIAL PRIMARY KEY,

@@ -29,9 +29,13 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const targetDate = body.log_date ?? new Date().toISOString().slice(0, 10)
 
+  // Auto-detect period from current time UTC+7
+  const utc7Hour = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' })).getHours()
+  const period = utc7Hour < 12 ? 'morning' : 'afternoon'
+
   // Normalize to array of sheet entries
-  const entries: Array<{ sheet: string; total: number; ios?: number; android?: number }> =
-    body.sheets ?? [{ sheet: body.sheet, total: body.total, ios: body.ios, android: body.android }]
+  const entries: Array<{ sheet: string; total: number }> =
+    body.sheets ?? [{ sheet: body.sheet, total: body.total }]
 
   for (const e of entries) {
     if (!VALID_SHEETS.includes(e.sheet)) {
@@ -39,12 +43,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Only log 'all' platform (no ios/android breakdown for push)
   for (const e of entries) {
     await sql`
       INSERT INTO game_flow_logs (log_date, flow_type, period, sheet, platform, count)
-      VALUES (${targetDate}::date, 'push', NULL, ${e.sheet}, 'all', ${e.total})
-      ON CONFLICT (log_date, sheet, platform) WHERE flow_type = 'push'
+      VALUES (${targetDate}::date, 'push', ${period}, ${e.sheet}, 'all', ${e.total})
+      ON CONFLICT (log_date, sheet, platform, period) WHERE flow_type = 'push'
         DO UPDATE SET count = EXCLUDED.count, created_at = NOW()
     `
   }

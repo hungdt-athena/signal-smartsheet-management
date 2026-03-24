@@ -68,12 +68,12 @@ export async function GET(_req: NextRequest) {
       ORDER BY period, platform NULLS FIRST
     `,
 
-    // Push counts per sheet today
+    // Push counts per sheet today — sum all periods (morning + afternoon runs)
     sql`
-      SELECT sheet, platform, count
+      SELECT sheet, SUM(count) AS count
       FROM game_flow_logs
-      WHERE log_date = CURRENT_DATE AND flow_type = 'push'
-      ORDER BY sheet, platform NULLS FIRST
+      WHERE log_date = CURRENT_DATE AND flow_type = 'push' AND platform = 'all'
+      GROUP BY sheet
     `,
 
     // Last run per workflow (for status badges)
@@ -86,8 +86,8 @@ export async function GET(_req: NextRequest) {
 
   const getCP = (period: string, platform: string) =>
     pullCheckpoints.find(r => r.period === period && r.platform === platform)?.count ?? null
-  const getSheet = (sheet: string, platform: string) =>
-    pushLogs.find(r => r.sheet === sheet && r.platform === platform)?.count ?? null
+  const getSheet = (sheet: string) =>
+    pushLogs.find(r => r.sheet === sheet) ? Number(pushLogs.find(r => r.sheet === sheet)!.count) : null
 
   const morning   = { total: getCP('morning', 'all'),   ios: getCP('morning', 'ios'),   android: getCP('morning', 'android') }
   const afternoon = { total: getCP('afternoon', 'all'), ios: getCP('afternoon', 'ios'), android: getCP('afternoon', 'android') }
@@ -106,9 +106,9 @@ export async function GET(_req: NextRequest) {
         : null,
     },
     push: {
-      puzzle:     getSheet('puzzle', 'all'),
-      arcade:     getSheet('arcade', 'all'),
-      simulation: getSheet('simulation', 'all'),
+      puzzle:     getSheet('puzzle'),
+      arcade:     getSheet('arcade'),
+      simulation: getSheet('simulation'),
     },
     workflows,
   })
