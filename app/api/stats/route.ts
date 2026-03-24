@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
+import { requireRole } from '@/lib/auth-guard'
 
 function verifyWebhookSecret(req: NextRequest) {
   const secret = process.env.WEBHOOK_SECRET
@@ -42,43 +41,74 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(_req: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  if (session.user.role !== 'manager') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const guard = await requireRole('manager')
+  if (guard) return guard
 
-  // Global stats today
-  const [globalStats] = await sql`
-    SELECT games_pulled, games_pushed
-    FROM daily_stats
-    WHERE stat_date = CURRENT_DATE AND evaluator_name IS NULL
-  `
+  const [
+    pullRealtime,
+    pullCheckpoints,
+    pushLogs,
+    workflows,
+  ] = await Promise.all([
+    // Realtime: count directly from game_info — always live
+    sql<[{ total: string; ios: string; android: string }]>`
+      SELECT
+        COUNT(*)                                  AS total,
+        COUNT(*) FILTER (WHERE os = 'ios')        AS ios,
+        COUNT(*) FILTER (WHERE os = 'android')    AS android
+      FROM game_info
+      WHERE created_date = CURRENT_DATE
+    `,
 
-  // Latest successful import run today for category/OS breakdown
-  const [latestImport] = await sql`
-    SELECT summary FROM ops_logs
-    WHERE workflow_name = 'import_daily_game'
-      AND status = 'success'
-      AND created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh') AT TIME ZONE 'Asia/Ho_Chi_Minh'
-    ORDER BY created_at DESC
-    LIMIT 1
-  `
+    // Checkpoints at 12h and 16h (set by n8n cron)
+    sql`
+      SELECT period, platform, count
+      FROM game_flow_logs
+      WHERE log_date = CURRENT_DATE AND flow_type = 'pull'
+      ORDER BY period, platform NULLS FIRST
+    `,
 
-  // Last run per workflow
-  const workflows = await sql`
-    SELECT DISTINCT ON (workflow_name) workflow_name, status, created_at
-    FROM ops_logs
-    ORDER BY workflow_name, created_at DESC
-  `
+    // Push counts per sheet today
+    sql`
+      SELECT sheet, platform, count
+      FROM game_flow_logs
+      WHERE log_date = CURRENT_DATE AND flow_type = 'push'
+      ORDER BY sheet, platform NULLS FIRST
+    `,
+
+    // Last run per workflow (for status badges)
+    sql`
+      SELECT DISTINCT ON (workflow_name) workflow_name, status, created_at
+      FROM ops_logs
+      ORDER BY workflow_name, created_at DESC
+    `,
+  ])
+
+  const getCP = (period: string, platform: string) =>
+    pullCheckpoints.find(r => r.period === period && r.platform === platform)?.count ?? null
+  const getSheet = (sheet: string, platform: string) =>
+    pushLogs.find(r => r.sheet === sheet && r.platform === platform)?.count ?? null
+
+  const morning   = { total: getCP('morning', 'all'),   ios: getCP('morning', 'ios'),   android: getCP('morning', 'android') }
+  const afternoon = { total: getCP('afternoon', 'all'), ios: getCP('afternoon', 'ios'), android: getCP('afternoon', 'android') }
 
   return NextResponse.json({
-    today: {
-      games_pulled: globalStats?.games_pulled ?? 0,
-      games_pushed: globalStats?.games_pushed ?? 0,
-      ...(latestImport?.summary ?? { total: 0, puzzle: 0, arcade: 0, sim: 0, ios: 0, android: 0 }),
+    pull: {
+      realtime: {
+        total:   parseInt(pullRealtime[0].total),
+        ios:     parseInt(pullRealtime[0].ios),
+        android: parseInt(pullRealtime[0].android),
+      },
+      morning,
+      afternoon,
+      delta: morning.total !== null && afternoon.total !== null
+        ? { total: afternoon.total - morning.total, ios: (afternoon.ios ?? 0) - (morning.ios ?? 0), android: (afternoon.android ?? 0) - (morning.android ?? 0) }
+        : null,
+    },
+    push: {
+      puzzle:     getSheet('puzzle', 'all'),
+      arcade:     getSheet('arcade', 'all'),
+      simulation: getSheet('simulation', 'all'),
     },
     workflows,
   })

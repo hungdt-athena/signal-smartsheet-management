@@ -3,6 +3,9 @@ import { NextResponse } from 'next/server'
 
 export default withAuth(
   function middleware(req) {
+    // Skip auth checks in local dev
+    if (process.env.SKIP_AUTH === 'true') return NextResponse.next()
+
     const { pathname } = req.nextUrl
     const role = req.nextauth.token?.role as string | undefined
 
@@ -21,7 +24,7 @@ export default withAuth(
   },
   {
     callbacks: {
-      authorized: ({ token }) => !!token,
+      authorized: ({ token }) => process.env.SKIP_AUTH === 'true' || !!token,
     },
   }
 )
