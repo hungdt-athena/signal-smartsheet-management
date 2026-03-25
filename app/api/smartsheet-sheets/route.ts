@@ -8,7 +8,7 @@ export async function GET() {
   if (guard) return guard
 
   const rows = await sql`
-    SELECT sheet_name, sheet_id, row_count, col_count, max_rows, remaining, updated_at
+    SELECT sheet_name, sheet_id, categories_list, row_count, col_count, max_rows, remaining, updated_at
     FROM smartsheet_sheets
     ORDER BY id
   `
