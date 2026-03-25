@@ -15,7 +15,7 @@ export async function GET() {
   return NextResponse.json(rows)
 }
 
-// PATCH /api/smartsheet-sheets — update sheet_id for a sheet
+// PATCH /api/smartsheet-sheets — update sheet_id in DB and sync to Google Sheets via n8n
 export async function PATCH(req: NextRequest) {
   const guard = await requireRole('manager')
   if (guard) return guard
@@ -25,9 +25,19 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'sheet_name and sheet_id required' }, { status: 400 })
   }
 
-  await sql`
-    UPDATE smartsheet_sheets SET sheet_id = ${sheet_id}
-    WHERE sheet_name = ${sheet_name}
-  `
+  // 1. Save to DB
+  await sql`UPDATE smartsheet_sheets SET sheet_id = ${sheet_id} WHERE sheet_name = ${sheet_name}`
+
+  // 2. Sync to Google Sheets via n8n webhook (non-blocking — fire and forget)
+  const webhookUrl = process.env.WEBHOOK_UPDATE_SHEET_CONFIG
+  if (webhookUrl) {
+    fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet_name, sheet_id }),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => {}) // silent fail — DB is source of truth
+  }
+
   return NextResponse.json({ ok: true })
 }
