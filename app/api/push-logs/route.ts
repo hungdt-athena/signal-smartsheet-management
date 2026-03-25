@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
     result[sheet] = rows.find(r => r.sheet === sheet && r.platform === 'all')?.count ?? null
   }
 
-  const grandTotal = Object.values(result).reduce((sum, c) => sum + (c ?? 0), 0)
+  const grandTotal = Object.values(result).reduce((sum: number, c) => sum + (c ?? 0), 0)
 
   return NextResponse.json({ date, sheets: result, total: grandTotal })
 }

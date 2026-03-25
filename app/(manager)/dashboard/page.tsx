@@ -3,24 +3,10 @@ import { useEffect, useState, useRef } from 'react'
 import { FlowHistory } from '@/components/FlowHistory'
 import { SmartsheetCapacity } from '@/components/SmartsheetCapacity'
 
-interface PullCheckpoint {
-  total: number | null
-  ios: number | null
-  android: number | null
-}
-
+interface PullCheckpoint { total: number | null; ios: number | null; android: number | null }
 interface Stats {
-  pull: {
-    realtime: PullCheckpoint
-    morning: PullCheckpoint
-    afternoon: PullCheckpoint
-    delta: PullCheckpoint | null
-  }
-  push: {
-    puzzle: number | null
-    arcade: number | null
-    simulation: number | null
-  }
+  pull: { realtime: PullCheckpoint; morning: PullCheckpoint; afternoon: PullCheckpoint; delta: PullCheckpoint | null }
+  push: { puzzle: number | null; arcade: number | null; simulation: number | null }
   workflows: Array<{ workflow_name: string; status: string; created_at: string }>
 }
 
@@ -28,16 +14,32 @@ function fmt(n: number | null | undefined) {
   return n == null ? '—' : n.toLocaleString()
 }
 
-
-function PullCard({ label, data, highlight }: { label: string; data: PullCheckpoint; highlight?: boolean }) {
+function PullCard({ label, data, img, highlight }: { label: string; data: PullCheckpoint; img: string; highlight?: boolean }) {
   return (
-    <div className={`rounded-lg border p-4 ${highlight ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'}`}>
-      <p className="text-xs text-gray-500 mb-2">{label}</p>
-      <p className={`text-2xl font-bold ${highlight ? 'text-blue-700' : 'text-gray-900'}`}>{fmt(data.total)}</p>
-      <div className="flex gap-3 mt-1">
-        <span className="text-xs text-gray-400">iOS {fmt(data.ios)}</span>
-        <span className="text-xs text-gray-400">Android {fmt(data.android)}</span>
+    <div className="bean-card-inner flex flex-col justify-between relative overflow-hidden" style={{
+      minHeight: 140,
+      padding: '12px 14px',
+      ...(highlight ? { borderColor: '#5A6A10', background: '#E8F5C8' } : {})
+    }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={img} alt="" className="absolute right-1 bottom-1 w-20 h-20 object-contain pointer-events-none select-none" />
+      <span className="font-extrabold text-sm relative z-10" style={{ color: '#2A1F08' }}>{label}</span>
+      <p className="bean-number relative z-10" style={{ fontSize: '2rem', ...(highlight ? { color: '#3A6010' } : {}) }}>{fmt(data.total)}</p>
+      <div className="flex gap-3 relative z-10">
+        <span className="text-xs font-semibold" style={{ color: '#6B5A3A' }}>iOS {fmt(data.ios)}</span>
+        <span className="text-xs font-semibold" style={{ color: '#6B5A3A' }}>Android {fmt(data.android)}</span>
       </div>
+    </div>
+  )
+}
+
+function PushCard({ label, value, img }: { label: string; value: number | null; img: string }) {
+  return (
+    <div className="bean-card-inner flex flex-col justify-between relative overflow-hidden" style={{ minHeight: 140, padding: '12px 14px' }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={img} alt="" className="absolute right-1 bottom-1 w-20 h-20 object-contain pointer-events-none select-none" />
+      <span className="font-extrabold text-sm relative z-10" style={{ color: '#2A1F08' }}>{label}</span>
+      <p className="bean-number relative z-10" style={{ fontSize: '2rem' }}>{fmt(value)}</p>
     </div>
   )
 }
@@ -70,45 +72,47 @@ export default function DashboardPage() {
   const pushTotal = (push?.puzzle ?? 0) + (push?.arcade ?? 0) + (push?.simulation ?? 0)
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-900">Dashboard</h2>
+    <div className="space-y-4 w-full">
 
-      {/* Pull Section */}
-      <div>
-        <h3 className="text-sm font-medium text-gray-500 mb-3 uppercase tracking-wide">Pull — Games in DB today</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <PullCard label="Realtime" data={pull?.realtime ?? { total: null, ios: null, android: null }} highlight />
-          <PullCard label="Morning" data={pull?.morning ?? { total: null, ios: null, android: null }} />
-          <PullCard label="Afternoon" data={pull?.delta ?? { total: null, ios: null, android: null }} />
-        </div>
-      </div>
+      {/* Title */}
+      <h1 className="font-extrabold text-2xl" style={{ color: '#2A1F08' }}>Game Ops Dashboard</h1>
 
-      {/* Push Section */}
-      <div>
-        <h3 className="text-sm font-medium text-gray-500 mb-3 uppercase tracking-wide">Push — Smartsheet today</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <p className="text-xs text-gray-500 mb-2">Total pushed</p>
-            <p className="text-2xl font-bold text-gray-900">{fmt(pushTotal || null)}</p>
+      {/* Pull + Push */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+        {/* Pull */}
+        <div className="bean-card p-4">
+          <p className="bean-section-label mb-3">Pull Stats</p>
+          <div className="grid grid-cols-3 gap-2">
+            <PullCard label="Realtime"  data={pull?.realtime ?? { total: null, ios: null, android: null }} img="/stickers/realtime-card.png" highlight />
+            <PullCard label="Morning"   data={pull?.morning  ?? { total: null, ios: null, android: null }} img="/stickers/morning-card.png" />
+            <PullCard label="Afternoon" data={pull?.delta    ?? { total: null, ios: null, android: null }} img="/stickers/afternoon-card.png" />
           </div>
-          {(['puzzle', 'arcade', 'simulation'] as const).map(sheet => (
-            <div key={sheet} className="rounded-lg border border-gray-200 bg-white p-4">
-              <p className="text-xs text-gray-500 mb-2 capitalize">{sheet}</p>
-              <p className="text-2xl font-bold text-gray-900">{fmt(push?.[sheet])}</p>
-            </div>
-          ))}
+        </div>
+
+        {/* Push */}
+        <div className="bean-card p-4">
+          <p className="bean-section-label mb-3">Push Stats</p>
+          <div className="grid grid-cols-4 gap-2">
+            <PushCard label="Total pushed"     value={pushTotal || null}        img="/stickers/realtime-card.png" />
+            <PushCard label="Puzzle Sheet"     value={push?.puzzle ?? null}     img="/stickers/puzzle-push.png" />
+            <PushCard label="Arcade Sheet"     value={push?.arcade ?? null}     img="/stickers/arcade-push.png" />
+            <PushCard label="Simulation Sheet" value={push?.simulation ?? null} img="/stickers/simulation-push.png" />
+          </div>
         </div>
       </div>
 
       {/* Smartsheet Capacity */}
-      <SmartsheetCapacity
-        sheets={sheetStats as Parameters<typeof SmartsheetCapacity>[0]['sheets']}
-        onRefresh={fetchData}
-      />
+      <div className="bean-card p-4">
+        <SmartsheetCapacity
+          sheets={sheetStats as Parameters<typeof SmartsheetCapacity>[0]['sheets']}
+          onRefresh={fetchData}
+        />
+      </div>
 
       {/* Games History */}
-      <div>
-        <h3 className="text-sm font-medium text-gray-500 mb-3 uppercase tracking-wide">Games History</h3>
+      <div className="bean-card p-4">
+        <p className="bean-section-label mb-3">Games History</p>
         <FlowHistory entries={flowHistory as Parameters<typeof FlowHistory>[0]['entries']} />
       </div>
 
