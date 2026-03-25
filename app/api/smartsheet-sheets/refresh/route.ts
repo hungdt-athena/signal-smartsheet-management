@@ -44,16 +44,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'WEBHOOK_SMARTSHEET_REFRESH not configured' }, { status: 503 })
   }
 
-  // Read current sheet_ids to pass to n8n
-  const sheets = await sql`SELECT sheet_name, sheet_id FROM smartsheet_sheets`
-
-  const res = await fetch(webhookUrl, {
+  // Fire-and-forget — n8n can take 30-60s, don't block the response
+  fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sheets }),
-    signal: AbortSignal.timeout(5000),
-  })
+    body: '{}',
+  }).catch(() => {})
 
-  if (!res.ok) return NextResponse.json({ error: 'n8n webhook failed' }, { status: 502 })
   return NextResponse.json({ triggered: true })
 }

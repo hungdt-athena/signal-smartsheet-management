@@ -108,7 +108,7 @@ export default function DashboardPage() {
 
       {/* Games History */}
       <div>
-        <h3 className="text-sm font-medium text-gray-500 mb-3 uppercase tracking-wide">Games History — Today</h3>
+        <h3 className="text-sm font-medium text-gray-500 mb-3 uppercase tracking-wide">Games History</h3>
         <FlowHistory entries={flowHistory as Parameters<typeof FlowHistory>[0]['entries']} />
       </div>
 
