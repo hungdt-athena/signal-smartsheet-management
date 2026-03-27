@@ -22,14 +22,27 @@ function SheetCard({ sheet, onSaveId }: {
   onSaveId: (name: string, id: string) => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const [idInput, setIdInput] = useState(sheet.sheet_id ?? '')
   const [saving, setSaving] = useState(false)
 
-  async function handleSave() {
+  function handleSaveClick() {
+    if (!idInput || idInput === sheet.sheet_id) { setEditing(false); return }
+    setConfirming(true)
+  }
+
+  async function handleConfirm() {
     setSaving(true)
     await onSaveId(sheet.sheet_name, idInput)
     setSaving(false)
     setEditing(false)
+    setConfirming(false)
+  }
+
+  function handleCancel() {
+    setConfirming(false)
+    setEditing(false)
+    setIdInput(sheet.sheet_id ?? '')
   }
 
   const rows = sheet.row_count ?? 0
@@ -61,7 +74,26 @@ function SheetCard({ sheet, onSaveId }: {
         </div>
 
         {/* Sheet ID */}
-        {editing ? (
+        {confirming ? (
+          <div className="mt-1.5 rounded-xl p-2.5" style={{ background: '#FFF3CD', border: '2px solid #C47A20' }}>
+            <p className="text-xs font-bold mb-1" style={{ color: '#7A4010' }}>Confirm update?</p>
+            <p className="text-xs font-mono mb-0.5" style={{ color: '#6B5A3A' }}>
+              <span style={{ color: '#C0392B' }}>- {sheet.sheet_id ?? '(none)'}</span>
+            </p>
+            <p className="text-xs font-mono mb-2" style={{ color: '#6B5A3A' }}>
+              <span style={{ color: '#3A6010' }}>+ {idInput}</span>
+            </p>
+            <div className="flex gap-2">
+              <button onClick={handleConfirm} disabled={saving}
+                className="text-xs font-bold px-2.5 py-1 rounded-lg disabled:opacity-40"
+                style={{ background: '#7A8C1E', color: '#fff' }}>
+                {saving ? '…' : 'Confirm'}
+              </button>
+              <button onClick={handleCancel} disabled={saving}
+                className="text-xs font-bold" style={{ color: '#6B5A3A' }}>Cancel</button>
+            </div>
+          </div>
+        ) : editing ? (
           <div className="flex items-center gap-2 mt-1.5">
             <input
               className="text-xs font-mono rounded-lg px-2 py-1 w-40 focus:outline-none"
@@ -70,11 +102,12 @@ function SheetCard({ sheet, onSaveId }: {
               onChange={e => setIdInput(e.target.value)}
               placeholder="Sheet ID"
               autoFocus
+              onKeyDown={e => e.key === 'Enter' && handleSaveClick()}
             />
-            <button onClick={handleSave} disabled={saving || !idInput}
+            <button onClick={handleSaveClick} disabled={!idInput}
               className="text-xs font-bold px-2 py-1 rounded-lg disabled:opacity-40"
               style={{ background: '#7A8C1E', color: '#fff' }}>
-              {saving ? '…' : 'Save'}
+              Save
             </button>
             <button onClick={() => { setEditing(false); setIdInput(sheet.sheet_id ?? '') }}
               className="text-xs font-bold" style={{ color: '#6B5A3A' }}>Cancel</button>
