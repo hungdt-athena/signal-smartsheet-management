@@ -48,7 +48,18 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [flowHistory, setFlowHistory] = useState<unknown[]>([])
   const [sheetStats, setSheetStats] = useState<unknown[]>([])
+  const [pullRefreshing, setPullRefreshing] = useState(false)
   const intervalRef = useRef<NodeJS.Timeout>()
+
+  async function refreshPullLog() {
+    setPullRefreshing(true)
+    try {
+      await fetch('/api/flow-logs/refresh', { method: 'POST' })
+      await fetchData()
+    } finally {
+      setPullRefreshing(false)
+    }
+  }
 
   async function fetchData() {
     const [statsRes, historyRes, sheetsRes] = await Promise.all([
@@ -82,7 +93,18 @@ export default function DashboardPage() {
 
         {/* Pull */}
         <div className="bean-card p-4">
-          <p className="bean-section-label mb-3">Pull Stats</p>
+          <div className="flex items-center justify-between mb-3">
+            <p className="bean-section-label">Pull Stats</p>
+            <button
+              onClick={refreshPullLog}
+              disabled={pullRefreshing}
+              className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition-all"
+              style={{ background: '#D4C4A0', color: '#5A3E1B', opacity: pullRefreshing ? 0.6 : 1 }}
+            >
+              <span className={pullRefreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
+              {pullRefreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
           <div className="grid grid-cols-3 gap-2">
             <PullCard label="Realtime"  data={pull?.realtime ?? { total: null, ios: null, android: null }} img="/stickers/realtime-card.png" highlight />
             <PullCard label="Morning"   data={pull?.morning  ?? { total: null, ios: null, android: null }} img="/stickers/morning-card.png" />
