@@ -115,7 +115,7 @@ function DayRow({
 }
 
 function MonthRow({
-  year, month, open, loaded, days, error, onToggle, openDays, onToggleDay,
+  year: _year, month, open, loaded, days, error, onToggle, openDays, onToggleDay,
 }: {
   year: number
   month: number
@@ -241,7 +241,7 @@ export function FlowHistory() {
   async function toggleYear(year: number) {
     setOpenYears(s => {
       const n = new Set(s)
-      n.has(year) ? n.delete(year) : n.add(year)
+      if (n.has(year)) { n.delete(year) } else { n.add(year) }
       return n
     })
     if (monthsByYear[year] !== undefined) return
@@ -255,7 +255,7 @@ export function FlowHistory() {
     const mk = `${year}-${month}`
     setOpenMonths(s => {
       const n = new Set(s)
-      n.has(mk) ? n.delete(mk) : n.add(mk)
+      if (n.has(mk)) { n.delete(mk) } else { n.add(mk) }
       return n
     })
     if (entriesByMonth[mk] !== undefined) return
@@ -273,7 +273,7 @@ export function FlowHistory() {
   function toggleDay(date: string) {
     setOpenDays(s => {
       const n = new Set(s)
-      n.has(date) ? n.delete(date) : n.add(date)
+      if (n.has(date)) { n.delete(date) } else { n.add(date) }
       return n
     })
   }
