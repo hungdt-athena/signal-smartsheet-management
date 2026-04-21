@@ -46,7 +46,6 @@ function PushCard({ label, value, img }: { label: string; value: number | null; 
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
-  const [flowHistory, setFlowHistory] = useState<unknown[]>([])
   const [sheetStats, setSheetStats] = useState<unknown[]>([])
   const [pullRefreshing, setPullRefreshing] = useState(false)
   const intervalRef = useRef<NodeJS.Timeout>()
@@ -62,13 +61,15 @@ export default function DashboardPage() {
   }
 
   async function fetchData() {
-    const [statsRes, historyRes, sheetsRes] = await Promise.all([
-      fetch('/api/stats'),
-      fetch('/api/flow-logs'),
-      fetch('/api/smartsheet-sheets'),
+    const [statsRes, sheetsRes] = await Promise.all([
+      fetch('/api/stats', { cache: 'no-store' }),
+      fetch('/api/smartsheet-sheets', { cache: 'no-store' }),
     ])
+    if (statsRes.status === 401) {
+      window.location.href = '/login'
+      return
+    }
     if (statsRes.ok) setStats(await statsRes.json())
-    if (historyRes.ok) setFlowHistory(await historyRes.json())
     if (sheetsRes.ok) setSheetStats(await sheetsRes.json())
   }
 
@@ -134,8 +135,7 @@ export default function DashboardPage() {
 
       {/* Games History */}
       <div className="bean-card p-4">
-        <p className="bean-section-label mb-3">Games History</p>
-        <FlowHistory entries={flowHistory as Parameters<typeof FlowHistory>[0]['entries']} />
+        <FlowHistory />
       </div>
 
     </div>
