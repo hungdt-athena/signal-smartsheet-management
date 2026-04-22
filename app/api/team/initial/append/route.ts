@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
   if (!url) return NextResponse.json({ error: 'WEBHOOK_TEAM_INITIAL_APPEND not configured' }, { status: 500 })
 
   const body = await req.json()
+  // Expects: { name: string, today_available: 'Yes' | 'No', game_platform: string, game_category: string }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

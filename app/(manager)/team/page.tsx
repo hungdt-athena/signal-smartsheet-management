@@ -1,9 +1,10 @@
 'use client'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface InitialEvaluator {
+  row_number: number
   name: string
   today_available: 'Yes' | 'No'
   game_platform: string
@@ -11,6 +12,7 @@ interface InitialEvaluator {
 }
 
 interface FinalEvaluator {
+  row_number: number
   name: string
 }
 
@@ -58,15 +60,15 @@ function InitialTable() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // pending availability changes per row (name → pending value)
-  const [pendingAvail, setPendingAvail] = useState<Record<string, 'Yes' | 'No'>>({})
-  const [savingAvail, setSavingAvail] = useState<Set<string>>(new Set())
+  // pending availability changes per row (row_number → pending value)
+  const [pendingAvail, setPendingAvail] = useState<Record<number, 'Yes' | 'No'>>({})
+  const [savingAvail, setSavingAvail] = useState<Set<number>>(new Set())
 
   // add-row form
   const [showAdd, setShowAdd] = useState(false)
-  const [addForm, setAddForm] = useState({ name: '', today_available: 'Yes' as 'Yes' | 'No', game_platform: '', game_category: '' })
+  const [addForm, setAddForm] = useState({ name: '', today_available: 'Yes' as 'Yes' | 'No', game_platform: 'all', game_category: '' })
   const [adding, setAdding] = useState(false)
-  const [removing, setRemoving] = useState<Set<string>>(new Set())
+  const [removing, setRemoving] = useState<Set<number>>(new Set())
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -82,40 +84,44 @@ function InitialTable() {
     }
   }, [])
 
-  async function handleAvailConfirm(name: string) {
-    const value = pendingAvail[name]
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  async function handleAvailConfirm(rowNum: number) {
+    const value = pendingAvail[rowNum]
     if (!value) return
-    setSavingAvail(s => new Set(Array.from(s).concat([name])))
+    setSavingAvail(s => new Set(Array.from(s).concat([rowNum])))
     try {
       const res = await fetch('/api/team/initial/availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, today_available: value }),
+        body: JSON.stringify({ row_number: rowNum, today_available: value }),
       })
       if (!res.ok) throw new Error()
-      setRows(r => r.map(ev => ev.name === name ? { ...ev, today_available: value } : ev))
-      setPendingAvail(p => { const n = { ...p }; delete n[name]; return n })
+      setRows(r => r.map(ev => ev.row_number === rowNum ? { ...ev, today_available: value } : ev))
+      setPendingAvail(p => { const n = { ...p }; delete n[rowNum]; return n })
     } catch {
       setError('Failed to update availability.')
     } finally {
-      setSavingAvail(s => { const n = new Set(s); n.delete(name); return n })
+      setSavingAvail(s => { const n = new Set(s); n.delete(rowNum); return n })
     }
   }
 
-  async function handleRemove(name: string) {
-    setRemoving(s => new Set(Array.from(s).concat([name])))
+  async function handleRemove(rowNum: number) {
+    setRemoving(s => new Set(Array.from(s).concat([rowNum])))
     try {
       const res = await fetch('/api/team/initial/remove', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ row_number: rowNum }),
       })
       if (!res.ok) throw new Error()
-      setRows(r => r.filter(ev => ev.name !== name))
+      setRows(r => r.filter(ev => ev.row_number !== rowNum))
     } catch {
       setError('Failed to remove row.')
     } finally {
-      setRemoving(s => { const n = new Set(s); n.delete(name); return n })
+      setRemoving(s => { const n = new Set(s); n.delete(rowNum); return n })
     }
   }
 
@@ -129,9 +135,11 @@ function InitialTable() {
         body: JSON.stringify(addForm),
       })
       if (!res.ok) throw new Error()
-      setRows(r => [...r, { ...addForm, name: addForm.name.trim() }])
       setAddForm({ name: '', today_available: 'Yes', game_platform: '', game_category: '' })
       setShowAdd(false)
+      // Refresh to get the new row with its row_number
+      const freshRes = await fetch('/api/team/initial', { cache: 'no-store' })
+      if (freshRes.ok) setRows(await freshRes.json())
     } catch {
       setError('Failed to add row.')
     } finally {
@@ -170,18 +178,18 @@ function InitialTable() {
               </td></tr>
             )}
             {!loading && rows.map(ev => {
-              const pending = pendingAvail[ev.name]
+              const pending = pendingAvail[ev.row_number]
               const currentDisplay = pending ?? ev.today_available
               const isDirty = pending !== undefined && pending !== ev.today_available
-              const isSaving = savingAvail.has(ev.name)
+              const isSaving = savingAvail.has(ev.row_number)
               return (
-                <tr key={ev.name} style={{ background: 'transparent' }}>
+                <tr key={ev.row_number} style={{ background: 'transparent' }}>
                   <td style={{ ...tdStyle, fontWeight: 600 }}>{ev.name}</td>
                   <td style={tdStyle}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <select
                         value={currentDisplay}
-                        onChange={e => setPendingAvail(p => ({ ...p, [ev.name]: e.target.value as 'Yes' | 'No' }))}
+                        onChange={e => setPendingAvail(p => ({ ...p, [ev.row_number]: e.target.value as 'Yes' | 'No' }))}
                         style={{
                           border: `1px solid ${isDirty ? '#5A3E1B' : '#D4C4A0'}`,
                           borderRadius: 6, padding: '2px 6px', fontSize: 12,
@@ -193,7 +201,7 @@ function InitialTable() {
                         <option value="No">No</option>
                       </select>
                       {isDirty && (
-                        <Btn onClick={() => handleAvailConfirm(ev.name)} disabled={isSaving} variant="primary">
+                        <Btn onClick={() => handleAvailConfirm(ev.row_number)} disabled={isSaving} variant="primary">
                           {isSaving ? '...' : 'Confirm'}
                         </Btn>
                       )}
@@ -202,8 +210,8 @@ function InitialTable() {
                   <td style={tdStyle}>{ev.game_platform || '—'}</td>
                   <td style={tdStyle}>{ev.game_category || '—'}</td>
                   <td style={tdStyle}>
-                    <Btn onClick={() => handleRemove(ev.name)} disabled={removing.has(ev.name)} variant="danger">
-                      {removing.has(ev.name) ? '...' : 'Remove'}
+                    <Btn onClick={() => handleRemove(ev.row_number)} disabled={removing.has(ev.row_number)} variant="danger">
+                      {removing.has(ev.row_number) ? '...' : 'Remove'}
                     </Btn>
                   </td>
                 </tr>
@@ -217,7 +225,9 @@ function InitialTable() {
                   <input
                     value={addForm.name}
                     onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
                     placeholder="Name"
+                    autoFocus
                     style={{ border: '1px solid #D4C4A0', borderRadius: 6, padding: '3px 7px', fontSize: 12, width: '100%' }}
                   />
                 </td>
@@ -231,28 +241,14 @@ function InitialTable() {
                     <option value="No">No</option>
                   </select>
                 </td>
-                <td style={tdStyle}>
-                  <input
-                    value={addForm.game_platform}
-                    onChange={e => setAddForm(f => ({ ...f, game_platform: e.target.value }))}
-                    placeholder="Platform"
-                    style={{ border: '1px solid #D4C4A0', borderRadius: 6, padding: '3px 7px', fontSize: 12, width: '100%' }}
-                  />
-                </td>
-                <td style={tdStyle}>
-                  <input
-                    value={addForm.game_category}
-                    onChange={e => setAddForm(f => ({ ...f, game_category: e.target.value }))}
-                    placeholder="Category"
-                    style={{ border: '1px solid #D4C4A0', borderRadius: 6, padding: '3px 7px', fontSize: 12, width: '100%' }}
-                  />
-                </td>
+                <td style={{ ...tdStyle, color: '#9A8A6A', fontSize: 11 }}>all</td>
+                <td style={{ ...tdStyle, color: '#9A8A6A', fontSize: 11 }}>—</td>
                 <td style={tdStyle}>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <Btn onClick={handleAdd} disabled={adding || !addForm.name.trim()} variant="primary">
                       {adding ? '...' : 'Add'}
                     </Btn>
-                    <Btn onClick={() => { setShowAdd(false); setAddForm({ name: '', today_available: 'Yes', game_platform: '', game_category: '' }) }}>
+                    <Btn onClick={() => { setShowAdd(false); setAddForm({ name: '', today_available: 'Yes', game_platform: 'all', game_category: '' }) }}>
                       ✕
                     </Btn>
                   </div>
@@ -289,7 +285,7 @@ function FinalTable() {
   const [showAdd, setShowAdd] = useState(false)
   const [addName, setAddName] = useState('')
   const [adding, setAdding] = useState(false)
-  const [removing, setRemoving] = useState<Set<string>>(new Set())
+  const [removing, setRemoving] = useState<Set<number>>(new Set())
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -305,20 +301,24 @@ function FinalTable() {
     }
   }, [])
 
-  async function handleRemove(name: string) {
-    setRemoving(s => new Set(Array.from(s).concat([name])))
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  async function handleRemove(rowNum: number) {
+    setRemoving(s => new Set(Array.from(s).concat([rowNum])))
     try {
       const res = await fetch('/api/team/final/remove', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ row_number: rowNum }),
       })
       if (!res.ok) throw new Error()
-      setRows(r => r.filter(ev => ev.name !== name))
+      setRows(r => r.filter(ev => ev.row_number !== rowNum))
     } catch {
       setError('Failed to remove.')
     } finally {
-      setRemoving(s => { const n = new Set(s); n.delete(name); return n })
+      setRemoving(s => { const n = new Set(s); n.delete(rowNum); return n })
     }
   }
 
@@ -332,9 +332,12 @@ function FinalTable() {
         body: JSON.stringify({ name: addName.trim() }),
       })
       if (!res.ok) throw new Error()
-      setRows(r => [...r, { name: addName.trim() }])
+      // Note: row_number will be assigned by n8n/Google Sheets, we'll refresh to get it
       setAddName('')
       setShowAdd(false)
+      // Refresh to get the new row with its row_number
+      const freshRes = await fetch('/api/team/final', { cache: 'no-store' })
+      if (freshRes.ok) setRows(await freshRes.json())
     } catch {
       setError('Failed to add.')
     } finally {
@@ -370,11 +373,11 @@ function FinalTable() {
               </td></tr>
             )}
             {!loading && rows.map(ev => (
-              <tr key={ev.name}>
+              <tr key={ev.row_number}>
                 <td style={{ ...tdStyle, fontWeight: 600 }}>{ev.name}</td>
                 <td style={tdStyle}>
-                  <Btn onClick={() => handleRemove(ev.name)} disabled={removing.has(ev.name)} variant="danger">
-                    {removing.has(ev.name) ? '...' : 'Remove'}
+                  <Btn onClick={() => handleRemove(ev.row_number)} disabled={removing.has(ev.row_number)} variant="danger">
+                    {removing.has(ev.row_number) ? '...' : 'Remove'}
                   </Btn>
                 </td>
               </tr>

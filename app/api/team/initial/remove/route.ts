@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
   if (!url) return NextResponse.json({ error: 'WEBHOOK_TEAM_INITIAL_REMOVE not configured' }, { status: 500 })
 
   const body = await req.json()
+  // Expects: { row_number: number }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

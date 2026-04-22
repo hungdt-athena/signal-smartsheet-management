@@ -6,23 +6,22 @@ import { signOut } from 'next-auth/react'
 const NAV_ITEMS = [
   { href: '/dashboard',  label: 'Dashboard',  locked: false },
   { href: '/operations', label: 'Operations', locked: true  },
-  { href: '/team',       label: 'Team',        locked: true  },
-  { href: '/youtube',    label: 'YouTube',     locked: true  },
+  { href: '/team',       label: 'Team',       locked: false },
+  { href: '/youtube',    label: 'YouTube',    locked: true  },
 ]
 
 export default function ManagerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <aside className="w-72 flex flex-col flex-shrink-0"
-        style={{ background: '#BF9A6E', borderRight: '3px solid #5A6A10' }}>
+    <div style={{ display: 'flex', flexDirection: 'row', height: '100vh', overflow: 'hidden' }}>
+      <aside style={{ width: 288, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#BF9A6E', borderRight: '3px solid #5A6A10' }}>
 
         {/* Logo */}
         <div className="p-5 pb-4" style={{ borderBottom: '2.5px solid #7A8C1E' }}>
           <div className="flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo/athena-orange-logo.png" alt="Athena" className="h-10 w-auto object-contain" />
+            <img src="/logo/athena-orange-logo.png" alt="Athena" style={{ height: 40, width: 'auto', objectFit: 'contain' }} />
             <div>
               <p className="font-extrabold text-base leading-tight" style={{ color: '#2A1F08' }}>Signal</p>
               <p className="font-bold text-xs" style={{ color: '#5A6A10' }}>Smartsheet Management</p>
@@ -67,7 +66,7 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         {children}
       </main>
     </div>
