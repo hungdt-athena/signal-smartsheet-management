@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
 import { requireRole } from '@/lib/auth-guard'
 
+export const dynamic = 'force-dynamic'
+
 // GET /api/flow-logs — all logs, newest date first
 export async function GET(_req: NextRequest) {
   const guard = await requireRole('manager')
@@ -47,5 +49,7 @@ export async function GET(_req: NextRequest) {
     return periodOrder.indexOf(`${a.flow_type}-${a.period}`) - periodOrder.indexOf(`${b.flow_type}-${b.period}`)
   })
 
-  return NextResponse.json(result)
+  return NextResponse.json(result, {
+    headers: { 'Cache-Control': 'no-store' },
+  })
 }

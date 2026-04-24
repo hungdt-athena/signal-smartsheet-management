@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
 import { requireRole } from '@/lib/auth-guard'
 
+export const dynamic = 'force-dynamic'
+
 function verifyWebhookSecret(req: NextRequest) {
   const secret = process.env.WEBHOOK_SECRET
   return !!secret && req.headers.get('x-webhook-secret') === secret
@@ -111,5 +113,5 @@ export async function GET(_req: NextRequest) {
       simulation: getSheet('simulation'),
     },
     workflows,
-  })
+  }, { headers: { 'Cache-Control': 'no-store' } })
 }

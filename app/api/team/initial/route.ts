@@ -22,12 +22,20 @@ export async function GET(_req: NextRequest) {
   if (!res.ok) return NextResponse.json({ error: 'Failed to fetch from webhook' }, { status: 502 })
   const rawData = await res.json()
 
+  interface RawWebhookRow {
+    'Evaluator Name'?: string
+    row_number: number
+    'Today Available': 'Yes' | 'No'
+    'Game Platform': string
+    'Game Category': string
+  }
+
   // Transform Google Sheets fields → expected schema, filter empty rows
-  const data: InitialEvaluator[] = rawData
-    .filter((row: any) => row['Evaluator Name']?.trim())
-    .map((row: any) => ({
+  const data: InitialEvaluator[] = (rawData as RawWebhookRow[])
+    .filter((row: RawWebhookRow) => row['Evaluator Name']?.trim())
+    .map((row: RawWebhookRow) => ({
       row_number: row.row_number,
-      name: row['Evaluator Name'],
+      name: row['Evaluator Name'] as string,
       today_available: row['Today Available'],
       game_platform: row['Game Platform'],
       game_category: row['Game Category'],
