@@ -386,7 +386,7 @@ export default function OperationsPage() {
                             {mb.days.map(db => {
                               const isToday = db.date === today
                               const [, dm, dd] = db.date.split('-')
-                              const label = isToday ? 'Today' : `${dd}/${dm}`
+                              const label = `${dd}/${dm}`
                               const successCount = db.rows.filter(r => r.status.toLowerCase() === 'success').length
                               const failCount    = db.rows.length - successCount
                               return (
