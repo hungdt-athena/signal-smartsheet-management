@@ -64,6 +64,10 @@ function InitialTable() {
   const [pendingAvail, setPendingAvail] = useState<Record<number, 'Yes' | 'No'>>({})
   const [savingAvail, setSavingAvail] = useState<Set<number>>(new Set())
 
+  // pending platform changes per row
+  const [pendingPlatform, setPendingPlatform] = useState<Record<number, string>>({})
+  const [savingPlatform, setSavingPlatform] = useState<Set<number>>(new Set())
+
   // add-row form
   const [showAdd, setShowAdd] = useState(false)
   const [addForm, setAddForm] = useState({ name: '', today_available: 'Yes' as 'Yes' | 'No', game_platform: 'all', game_category: '' })
@@ -105,6 +109,26 @@ function InitialTable() {
       setError('Failed to update availability.')
     } finally {
       setSavingAvail(s => { const n = new Set(s); n.delete(rowNum); return n })
+    }
+  }
+
+  async function handlePlatformConfirm(rowNum: number) {
+    const value = pendingPlatform[rowNum]
+    if (!value) return
+    setSavingPlatform(s => new Set(Array.from(s).concat([rowNum])))
+    try {
+      const res = await fetch('/api/team/initial/platform', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ row_number: rowNum, game_platform: value }),
+      })
+      if (!res.ok) throw new Error()
+      setRows(r => r.map(ev => ev.row_number === rowNum ? { ...ev, game_platform: value } : ev))
+      setPendingPlatform(p => { const n = { ...p }; delete n[rowNum]; return n })
+    } catch {
+      setError('Failed to update platform.')
+    } finally {
+      setSavingPlatform(s => { const n = new Set(s); n.delete(rowNum); return n })
     }
   }
 
@@ -207,7 +231,36 @@ function InitialTable() {
                       )}
                     </div>
                   </td>
-                  <td style={tdStyle}>{ev.game_platform || '—'}</td>
+                  <td style={tdStyle}>
+                    {(() => {
+                      const pendingP = pendingPlatform[ev.row_number]
+                      const currentP = pendingP ?? ev.game_platform ?? 'all'
+                      const isDirtyP = pendingP !== undefined && pendingP !== ev.game_platform
+                      const isSavingP = savingPlatform.has(ev.row_number)
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <select
+                            value={currentP}
+                            onChange={e => setPendingPlatform(p => ({ ...p, [ev.row_number]: e.target.value }))}
+                            style={{
+                              border: `1px solid ${isDirtyP ? '#5A3E1B' : '#D4C4A0'}`,
+                              borderRadius: 6, padding: '2px 6px', fontSize: 12,
+                              background: '#FAF5EC', color: '#2A1F08', fontWeight: 600,
+                            }}
+                          >
+                            <option value="all">all</option>
+                            <option value="ios">ios</option>
+                            <option value="android">android</option>
+                          </select>
+                          {isDirtyP && (
+                            <Btn onClick={() => handlePlatformConfirm(ev.row_number)} disabled={isSavingP} variant="primary">
+                              {isSavingP ? '...' : 'Confirm'}
+                            </Btn>
+                          )}
+                        </div>
+                      )
+                    })()}
+                  </td>
                   <td style={tdStyle}>{ev.game_category || '—'}</td>
                   <td style={tdStyle}>
                     <Btn onClick={() => handleRemove(ev.row_number)} disabled={removing.has(ev.row_number)} variant="danger">
@@ -241,7 +294,17 @@ function InitialTable() {
                     <option value="No">No</option>
                   </select>
                 </td>
-                <td style={{ ...tdStyle, color: '#9A8A6A', fontSize: 11 }}>all</td>
+                <td style={tdStyle}>
+                  <select
+                    value={addForm.game_platform}
+                    onChange={e => setAddForm(f => ({ ...f, game_platform: e.target.value }))}
+                    style={{ border: '1px solid #D4C4A0', borderRadius: 6, padding: '3px 7px', fontSize: 12, background: '#FAF5EC', color: '#2A1F08', fontWeight: 600 }}
+                  >
+                    <option value="all">all</option>
+                    <option value="ios">ios</option>
+                    <option value="android">android</option>
+                  </select>
+                </td>
                 <td style={{ ...tdStyle, color: '#9A8A6A', fontSize: 11 }}>—</td>
                 <td style={tdStyle}>
                   <div style={{ display: 'flex', gap: 4 }}>
