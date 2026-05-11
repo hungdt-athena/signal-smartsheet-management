@@ -52,6 +52,17 @@ export async function POST(req: NextRequest) {
     `
   }
 
+  // Trigger capacity refresh so SmartsheetCapacity stays current after each push
+  const refreshUrl = process.env.WEBHOOK_SMARTSHEET_REFRESH
+  if (refreshUrl) {
+    fetch(refreshUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => {})
+  }
+
   return NextResponse.json({ ok: true, log_date: targetDate, sheets: entries.map(e => e.sheet) })
 }
 

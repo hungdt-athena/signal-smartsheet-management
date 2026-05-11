@@ -39,5 +39,16 @@ export async function PATCH(req: NextRequest) {
     }).catch(() => {}) // silent fail — DB is source of truth
   }
 
+  // 3. Trigger capacity refresh so the new sheet_id is immediately reflected
+  const refreshUrl = process.env.WEBHOOK_SMARTSHEET_REFRESH
+  if (refreshUrl) {
+    fetch(refreshUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => {})
+  }
+
   return NextResponse.json({ ok: true })
 }
