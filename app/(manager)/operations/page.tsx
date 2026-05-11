@@ -191,7 +191,6 @@ export default function OperationsPage() {
     Object.fromEntries(realtimeRows.map(r => [r.workflow, r.status])),
   [realtimeRows])
 
-  const anyRunning = realtimeRows.some(r => r.status === 'running')
 
   const nowStr = realtimeAt
     ? realtimeAt.toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', second: '2-digit' })
