@@ -5,9 +5,9 @@ import { signOut } from 'next-auth/react'
 
 const NAV_ITEMS = [
   { href: '/dashboard',  label: 'Dashboard',  locked: false },
-  { href: '/operations', label: 'Operations', locked: true  },
+  { href: '/operations', label: 'Operations', locked: false },
   { href: '/team',       label: 'Team',       locked: false },
-  { href: '/youtube',    label: 'YouTube',    locked: true  },
+  { href: '/youtube',    label: 'Videos',     locked: false },
 ]
 
 export default function ManagerLayout({ children }: { children: React.ReactNode }) {

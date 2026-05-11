@@ -15,6 +15,9 @@ function getWebhookMap(): Record<string, string | undefined> {
     assign_initial:    process.env.WEBHOOK_ASSIGN_INITIAL,
     clean_links:       process.env.WEBHOOK_CLEAN_LINKS,
     upload_ytb:        process.env.WEBHOOK_YTB_TRIGGER,
+    delete_bypass:     process.env.WEBHOOK_DELETE_BYPASS,
+    delete_blank:      process.env.WEBHOOK_DELETE_BLANK,
+    append_sheet:      process.env.WEBHOOK_APPEND_SHEET,
   }
 }
 
