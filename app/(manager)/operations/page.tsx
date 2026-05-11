@@ -192,7 +192,6 @@ export default function OperationsPage() {
   [realtimeRows])
 
   const anyRunning = realtimeRows.some(r => r.status === 'running')
-  const buttonsLocked = anyRunning || triggering !== null
 
   const nowStr = realtimeAt
     ? realtimeAt.toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -221,16 +220,7 @@ export default function OperationsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="font-extrabold text-2xl" style={{ color: '#2A1F08' }}>Operations</h1>
-        {anyRunning && (
-          <span className="text-xs font-semibold px-3 py-1 rounded-full flex items-center gap-1.5"
-            style={{ background: '#FEF3C7', color: '#92400E' }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse inline-block" />
-            Workflow running · buttons locked
-          </span>
-        )}
-      </div>
+      <h1 className="font-extrabold text-2xl" style={{ color: '#2A1F08' }}>Operations</h1>
 
       {/* ── Section 1+2: Groups (Realtime + Triggers combined) ── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -256,11 +246,12 @@ export default function OperationsPage() {
 
               <div className="divide-y" style={{ borderColor: '#E8DCC8' }}>
                 {group.workflows.map(op => {
-                  const disconnected = realtimeOk === false
+                  const disconnected  = realtimeOk === false
                   const status       = disconnected ? 'idle' : (statusMap[op.realtime] ?? 'idle')
                   const isRunning    = status === 'running'
                   const isTriggering = triggering === op.workflow
                   const wasTriggered = triggered === op.workflow
+                  const isLocked     = isRunning || isTriggering
                   return (
                     <div key={op.workflow}
                       className="flex items-center justify-between py-2.5 gap-2"
@@ -273,7 +264,7 @@ export default function OperationsPage() {
                       </div>
                       <button
                         onClick={() => handleTrigger(op.workflow)}
-                        disabled={buttonsLocked}
+                        disabled={isLocked}
                         className="flex-shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg transition-all"
                         style={{
                           background: wasTriggered ? '#7A8C1E'
@@ -283,8 +274,8 @@ export default function OperationsPage() {
                                 : isRunning    ? '#fff'
                                 :                '#2A1F08',
                           border: '1.5px solid ' + (isRunning ? '#D97706' : '#5A6A10'),
-                          opacity: buttonsLocked && !isRunning && !isTriggering ? 0.4 : 1,
-                          cursor: buttonsLocked ? 'not-allowed' : 'pointer',
+                          opacity: isLocked ? 0.6 : 1,
+                          cursor: isLocked ? 'not-allowed' : 'pointer',
                         }}
                       >
                         {isTriggering ? <span className="inline-block animate-spin">↻</span>
