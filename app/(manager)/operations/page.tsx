@@ -114,11 +114,13 @@ function LogBadge({ status }: { status: string }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function OperationsPage() {
-  const [triggering, setTriggering]     = useState<string | null>(null)
-  const [triggered, setTriggered]       = useState<string | null>(null)
-  const [realtimeRows, setRealtimeRows] = useState<RealtimeRow[]>([])
-  const [logRows, setLogRows]           = useState<LogRow[]>([])
-  const [realtimeAt, setRealtimeAt]     = useState<Date | null>(null)
+  const [triggering, setTriggering]         = useState<string | null>(null)
+  const [triggered, setTriggered]           = useState<string | null>(null)
+  const [realtimeRows, setRealtimeRows]     = useState<RealtimeRow[]>([])
+  const [realtimeOk, setRealtimeOk]         = useState<boolean | null>(null)
+  const [logRows, setLogRows]               = useState<LogRow[]>([])
+  const [logOk, setLogOk]                   = useState<boolean | null>(null)
+  const [realtimeAt, setRealtimeAt]         = useState<Date | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
 
   // History filters
@@ -136,15 +138,28 @@ export default function OperationsPage() {
   const [openDays,   setOpenDays]   = useState<Set<string>>(new Set([today]))
 
   const fetchRealtime = useCallback(async () => {
-    const res = await fetch('/api/operations/realtime', { cache: 'no-store' })
-    if (res.ok) { setRealtimeRows(await res.json()); setRealtimeAt(new Date()) }
+    try {
+      const res = await fetch('/api/operations/realtime', { cache: 'no-store' })
+      if (res.ok) {
+        setRealtimeRows(await res.json())
+        setRealtimeAt(new Date())
+        setRealtimeOk(true)
+      } else {
+        setRealtimeOk(false)
+      }
+    } catch {
+      setRealtimeOk(false)
+    }
   }, [])
 
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
       const res = await fetch('/api/operations/history?limit=200', { cache: 'no-store' })
-      if (res.ok) setLogRows(await res.json())
+      if (res.ok) { setLogRows(await res.json()); setLogOk(true) }
+      else setLogOk(false)
+    } catch {
+      setLogOk(false)
     } finally { setHistoryLoading(false) }
   }, [])
 
@@ -225,19 +240,25 @@ export default function OperationsPage() {
             <div key={group.label} className="bean-card p-4 flex flex-col gap-0">
               <div className="flex items-center justify-between mb-3">
                 <p className="bean-section-label" style={{ marginBottom: 0 }}>{group.label}</p>
-                {groupRunning && (
+                {realtimeOk === false ? (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                    style={{ background: '#FEE2E2', color: '#B91C1C' }}>
+                    ⚡ disconnected
+                  </span>
+                ) : groupRunning ? (
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1"
                     style={{ background: '#FEF3C7', color: '#92400E' }}>
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse inline-block" />
                     running
                   </span>
-                )}
+                ) : null}
               </div>
 
               <div className="divide-y" style={{ borderColor: '#E8DCC8' }}>
                 {group.workflows.map(op => {
-                  const status      = statusMap[op.realtime] ?? 'idle'
-                  const isRunning   = status === 'running'
+                  const disconnected = realtimeOk === false
+                  const status       = disconnected ? 'idle' : (statusMap[op.realtime] ?? 'idle')
+                  const isRunning    = status === 'running'
                   const isTriggering = triggering === op.workflow
                   const wasTriggered = triggered === op.workflow
                   return (
@@ -245,7 +266,9 @@ export default function OperationsPage() {
                       className="flex items-center justify-between py-2.5 gap-2"
                       style={{ background: isRunning ? '#FFFBEB' : 'transparent' }}>
                       <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <StatusDot status={status} />
+                        {disconnected
+                          ? <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#F3F4F6', color: '#9CA3AF' }}>–</span>
+                          : <StatusDot status={status} />}
                         <span className="text-xs font-semibold truncate" style={{ color: '#2A1F08' }}>{op.label}</span>
                       </div>
                       <button
@@ -329,7 +352,11 @@ export default function OperationsPage() {
         </div>
 
         {/* Nested date tree */}
-        {grouped.length === 0 ? (
+        {logOk === false ? (
+          <p className="text-sm text-center py-6" style={{ color: '#B91C1C' }}>
+            ⚡ Cannot connect to Google Sheets — check OAuth credentials in Replit secrets.
+          </p>
+        ) : grouped.length === 0 ? (
           <p className="text-sm text-center py-6" style={{ color: '#8B6A3E' }}>
             No entries match the current filters.
           </p>
