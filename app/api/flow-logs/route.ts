@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 // GET /api/flow-logs — all logs, newest date first
 export async function GET(_req: NextRequest) {
-  const guard = await requireRole('manager')
+  const guard = await requireRole('admin')
   if (guard) return guard
 
   const rows = await sql`

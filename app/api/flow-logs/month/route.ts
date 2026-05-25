@@ -30,7 +30,7 @@ interface DayGroup {
 const ENTRY_ORDER = ['pull-morning', 'pull-afternoon', 'push-morning', 'push-afternoon']
 
 export async function GET(req: NextRequest) {
-  const guard = await requireRole('manager')
+  const guard = await requireRole('admin')
   if (guard) return guard
 
   const params = new URL(req.url).searchParams

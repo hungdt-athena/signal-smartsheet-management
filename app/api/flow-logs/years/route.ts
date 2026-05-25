@@ -5,7 +5,7 @@ import { requireRole } from '@/lib/auth-guard'
 export const dynamic = 'force-dynamic'
 
 export async function GET(_req: NextRequest) {
-  const guard = await requireRole('manager')
+  const guard = await requireRole('admin')
   if (guard) return guard
 
   const rows = await sql<{ year: number }[]>`

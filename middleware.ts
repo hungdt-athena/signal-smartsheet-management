@@ -9,18 +9,20 @@ export default withAuth(
     const { pathname } = req.nextUrl
     const role = req.nextauth.token?.role as string | undefined
 
-    const managerPaths = ['/dashboard', '/operations', '/team', '/youtube']
-    const evaluatorPaths = ['/handover', '/drive-videos']
+    // Admin-only paths
+    const adminPaths = ['/operations', '/team', '/admin']
+    const isAdminPath = adminPaths.some(p => pathname.startsWith(p))
 
-    const isManagerPath = managerPaths.some(p => pathname.startsWith(p))
-    const isEvaluatorPath = evaluatorPaths.some(p => pathname.startsWith(p))
+    // Paths accessible by both roles
+    const sharedPaths = ['/dashboard', '/handover-puzzle', '/handover', '/youtube', '/drive-videos']
+    const isSharedPath = sharedPaths.some(p => pathname.startsWith(p))
 
-    if (isManagerPath && role !== 'manager') {
-      return NextResponse.redirect(new URL('/handover', req.url))
-    }
-    if (isEvaluatorPath && role !== 'evaluator') {
+    if (isAdminPath && role !== 'admin') {
       return NextResponse.redirect(new URL('/dashboard', req.url))
     }
+
+    // All authenticated users can access shared paths
+    if (isSharedPath) return NextResponse.next()
   },
   {
     callbacks: {
@@ -35,7 +37,9 @@ export const config = {
     '/operations/:path*',
     '/team/:path*',
     '/youtube/:path*',
+    '/handover-puzzle/:path*',
     '/handover/:path*',
     '/drive-videos/:path*',
+    '/admin/:path*',
   ],
 }

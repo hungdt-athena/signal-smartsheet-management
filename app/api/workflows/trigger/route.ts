@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
+import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 
 function getWebhookMap(): Record<string, string | undefined> {
@@ -22,15 +23,13 @@ function getWebhookMap(): Record<string, string | undefined> {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  if (session.user.role !== 'manager') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const guard = await requireRole('admin')
+  if (guard) return guard
 
-  const { workflow } = await req.json()
+  const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
+  const triggeredBy = session?.user?.email ?? 'dev'
+
+  const { workflow, sheet_type } = await req.json()
   const webhookUrl = getWebhookMap()[workflow]
 
   if (!webhookUrl) {
@@ -42,14 +41,17 @@ export async function POST(req: NextRequest) {
   // Insert running row before calling n8n
   await sql`
     INSERT INTO ops_logs (workflow_name, triggered_by, status, created_at)
-    VALUES (${workflow}, ${session.user.email}, 'running', ${triggeredAt}::timestamptz)
+    VALUES (${workflow}, ${triggeredBy}, 'running', ${triggeredAt}::timestamptz)
   `
 
   // Fire-and-forget: call n8n webhook
   fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ triggered_by: session.user.email }),
+    body: JSON.stringify({
+      triggered_by: triggeredBy,
+      ...(sheet_type ? { sheet_type } : {}),
+    }),
   }).catch(console.error)
 
   return NextResponse.json({ triggered_at: triggeredAt })

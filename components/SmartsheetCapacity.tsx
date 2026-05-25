@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 
 interface SheetStats {
   sheet_name: string
+  display_name: string | null
   sheet_id: string | null
   row_count: number | null
   col_count: number | null
@@ -62,16 +63,14 @@ function SheetCard({ sheet, onSaveId }: {
 
       {/* Header */}
       <div className="mb-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-extrabold text-base capitalize" style={{ color: '#2A1F08' }}>
-            {sheet.sheet_name.charAt(0).toUpperCase() + sheet.sheet_name.slice(1)} Sheet
-          </span>
-          {sheet.updated_at && (
-            <span className="text-xs font-semibold" style={{ color: '#7A8C1E' }}>
-              updated {new Date(sheet.updated_at).toLocaleTimeString('en-US', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' })}
-            </span>
-          )}
-        </div>
+        <span className="font-extrabold text-base capitalize" style={{ color: '#2A1F08' }}>
+          {sheet.sheet_name.charAt(0).toUpperCase() + sheet.sheet_name.slice(1)} Sheet
+        </span>
+        {sheet.display_name && (
+          <p className="text-xs font-mono truncate" style={{ color: '#6B5A3A', marginTop: 1 }} title={sheet.display_name}>
+            {sheet.display_name}
+          </p>
+        )}
 
         {/* Sheet ID */}
         {confirming ? (
@@ -186,6 +185,8 @@ export function SmartsheetCapacity({ sheets, onRefresh }: {
       body: JSON.stringify({ sheet_name: sheetName, sheet_id: sheetId }),
     })
     setSheets(prev => prev.map(s => s.sheet_name === sheetName ? { ...s, sheet_id: sheetId } : s))
+    // Auto-refresh capacity data for the new sheet
+    handleRefresh()
   }
 
   const lastUpdated = sheets_.find(s => s.updated_at)?.updated_at

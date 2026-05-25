@@ -4,11 +4,11 @@ import { requireRole } from '@/lib/auth-guard'
 
 // GET /api/smartsheet-sheets — read cached stats
 export async function GET() {
-  const guard = await requireRole('manager')
+  const guard = await requireRole('admin')
   if (guard) return guard
 
   const rows = await sql`
-    SELECT sheet_name, sheet_id, row_count, col_count, max_rows, remaining, updated_at
+    SELECT sheet_name, display_name, sheet_id, row_count, col_count, max_rows, remaining, updated_at
     FROM smartsheet_sheets
     ORDER BY id
   `
@@ -17,7 +17,7 @@ export async function GET() {
 
 // PATCH /api/smartsheet-sheets — update sheet_id in DB and sync to Google Sheets via n8n
 export async function PATCH(req: NextRequest) {
-  const guard = await requireRole('manager')
+  const guard = await requireRole('admin')
   if (guard) return guard
 
   const { sheet_name, sheet_id } = await req.json()

@@ -118,26 +118,39 @@ export async function readRealtimeStatus(): Promise<RealtimeRow[]> {
 
 const FLOW_LOG_SHEET = 'flow_log'
 
-export interface FlowLogRow { date: string; name: string; status: string; note: string }
+export interface FlowLogRow { date: string; name: string; status: string; note: string; sheet_id?: string }
 
 export async function readFlowLog(limit = 50): Promise<FlowLogRow[]> {
   const auth = getAuthClient()
   const sheets = google.sheets({ version: 'v4', auth })
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${FLOW_LOG_SHEET}!A:D`,
+    range: `${FLOW_LOG_SHEET}!A:E`,
   })
   const rows = res.data.values ?? []
   return rows.slice(1)
     .reverse()
     .slice(0, limit)
     .map(row => ({
-      date:   row[0] ?? '',
-      name:   row[1] ?? '',
-      status: row[2] ?? '',
-      note:   row[3] ?? '',
+      date:     row[0] ?? '',
+      name:     row[1] ?? '',
+      status:   row[2] ?? '',
+      note:     row[3] ?? '',
+      sheet_id: row[4] ?? '',
     }))
     .filter(r => r.date || r.name)
+}
+
+export async function appendFlowLog(row: FlowLogRow) {
+  const auth = getAuthClient()
+  const sheets = google.sheets({ version: 'v4', auth })
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${FLOW_LOG_SHEET}!A:E`,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [[row.date, row.name, row.status, row.note, row.sheet_id ?? '']] },
+  })
 }
 
 // ── Routing tab ──────────────────────────────────────────────────────────────
@@ -175,6 +188,122 @@ export async function updateRoutingBlocking(value: 'yes' | 'no'): Promise<void> 
     range: `${ROUTING_SHEET}!${colLetter}2`,
     valueInputOption: 'RAW',
     requestBody: { values: [[value]] },
+  })
+}
+
+// ── Handover Puzzle tab ──────────────────────────────────────────────────────
+
+const HANDOVER_PUZZLE_SHEET = 'handover_puzzle'
+
+// Column order: Date, Evaluator Name, Start Date, End Date, Status
+export const HANDOVER_PUZZLE_COLUMNS = ['date', 'evaluatorName', 'startDate', 'endDate', 'status'] as const
+export type HandoverPuzzleColumn = typeof HANDOVER_PUZZLE_COLUMNS[number]
+
+export interface HandoverPuzzleRow {
+  row_index: number
+  date: string
+  evaluatorName: string
+  startDate: string
+  endDate: string
+  status: string
+}
+
+export async function readHandoverPuzzle(): Promise<HandoverPuzzleRow[]> {
+  const auth = getAuthClient()
+  const sheets = google.sheets({ version: 'v4', auth })
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${HANDOVER_PUZZLE_SHEET}!A:E`,
+  })
+  const rows = res.data.values ?? []
+  return rows.slice(1).map((row, i) => ({
+    row_index: i + 2,
+    date: row[0] ?? '',
+    evaluatorName: row[1] ?? '',
+    startDate: row[2] ?? '',
+    endDate: row[3] ?? '',
+    status: row[4] ?? '',
+  })).filter(r => r.evaluatorName)
+}
+
+export async function appendHandoverPuzzle(row: Omit<HandoverPuzzleRow, 'row_index'>) {
+  const auth = getAuthClient()
+  const sheets = google.sheets({ version: 'v4', auth })
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${HANDOVER_PUZZLE_SHEET}!A:E`,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [[row.date, row.evaluatorName, row.startDate, row.endDate, row.status]] },
+  })
+}
+
+export async function updateHandoverPuzzleStatus(rowIndex: number, status: string) {
+  const auth = getAuthClient()
+  const sheets = google.sheets({ version: 'v4', auth })
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${HANDOVER_PUZZLE_SHEET}!E${rowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[status]] },
+  })
+}
+
+// ── Handover Logging tab (sheet: Handover Game List Request) ─────────────────
+
+const HANDOVER_LOG_SPREADSHEET_ID = '1kR6I3DnYCn67GUqZv0ms6cksUnRTHEBQniVjOuoEqlo'
+const HANDOVER_LOG_SHEET = 'Logging'
+
+// Columns: Date | Evaluator Name | Start Date | End Date | Sheet Type | Status
+export interface HandoverLogRow {
+  row_index: number
+  date: string
+  evaluatorName: string
+  startDate: string
+  endDate: string
+  sheetType: string
+  status: string
+}
+
+export async function readHandoverLog(): Promise<HandoverLogRow[]> {
+  const auth = getAuthClient()
+  const sheets = google.sheets({ version: 'v4', auth })
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: HANDOVER_LOG_SPREADSHEET_ID,
+    range: `${HANDOVER_LOG_SHEET}!A:F`,
+  })
+  const rows = res.data.values ?? []
+  return rows.slice(1).map((row, i) => ({
+    row_index: i + 2,
+    date:          row[0] ?? '',
+    evaluatorName: row[1] ?? '',
+    startDate:     row[2] ?? '',
+    endDate:       row[3] ?? '',
+    sheetType:     row[4] ?? '',
+    status:        row[5] ?? '',
+  })).filter(r => r.evaluatorName)
+}
+
+export async function appendHandoverLog(row: Omit<HandoverLogRow, 'row_index'>) {
+  const auth = getAuthClient()
+  const sheets = google.sheets({ version: 'v4', auth })
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: HANDOVER_LOG_SPREADSHEET_ID,
+    range: `${HANDOVER_LOG_SHEET}!A:F`,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [[row.date, row.evaluatorName, row.startDate, row.endDate, row.sheetType, row.status]] },
+  })
+}
+
+export async function updateHandoverLogStatus(rowIndex: number, status: string) {
+  const auth = getAuthClient()
+  const sheets = google.sheets({ version: 'v4', auth })
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: HANDOVER_LOG_SPREADSHEET_ID,
+    range: `${HANDOVER_LOG_SHEET}!F${rowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[status]] },
   })
 }
 

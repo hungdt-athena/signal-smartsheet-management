@@ -62,10 +62,6 @@ function getCurrentMonthFilters(): Filters {
 
 const EMPTY_FILTERS: Filters = { year: '', month: '', evaluator: '', duration: '' }
 
-// Normalize evaluator name for case-insensitive grouping while keeping trailing numbers distinct.
-// "MYTL" and "MyTL" → same key. "ABC2" and "Abc2" → same. "ABC23" and "ABC2" → different.
-// When merging, prefer the version WITH a trailing number as canonical display name
-// (e.g. "PhuongNT" + "PhuongNT1" → "PhuongNT1").
 function normalizeEvaluator(name: string): string {
   const match = name.match(/^(.*?)(\d+)$/)
   if (match) {
@@ -77,8 +73,6 @@ function normalizeEvaluator(name: string): string {
 function getFilterOptions(rows: YtbRow[]) {
   const years = new Set<string>()
   const monthsByYear = new Map<string, Set<number>>()
-  // key = normalized name, value = canonical display name
-  // Prefer the version with a trailing number as the display name.
   const evaluatorMap = new Map<string, string>()
   const durations = new Set<string>()
 
@@ -98,7 +92,6 @@ function getFilterOptions(rows: YtbRow[]) {
       if (!existing) {
         evaluatorMap.set(key, row.pic)
       } else {
-        // Prefer the version with trailing digits as canonical
         const hasDigits = /\d+$/.test(row.pic)
         const existingHasDigits = /\d+$/.test(existing)
         if (hasDigits && !existingHasDigits) {
@@ -531,6 +524,7 @@ export default function YouTubePage() {
   const [saving, setSaving]   = useState<Set<number>>(new Set())
   const [filters, setFilters] = useState<Filters>(getCurrentMonthFilters)
   const [openDays, setOpenDays] = useState<Set<string>>(new Set())
+  const initialOpenDone = useRef(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -557,17 +551,17 @@ export default function YouTubePage() {
 
   const dayGroups = useMemo(() => groupByDay(filteredRows), [filteredRows])
 
-  // Auto-open today's group on first load
+  // Auto-open today's group on first load only
   useEffect(() => {
-    if (dayGroups.length > 0 && openDays.size === 0) {
-      const todayGroup = dayGroups.find(g => g.label === 'Today')
-      if (todayGroup) {
-        setOpenDays(new Set([todayGroup.day]))
-      } else {
-        setOpenDays(new Set([dayGroups[0].day]))
-      }
+    if (initialOpenDone.current || dayGroups.length === 0) return
+    initialOpenDone.current = true
+    const todayGroup = dayGroups.find(g => g.label === 'Today')
+    if (todayGroup) {
+      setOpenDays(new Set([todayGroup.day]))
+    } else {
+      setOpenDays(new Set([dayGroups[0].day]))
     }
-  }, [dayGroups, openDays.size])
+  }, [dayGroups])
 
   function toggleDay(day: string) {
     setOpenDays(s => {
@@ -616,9 +610,9 @@ export default function YouTubePage() {
         <BlockingToggle />
       </div>
 
-      <div className="bean-card p-4">
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+      <div className="bean-card p-4" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
+        {/* Header — sticky */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexShrink: 0 }}>
           <p className="bean-section-label">Drive Videos</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, color: '#9A8A6A' }}>
@@ -631,9 +625,9 @@ export default function YouTubePage() {
           </div>
         </div>
 
-        {/* Filter bar */}
+        {/* Filter bar — sticky */}
         {rows.length > 0 && (
-          <div style={{ background: '#FAF5EC', borderRadius: 10, padding: '10px 14px', marginBottom: 12, border: '1px solid #E8DCC8' }}>
+          <div style={{ background: '#FAF5EC', borderRadius: 10, padding: '10px 14px', marginBottom: 12, border: '1px solid #E8DCC8', flexShrink: 0 }}>
             <FilterBar
               filters={filters}
               options={filterOptions}
@@ -643,9 +637,10 @@ export default function YouTubePage() {
           </div>
         )}
 
-        {error && <p style={{ fontSize: 11, color: '#b91c1c', marginBottom: 6 }}>{error}</p>}
+        {error && <p style={{ fontSize: 11, color: '#b91c1c', marginBottom: 6, flexShrink: 0 }}>{error}</p>}
 
-        <div style={{ overflowX: 'auto' }}>
+        {/* Table header — sticky */}
+        <div style={{ flexShrink: 0 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
             <ColGroup />
             <thead>
@@ -660,133 +655,131 @@ export default function YouTubePage() {
                 <th style={th}></th>
               </tr>
             </thead>
-            <tbody>
-              {filteredRows.length === 0 && !loading && (
-                <tr><td colSpan={8} style={{ ...td, color: '#9A8A6A', textAlign: 'center', padding: 16 }}>
-                  {rows.length === 0 ? 'No data — click Refresh to load' : 'No rows match the selected filters'}
-                </td></tr>
-              )}
-              {loading && (
-                <tr><td colSpan={8} style={{ ...td, color: '#9A8A6A', textAlign: 'center', padding: 16 }}>Loading...</td></tr>
-              )}
-              {!loading && dayGroups.map((group, gi) => {
-                const isOpen = openDays.has(group.day)
-                const isToday = group.label === 'Today'
-                return (
-                  <tr key={`group-${group.day}`} style={{ cursor: 'default' }}>
-                    <td colSpan={8} style={{ padding: 0, border: 'none' }}>
-                      {/* Spacer between day groups (not before first) */}
-                      {gi > 0 && (
-                        <div style={{ height: 6, background: '#D4C4A0' }} />
-                      )}
-
-                      {/* Day header */}
-                      <button
-                        onClick={() => toggleDay(group.day)}
-                        style={{
-                          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                          background: isToday ? '#5A6A10' : '#C8B896',
-                          padding: '7px 12px', border: 'none',
-                          borderBottom: `2px solid ${isToday ? '#4A5A08' : '#B0A080'}`,
-                          cursor: 'pointer', textAlign: 'left',
-                        }}
-                      >
-                        <span style={{ fontSize: 10, color: isToday ? '#C8E070' : '#6B5A3A' }}>
-                          {isOpen ? '▾' : '▸'}
-                        </span>
-                        <span style={{ fontWeight: 700, color: isToday ? '#fff' : '#2A1F08', fontSize: 12 }}>
-                          {group.label}
-                        </span>
-                        {isToday && (
-                          <span style={{
-                            background: 'rgba(255,255,255,0.2)', color: '#fff', borderRadius: 4,
-                            padding: '1px 6px', fontSize: 10, fontWeight: 700,
-                          }}>Now</span>
-                        )}
-                        <span style={{ marginLeft: 'auto', fontSize: 11, color: isToday ? 'rgba(255,255,255,0.7)' : '#6B5A3A', fontWeight: 600 }}>
-                          {group.rows.length} video{group.rows.length !== 1 ? 's' : ''}
-                        </span>
-                      </button>
-
-                      {/* Day rows */}
-                      {isOpen && (
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
-                          <ColGroup />
-                          <tbody>
-                            {group.rows.map(row => {
-                              const pending   = edits[row.row_index] ?? {}
-                              const isDirty   = Object.keys(pending).length > 0
-                              const isSaving  = saving.has(row.row_index)
-                              const youtubeId = pending.youtubeId ?? row.youtubeId
-                              const ytUrl     = youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : null
-
-                              return (
-                                <tr key={row.row_index} style={{ background: isDirty ? '#FDFAF2' : 'transparent' }}>
-                                  <td style={{ ...td, color: '#6B5A3A' }}>
-                                    {row.time ? new Date(row.time).toLocaleTimeString('en-US', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' }) : '—'}
-                                  </td>
-                                  <td style={td}>{row.gameTitle || '—'}</td>
-                                  <td style={td}>{row.pic || '—'}</td>
-                                  <td style={{ ...td, color: '#6B5A3A' }}>{row.duration || '—'}</td>
-                                  <td style={td}>
-                                    <StatusBadge status={row.status} />
-                                  </td>
-                                  <td style={td}>{row.fileName || '—'}</td>
-                                  <td style={td}>
-                                    {isDirty ? (
-                                      <input
-                                        value={youtubeId}
-                                        onChange={e => setEdit(row.row_index, 'youtubeId', e.target.value)}
-                                        placeholder="YouTube ID"
-                                        autoFocus
-                                        style={{ border: '1px solid #5A3E1B', borderRadius: 5, padding: '2px 6px', fontSize: 11, fontFamily: 'monospace', width: 160, background: '#FAF5EC', color: '#2A1F08' }}
-                                      />
-                                    ) : (
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                        {ytUrl ? (
-                                          <a href={ytUrl} target="_blank" rel="noreferrer"
-                                            style={{ color: '#1A5A9A', fontWeight: 600, fontSize: 11, textDecoration: 'underline', whiteSpace: 'nowrap' }}>
-                                            youtu.be/{youtubeId}
-                                          </a>
-                                        ) : (
-                                          <span style={{ color: '#B0A090', fontStyle: 'italic', fontSize: 11 }}>
-                                            not synced yet
-                                          </span>
-                                        )}
-                                        <button
-                                          onClick={() => setEdit(row.row_index, 'youtubeId', youtubeId)}
-                                          title="Edit YouTube ID"
-                                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9A8A6A', fontSize: 12, lineHeight: 1, padding: '1px 3px', borderRadius: 4, flexShrink: 0 }}
-                                          onMouseEnter={e => (e.currentTarget.style.color = '#5A3E1B')}
-                                          onMouseLeave={e => (e.currentTarget.style.color = '#9A8A6A')}
-                                        >
-                                          ✎
-                                        </button>
-                                      </div>
-                                    )}
-                                  </td>
-                                  <td style={{ ...td, width: 90 }}>
-                                    {isDirty && (
-                                      <div style={{ display: 'flex', gap: 4 }}>
-                                        <Btn onClick={() => saveEdits(row.row_index)} disabled={isSaving} variant="primary">
-                                          {isSaving ? '...' : 'Save'}
-                                        </Btn>
-                                        <Btn onClick={() => cancelEdits(row.row_index)} disabled={isSaving}>✕</Btn>
-                                      </div>
-                                    )}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
           </table>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+          {filteredRows.length === 0 && !loading && (
+            <p style={{ color: '#9A8A6A', textAlign: 'center', padding: 16, fontSize: 12 }}>
+              {rows.length === 0 ? 'No data — click Refresh to load' : 'No rows match the selected filters'}
+            </p>
+          )}
+          {loading && (
+            <p style={{ color: '#9A8A6A', textAlign: 'center', padding: 16, fontSize: 12 }}>Loading...</p>
+          )}
+          {!loading && dayGroups.map((group, gi) => {
+            const isOpen = openDays.has(group.day)
+            const isToday = group.label === 'Today'
+            return (
+              <div key={group.day}>
+                {/* Spacer between day groups */}
+                {gi > 0 && <div style={{ height: 6, background: '#D4C4A0' }} />}
+
+                {/* Day header */}
+                <button
+                  onClick={() => toggleDay(group.day)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    background: isToday ? '#5A6A10' : '#C8B896',
+                    padding: '7px 12px', border: 'none',
+                    borderBottom: `2px solid ${isToday ? '#4A5A08' : '#B0A080'}`,
+                    cursor: 'pointer', textAlign: 'left',
+                  }}
+                >
+                  <span style={{ fontSize: 10, color: isToday ? '#C8E070' : '#6B5A3A' }}>
+                    {isOpen ? '▾' : '▸'}
+                  </span>
+                  <span style={{ fontWeight: 700, color: isToday ? '#fff' : '#2A1F08', fontSize: 12 }}>
+                    {group.label}
+                  </span>
+                  {isToday && (
+                    <span style={{
+                      background: 'rgba(255,255,255,0.2)', color: '#fff', borderRadius: 4,
+                      padding: '1px 6px', fontSize: 10, fontWeight: 700,
+                    }}>Now</span>
+                  )}
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: isToday ? 'rgba(255,255,255,0.7)' : '#6B5A3A', fontWeight: 600 }}>
+                    {group.rows.length} video{group.rows.length !== 1 ? 's' : ''}
+                  </span>
+                </button>
+
+                {/* Day rows */}
+                {isOpen && (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+                    <ColGroup />
+                    <tbody>
+                      {group.rows.map(row => {
+                        const pending   = edits[row.row_index] ?? {}
+                        const isDirty   = Object.keys(pending).length > 0
+                        const isSaving  = saving.has(row.row_index)
+                        const youtubeId = pending.youtubeId ?? row.youtubeId
+                        const ytUrl     = youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : null
+
+                        return (
+                          <tr key={row.row_index} style={{ background: isDirty ? '#FDFAF2' : 'transparent' }}>
+                            <td style={{ ...td, color: '#6B5A3A' }}>
+                              {row.time ? new Date(row.time).toLocaleTimeString('en-US', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' }) : '—'}
+                            </td>
+                            <td style={td}>{row.gameTitle || '—'}</td>
+                            <td style={td}>{row.pic || '—'}</td>
+                            <td style={{ ...td, color: '#6B5A3A' }}>{row.duration || '—'}</td>
+                            <td style={td}>
+                              <StatusBadge status={row.status} />
+                            </td>
+                            <td style={td}>{row.fileName || '—'}</td>
+                            <td style={td}>
+                              {isDirty ? (
+                                <input
+                                  value={youtubeId}
+                                  onChange={e => setEdit(row.row_index, 'youtubeId', e.target.value)}
+                                  placeholder="YouTube ID"
+                                  autoFocus
+                                  style={{ border: '1px solid #5A3E1B', borderRadius: 5, padding: '2px 6px', fontSize: 11, fontFamily: 'monospace', width: 160, background: '#FAF5EC', color: '#2A1F08' }}
+                                />
+                              ) : (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  {ytUrl ? (
+                                    <a href={ytUrl} target="_blank" rel="noreferrer"
+                                      style={{ color: '#1A5A9A', fontWeight: 600, fontSize: 11, textDecoration: 'underline', whiteSpace: 'nowrap' }}>
+                                      youtu.be/{youtubeId}
+                                    </a>
+                                  ) : (
+                                    <span style={{ color: '#B0A090', fontStyle: 'italic', fontSize: 11 }}>
+                                      not synced yet
+                                    </span>
+                                  )}
+                                  <button
+                                    onClick={() => setEdit(row.row_index, 'youtubeId', youtubeId)}
+                                    title="Edit YouTube ID"
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9A8A6A', fontSize: 12, lineHeight: 1, padding: '1px 3px', borderRadius: 4, flexShrink: 0 }}
+                                    onMouseEnter={e => (e.currentTarget.style.color = '#5A3E1B')}
+                                    onMouseLeave={e => (e.currentTarget.style.color = '#9A8A6A')}
+                                  >
+                                    ✎
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ ...td, width: 90 }}>
+                              {isDirty && (
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  <Btn onClick={() => saveEdits(row.row_index)} disabled={isSaving} variant="primary">
+                                    {isSaving ? '...' : 'Save'}
+                                  </Btn>
+                                  <Btn onClick={() => cancelEdits(row.row_index)} disabled={isSaving}>✕</Btn>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>

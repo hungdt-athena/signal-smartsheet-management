@@ -12,7 +12,7 @@ export interface InitialEvaluator {
 }
 
 export async function GET(_req: NextRequest) {
-  const guard = await requireRole('manager')
+  const guard = await requireRole('admin')
   if (guard) return guard
 
   const url = process.env.WEBHOOK_TEAM_INITIAL_GET
@@ -37,7 +37,7 @@ export async function GET(_req: NextRequest) {
       row_number: row.row_number,
       name: row['Evaluator Name'] as string,
       today_available: row['Today Available'],
-      game_platform: row['Game Platform'],
+      game_platform: (row['Game Platform'] ?? '').toLowerCase(),
       game_category: row['Game Category'],
     }))
 

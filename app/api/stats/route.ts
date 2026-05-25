@@ -43,14 +43,13 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(_req: NextRequest) {
-  const guard = await requireRole('manager')
+  const guard = await requireRole('admin')
   if (guard) return guard
 
   const [
     pullRealtime,
     pullCheckpoints,
     pushLogs,
-    workflows,
   ] = await Promise.all([
     // Realtime: count directly from game_info — always live
     sql<[{ total: string; ios: string; android: string }]>`
@@ -76,13 +75,6 @@ export async function GET(_req: NextRequest) {
       FROM game_flow_logs
       WHERE log_date = CURRENT_DATE AND flow_type = 'push' AND platform = 'all'
       GROUP BY sheet
-    `,
-
-    // Last run per workflow (for status badges)
-    sql`
-      SELECT DISTINCT ON (workflow_name) workflow_name, status, created_at
-      FROM ops_logs
-      ORDER BY workflow_name, created_at DESC
     `,
   ])
 
@@ -112,6 +104,6 @@ export async function GET(_req: NextRequest) {
       arcade:     getSheet('arcade'),
       simulation: getSheet('simulation'),
     },
-    workflows,
+    workflows: [],
   }, { headers: { 'Cache-Control': 'no-store' } })
 }

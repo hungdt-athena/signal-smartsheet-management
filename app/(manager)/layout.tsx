@@ -1,17 +1,26 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { signOut } from 'next-auth/react'
+import { signOut, useSession } from 'next-auth/react'
 
-const NAV_ITEMS = [
-  { href: '/dashboard',  label: 'Dashboard',  locked: false },
-  { href: '/operations', label: 'Operations', locked: false },
-  { href: '/team',       label: 'Team',       locked: false },
-  { href: '/youtube',    label: 'Videos',     locked: false },
+interface NavItem { href: string; label: string; adminOnly?: boolean }
+
+const NAV_ITEMS: NavItem[] = [
+  { href: '/dashboard',       label: 'Dashboard'  },
+  { href: '/operations',      label: 'Operations', adminOnly: true },
+  { href: '/team',            label: 'Team',       adminOnly: true },
+  { href: '/handover-puzzle', label: 'Handover'    },
+  { href: '/youtube',         label: 'Videos'      },
+  { href: '/admin',           label: 'Admin',      adminOnly: true },
 ]
 
 export default function ManagerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const { data: session } = useSession()
+  const role = session?.user?.role
+  const userName = session?.user?.name || session?.user?.email?.split('@')[0] || ''
+
+  const visibleItems = NAV_ITEMS.filter(item => !item.adminOnly || role === 'admin')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'row', height: '100vh', overflow: 'hidden' }}>
@@ -31,18 +40,8 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
 
         {/* Nav */}
         <nav className="flex-1 p-3 space-y-1.5">
-          {NAV_ITEMS.map(item => {
-            const active = pathname === item.href
-            if (item.locked) {
-              return (
-                <div key={item.href}
-                  className="flex items-center justify-between px-4 py-2.5 rounded-xl font-bold text-sm cursor-not-allowed"
-                  style={{ color: '#2A1F08', opacity: 0.35 }}>
-                  <span>{item.label}</span>
-                  <span className="text-xs font-extrabold px-1.5 py-0.5 rounded" style={{ background: '#8B6A3E', color: '#F5EDD8', fontSize: '0.6rem', letterSpacing: '0.05em' }}>SOON</span>
-                </div>
-              )
-            }
+          {visibleItems.map(item => {
+            const active = pathname === item.href || pathname.startsWith(item.href + '/')
             return (
               <Link key={item.href} href={item.href}>
                 <div className="flex items-center px-4 py-2.5 rounded-xl font-bold text-sm transition-all"
@@ -56,8 +55,22 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
           })}
         </nav>
 
-        {/* Sign out */}
+        {/* User info + Sign out */}
         <div className="p-4" style={{ borderTop: '2px solid #7A8C1E' }}>
+          {userName && (
+            <p className="text-xs font-semibold mb-2 truncate" style={{ color: '#2A1F08', opacity: 0.7 }}>
+              {userName}
+              {role && (
+                <span style={{
+                  marginLeft: 6, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+                  background: role === 'admin' ? '#FEF3C7' : '#E0E7FF',
+                  color: role === 'admin' ? '#92400E' : '#3730A3',
+                }}>
+                  {role}
+                </span>
+              )}
+            </p>
+          )}
           <button onClick={() => signOut({ callbackUrl: '/login' })}
             className="text-xs font-bold opacity-50 hover:opacity-100 transition-opacity"
             style={{ color: '#2A1F08' }}>

@@ -6,6 +6,6 @@ export default async function RootPage() {
   if (process.env.SKIP_AUTH === 'true') redirect('/dashboard')
   const session = await getServerSession(authOptions)
   if (!session) redirect('/login')
-  if (session.user.role === 'manager') redirect('/dashboard')
+  if (session.user.role === 'admin') redirect('/dashboard')
   redirect('/handover')
 }
