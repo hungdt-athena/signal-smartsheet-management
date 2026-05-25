@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
+import { useSession } from 'next-auth/react'
 import { FlowHistory } from '@/components/FlowHistory'
 import { SmartsheetCapacity } from '@/components/SmartsheetCapacity'
 
@@ -45,6 +46,8 @@ function PushCard({ label, value, img }: { label: string; value: number | null; 
 }
 
 export default function DashboardPage() {
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.role === 'admin'
   const [stats, setStats] = useState<Stats | null>(null)
   const [sheetStats, setSheetStats] = useState<unknown[]>([])
   const [pullRefreshing, setPullRefreshing] = useState(false)
@@ -130,6 +133,7 @@ export default function DashboardPage() {
         <SmartsheetCapacity
           sheets={sheetStats as Parameters<typeof SmartsheetCapacity>[0]['sheets']}
           onRefresh={fetchData}
+          isAdmin={isAdmin}
         />
       </div>
 

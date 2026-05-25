@@ -9,20 +9,18 @@ export default withAuth(
     const { pathname } = req.nextUrl
     const role = req.nextauth.token?.role as string | undefined
 
+    // Redirect old /handover → /handover-puzzle (unified layout)
+    if (pathname === '/handover' || pathname.startsWith('/handover/')) {
+      return NextResponse.redirect(new URL('/handover-puzzle', req.url))
+    }
+
     // Admin-only paths
     const adminPaths = ['/operations', '/team', '/admin']
     const isAdminPath = adminPaths.some(p => pathname.startsWith(p))
 
-    // Paths accessible by both roles
-    const sharedPaths = ['/dashboard', '/handover-puzzle', '/handover', '/youtube', '/drive-videos']
-    const isSharedPath = sharedPaths.some(p => pathname.startsWith(p))
-
     if (isAdminPath && role !== 'admin') {
       return NextResponse.redirect(new URL('/dashboard', req.url))
     }
-
-    // All authenticated users can access shared paths
-    if (isSharedPath) return NextResponse.next()
   },
   {
     callbacks: {

@@ -18,9 +18,10 @@ const SHEET_IMGS: Record<string, string> = {
   simulation: '/stickers/simulation-capacity-card.png',
 }
 
-function SheetCard({ sheet, onSaveId }: {
+function SheetCard({ sheet, onSaveId, canEdit }: {
   sheet: SheetStats
   onSaveId: (name: string, id: string) => Promise<void>
+  canEdit: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -116,8 +117,10 @@ function SheetCard({ sheet, onSaveId }: {
             <span className="text-xs font-mono truncate max-w-[140px]" style={{ color: sheet.sheet_id ? '#6B5A3A' : '#C47A20' }}>
               {sheet.sheet_id ?? 'No sheet ID'}
             </span>
-            <button onClick={() => setEditing(true)}
-              className="text-xs font-bold underline" style={{ color: '#7A8C1E' }}>edit</button>
+            {canEdit && (
+              <button onClick={() => setEditing(true)}
+                className="text-xs font-bold underline" style={{ color: '#7A8C1E' }}>edit</button>
+            )}
           </div>
         )}
       </div>
@@ -151,9 +154,10 @@ function SheetCard({ sheet, onSaveId }: {
   )
 }
 
-export function SmartsheetCapacity({ sheets, onRefresh }: {
+export function SmartsheetCapacity({ sheets, onRefresh, isAdmin = false }: {
   sheets: SheetStats[]
   onRefresh: () => void
+  isAdmin?: boolean
 }) {
   const [refreshing, setRefreshing] = useState(false)
   const [sheets_, setSheets] = useState(sheets)
@@ -212,7 +216,7 @@ export function SmartsheetCapacity({ sheets, onRefresh }: {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {sheets_.map(s => (
-          <SheetCard key={s.sheet_name} sheet={s} onSaveId={handleSaveId} />
+          <SheetCard key={s.sheet_name} sheet={s} onSaveId={handleSaveId} canEdit={isAdmin} />
         ))}
       </div>
     </div>
