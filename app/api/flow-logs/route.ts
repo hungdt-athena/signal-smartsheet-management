@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
-import { requireRole } from '@/lib/auth-guard'
+import { requireRole, requireAuth } from '@/lib/auth-guard'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/flow-logs — all logs, newest date first
 export async function GET(_req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireAuth()
   if (guard) return guard
 
   const rows = await sql`

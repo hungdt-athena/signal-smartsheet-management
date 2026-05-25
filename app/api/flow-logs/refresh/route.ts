@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
-import { requireRole } from '@/lib/auth-guard'
+import { requireRole, requireAuth } from '@/lib/auth-guard'
 
 // POST /api/flow-logs/refresh — manual pull log snapshot (same logic as n8n schedule)
 export async function POST(_req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireAuth()
   if (guard) return guard
 
   await sql`

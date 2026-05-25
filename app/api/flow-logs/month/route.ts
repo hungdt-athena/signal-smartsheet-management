@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
-import { requireRole } from '@/lib/auth-guard'
+import { requireRole, requireAuth } from '@/lib/auth-guard'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +30,7 @@ interface DayGroup {
 const ENTRY_ORDER = ['pull-morning', 'pull-afternoon', 'push-morning', 'push-afternoon']
 
 export async function GET(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireAuth()
   if (guard) return guard
 
   const params = new URL(req.url).searchParams

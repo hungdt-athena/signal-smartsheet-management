@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
-import { requireRole } from '@/lib/auth-guard'
+import { requireRole, requireAuth } from '@/lib/auth-guard'
 
 // GET /api/smartsheet-sheets — read cached stats
 export async function GET() {
-  const guard = await requireRole('admin')
+  const guard = await requireAuth()
   if (guard) return guard
 
   const rows = await sql`
