@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
-import { requireRole, requireAuth } from '@/lib/auth-guard'
+import { requireAuth } from '@/lib/auth-guard'
 
 export const dynamic = 'force-dynamic'
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
-import { requireRole, requireAuth } from '@/lib/auth-guard'
+import { requireAuth } from '@/lib/auth-guard'
 
 // POST /api/flow-logs/refresh — manual pull log snapshot (same logic as n8n schedule)
 export async function POST(_req: NextRequest) {
