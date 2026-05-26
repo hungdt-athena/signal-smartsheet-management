@@ -10,7 +10,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/operations',      label: 'Operations', adminOnly: true },
   { href: '/team',            label: 'Team',       adminOnly: true },
   { href: '/handover-puzzle', label: 'Handover'    },
-  { href: '/youtube',         label: 'Videos'      },
+  { href: '/youtube',         label: 'Videos',     adminOnly: true },
   { href: '/admin',           label: 'Admin',      adminOnly: true },
 ]
 
@@ -26,16 +26,10 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
     <div style={{ display: 'flex', flexDirection: 'row', height: '100vh', overflow: 'hidden' }}>
       <aside style={{ width: 288, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#BF9A6E', borderRight: '3px solid #5A6A10' }}>
 
-        {/* Logo */}
+        {/* Title */}
         <div className="p-5 pb-4" style={{ borderBottom: '2.5px solid #7A8C1E' }}>
-          <div className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo/athena-orange-logo.png" alt="Athena" style={{ height: 40, width: 'auto', objectFit: 'contain' }} />
-            <div>
-              <p className="font-extrabold text-base leading-tight" style={{ color: '#2A1F08' }}>Signal</p>
-              <p className="font-bold text-xs" style={{ color: '#5A6A10' }}>Smartsheet Management</p>
-            </div>
-          </div>
+          <p className="font-extrabold text-lg leading-tight" style={{ color: '#2A1F08' }}>Signal</p>
+          <p className="font-bold text-xs" style={{ color: '#5A6A10' }}>Smartsheet Management</p>
         </div>
 
         {/* Nav */}

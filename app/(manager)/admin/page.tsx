@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
+import { StyledSelect } from '@/components/StyledSelect'
 
 interface User {
   id: number
@@ -167,10 +168,11 @@ export default function AdminPage() {
           </div>
           <div style={{ minWidth: 90 }}>
             <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6B5A3A', marginBottom: 2 }}>Role</label>
-            <select value={newRole} onChange={e => setNewRole(e.target.value as 'admin' | 'evaluator')} style={{ ...inputStyle, width: '100%' }}>
-              <option value="evaluator">Evaluator</option>
-              <option value="admin">Admin</option>
-            </select>
+            <StyledSelect
+              value={newRole}
+              onChange={v => setNewRole(v as 'admin' | 'evaluator')}
+              options={[{ value: 'evaluator', label: 'Evaluator' }, { value: 'admin', label: 'Admin' }]}
+            />
           </div>
           <button type="submit" disabled={adding || !newEmail}
             style={{
@@ -236,18 +238,12 @@ export default function AdminPage() {
                     </td>
                     <td style={tdStyle}>{u.name}</td>
                     <td style={tdStyle}>
-                      <select
+                      <StyledSelect
                         value={u.role}
                         disabled={isSuper}
-                        onChange={e => handleRoleChange(u.id, e.target.value)}
-                        style={{
-                          ...inputStyle, padding: '2px 6px', fontSize: 11,
-                          opacity: isSuper ? 0.5 : 1, cursor: isSuper ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        <option value="admin">admin</option>
-                        <option value="evaluator">evaluator</option>
-                      </select>
+                        onChange={v => handleRoleChange(u.id, v)}
+                        options={[{ value: 'admin', label: 'admin' }, { value: 'evaluator', label: 'evaluator' }]}
+                      />
                     </td>
                     <td style={{ ...tdStyle, fontSize: 11, color: '#9A8A6A' }}>
                       {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}

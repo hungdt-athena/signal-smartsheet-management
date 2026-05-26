@@ -1,5 +1,6 @@
 'use client'
 import { useState, useCallback, useEffect } from 'react'
+import { StyledSelect } from '@/components/StyledSelect'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -211,19 +212,11 @@ function InitialTable() {
                   <td style={{ ...tdStyle, fontWeight: 600 }}>{ev.name}</td>
                   <td style={tdStyle}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <select
+                      <StyledSelect
                         value={currentDisplay}
-                        onChange={e => setPendingAvail(p => ({ ...p, [ev.row_number]: e.target.value as 'Yes' | 'No' }))}
-                        style={{
-                          border: `1px solid ${isDirty ? '#5A3E1B' : '#D4C4A0'}`,
-                          borderRadius: 6, padding: '2px 6px', fontSize: 12,
-                          background: currentDisplay === 'Yes' ? '#E8F5C8' : '#FEE2E2',
-                          color: '#2A1F08', fontWeight: 600,
-                        }}
-                      >
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                      </select>
+                        onChange={v => setPendingAvail(p => ({ ...p, [ev.row_number]: v as 'Yes' | 'No' }))}
+                        options={[{ value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }]}
+                      />
                       {isDirty && (
                         <Btn onClick={() => handleAvailConfirm(ev.row_number)} disabled={isSaving} variant="primary">
                           {isSaving ? '...' : 'Confirm'}
@@ -239,19 +232,11 @@ function InitialTable() {
                       const isSavingP = savingPlatform.has(ev.row_number)
                       return (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <select
+                          <StyledSelect
                             value={currentP}
-                            onChange={e => setPendingPlatform(p => ({ ...p, [ev.row_number]: e.target.value }))}
-                            style={{
-                              border: `1px solid ${isDirtyP ? '#5A3E1B' : '#D4C4A0'}`,
-                              borderRadius: 6, padding: '2px 6px', fontSize: 12,
-                              background: '#FAF5EC', color: '#2A1F08', fontWeight: 600,
-                            }}
-                          >
-                            <option value="all">all</option>
-                            <option value="ios">ios</option>
-                            <option value="android">android</option>
-                          </select>
+                            onChange={v => setPendingPlatform(p => ({ ...p, [ev.row_number]: v }))}
+                            options={[{ value: 'all', label: 'all' }, { value: 'ios', label: 'ios' }, { value: 'android', label: 'android' }]}
+                          />
                           {isDirtyP && (
                             <Btn onClick={() => handlePlatformConfirm(ev.row_number)} disabled={isSavingP} variant="primary">
                               {isSavingP ? '...' : 'Confirm'}
@@ -285,25 +270,18 @@ function InitialTable() {
                   />
                 </td>
                 <td style={tdStyle}>
-                  <select
+                  <StyledSelect
                     value={addForm.today_available}
-                    onChange={e => setAddForm(f => ({ ...f, today_available: e.target.value as 'Yes' | 'No' }))}
-                    style={{ border: '1px solid #D4C4A0', borderRadius: 6, padding: '3px 7px', fontSize: 12 }}
-                  >
-                    <option value="Yes">Yes</option>
-                    <option value="No">No</option>
-                  </select>
+                    onChange={v => setAddForm(f => ({ ...f, today_available: v as 'Yes' | 'No' }))}
+                    options={[{ value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }]}
+                  />
                 </td>
                 <td style={tdStyle}>
-                  <select
+                  <StyledSelect
                     value={addForm.game_platform}
-                    onChange={e => setAddForm(f => ({ ...f, game_platform: e.target.value }))}
-                    style={{ border: '1px solid #D4C4A0', borderRadius: 6, padding: '3px 7px', fontSize: 12, background: '#FAF5EC', color: '#2A1F08', fontWeight: 600 }}
-                  >
-                    <option value="all">all</option>
-                    <option value="ios">ios</option>
-                    <option value="android">android</option>
-                  </select>
+                    onChange={v => setAddForm(f => ({ ...f, game_platform: v }))}
+                    options={[{ value: 'all', label: 'all' }, { value: 'ios', label: 'ios' }, { value: 'android', label: 'android' }]}
+                  />
                 </td>
                 <td style={{ ...tdStyle, color: '#9A8A6A', fontSize: 11 }}>—</td>
                 <td style={tdStyle}>

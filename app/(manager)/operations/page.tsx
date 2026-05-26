@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { StyledSelect } from '@/components/StyledSelect'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -458,22 +459,21 @@ function ReassignModal({ open, onClose, evaluators, loadingEvals }: {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
               <label style={labelStyle}>Evaluator (re-assign from)</label>
-              <select value={selectedEvaluator} onChange={e => setSelectedEvaluator(e.target.value)}
-                required disabled={loadingEvals} style={inputStyle}>
-                <option value="">{loadingEvals ? 'Loading...' : '-- Select --'}</option>
-                {evaluators.map(ev => (
-                  <option key={ev.row_number} value={ev.name}>{ev.name}</option>
-                ))}
-              </select>
+              <StyledSelect
+                value={selectedEvaluator}
+                onChange={setSelectedEvaluator}
+                options={evaluators.map(ev => ({ value: ev.name, label: ev.name }))}
+                placeholder={loadingEvals ? 'Loading...' : '-- Select --'}
+                disabled={loadingEvals}
+              />
             </div>
             <div>
               <label style={labelStyle}>Sheet Type</label>
-              <select value={sheetType} onChange={e => setSheetType(e.target.value as SheetType)}
-                required style={inputStyle}>
-                {SHEET_TYPE_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              <StyledSelect
+                value={sheetType}
+                onChange={v => setSheetType(v as SheetType)}
+                options={SHEET_TYPE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+              />
             </div>
           </div>
 

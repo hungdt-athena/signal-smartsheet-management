@@ -1,6 +1,7 @@
 'use client'
 import { useState, useCallback, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
+import { StyledSelect } from '@/components/StyledSelect'
 
 interface HandoverRow {
   row_index: number
@@ -179,21 +180,13 @@ export default function HandoverPuzzlePage() {
                 Evaluator Name
               </label>
               {isAdmin ? (
-              <select
+              <StyledSelect
                 value={selectedEvaluator}
-                onChange={e => setSelectedEvaluator(e.target.value)}
-                required
+                onChange={setSelectedEvaluator}
+                options={evaluators.map(ev => ({ value: ev.name, label: ev.name }))}
+                placeholder={loadingEvals ? 'Loading...' : '-- Select --'}
                 disabled={loadingEvals}
-                style={{
-                  width: '100%', border: '1px solid #D4C4A0', borderRadius: 6,
-                  padding: '6px 8px', fontSize: 12, background: '#FAF5EC', color: '#2A1F08',
-                }}
-              >
-                <option value="">{loadingEvals ? 'Loading...' : '-- Select --'}</option>
-                {evaluators.map(ev => (
-                  <option key={ev.row_number} value={ev.name}>{ev.name}</option>
-                ))}
-              </select>
+              />
               ) : (
               <input
                 value={userName}
@@ -239,19 +232,15 @@ export default function HandoverPuzzlePage() {
               <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6B5A3A', marginBottom: 4 }}>
                 Sheet Type
               </label>
-              <select
+              <StyledSelect
                 value={sheetType}
-                onChange={e => setSheetType(e.target.value)}
-                required
-                style={{
-                  width: '100%', border: '1px solid #D4C4A0', borderRadius: 6,
-                  padding: '6px 8px', fontSize: 12, background: '#FAF5EC', color: '#2A1F08',
-                }}
-              >
-                <option value="Puzzle smartsheet ID">Puzzle</option>
-                <option value="Arcade smartsheet ID">Arcade</option>
-                <option value="Simulation smartsheet ID">Simulation</option>
-              </select>
+                onChange={setSheetType}
+                options={[
+                  { value: 'Puzzle smartsheet ID', label: 'Puzzle' },
+                  { value: 'Arcade smartsheet ID', label: 'Arcade' },
+                  { value: 'Simulation smartsheet ID', label: 'Simulation' },
+                ]}
+              />
             </div>
           </div>
 
