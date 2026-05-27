@@ -5,7 +5,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { requireRole } from '@/lib/auth-guard'
-import { sql } from '@/lib/db'
 
 function getWebhookMap(): Record<string, string | undefined> {
   return {
@@ -37,12 +36,6 @@ export async function POST(req: NextRequest) {
   }
 
   const triggeredAt = new Date().toISOString()
-
-  // Insert running row before calling n8n
-  await sql`
-    INSERT INTO ops_logs (workflow_name, triggered_by, status, created_at)
-    VALUES (${workflow}, ${triggeredBy}, 'running', ${triggeredAt}::timestamptz)
-  `
 
   // Fire-and-forget: call n8n webhook
   fetch(webhookUrl, {

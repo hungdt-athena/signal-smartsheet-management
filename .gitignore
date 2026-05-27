@@ -36,5 +36,5 @@ yarn-error.log*
 next-env.d.ts
 
 # workflows & claude local
-workflows/
+/workflows/
 .claude/
