@@ -12,12 +12,6 @@ interface SheetStats {
   updated_at: string | null
 }
 
-const SHEET_IMGS: Record<string, string> = {
-  puzzle:     '/stickers/puzzle-capacity-card.png',
-  arcade:     '/stickers/arcade-capacity-card.png',
-  simulation: '/stickers/simulation-capacity-card.png',
-}
-
 function SheetCard({ sheet, onSaveId, canEdit }: {
   sheet: SheetStats
   onSaveId: (name: string, id: string) => Promise<void>
@@ -48,108 +42,91 @@ function SheetCard({ sheet, onSaveId, canEdit }: {
   }
 
   const rows = sheet.row_count ?? 0
-  const max = sheet.max_rows ?? 20000
+  const max  = sheet.max_rows ?? 20000
   const remaining = sheet.remaining ?? max
-  const pct = max > 0 ? Math.min(100, (rows / max) * 100) : 0
+  const pct  = max > 0 ? Math.min(100, (rows / max) * 100) : 0
   const isWarning = pct > 90
-  const isAlert = pct > 70 && !isWarning
+  const isAlert   = pct > 70 && !isWarning
 
   return (
-    <div className="bean-card-inner p-4 relative overflow-hidden" style={{ minHeight: 160 }}>
-      {/* Sticker — top right */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={SHEET_IMGS[sheet.sheet_name] ?? ''} alt=""
-        className="absolute right-1 top-1 w-20 h-20 object-contain pointer-events-none select-none"
-        style={{ opacity: 0.92 }} />
-
-      {/* Header */}
-      <div className="mb-2">
-        <span className="font-extrabold text-base capitalize" style={{ color: '#2A1F08' }}>
-          {sheet.sheet_name.charAt(0).toUpperCase() + sheet.sheet_name.slice(1)} Sheet
-        </span>
-        {sheet.display_name && (
-          <p className="text-xs font-mono truncate" style={{ color: '#6B5A3A', marginTop: 1 }} title={sheet.display_name}>
-            {sheet.display_name}
-          </p>
-        )}
-
-        {/* Sheet ID */}
-        {confirming ? (
-          <div className="mt-1.5 rounded-xl p-2.5" style={{ background: '#FFF3CD', border: '2px solid #C47A20' }}>
-            <p className="text-xs font-bold mb-1" style={{ color: '#7A4010' }}>Confirm update?</p>
-            <p className="text-xs font-mono mb-0.5" style={{ color: '#6B5A3A' }}>
-              <span style={{ color: '#C0392B' }}>- {sheet.sheet_id ?? '(none)'}</span>
+    <div className="cap-row" style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      <div className="stat" style={{ flexDirection: 'column', gap: 10 }}>
+        {/* Header */}
+        <div>
+          <span className="cap-name" style={{ textTransform: 'capitalize' }}>
+            {sheet.sheet_name.charAt(0).toUpperCase() + sheet.sheet_name.slice(1)} Sheet
+          </span>
+          {sheet.display_name && (
+            <p style={{ fontSize: 11, fontFamily: 'var(--num)', color: 'var(--faint)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title={sheet.display_name}>
+              {sheet.display_name}
             </p>
-            <p className="text-xs font-mono mb-2" style={{ color: '#6B5A3A' }}>
-              <span style={{ color: '#3A6010' }}>+ {idInput}</span>
-            </p>
-            <div className="flex gap-2">
-              <button onClick={handleConfirm} disabled={saving}
-                className="text-xs font-bold px-2.5 py-1 rounded-lg disabled:opacity-40"
-                style={{ background: '#7A8C1E', color: '#fff' }}>
-                {saving ? '…' : 'Confirm'}
-              </button>
-              <button onClick={handleCancel} disabled={saving}
-                className="text-xs font-bold" style={{ color: '#6B5A3A' }}>Cancel</button>
+          )}
+
+          {/* Sheet ID */}
+          {confirming ? (
+            <div style={{ marginTop: 8, borderRadius: 8, padding: '8px 10px', background: 'var(--warn-weak)', border: '1px solid var(--warn)' }}>
+              <p style={{ fontSize: 11, fontWeight: 700, marginBottom: 4, color: 'var(--warn)' }}>Confirm update?</p>
+              <p style={{ fontSize: 11, fontFamily: 'var(--num)', color: 'var(--bad)', marginBottom: 2 }}>- {sheet.sheet_id ?? '(none)'}</p>
+              <p style={{ fontSize: 11, fontFamily: 'var(--num)', color: 'var(--good)', marginBottom: 8 }}>+ {idInput}</p>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-sm btn-primary" onClick={handleConfirm} disabled={saving}>
+                  {saving ? '...' : 'Confirm'}
+                </button>
+                <button className="btn btn-sm" onClick={handleCancel} disabled={saving}>Cancel</button>
+              </div>
             </div>
-          </div>
-        ) : editing ? (
-          <div className="flex items-center gap-2 mt-1.5">
-            <input
-              className="text-xs font-mono rounded-lg px-2 py-1 w-40 focus:outline-none"
-              style={{ border: '2px solid #7A8C1E', background: '#F5EDD8', color: '#2A1F08' }}
-              value={idInput}
-              onChange={e => setIdInput(e.target.value)}
-              placeholder="Sheet ID"
-              autoFocus
-              onKeyDown={e => e.key === 'Enter' && handleSaveClick()}
-            />
-            <button onClick={handleSaveClick} disabled={!idInput}
-              className="text-xs font-bold px-2 py-1 rounded-lg disabled:opacity-40"
-              style={{ background: '#7A8C1E', color: '#fff' }}>
-              Save
-            </button>
-            <button onClick={() => { setEditing(false); setIdInput(sheet.sheet_id ?? '') }}
-              className="text-xs font-bold" style={{ color: '#6B5A3A' }}>Cancel</button>
-          </div>
+          ) : editing ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+              <input className="input" style={{ fontSize: 12, fontFamily: 'var(--num)', padding: '4px 8px', width: 160 }}
+                value={idInput}
+                onChange={e => setIdInput(e.target.value)}
+                placeholder="Sheet ID"
+                autoFocus
+                onKeyDown={e => e.key === 'Enter' && handleSaveClick()}
+              />
+              <button className="btn btn-sm btn-primary" onClick={handleSaveClick} disabled={!idInput}>Save</button>
+              <button className="btn btn-sm" onClick={() => { setEditing(false); setIdInput(sheet.sheet_id ?? '') }}>Cancel</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <span style={{ fontSize: 11, fontFamily: 'var(--num)', color: sheet.sheet_id ? 'var(--faint)' : 'var(--warn)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                {sheet.sheet_id ?? 'No sheet ID'}
+              </span>
+              {canEdit && (
+                <button className="btn-ghost" style={{ fontSize: 11, fontWeight: 600, padding: '1px 6px', borderRadius: 4, border: 'none', color: 'var(--accent)', cursor: 'pointer', background: 'none' }}
+                  onClick={() => setEditing(true)}>
+                  edit
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Stats */}
+        {sheet.row_count != null ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span className="stat-num" style={{ fontSize: 24 }}>{rows.toLocaleString()}</span>
+              <span className="cap-meta">/ {max.toLocaleString()} rows · {sheet.col_count} cols</span>
+            </div>
+            <div className="cap-bar">
+              <div className="cap-fill" style={{
+                width: `${pct}%`,
+                background: isWarning ? 'var(--bad)' : isAlert ? 'var(--warn)' : 'var(--accent)',
+              }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
+                Remaining: <span style={{ color: isWarning ? 'var(--bad)' : 'var(--good)' }}>{remaining.toLocaleString()}</span>
+              </span>
+              <span className="cap-pct">{pct.toFixed(1)}%</span>
+            </div>
+          </>
         ) : (
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs font-mono truncate max-w-[140px]" style={{ color: sheet.sheet_id ? '#6B5A3A' : '#C47A20' }}>
-              {sheet.sheet_id ?? 'No sheet ID'}
-            </span>
-            {canEdit && (
-              <button onClick={() => setEditing(true)}
-                className="text-xs font-bold underline" style={{ color: '#7A8C1E' }}>edit</button>
-            )}
-          </div>
+          <p style={{ fontSize: 12, color: 'var(--faint)', marginTop: 4 }}>No data — click Refresh</p>
         )}
       </div>
-
-      {/* Stats */}
-      {sheet.row_count != null ? (
-        <>
-          <div className="flex items-baseline gap-1">
-            <span className="font-extrabold" style={{ fontSize: '1.8rem', color: '#3A6010', lineHeight: 1 }}>
-              {rows.toLocaleString()}
-            </span>
-            <span className="text-xs font-semibold" style={{ color: '#6B5A3A' }}>
-              / {max.toLocaleString()} rows · {sheet.col_count} cols
-            </span>
-          </div>
-          <div className="bean-progress">
-            <div className="bean-progress-fill"
-              style={{ width: `${pct}%`, background: isWarning ? '#C0392B' : isAlert ? '#E67E22' : undefined }} />
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold" style={{ color: '#2A1F08' }}>
-              Remaining: <span style={{ color: isWarning ? '#C0392B' : '#3A6010' }}>{remaining.toLocaleString()}</span>
-            </span>
-            <span className="text-xs font-bold" style={{ color: '#6B5A3A' }}>{pct.toFixed(1)}% used</span>
-          </div>
-        </>
-      ) : (
-        <p className="text-xs font-semibold mt-2" style={{ color: '#6B5A3A' }}>No data — click Refresh</p>
-      )}
     </div>
   )
 }
@@ -189,7 +166,6 @@ export function SmartsheetCapacity({ sheets, onRefresh, isAdmin = false }: {
       body: JSON.stringify({ sheet_name: sheetName, sheet_id: sheetId }),
     })
     setSheets(prev => prev.map(s => s.sheet_name === sheetName ? { ...s, sheet_id: sheetId } : s))
-    // Auto-refresh capacity data for the new sheet
     handleRefresh()
   }
 
@@ -197,24 +173,21 @@ export function SmartsheetCapacity({ sheets, onRefresh, isAdmin = false }: {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <p className="bean-section-label">Smartsheet Capacity</p>
-
-        <div className="flex items-center gap-3">
+      <div className="card-head">
+        <span className="card-label">Smartsheet Capacity</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {lastUpdated && (
-            <span className="text-xs font-semibold" style={{ color: '#5C3D1E' }}>
+            <span className="sync">
               Last: {new Date(lastUpdated).toLocaleTimeString('en-US', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
-          <button onClick={handleRefresh} disabled={refreshing}
-            className="text-xs font-bold px-3 py-1.5 rounded-xl disabled:opacity-50 flex items-center gap-1.5 transition-all hover:opacity-80"
-            style={{ background: '#EFE3C8', border: '2px solid #7A8C1E', color: '#2A1F08' }}>
-            <span className={refreshing ? 'inline-block animate-spin' : ''}>↻</span>
+          <button className="btn btn-sm" onClick={handleRefresh} disabled={refreshing}>
+            <span className={refreshing ? 'spin' : ''}>↻</span>
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--gap)' }}>
         {sheets_.map(s => (
           <SheetCard key={s.sheet_name} sheet={s} onSaveId={handleSaveId} canEdit={isAdmin} />
         ))}

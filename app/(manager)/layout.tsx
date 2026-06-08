@@ -3,79 +3,95 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { signOut, useSession } from 'next-auth/react'
 
-interface NavItem { href: string; label: string; adminOnly?: boolean }
+function SIcon({ d, size = 17 }: { d: string | string[]; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {Array.isArray(d)
+        ? d.map((p, i) => <path key={i} d={p} />)
+        : <path d={d} />}
+    </svg>
+  )
+}
+
+const ICONS: Record<string, string | string[]> = {
+  grid:   'M4 4h7v7H4zM13 4h7v7h-7zM13 13h7v7h-7zM4 13h7v7H4z',
+  pulse:  'M3 12h4l2 6 4-14 2 8h6',
+  users:  ['M16 18v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2', 'M9 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6', 'M22 18v-2a4 4 0 0 0-3-3.9', 'M16 2.1A4 4 0 0 1 16 10'],
+  swap:   'M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3',
+  video:  'M23 7l-7 5 7 5V7zM1 5h15v14H1z',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+}
+
+interface NavItem { href: string; label: string; icon: keyof typeof ICONS; adminOnly?: boolean }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/dashboard',       label: 'Dashboard'  },
-  { href: '/operations',      label: 'Operations', adminOnly: true },
-  { href: '/team',            label: 'Team',       adminOnly: true },
-  { href: '/handover-puzzle', label: 'Handover'    },
-  { href: '/youtube',         label: 'Videos',     adminOnly: true },
-  { href: '/admin',           label: 'Admin',      adminOnly: true },
+  { href: '/dashboard',       label: 'Dashboard',  icon: 'grid' },
+  { href: '/operations',      label: 'Operations', icon: 'pulse',  adminOnly: true },
+  { href: '/team',            label: 'Team',        icon: 'users',  adminOnly: true },
+  { href: '/handover-puzzle', label: 'Handover',   icon: 'swap' },
+  { href: '/youtube',         label: 'Videos',     icon: 'video',  adminOnly: true },
+  { href: '/admin',           label: 'Admin',      icon: 'shield', adminOnly: true },
 ]
 
 export default function ManagerLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { data: session } = useSession()
-  const role = session?.user?.role
+  const role     = session?.user?.role
   const userName = session?.user?.name || session?.user?.email?.split('@')[0] || ''
+  const initials = userName.split(' ').map((s: string) => s[0] ?? '').join('').slice(0, 2).toUpperCase() || 'U'
 
   const visibleItems = NAV_ITEMS.filter(item => !item.adminOnly || role === 'admin')
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'row', height: '100vh', overflow: 'hidden' }}>
-      <aside style={{ width: 288, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#BF9A6E', borderRight: '3px solid #5A6A10' }}>
-
-        {/* Title */}
-        <div className="p-5 pb-4" style={{ borderBottom: '2.5px solid #7A8C1E' }}>
-          <p className="font-extrabold text-lg leading-tight" style={{ color: '#2A1F08' }}>Signal</p>
-          <p className="font-bold text-xs" style={{ color: '#5A6A10' }}>Smartsheet Management</p>
+    <div className="app">
+      <aside className="sb">
+        {/* Brand */}
+        <div className="sb-brand">
+          <div className="sb-mark"><span /></div>
+          <div>
+            <p className="sb-name">Signal</p>
+            <p className="sb-tag">Smartsheet Ops</p>
+          </div>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 p-3 space-y-1.5">
+        <div className="sb-section">Workspace</div>
+        <nav className="sb-nav">
           {visibleItems.map(item => {
             const active = pathname === item.href || pathname.startsWith(item.href + '/')
             return (
-              <Link key={item.href} href={item.href}>
-                <div className="flex items-center px-4 py-2.5 rounded-xl font-bold text-sm transition-all"
-                  style={active
-                    ? { background: '#7A8C1E', color: '#fff', border: '2px solid #5A6A10' }
-                    : { color: '#2A1F08', opacity: 0.85 }}>
-                  {item.label}
-                </div>
+              <Link key={item.href} href={item.href}
+                className={'sb-item' + (active ? ' active' : '')}>
+                <span className="sb-ico">
+                  <SIcon d={ICONS[item.icon]} size={17} />
+                </span>
+                <span>{item.label}</span>
               </Link>
             )
           })}
         </nav>
 
-        {/* User info + Sign out */}
-        <div className="p-4" style={{ borderTop: '2px solid #7A8C1E' }}>
-          {userName && (
-            <p className="text-xs font-semibold mb-2 truncate" style={{ color: '#2A1F08', opacity: 0.7 }}>
-              {userName}
-              {role && (
-                <span style={{
-                  marginLeft: 6, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
-                  background: role === 'admin' ? '#FEF3C7' : '#E0E7FF',
-                  color: role === 'admin' ? '#92400E' : '#3730A3',
-                }}>
-                  {role}
-                </span>
-              )}
-            </p>
-          )}
-          <button onClick={() => signOut({ callbackUrl: '/login' })}
-            className="text-xs font-bold opacity-50 hover:opacity-100 transition-opacity"
-            style={{ color: '#2A1F08' }}>
-            Sign out →
+        {/* Footer */}
+        <div className="sb-foot">
+          <div className="sb-user">
+            <div className="sb-avatar">{initials}</div>
+            <div>
+              <p className="sb-user-name">{userName}</p>
+              <p className="sb-user-role">{role ?? 'user'} · signal</p>
+            </div>
+          </div>
+          <button className="btn btn-sm btn-ghost"
+            style={{ width: '100%', justifyContent: 'center' }}
+            onClick={() => signOut({ callbackUrl: '/login' })}>
+            Sign out
           </button>
         </div>
       </aside>
 
-      <main style={{ flex: 1, overflow: 'auto', padding: 24 }}>
+      <div className="content">
         {children}
-      </main>
+      </div>
     </div>
   )
 }

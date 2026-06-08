@@ -18,7 +18,6 @@ export default function AdminPage() {
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
 
-  // Add user form
   const [newEmail, setNewEmail] = useState('')
   const [newName, setNewName] = useState('')
   const [newRole, setNewRole] = useState<'admin' | 'evaluator'>('evaluator')
@@ -115,129 +114,102 @@ export default function AdminPage() {
     }
   }
 
-  const inputStyle: React.CSSProperties = {
-    border: '1px solid #D4C4A0', borderRadius: 6,
-    padding: '6px 8px', fontSize: 12, background: '#FAF5EC', color: '#2A1F08',
-  }
-  const thStyle: React.CSSProperties = {
-    padding: '6px 10px', textAlign: 'left', fontSize: 11, fontWeight: 700,
-    color: '#6B5A3A', background: '#D4C4A0', borderBottom: '2px solid #C8B896',
-  }
-  const tdStyle: React.CSSProperties = {
-    padding: '6px 10px', fontSize: 12, color: '#2A1F08', borderBottom: '1px solid #EFE3C8',
-  }
-
   return (
-    <div className="space-y-4 w-full">
-      <h1 className="font-extrabold text-2xl" style={{ color: '#2A1F08' }}>Admin</h1>
+    <div className="page">
+      <div className="page-head">
+        <h1 className="h-title">Admin</h1>
+      </div>
 
       {/* Add User + Sync */}
-      <div className="bean-card p-4">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <p className="bean-section-label" style={{ marginBottom: 0 }}>Add User</p>
-          <button onClick={handleSync} disabled={syncing}
-            style={{
-              background: '#7A8C1E', color: '#fff', border: 'none', borderRadius: 7,
-              padding: '5px 12px', fontSize: 11, fontWeight: 700,
-              cursor: syncing ? 'not-allowed' : 'pointer', opacity: syncing ? 0.6 : 1,
-            }}>
+      <div className="card">
+        <div className="card-head">
+          <span className="card-label">Add User</span>
+          <button className="btn btn-sm btn-primary" onClick={handleSync} disabled={syncing}>
+            <span className={syncing ? 'spin' : ''}>↻</span>
             {syncing ? 'Syncing...' : 'Sync Evaluators'}
           </button>
         </div>
 
         {syncResult && (
-          <p style={{ fontSize: 11, color: '#5A6A10', marginBottom: 8, fontWeight: 600 }}>{syncResult}</p>
+          <p className="msg-ok" style={{ marginBottom: 10 }}>{syncResult}</p>
         )}
 
-        <form onSubmit={handleAdd} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 140 }}>
-            <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6B5A3A', marginBottom: 2 }}>Email</label>
-            <input
+        <form onSubmit={handleAdd} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div className="field" style={{ flex: 1, minWidth: 140 }}>
+            <span className="label">Email</span>
+            <input className="input"
               value={newEmail} onChange={e => setNewEmail(e.target.value)}
               placeholder="user@athena.studio"
-              required style={{ ...inputStyle, width: '100%' }}
+              required
             />
           </div>
-          <div style={{ minWidth: 100 }}>
-            <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6B5A3A', marginBottom: 2 }}>Name</label>
-            <input
+          <div className="field" style={{ minWidth: 100 }}>
+            <span className="label">Name</span>
+            <input className="input"
               value={newName} onChange={e => setNewName(e.target.value)}
               placeholder="Display name"
-              style={{ ...inputStyle, width: '100%' }}
             />
           </div>
-          <div style={{ minWidth: 90 }}>
-            <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6B5A3A', marginBottom: 2 }}>Role</label>
+          <div className="field" style={{ minWidth: 100 }}>
+            <span className="label">Role</span>
             <StyledSelect
               value={newRole}
               onChange={v => setNewRole(v as 'admin' | 'evaluator')}
               options={[{ value: 'evaluator', label: 'Evaluator' }, { value: 'admin', label: 'Admin' }]}
             />
           </div>
-          <button type="submit" disabled={adding || !newEmail}
-            style={{
-              background: '#5A3E1B', color: '#fff', border: 'none', borderRadius: 7,
-              padding: '6px 14px', fontSize: 12, fontWeight: 700,
-              cursor: (adding || !newEmail) ? 'not-allowed' : 'pointer',
-              opacity: (adding || !newEmail) ? 0.55 : 1,
-            }}>
+          <button type="submit" className="btn btn-primary" disabled={adding || !newEmail}>
             {adding ? '...' : 'Add'}
           </button>
         </form>
 
         {message && (
-          <p style={{ fontSize: 11, marginTop: 8, color: message.type === 'success' ? '#3D6B00' : '#b91c1c', fontWeight: 600 }}>
+          <p className={message.type === 'success' ? 'msg-ok' : 'msg-err'} style={{ marginTop: 8 }}>
             {message.text}
           </p>
         )}
       </div>
 
       {/* User List */}
-      <div className="bean-card p-4">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <p className="bean-section-label" style={{ marginBottom: 0 }}>Users ({users.length})</p>
-          <button onClick={fetchUsers} disabled={loading}
-            style={{
-              background: '#D4C4A0', color: '#5A3E1B', border: 'none', borderRadius: 7,
-              padding: '3px 10px', fontSize: 11, fontWeight: 700,
-              cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1,
-            }}>
+      <div className="card">
+        <div className="card-head">
+          <span className="card-label">Users ({users.length})</span>
+          <button className="btn btn-sm" onClick={fetchUsers} disabled={loading}>
+            <span className={loading ? 'spin' : ''}>↻</span>
             {loading ? '...' : 'Refresh'}
           </button>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div className="tbl-wrap">
+          <table className="tbl">
             <thead>
               <tr>
-                <th style={thStyle}>Email</th>
-                <th style={thStyle}>Name</th>
-                <th style={thStyle}>Role</th>
-                <th style={thStyle}>Created</th>
-                <th style={thStyle}></th>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {users.length === 0 && !loading && (
-                <tr><td colSpan={5} style={{ ...tdStyle, textAlign: 'center', color: '#9A8A6A', padding: 16 }}>No users</td></tr>
+                <tr><td colSpan={5} className="empty">No users</td></tr>
               )}
               {loading && (
-                <tr><td colSpan={5} style={{ ...tdStyle, textAlign: 'center', color: '#9A8A6A', padding: 16 }}>Loading...</td></tr>
+                <tr><td colSpan={5} className="empty">Loading...</td></tr>
               )}
               {!loading && users.map(u => {
                 const isSuper = u.email === SUPER_ADMIN
                 return (
                   <tr key={u.id}>
-                    <td style={tdStyle}>
-                      <span style={{ fontWeight: 600 }}>{u.email}</span>
+                    <td>
+                      <span className="cell-name">{u.email}</span>
                       {isSuper && (
-                        <span style={{ fontSize: 9, fontWeight: 700, marginLeft: 6, padding: '1px 4px', borderRadius: 4, background: '#FEF3C7', color: '#92400E' }}>
-                          SUPER
-                        </span>
+                        <span className="badge running" style={{ fontSize: 9, padding: '1px 5px', marginLeft: 6 }}>SUPER</span>
                       )}
                     </td>
-                    <td style={tdStyle}>{u.name}</td>
-                    <td style={tdStyle}>
+                    <td>{u.name}</td>
+                    <td>
                       <StyledSelect
                         value={u.role}
                         disabled={isSuper}
@@ -245,16 +217,13 @@ export default function AdminPage() {
                         options={[{ value: 'admin', label: 'admin' }, { value: 'evaluator', label: 'evaluator' }]}
                       />
                     </td>
-                    <td style={{ ...tdStyle, fontSize: 11, color: '#9A8A6A' }}>
+                    <td style={{ color: 'var(--faint)', fontSize: 12 }}>
                       {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
                     </td>
-                    <td style={tdStyle}>
+                    <td>
                       {!isSuper && (
-                        <button onClick={() => handleDelete(u.id, u.email)}
-                          style={{
-                            background: 'none', border: 'none', color: '#b91c1c',
-                            fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                          }}>
+                        <button className="btn btn-sm btn-danger"
+                          onClick={() => handleDelete(u.id, u.email)}>
                           Remove
                         </button>
                       )}

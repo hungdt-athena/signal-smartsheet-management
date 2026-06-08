@@ -66,9 +66,8 @@ function formatNote(name: string, raw: string): string {
 function StatusDot({ status }: { status: string }) {
   const running = status === 'running'
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full"
-      style={{ background: running ? '#FEF3C7' : '#F3F4F6', color: running ? '#92400E' : '#9CA3AF' }}>
-      <span className={`w-1.5 h-1.5 rounded-full inline-block ${running ? 'bg-amber-500 animate-pulse' : 'bg-gray-300'}`} />
+    <span className={`status-dot${running ? ' running' : ''}`}>
+      <span className="sd" />
       {running ? 'running' : 'idle'}
     </span>
   )
@@ -77,7 +76,7 @@ function StatusDot({ status }: { status: string }) {
 function LogBadge({ status }: { status: string }) {
   const ok = status.toLowerCase() === 'success'
   return (
-    <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+    <span className={`badge ${ok ? 'success' : 'error'}`}>
       {ok ? '✓' : '✗'}
     </span>
   )
@@ -108,20 +107,18 @@ function HistoryPanel({ allRows, realtimeKeys, loading, onRefresh }: {
   }, [entries])
 
   return (
-    <div className="bean-card p-3 flex flex-col h-full">
-      <div className="flex items-center justify-between mb-2">
-        <span className="bean-section-label" style={{ marginBottom: 0 }}>History</span>
-        <button onClick={onRefresh} disabled={loading}
-          className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-lg"
-          style={{ background: '#D4C4A0', color: '#5A3E1B', border: 'none', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1 }}>
-          <span className={loading ? 'inline-block animate-spin' : ''}>↻</span>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="card-head">
+        <span className="card-label">History</span>
+        <button className="btn btn-sm" onClick={onRefresh} disabled={loading}>
+          <span className={loading ? 'spin' : ''}>↻</span>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
       </div>
 
-      <div style={{ overflowY: 'auto', maxHeight: 220 }}>
+      <div style={{ overflowY: 'auto', maxHeight: 240 }}>
         {entries.length === 0 ? (
-          <p className="text-xs text-center py-6" style={{ color: '#9CA3AF' }}>No history yet</p>
+          <p className="empty">No history yet</p>
         ) : (
           byDate.map(([date, rows]) => {
             const [, dm, dd] = date.split('-')
@@ -130,30 +127,37 @@ function HistoryPanel({ allRows, realtimeKeys, loading, onRefresh }: {
             const failCount = rows.length - successCount
             return (
               <div key={date}>
-                <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-bold"
-                  style={{ background: '#F0E8D6', color: '#8B6A3E', borderBottom: '1px solid #E8DCC8', position: 'sticky', top: 0 }}>
-                  {dd}/{dm}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '5px 2px',
+                  background: isToday ? 'var(--accent-weak)' : 'var(--surface-2)',
+                  borderRadius: 6, marginBottom: 2,
+                  borderBottom: '1px solid var(--border)',
+                  position: 'sticky', top: 0,
+                }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: isToday ? 'var(--accent-strong)' : 'var(--muted)', marginLeft: 2 }}>
+                    {dd}/{dm}
+                  </span>
                   {isToday && (
-                    <span className="px-1 py-0.5 rounded font-bold text-white"
-                      style={{ background: '#7A8C1E', fontSize: '0.55rem' }}>TODAY</span>
+                    <span className="badge running" style={{ fontSize: 9, padding: '1px 5px' }}>TODAY</span>
                   )}
-                  <span className="ml-auto font-normal flex items-center gap-2">
-                    {successCount > 0 && <span className="text-green-600">✓ {successCount}</span>}
-                    {failCount    > 0 && <span className="text-red-500">✗ {failCount}</span>}
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--faint)', display: 'flex', gap: 8 }}>
+                    {successCount > 0 && <span style={{ color: 'var(--good)' }}>✓ {successCount}</span>}
+                    {failCount    > 0 && <span style={{ color: 'var(--bad)' }}>✗ {failCount}</span>}
                   </span>
                 </div>
                 {rows.map((r, i) => {
                   const note = formatNote(r.name, r.note)
                   return (
-                    <div key={i} className="flex items-center gap-2 px-2 py-1.5 text-xs"
-                      style={{ borderBottom: '1px solid #F5EDD8' }}>
-                      <span className="font-mono text-gray-400 flex-shrink-0" style={{ fontSize: '0.6rem', minWidth: 30 }}>
-                        {r.date.slice(11, 16)}
-                      </span>
-                      <span className="truncate font-medium" style={{ color: '#2A1F08', flex: 1 }}>{r.name}</span>
+                    <div key={i} style={{
+                      display: 'grid', gridTemplateColumns: '40px 1fr auto auto',
+                      alignItems: 'center', gap: 10, padding: '7px 2px',
+                      borderBottom: '1px solid var(--border)',
+                    }}>
+                      <span className="ht-time">{r.date.slice(11, 16)}</span>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
                       <LogBadge status={r.status} />
                       {note && (
-                        <span className="flex-shrink-0 text-right" style={{ color: '#6B5A3A', fontSize: '0.65rem' }}>{note}</span>
+                        <span style={{ fontSize: 11, color: 'var(--faint)', textAlign: 'right' }}>{note}</span>
                       )}
                     </div>
                   )
@@ -187,47 +191,36 @@ function DielinkCard({ statusMap, realtimeOk, triggering, triggered, activeKey, 
   const anyRunning = DIELINK_TABS.some(t => !disconnected && statusMap[t.realtime] === 'running')
 
   return (
-    <div className="bean-card p-4 flex flex-col gap-0 h-full">
-      <div className="flex items-center justify-between mb-3">
-        <p className="bean-section-label" style={{ marginBottom: 0 }}>Die-Link</p>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
+      <div className="card-head" style={{ marginBottom: 0 }}>
+        <span className="card-label">Die-Link</span>
         {disconnected ? (
-          <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-            style={{ background: '#FEE2E2', color: '#B91C1C' }}>⚡ disconnected</span>
+          <span className="badge error">⚡ disconnected</span>
         ) : anyRunning ? (
-          <span className="text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1"
-            style={{ background: '#FEF3C7', color: '#92400E' }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse inline-block" />
-            running
-          </span>
+          <span className="badge running"><span className="bdot" /> running</span>
         ) : null}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1.5 mb-4">
+      {/* Segmented tabs */}
+      <div className="seg">
         {DIELINK_TABS.map((t, i) => (
-          <button key={t.label} onClick={() => setActiveTab(i)}
-            style={{
-              flex: 1, padding: '5px 0', borderRadius: 7, fontSize: 12, fontWeight: 700,
-              background: activeTab === i ? '#5A3E1B' : '#EFE3C8',
-              color: activeTab === i ? '#fff' : '#5A3E1B',
-              border: 'none', cursor: 'pointer',
-              boxShadow: activeTab === i ? '0 1px 4px rgba(0,0,0,0.15)' : 'none',
-            }}>
+          <button key={t.label} className={`seg-btn${activeTab === i ? ' active' : ''}`}
+            onClick={() => setActiveTab(i)}>
             {t.label}
           </button>
         ))}
       </div>
 
       {/* Status row */}
-      <div className="flex items-center gap-2 mb-3">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {disconnected
-          ? <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#F3F4F6', color: '#9CA3AF' }}>–</span>
+          ? <span className="badge neutral">–</span>
           : <StatusDot status={status} />}
-        <span className="text-xs font-semibold" style={{ color: '#2A1F08' }}>Delete {tab.label}</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Delete {tab.label}</span>
       </div>
 
       {/* Sheet type buttons */}
-      <div className="flex gap-2">
+      <div style={{ display: 'flex', gap: 8 }}>
         {SHEET_TYPE_OPTIONS.map(({ label, value }) => {
           const key = `${tab.workflow}__${value}`
           const isTriggering = triggering === key
@@ -237,19 +230,12 @@ function DielinkCard({ statusMap, realtimeOk, triggering, triggered, activeKey, 
           const isLocked     = isRunning || isLoading
           return (
             <button key={value}
+              className={`trig${isLoading ? ' running' : wasTriggered ? ' done' : ''}`}
+              style={{ flex: 1, opacity: isLocked && !isLoading ? 0.5 : 1 }}
               onClick={() => onTrigger(tab.workflow, value)}
-              disabled={isLocked}
-              style={{
-                flex: 1, padding: '7px 4px', borderRadius: 8, fontSize: 11, fontWeight: 700,
-                background: isLoading ? '#F59E0B' : wasTriggered ? '#7A8C1E' : isRunning ? '#EFE3C8' : '#D4C4A0',
-                color: isLoading || wasTriggered ? '#fff' : '#2A1F08',
-                border: '1.5px solid ' + (isLoading ? '#D97706' : '#C8B896'),
-                opacity: isLocked && !isLoading ? 0.5 : 1,
-                cursor: isLocked ? 'not-allowed' : 'pointer',
-                transition: 'all 0.15s',
-              }}>
+              disabled={isLocked}>
               {isLoading
-                ? <span className="inline-block animate-spin">↻</span>
+                ? <span className="spin">↻</span>
                 : wasTriggered ? `✓ ${label}`
                 : label}
             </button>
@@ -257,7 +243,7 @@ function DielinkCard({ statusMap, realtimeOk, triggering, triggered, activeKey, 
         })}
       </div>
 
-      <p className="text-xs mt-3 text-right" style={{ color: '#9CA3AF' }}>
+      <p style={{ fontSize: 11, textAlign: 'right', color: 'var(--faint)', marginTop: 'auto' }}>
         {nowStr ? `${nowStr} · 5s` : '…'}
       </p>
     </div>
@@ -278,22 +264,17 @@ function StandardGroupCard({ group, statusMap, realtimeOk, triggering, triggered
 }) {
   const groupRunning = group.workflows.some(w => statusMap[w.realtime] === 'running')
   return (
-    <div className="bean-card p-4 flex flex-col gap-0 h-full">
-      <div className="flex items-center justify-between mb-3">
-        <p className="bean-section-label" style={{ marginBottom: 0 }}>{group.label}</p>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="card-head" style={{ marginBottom: 0 }}>
+        <span className="card-label">{group.label}</span>
         {realtimeOk === false ? (
-          <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-            style={{ background: '#FEE2E2', color: '#B91C1C' }}>⚡ disconnected</span>
+          <span className="badge error">⚡ disconnected</span>
         ) : groupRunning ? (
-          <span className="text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1"
-            style={{ background: '#FEF3C7', color: '#92400E' }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse inline-block" />
-            running
-          </span>
+          <span className="badge running"><span className="bdot" /> running</span>
         ) : null}
       </div>
 
-      <div className="divide-y" style={{ borderColor: '#E8DCC8' }}>
+      <div style={{ flex: 1 }}>
         {group.workflows.map(op => {
           const disconnected  = realtimeOk === false
           const status        = disconnected ? 'idle' : (statusMap[op.realtime] ?? 'idle')
@@ -302,27 +283,20 @@ function StandardGroupCard({ group, statusMap, realtimeOk, triggering, triggered
           const wasTriggered  = triggered === op.workflow
           const isLocked      = isRunning || isTriggering
           return (
-            <div key={op.workflow}
-              className="flex items-center justify-between py-2.5 gap-2"
-              style={{ background: isRunning ? '#FFFBEB' : 'transparent' }}>
-              <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div key={op.workflow} className="op-row"
+              style={{ background: isRunning ? 'var(--warn-weak)' : 'transparent' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
                 {disconnected
-                  ? <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#F3F4F6', color: '#9CA3AF' }}>–</span>
+                  ? <span className="badge neutral">–</span>
                   : <StatusDot status={status} />}
-                <span className="text-xs font-semibold truncate" style={{ color: '#2A1F08' }}>{op.label}</span>
+                <span className="op-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.label}</span>
               </div>
               <button
+                className={`trig${wasTriggered ? ' done' : isRunning ? ' running' : ''}`}
                 onClick={() => onTrigger(op.workflow)}
                 disabled={isLocked}
-                className="flex-shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg transition-all"
-                style={{
-                  background: wasTriggered ? '#7A8C1E' : isRunning ? '#F59E0B' : '#D4C4A0',
-                  color: wasTriggered || isRunning ? '#fff' : '#2A1F08',
-                  border: '1.5px solid ' + (isRunning ? '#D97706' : '#5A6A10'),
-                  opacity: isLocked ? 0.6 : 1,
-                  cursor: isLocked ? 'not-allowed' : 'pointer',
-                }}>
-                {isTriggering ? <span className="inline-block animate-spin">↻</span>
+                style={{ opacity: isLocked && !isTriggering ? 0.6 : 1 }}>
+                {isTriggering ? <span className="spin">↻</span>
                  : wasTriggered ? '✓'
                  : isRunning   ? '●'
                  : '▶'}
@@ -331,27 +305,18 @@ function StandardGroupCard({ group, statusMap, realtimeOk, triggering, triggered
           )
         })}
         {onReassign && (
-          <div className="flex items-center justify-between py-2.5 gap-2">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#EDE9FE', color: '#6D28D9', fontWeight: 700 }}>⇄</span>
-              <span className="text-xs font-semibold truncate" style={{ color: '#2A1F08' }}>Re-assign</span>
+          <div className="op-row">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+              <span className="badge neutral" style={{ background: 'var(--accent-weak)', color: 'var(--accent-strong)' }}>⇄</span>
+              <span className="op-name">Re-assign</span>
             </div>
-            <button
-              onClick={onReassign}
-              className="flex-shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg transition-all"
-              style={{
-                background: '#7C3AED',
-                color: '#fff',
-                border: '1.5px solid #6D28D9',
-                cursor: 'pointer',
-              }}>
-              ▶
-            </button>
+            <button className="trig" style={{ background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }}
+              onClick={onReassign}>▶</button>
           </div>
         )}
       </div>
 
-      <p className="text-xs mt-2 text-right" style={{ color: '#9CA3AF' }}>
+      <p style={{ fontSize: 11, textAlign: 'right', color: 'var(--faint)', marginTop: 8 }}>
         {nowStr ? `${nowStr} · 5s` : '…'}
       </p>
     </div>
@@ -374,7 +339,6 @@ function ReassignModal({ open, onClose, evaluators, loadingEvals }: {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // Reset checked when evaluators load or selected evaluator changes
   useEffect(() => {
     const init: Record<string, boolean> = {}
     for (const ev of evaluators) {
@@ -385,7 +349,6 @@ function ReassignModal({ open, onClose, evaluators, loadingEvals }: {
     setChecked(init)
   }, [evaluators, selectedEvaluator])
 
-  // Reset form when modal opens
   useEffect(() => {
     if (open) {
       setSelectedEvaluator('')
@@ -435,118 +398,85 @@ function ReassignModal({ open, onClose, evaluators, loadingEvals }: {
 
   if (!open) return null
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%', border: '1px solid #D4C4A0', borderRadius: 6,
-    padding: '6px 8px', fontSize: 12, background: '#FAF5EC', color: '#2A1F08',
-  }
-  const labelStyle: React.CSSProperties = {
-    display: 'block', fontSize: 11, fontWeight: 700, color: '#6B5A3A', marginBottom: 4,
-  }
-
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      {/* Backdrop */}
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)' }} />
-      {/* Modal */}
-      <div style={{ position: 'relative', background: '#FAF5EC', borderRadius: 12, padding: 24, width: 520, maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', border: '2px solid #D4C4A0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 800, color: '#2A1F08', margin: 0 }}>Re-assign Games</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#9CA3AF', fontWeight: 700 }}>×</button>
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="modal-title">Re-assign Games</span>
+          <button className="x-btn" onClick={onClose} type="button">✕</button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* Row 1: Evaluator + Sheet Type */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Evaluator (re-assign from)</label>
-              <StyledSelect
-                value={selectedEvaluator}
-                onChange={setSelectedEvaluator}
-                options={evaluators.map(ev => ({ value: ev.name, label: ev.name }))}
-                placeholder={loadingEvals ? 'Loading...' : '-- Select --'}
-                disabled={loadingEvals}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Sheet Type</label>
-              <StyledSelect
-                value={sheetType}
-                onChange={v => setSheetType(v as SheetType)}
-                options={SHEET_TYPE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
-              />
-            </div>
-          </div>
-
-          {/* Row 2: Date range */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Start Date</label>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                required style={inputStyle} />
-            </div>
-            <div>
-              <label style={labelStyle}>End Date</label>
-              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-                required style={inputStyle} />
-            </div>
-          </div>
-
-          {/* Evaluator checkboxes */}
-          <div>
-            <label style={{ ...labelStyle, marginBottom: 8 }}>
-              Assign to ({selectedCount} selected)
-            </label>
-            {!selectedEvaluator ? (
-              <p style={{ fontSize: 11, color: '#9CA3AF', fontStyle: 'italic' }}>Select an evaluator above first</p>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, maxHeight: 200, overflowY: 'auto', padding: 8, background: '#F5EDD8', borderRadius: 8, border: '1px solid #E8DCC8' }}>
-                {filteredEvaluators.map(ev => (
-                  <label key={ev.row_number} style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-                    background: checked[ev.name] ? '#E8F5C8' : 'transparent',
-                    transition: 'background 0.15s',
-                  }}>
-                    <input type="checkbox" checked={!!checked[ev.name]}
-                      onChange={e => setChecked(prev => ({ ...prev, [ev.name]: e.target.checked }))}
-                      style={{ accentColor: '#5A3E1B' }} />
-                    <span style={{ fontWeight: 600, color: '#2A1F08' }}>{ev.name}</span>
-                    <span style={{
-                      fontSize: 9, fontWeight: 700, padding: '1px 4px', borderRadius: 4, marginLeft: 'auto',
-                      background: ev.today_available === 'Yes' ? '#D1FAE5' : '#FEE2E2',
-                      color: ev.today_available === 'Yes' ? '#065F46' : '#991B1B',
-                    }}>
-                      {ev.today_available === 'Yes' ? 'available' : 'unavailable'}
-                    </span>
-                    {ev.game_platform && ev.game_platform !== 'all' && (
-                      <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 4px', borderRadius: 4, background: '#E0E7FF', color: '#3730A3' }}>
-                        {ev.game_platform}
-                      </span>
-                    )}
-                  </label>
-                ))}
+        <form onSubmit={handleSubmit}>
+          <div className="modal-body">
+            {/* Row 1: Evaluator + Sheet Type */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="field">
+                <span className="label">Evaluator (re-assign from)</span>
+                <StyledSelect
+                  value={selectedEvaluator}
+                  onChange={setSelectedEvaluator}
+                  options={evaluators.map(ev => ({ value: ev.name, label: ev.name }))}
+                  placeholder={loadingEvals ? 'Loading...' : '-- Select --'}
+                  disabled={loadingEvals}
+                />
               </div>
+              <div className="field">
+                <span className="label">Sheet Type</span>
+                <StyledSelect
+                  value={sheetType}
+                  onChange={v => setSheetType(v as SheetType)}
+                  options={SHEET_TYPE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+                />
+              </div>
+            </div>
+
+            {/* Row 2: Date range */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="field">
+                <span className="label">Start Date</span>
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                  required className="input" />
+              </div>
+              <div className="field">
+                <span className="label">End Date</span>
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                  required className="input" />
+              </div>
+            </div>
+
+            {/* Evaluator checkboxes */}
+            <div className="field">
+              <span className="label">Assign to ({selectedCount} selected)</span>
+              {!selectedEvaluator ? (
+                <p style={{ fontSize: 12, color: 'var(--faint)', fontStyle: 'italic' }}>Select an evaluator above first</p>
+              ) : (
+                <div className="check-grid">
+                  {filteredEvaluators.map(ev => (
+                    <label key={ev.row_number} className={`check-item${checked[ev.name] ? ' on' : ''}`}>
+                      <input type="checkbox" checked={!!checked[ev.name]}
+                        onChange={e => setChecked(prev => ({ ...prev, [ev.name]: e.target.checked }))} />
+                      <span style={{ fontWeight: 600, flex: 1 }}>{ev.name}</span>
+                      <span className={`pill ${ev.today_available === 'Yes' ? 'on' : 'off'}`} style={{ fontSize: 10 }}>
+                        {ev.today_available === 'Yes' ? 'avail' : 'away'}
+                      </span>
+                      {ev.game_platform && ev.game_platform !== 'all' && (
+                        <span className="pill tag" style={{ fontSize: 10 }}>{ev.game_platform}</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {message && (
+              <p className={message.type === 'success' ? 'msg-ok' : 'msg-err'}>{message.text}</p>
             )}
           </div>
 
-          {message && (
-            <p style={{ fontSize: 12, color: message.type === 'success' ? '#3D6B00' : '#b91c1c', fontWeight: 600 }}>
-              {message.text}
-            </p>
-          )}
-
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button type="button" onClick={onClose}
-              style={{ background: '#E8DCC8', color: '#5A3E1B', border: 'none', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-              Cancel
-            </button>
-            <button type="submit"
-              disabled={submitting || !selectedEvaluator || !startDate || !endDate || selectedCount === 0}
-              style={{
-                background: '#5A3E1B', color: '#fff', border: 'none', borderRadius: 7,
-                padding: '6px 14px', fontSize: 12, fontWeight: 700,
-                cursor: (submitting || !selectedEvaluator || !startDate || !endDate || selectedCount === 0) ? 'not-allowed' : 'pointer',
-                opacity: (submitting || !selectedEvaluator || !startDate || !endDate || selectedCount === 0) ? 0.55 : 1,
-              }}>
+          <div className="modal-foot">
+            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary"
+              disabled={submitting || !selectedEvaluator || !startDate || !endDate || selectedCount === 0}>
               {submitting ? 'Submitting...' : 'Re-assign'}
             </button>
           </div>
@@ -639,7 +569,6 @@ export default function OperationsPage() {
     Object.fromEntries(realtimeRows.map(r => [r.workflow, r.status])),
   [realtimeRows])
 
-  // Clear activeKey once the workflow's realtime status transitions from running → idle
   useEffect(() => {
     if (!activeKey) return
     const [wf] = activeKey.split('__')
@@ -655,11 +584,13 @@ export default function OperationsPage() {
     : null
 
   return (
-    <div className="space-y-4">
-      <h1 className="font-extrabold text-2xl" style={{ color: '#2A1F08' }}>Operations</h1>
+    <div className="page">
+      <div className="page-head">
+        <h1 className="h-title">Operations</h1>
+      </div>
 
       {/* Die-Link row */}
-      <div className="grid grid-cols-1 md:grid-cols-[2fr_3fr] gap-4 items-stretch">
+      <div className="grid-ops">
         <DielinkCard
           statusMap={statusMap}
           realtimeOk={realtimeOk}
@@ -679,7 +610,7 @@ export default function OperationsPage() {
 
       {/* Smartsheet + Videos rows */}
       {STANDARD_GROUPS.map(group => (
-        <div key={group.label} className="grid grid-cols-1 md:grid-cols-[2fr_3fr] gap-4 items-stretch">
+        <div key={group.label} className="grid-ops">
           <StandardGroupCard
             group={group}
             statusMap={statusMap}

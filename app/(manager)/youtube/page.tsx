@@ -15,22 +15,19 @@ interface YtbRow {
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
-const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
-  DONE:       { bg: '#E8F5C8', color: '#3A6010', label: 'Uploaded' },
-  FAILED:     { bg: '#FEE2E2', color: '#b91c1c', label: 'Failed to Upload' },
-  PROCESSING: { bg: '#FEF3C7', color: '#92400E', label: 'Processing' },
-  IN_BATCH:   { bg: '#FFF9C4', color: '#A16207', label: 'Waiting for processing' },
-  PENDING:    { bg: '#F3F4F6', color: '#6B7280', label: 'Pending' },
+const STATUS_STYLES: Record<string, { cls: string; label: string }> = {
+  DONE:       { cls: 'success', label: 'Uploaded' },
+  FAILED:     { cls: 'error',   label: 'Failed to Upload' },
+  PROCESSING: { cls: 'running', label: 'Processing' },
+  IN_BATCH:   { cls: 'running', label: 'Waiting for processing' },
+  PENDING:    { cls: 'idle',    label: 'Pending' },
 }
 
 function StatusBadge({ status }: { status: string }) {
   const key = status?.toUpperCase() as keyof typeof STATUS_STYLES
-  const s = STATUS_STYLES[key] ?? { bg: '#F5EDD8', color: '#6B5A3A', label: status || '—' }
-  return (
-    <span style={{ background: s.bg, color: s.color, borderRadius: 6, padding: '2px 8px', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>
-      {s.label}
-    </span>
-  )
+  const s = STATUS_STYLES[key]
+  if (s) return <span className={`badge ${s.cls}`}>{s.label}</span>
+  return <span className="badge neutral">{status || '—'}</span>
 }
 
 // ── Month names ───────────────────────────────────────────────────────────────
@@ -64,9 +61,7 @@ const EMPTY_FILTERS: Filters = { year: '', month: '', evaluator: '', duration: '
 
 function normalizeEvaluator(name: string): string {
   const match = name.match(/^(.*?)(\d+)$/)
-  if (match) {
-    return match[1].toLowerCase() + match[2]
-  }
+  if (match) return match[1].toLowerCase() + match[2]
   return name.toLowerCase()
 }
 
@@ -94,9 +89,7 @@ function getFilterOptions(rows: YtbRow[]) {
       } else {
         const hasDigits = /\d+$/.test(row.pic)
         const existingHasDigits = /\d+$/.test(existing)
-        if (hasDigits && !existingHasDigits) {
-          evaluatorMap.set(key, row.pic)
-        }
+        if (hasDigits && !existingHasDigits) evaluatorMap.set(key, row.pic)
       }
     }
     if (row.duration) durations.add(row.duration)
@@ -135,7 +128,6 @@ function applyFilters(rows: YtbRow[], filters: Filters): YtbRow[] {
   })
 }
 
-// Group filtered rows by day string (YYYY-MM-DD)
 function groupByDay(rows: YtbRow[]): { day: string; label: string; rows: YtbRow[] }[] {
   const map = new Map<string, YtbRow[]>()
   for (const row of rows) {
@@ -198,24 +190,25 @@ function CustomDropdown({ label, value, options, onChange }: {
         onClick={() => setOpen(!open)}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
-          border: `1.5px solid ${isActive ? '#7A8C1E' : '#D4C4A0'}`,
+          border: `1.5px solid ${isActive ? 'var(--accent-border)' : 'var(--border-strong)'}`,
           borderRadius: 8, padding: '5px 10px',
           fontSize: 12, fontWeight: 600,
-          color: isActive ? '#3A6010' : '#2A1F08',
-          background: isActive ? '#E8F5C8' : '#FAF5EC',
+          color: isActive ? 'var(--accent-strong)' : 'var(--text)',
+          background: isActive ? 'var(--accent-weak)' : 'var(--surface)',
           cursor: 'pointer', whiteSpace: 'nowrap',
           transition: 'all 0.15s ease',
+          fontFamily: 'var(--font)',
         }}
       >
         {selectedLabel}
-        <span style={{ fontSize: 9, color: '#9A8A6A', marginLeft: 2, transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
+        <span style={{ fontSize: 9, color: 'var(--faint)', marginLeft: 2, transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
       </button>
       {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50,
-          background: '#3D3022', borderRadius: 10, padding: '4px 0',
-          minWidth: 160, maxHeight: 260, overflowY: 'auto',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 10,
+          padding: '4px', minWidth: 160, maxHeight: 260, overflowY: 'auto',
+          boxShadow: 'var(--shadow-md)',
         }}>
           {allOptions.map(opt => {
             const selected = opt.value === value
@@ -225,16 +218,18 @@ function CustomDropdown({ label, value, options, onChange }: {
                 onClick={() => { onChange(opt.value); setOpen(false) }}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '7px 12px', border: 'none',
-                  background: selected ? 'rgba(255,255,255,0.08)' : 'transparent',
-                  color: '#F5EDD8', fontSize: 12, fontWeight: selected ? 700 : 500,
+                  padding: '7px 9px', border: 'none', borderRadius: 6,
+                  background: selected ? 'var(--accent-weak)' : 'transparent',
+                  color: selected ? 'var(--accent-strong)' : 'var(--text)',
+                  fontSize: 13, fontWeight: selected ? 700 : 500,
                   cursor: 'pointer', textAlign: 'left',
+                  fontFamily: 'var(--font)',
                   transition: 'background 0.1s',
                 }}
-                onMouseEnter={e => { if (!selected) e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}
+                onMouseEnter={e => { if (!selected) e.currentTarget.style.background = 'var(--surface-2)' }}
                 onMouseLeave={e => { if (!selected) e.currentTarget.style.background = 'transparent' }}
               >
-                <span style={{ width: 16, flexShrink: 0, fontSize: 11, color: '#A8C44E' }}>
+                <span style={{ width: 16, flexShrink: 0, fontSize: 11, color: 'var(--accent)' }}>
                   {selected ? '✓' : ''}
                 </span>
                 {opt.label}
@@ -247,7 +242,7 @@ function CustomDropdown({ label, value, options, onChange }: {
   )
 }
 
-// ── Nested Time Filter (Year → Month chips) ──────────────────────────────────
+// ── Nested Time Filter ────────────────────────────────────────────────────────
 
 function TimeFilter({ filters, options, onChange }: {
   filters: Filters
@@ -257,27 +252,17 @@ function TimeFilter({ filters, options, onChange }: {
   const [expandedYear, setExpandedYear] = useState<string | null>(filters.year || null)
 
   useEffect(() => {
-    if (filters.year && expandedYear !== filters.year) {
-      setExpandedYear(filters.year)
-    }
+    if (filters.year && expandedYear !== filters.year) setExpandedYear(filters.year)
   }, [filters.year, expandedYear])
 
   function selectYear(y: string) {
-    if (filters.year === y) {
-      onChange({ ...filters, year: '', month: '' })
-      setExpandedYear(null)
-    } else {
-      onChange({ ...filters, year: y, month: '' })
-      setExpandedYear(y)
-    }
+    if (filters.year === y) { onChange({ ...filters, year: '', month: '' }); setExpandedYear(null) }
+    else { onChange({ ...filters, year: y, month: '' }); setExpandedYear(y) }
   }
 
   function selectMonth(m: number) {
-    if (filters.month === String(m)) {
-      onChange({ ...filters, month: '' })
-    } else {
-      onChange({ ...filters, month: String(m) })
-    }
+    if (filters.month === String(m)) onChange({ ...filters, month: '' })
+    else onChange({ ...filters, month: String(m) })
   }
 
   function toggleExpand(y: string) {
@@ -299,34 +284,30 @@ function TimeFilter({ filters, options, onChange }: {
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   width: 20, height: 28, border: 'none', background: 'transparent',
-                  cursor: 'pointer', color: '#9A8A6A', fontSize: 9,
+                  cursor: 'pointer', color: 'var(--faint)', fontSize: 9,
                   transition: 'transform 0.15s',
                   transform: isExpanded ? 'rotate(90deg)' : 'none',
                 }}
-              >
-                ▶
-              </button>
+              >▶</button>
               <button
                 onClick={() => selectYear(year)}
                 style={{
-                  border: `1.5px solid ${isSelected ? '#7A8C1E' : '#D4C4A0'}`,
+                  border: `1.5px solid ${isSelected ? 'var(--accent)' : 'var(--border-strong)'}`,
                   borderRadius: 8, padding: '4px 12px',
                   fontSize: 12, fontWeight: 700,
-                  color: isSelected ? '#fff' : '#2A1F08',
-                  background: isSelected ? '#7A8C1E' : '#EFE3C8',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
+                  color: isSelected ? 'var(--accent-contrast)' : 'var(--text)',
+                  background: isSelected ? 'var(--accent)' : 'var(--surface-2)',
+                  cursor: 'pointer', transition: 'all 0.15s ease',
+                  fontFamily: 'var(--font)',
                 }}
-              >
-                {year}
-              </button>
+              >{year}</button>
             </div>
 
             {isExpanded && months.length > 0 && (
               <div style={{
                 display: 'flex', gap: 4, flexWrap: 'wrap',
                 marginLeft: 22, paddingLeft: 8,
-                borderLeft: '2px solid #D4C4A0',
+                borderLeft: '2px solid var(--border)',
               }}>
                 {months.map(m => {
                   const mSelected = isSelected && filters.month === String(m)
@@ -338,17 +319,15 @@ function TimeFilter({ filters, options, onChange }: {
                         else selectMonth(m)
                       }}
                       style={{
-                        border: `1.5px solid ${mSelected ? '#7A8C1E' : 'transparent'}`,
+                        border: `1.5px solid ${mSelected ? 'var(--accent)' : 'transparent'}`,
                         borderRadius: 6, padding: '3px 10px',
                         fontSize: 11, fontWeight: 600,
-                        color: mSelected ? '#fff' : '#5A3E1B',
-                        background: mSelected ? '#7A8C1E' : '#E8DCC8',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
+                        color: mSelected ? 'var(--accent-contrast)' : 'var(--muted)',
+                        background: mSelected ? 'var(--accent)' : 'var(--surface-3)',
+                        cursor: 'pointer', transition: 'all 0.15s ease',
+                        fontFamily: 'var(--font)',
                       }}
-                    >
-                      {MONTH_SHORT[m]}
-                    </button>
+                    >{MONTH_SHORT[m]}</button>
                   )
                 })}
               </div>
@@ -386,15 +365,8 @@ function FilterBar({ filters, options, onChange, onClear }: {
           onChange={v => onChange({ ...filters, duration: v })}
         />
         {hasAny && (
-          <button onClick={onClear}
-            style={{
-              background: 'none', color: '#9A8A6A', border: '1px dashed #D4C4A0',
-              borderRadius: 7, padding: '5px 10px', fontSize: 11, fontWeight: 600,
-              cursor: 'pointer', transition: 'all 0.15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = '#b91c1c'; e.currentTarget.style.borderColor = '#b91c1c' }}
-            onMouseLeave={e => { e.currentTarget.style.color = '#9A8A6A'; e.currentTarget.style.borderColor = '#D4C4A0' }}
-          >
+          <button className="btn btn-sm" onClick={onClear}
+            style={{ color: 'var(--bad)', borderColor: 'var(--bad-weak)' }}>
             ✕ Clear all
           </button>
         )}
@@ -407,7 +379,7 @@ function FilterBar({ filters, options, onChange, onClear }: {
   )
 }
 
-// ── Blocking Pill Toggle ─────────────────────────────────────────────────────
+// ── Blocking Toggle ──────────────────────────────────────────────────────────
 
 function BlockingToggle() {
   const [blocking, setBlocking] = useState<string | null>(null)
@@ -435,45 +407,40 @@ function BlockingToggle() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blocking: newVal }),
       })
-      if (res.ok) {
-        setBlocking(newVal)
-      }
+      if (res.ok) setBlocking(newVal)
     } catch { /* silent */ }
     setSaving(false)
   }
 
   if (blocking === null) {
-    return (
-      <span style={{ fontSize: 11, color: '#9A8A6A' }}>Loading...</span>
-    )
+    return <span style={{ fontSize: 12, color: 'var(--faint)' }}>Loading...</span>
   }
 
   const isBlocked = blocking === 'yes'
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ fontSize: 11, color: '#9A8A6A' }}>Automated uploading to YouTube</span>
-      <span style={{ fontSize: 11, fontWeight: 600, color: isBlocked ? '#b91c1c' : '#3A6010' }}>
+      <span style={{ fontSize: 12, color: 'var(--muted)' }}>Auto-upload to YouTube</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: isBlocked ? 'var(--bad)' : 'var(--good)' }}>
         {isBlocked ? 'Blocked' : 'Active'}
       </span>
       <button
         onClick={toggle}
         disabled={saving}
+        title={isBlocked ? 'Blocked — click to activate' : 'Active — click to block'}
         style={{
           position: 'relative',
           width: 44, height: 24, borderRadius: 12, border: 'none',
-          background: isBlocked ? '#b91c1c' : '#7A8C1E',
+          background: isBlocked ? 'var(--bad)' : 'var(--good)',
           cursor: saving ? 'not-allowed' : 'pointer',
           opacity: saving ? 0.6 : 1,
           transition: 'background 0.2s ease',
           flexShrink: 0,
         }}
-        title={isBlocked ? 'Upload routing is blocked — click to activate' : 'Upload routing is active — click to block'}
       >
         <span style={{
           position: 'absolute', top: 3, left: isBlocked ? 3 : 23,
-          width: 18, height: 18, borderRadius: '50%',
-          background: '#fff',
+          width: 18, height: 18, borderRadius: '50%', background: '#fff',
           boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
           transition: 'left 0.2s ease',
         }} />
@@ -482,22 +449,7 @@ function BlockingToggle() {
   )
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function Btn({ onClick, disabled, children, variant = 'default' }: {
-  onClick: () => void; disabled?: boolean; children: React.ReactNode; variant?: 'default' | 'primary'
-}) {
-  const bg = variant === 'primary' ? '#5A3E1B' : '#D4C4A0'
-  const color = variant === 'default' ? '#5A3E1B' : '#fff'
-  return (
-    <button onClick={onClick} disabled={disabled}
-      style={{ background: bg, color, border: 'none', borderRadius: 7, padding: '3px 10px', fontSize: 12, fontWeight: 700, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.55 : 1 }}>
-      {children}
-    </button>
-  )
-}
-
-// ── Colgroup (shared) ────────────────────────────────────────────────────────
+// ── Colgroup ─────────────────────────────────────────────────────────────────
 
 function ColGroup() {
   return (
@@ -546,21 +498,15 @@ export default function YouTubePage() {
   useEffect(() => { refresh() }, [refresh])
 
   const filterOptions = useMemo(() => getFilterOptions(rows), [rows])
+  const filteredRows  = useMemo(() => applyFilters(rows, filters), [rows, filters])
+  const dayGroups     = useMemo(() => groupByDay(filteredRows), [filteredRows])
 
-  const filteredRows = useMemo(() => applyFilters(rows, filters), [rows, filters])
-
-  const dayGroups = useMemo(() => groupByDay(filteredRows), [filteredRows])
-
-  // Auto-open today's group on first load only
   useEffect(() => {
     if (initialOpenDone.current || dayGroups.length === 0) return
     initialOpenDone.current = true
     const todayGroup = dayGroups.find(g => g.label === 'Today')
-    if (todayGroup) {
-      setOpenDays(new Set([todayGroup.day]))
-    } else {
-      setOpenDays(new Set([dayGroups[0].day]))
-    }
+    if (todayGroup) setOpenDays(new Set([todayGroup.day]))
+    else setOpenDays(new Set([dayGroups[0].day]))
   }, [dayGroups])
 
   function toggleDay(day: string) {
@@ -599,35 +545,34 @@ export default function YouTubePage() {
     setEdits(prev => { const n = { ...prev }; delete n[rowIndex]; return n })
   }
 
-  const th: React.CSSProperties = { padding: '6px 10px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#6B5A3A', background: '#D4C4A0', borderBottom: '2px solid #C8B896', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
-  const td: React.CSSProperties = { padding: '6px 10px', fontSize: 12, color: '#2A1F08', borderBottom: '1px solid #EFE3C8', verticalAlign: 'middle', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
-
   return (
-    <div className="space-y-4 w-full">
-      {/* Title + Blocking toggle */}
-      <div className="flex items-center justify-between">
-        <h1 className="font-extrabold text-2xl" style={{ color: '#2A1F08' }}>Videos</h1>
-        <BlockingToggle />
+    <div className="page">
+      <div className="page-head">
+        <h1 className="h-title">Videos</h1>
+        <div className="head-actions">
+          <BlockingToggle />
+        </div>
       </div>
 
-      <div className="bean-card p-4" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
-        {/* Header — sticky */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexShrink: 0 }}>
-          <p className="bean-section-label">Drive Videos</p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, color: '#9A8A6A' }}>
-              {filteredRows.length}/{rows.length} videos
-            </span>
-            <Btn onClick={refresh} disabled={loading}>
-              <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none' }}>↻</span>
-              {' '}{loading ? 'Loading...' : 'Refresh'}
-            </Btn>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
+        {/* Header */}
+        <div className="card-head" style={{ flexShrink: 0 }}>
+          <span className="card-label">Drive Videos</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="card-note">{filteredRows.length}/{rows.length} videos</span>
+            <button className="btn btn-sm" onClick={refresh} disabled={loading}>
+              <span className={loading ? 'spin' : ''}>↻</span>
+              {loading ? 'Loading...' : 'Refresh'}
+            </button>
           </div>
         </div>
 
-        {/* Filter bar — sticky */}
+        {/* Filter bar */}
         {rows.length > 0 && (
-          <div style={{ background: '#FAF5EC', borderRadius: 10, padding: '10px 14px', marginBottom: 12, border: '1px solid #E8DCC8', flexShrink: 0 }}>
+          <div style={{
+            background: 'var(--surface-2)', borderRadius: 10, padding: '10px 14px',
+            marginBottom: 12, border: '1px solid var(--border)', flexShrink: 0,
+          }}>
             <FilterBar
               filters={filters}
               options={filterOptions}
@@ -637,22 +582,22 @@ export default function YouTubePage() {
           </div>
         )}
 
-        {error && <p style={{ fontSize: 11, color: '#b91c1c', marginBottom: 6, flexShrink: 0 }}>{error}</p>}
+        {error && <p className="msg-err" style={{ marginBottom: 6, flexShrink: 0 }}>{error}</p>}
 
-        {/* Table header — sticky */}
+        {/* Table header */}
         <div style={{ flexShrink: 0 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+          <table className="tbl" style={{ tableLayout: 'fixed' }}>
             <ColGroup />
             <thead>
               <tr>
-                <th style={th}>Time</th>
-                <th style={th}>Game Title</th>
-                <th style={th}>Evaluator</th>
-                <th style={th}>Duration</th>
-                <th style={th}>Status</th>
-                <th style={th}>File Name</th>
-                <th style={th}>YouTube Link</th>
-                <th style={th}></th>
+                <th>Time</th>
+                <th>Game Title</th>
+                <th>Evaluator</th>
+                <th>Duration</th>
+                <th>Status</th>
+                <th>File Name</th>
+                <th>YouTube Link</th>
+                <th></th>
               </tr>
             </thead>
           </table>
@@ -661,52 +606,46 @@ export default function YouTubePage() {
         {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
           {filteredRows.length === 0 && !loading && (
-            <p style={{ color: '#9A8A6A', textAlign: 'center', padding: 16, fontSize: 12 }}>
+            <p className="empty">
               {rows.length === 0 ? 'No data — click Refresh to load' : 'No rows match the selected filters'}
             </p>
           )}
-          {loading && (
-            <p style={{ color: '#9A8A6A', textAlign: 'center', padding: 16, fontSize: 12 }}>Loading...</p>
-          )}
+          {loading && <p className="empty">Loading...</p>}
           {!loading && dayGroups.map((group, gi) => {
-            const isOpen = openDays.has(group.day)
+            const isOpen  = openDays.has(group.day)
             const isToday = group.label === 'Today'
             return (
               <div key={group.day}>
-                {/* Spacer between day groups */}
-                {gi > 0 && <div style={{ height: 6, background: '#D4C4A0' }} />}
+                {gi > 0 && <div style={{ height: 4, background: 'var(--border)' }} />}
 
                 {/* Day header */}
                 <button
                   onClick={() => toggleDay(group.day)}
                   style={{
                     width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                    background: isToday ? '#5A6A10' : '#C8B896',
+                    background: isToday ? 'var(--accent-weak)' : 'var(--surface-2)',
                     padding: '7px 12px', border: 'none',
-                    borderBottom: `2px solid ${isToday ? '#4A5A08' : '#B0A080'}`,
+                    borderBottom: `1px solid ${isToday ? 'var(--accent-border)' : 'var(--border)'}`,
                     cursor: 'pointer', textAlign: 'left',
                   }}
                 >
-                  <span style={{ fontSize: 10, color: isToday ? '#C8E070' : '#6B5A3A' }}>
+                  <span style={{ fontSize: 9, color: isToday ? 'var(--accent)' : 'var(--faint)' }}>
                     {isOpen ? '▾' : '▸'}
                   </span>
-                  <span style={{ fontWeight: 700, color: isToday ? '#fff' : '#2A1F08', fontSize: 12 }}>
+                  <span style={{ fontWeight: 700, color: isToday ? 'var(--accent-strong)' : 'var(--text)', fontSize: 12 }}>
                     {group.label}
                   </span>
                   {isToday && (
-                    <span style={{
-                      background: 'rgba(255,255,255,0.2)', color: '#fff', borderRadius: 4,
-                      padding: '1px 6px', fontSize: 10, fontWeight: 700,
-                    }}>Now</span>
+                    <span className="badge running" style={{ fontSize: 9, padding: '1px 6px' }}>live</span>
                   )}
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: isToday ? 'rgba(255,255,255,0.7)' : '#6B5A3A', fontWeight: 600 }}>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--faint)', fontWeight: 600 }}>
                     {group.rows.length} video{group.rows.length !== 1 ? 's' : ''}
                   </span>
                 </button>
 
                 {/* Day rows */}
                 {isOpen && (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+                  <table className="tbl" style={{ tableLayout: 'fixed' }}>
                     <ColGroup />
                     <tbody>
                       {group.rows.map(row => {
@@ -717,57 +656,60 @@ export default function YouTubePage() {
                         const ytUrl     = youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : null
 
                         return (
-                          <tr key={row.row_index} style={{ background: isDirty ? '#FDFAF2' : 'transparent' }}>
-                            <td style={{ ...td, color: '#6B5A3A' }}>
+                          <tr key={row.row_index} style={{ background: isDirty ? 'var(--accent-weak)' : 'transparent' }}>
+                            <td style={{ color: 'var(--faint)' }}>
                               {row.time ? new Date(row.time).toLocaleTimeString('en-US', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' }) : '—'}
                             </td>
-                            <td style={td}>{row.gameTitle || '—'}</td>
-                            <td style={td}>{row.pic || '—'}</td>
-                            <td style={{ ...td, color: '#6B5A3A' }}>{row.duration || '—'}</td>
-                            <td style={td}>
-                              <StatusBadge status={row.status} />
-                            </td>
-                            <td style={td}>{row.fileName || '—'}</td>
-                            <td style={td}>
+                            <td>{row.gameTitle || '—'}</td>
+                            <td>{row.pic || '—'}</td>
+                            <td style={{ color: 'var(--muted)' }}>{row.duration || '—'}</td>
+                            <td><StatusBadge status={row.status} /></td>
+                            <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.fileName || '—'}</td>
+                            <td>
                               {isDirty ? (
                                 <input
                                   value={youtubeId}
                                   onChange={e => setEdit(row.row_index, 'youtubeId', e.target.value)}
                                   placeholder="YouTube ID"
                                   autoFocus
-                                  style={{ border: '1px solid #5A3E1B', borderRadius: 5, padding: '2px 6px', fontSize: 11, fontFamily: 'monospace', width: 160, background: '#FAF5EC', color: '#2A1F08' }}
+                                  className="input"
+                                  style={{ padding: '3px 7px', fontSize: 12, fontFamily: 'var(--num)', width: 160 }}
                                 />
                               ) : (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                   {ytUrl ? (
                                     <a href={ytUrl} target="_blank" rel="noreferrer"
-                                      style={{ color: '#1A5A9A', fontWeight: 600, fontSize: 11, textDecoration: 'underline', whiteSpace: 'nowrap' }}>
+                                      style={{ color: 'var(--accent)', fontWeight: 600, fontSize: 12, textDecoration: 'underline', whiteSpace: 'nowrap' }}>
                                       youtu.be/{youtubeId}
                                     </a>
                                   ) : (
-                                    <span style={{ color: '#B0A090', fontStyle: 'italic', fontSize: 11 }}>
+                                    <span style={{ color: 'var(--faint)', fontStyle: 'italic', fontSize: 12 }}>
                                       not synced yet
                                     </span>
                                   )}
                                   <button
                                     onClick={() => setEdit(row.row_index, 'youtubeId', youtubeId)}
                                     title="Edit YouTube ID"
-                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9A8A6A', fontSize: 12, lineHeight: 1, padding: '1px 3px', borderRadius: 4, flexShrink: 0 }}
-                                    onMouseEnter={e => (e.currentTarget.style.color = '#5A3E1B')}
-                                    onMouseLeave={e => (e.currentTarget.style.color = '#9A8A6A')}
-                                  >
-                                    ✎
-                                  </button>
+                                    style={{
+                                      background: 'none', border: 'none', cursor: 'pointer',
+                                      color: 'var(--faint)', fontSize: 13, lineHeight: 1,
+                                      padding: '1px 3px', borderRadius: 4, flexShrink: 0,
+                                    }}
+                                    onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+                                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--faint)')}
+                                  >✎</button>
                                 </div>
                               )}
                             </td>
-                            <td style={{ ...td, width: 90 }}>
+                            <td style={{ width: 90 }}>
                               {isDirty && (
                                 <div style={{ display: 'flex', gap: 4 }}>
-                                  <Btn onClick={() => saveEdits(row.row_index)} disabled={isSaving} variant="primary">
+                                  <button className="btn btn-sm btn-primary"
+                                    onClick={() => saveEdits(row.row_index)} disabled={isSaving}>
                                     {isSaving ? '...' : 'Save'}
-                                  </Btn>
-                                  <Btn onClick={() => cancelEdits(row.row_index)} disabled={isSaving}>✕</Btn>
+                                  </button>
+                                  <button className="btn btn-sm"
+                                    onClick={() => cancelEdits(row.row_index)} disabled={isSaving}>✕</button>
                                 </div>
                               )}
                             </td>

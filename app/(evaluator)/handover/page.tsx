@@ -48,75 +48,86 @@ export default function HandoverPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div>
-        <h2 className="text-xl font-bold">Game List Handover</h2>
-        <p className="text-gray-500 text-sm mt-1">Submit a request to redistribute your assigned games while you&apos;re unavailable.</p>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Game List Handover</h2>
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
+          Submit a request to redistribute your assigned games while you&apos;re unavailable.
+        </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="bg-white rounded-lg border p-6 space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Evaluator Name</label>
-          <input
-            value={session?.user?.name ?? ''}
-            disabled
-            className="w-full border rounded-md px-3 py-2 text-sm bg-gray-50 text-gray-500"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+      <div className="card">
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="field">
+            <span className="label">Evaluator Name</span>
             <input
-              type="date"
-              value={startDate}
-              onChange={e => setStartDate(e.target.value)}
-              required
-              className="w-full border rounded-md px-3 py-2 text-sm"
+              value={session?.user?.name ?? ''}
+              disabled
+              className="input"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={e => setEndDate(e.target.value)}
-              required
-              className="w-full border rounded-md px-3 py-2 text-sm"
-            />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="field">
+              <span className="label">Start Date</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                required
+                className="input"
+              />
+            </div>
+            <div className="field">
+              <span className="label">End Date</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                required
+                className="input"
+              />
+            </div>
           </div>
-        </div>
-        {message && (
-          <p className={`text-sm ${message.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-            {message.text}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white py-2 rounded-md text-sm font-medium"
-        >
-          {submitting ? 'Submitting...' : 'Submit Handover Request'}
-        </button>
-      </form>
+          {message && (
+            <p className={message.type === 'success' ? 'msg-ok' : 'msg-err'}>{message.text}</p>
+          )}
+          <button type="submit" className="btn btn-primary" disabled={submitting}
+            style={{ width: '100%', justifyContent: 'center' }}>
+            {submitting ? 'Submitting...' : 'Submit Handover Request'}
+          </button>
+        </form>
+      </div>
 
       {history.length > 0 && (
-        <div className="bg-white rounded-lg border p-6">
-          <h3 className="font-medium mb-3">Handover History</h3>
-          <ul className="space-y-2">
-            {history.map(entry => (
-              <li key={entry.id} className="flex justify-between text-sm border-b pb-2">
-                <div>
-                  <span className={entry.status === 'success' ? 'text-green-600' : entry.status === 'error' ? 'text-red-600' : 'text-yellow-600'}>
-                    {entry.status === 'running' ? 'In Progress' : entry.status}
+        <div className="card">
+          <div className="card-head">
+            <span className="card-label">Handover History</span>
+          </div>
+          <div>
+            {history.map(entry => {
+              const statusCls = entry.status === 'success' ? 'success' : entry.status === 'error' ? 'error' : 'running'
+              return (
+                <div key={entry.id} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '10px 2px', borderBottom: '1px solid var(--border)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className={`badge ${statusCls}`}>
+                      {entry.status === 'running' ? 'In Progress' : entry.status}
+                    </span>
+                    {entry.summary && (
+                      <span style={{ fontSize: 12, color: 'var(--faint)' }}>
+                        · {entry.summary.games} games redistributed
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: 12, color: 'var(--faint)' }}>
+                    {new Date(entry.created_at).toLocaleDateString()}
                   </span>
-                  {entry.summary && (
-                    <span className="text-gray-400 ml-2">· {entry.summary.games} games redistributed</span>
-                  )}
                 </div>
-                <span className="text-gray-400">{new Date(entry.created_at).toLocaleDateString()}</span>
-              </li>
-            ))}
-          </ul>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>

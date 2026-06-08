@@ -11,7 +11,7 @@ interface StyledSelectProps {
   style?: React.CSSProperties
 }
 
-export function StyledSelect({ value, onChange, options, placeholder = '-- Select --', disabled, style }: StyledSelectProps) {
+export function StyledSelect({ value, onChange, options, placeholder = 'Select', disabled, style }: StyledSelectProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -23,60 +23,42 @@ export function StyledSelect({ value, onChange, options, placeholder = '-- Selec
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
-  const selectedLabel = options.find(o => o.value === value)?.label || ''
+  const selectedLabel = options.find(o => o.value === value)?.label
 
   return (
-    <div ref={ref} style={{ position: 'relative', ...style }}>
+    <div ref={ref} className="ssel" style={style}>
       <button
         type="button"
-        onClick={() => !disabled && setOpen(!open)}
+        className="ssel-btn"
+        aria-expanded={open}
         disabled={disabled}
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          border: '1px solid #D4C4A0', borderRadius: 6,
-          padding: '6px 8px', fontSize: 12, fontWeight: 600,
-          background: disabled ? '#EFE3C8' : '#FAF5EC', color: '#2A1F08',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.6 : 1,
-          textAlign: 'left',
-        }}
+        onClick={() => !disabled && setOpen(!open)}
       >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {value ? selectedLabel : <span style={{ color: '#9A8A6A' }}>{placeholder}</span>}
+        <span style={{ color: selectedLabel ? 'var(--text)' : 'var(--faint)' }}>
+          {selectedLabel ?? placeholder}
         </span>
-        <span style={{ fontSize: 8, color: '#9A8A6A', marginLeft: 6, flexShrink: 0, transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
+        <span className="chev">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </span>
       </button>
       {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, zIndex: 50,
-          background: '#3D3022', borderRadius: 8, padding: '3px 0',
-          maxHeight: 220, overflowY: 'auto',
-          boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
-        }}>
-          {options.map(opt => {
-            const selected = opt.value === value
-            return (
-              <button
-                type="button"
-                key={opt.value}
-                onClick={() => { onChange(opt.value); setOpen(false) }}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '6px 10px', border: 'none',
-                  background: selected ? 'rgba(255,255,255,0.1)' : 'transparent',
-                  color: '#F5EDD8', fontSize: 12, fontWeight: selected ? 700 : 500,
-                  cursor: 'pointer', textAlign: 'left',
-                }}
-                onMouseEnter={e => { if (!selected) e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}
-                onMouseLeave={e => { if (!selected) e.currentTarget.style.background = selected ? 'rgba(255,255,255,0.1)' : 'transparent' }}
-              >
-                <span style={{ width: 14, flexShrink: 0, fontSize: 10, color: '#A8C44E' }}>
-                  {selected ? '✓' : ''}
-                </span>
-                {opt.label}
-              </button>
-            )
-          })}
+        <div className="ssel-menu">
+          {options.map(opt => (
+            <div key={opt.value}
+              className={'ssel-opt' + (opt.value === value ? ' sel' : '')}
+              onClick={() => { onChange(opt.value); setOpen(false) }}>
+              {opt.label}
+              {opt.value === value && (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

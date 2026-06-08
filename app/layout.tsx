@@ -1,16 +1,26 @@
 import type { Metadata } from 'next'
-import { Baloo_2 } from 'next/font/google'
+import { IBM_Plex_Sans, IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 
-const baloo = Baloo_2({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'] })
+const ibmPlexSans = IBM_Plex_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-ibm-plex-sans',
+})
 
-export const metadata: Metadata = { title: 'Signal Management' }
+const ibmPlexMono = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-ibm-plex-mono',
+})
+
+export const metadata: Metadata = { title: 'Signal — Smartsheet Ops' }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={baloo.className}>
+      <body className={`${ibmPlexSans.variable} ${ibmPlexMono.variable}`}>
         <Providers>{children}</Providers>
       </body>
     </html>
