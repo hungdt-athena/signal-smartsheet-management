@@ -1,5 +1,12 @@
 'use client'
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useSession } from 'next-auth/react'
+import { StyledSelect } from '@/components/StyledSelect'
+import { MultiSelect } from '@/components/MultiSelect'
+import { MonthPicker } from '@/components/MonthPicker'
+import type { YearMonth } from '@/components/MonthPicker'
+import EvalDetailPanel from '@/components/EvalDetailPanel'
 
 interface YtbRow {
   row_index: number
@@ -468,7 +475,7 @@ function ColGroup() {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function YouTubePage() {
+function YouTubeTab() {
   const [rows, setRows]       = useState<YtbRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
@@ -610,7 +617,12 @@ export default function YouTubePage() {
               {rows.length === 0 ? 'No data — click Refresh to load' : 'No rows match the selected filters'}
             </p>
           )}
-          {loading && <p className="empty">Loading...</p>}
+          {loading && (
+            <table className="tbl" style={{ tableLayout: 'fixed' }}>
+              <ColGroup />
+              <tbody><SkeletonRows cols={8} rows={4} /></tbody>
+            </table>
+          )}
           {!loading && dayGroups.map((group, gi) => {
             const isOpen  = openDays.has(group.day)
             const isToday = group.label === 'Today'
@@ -726,4 +738,978 @@ export default function YouTubePage() {
       </div>
     </div>
   )
+}
+
+// ── Short List types ─────────────────────────────────────────────────────────
+
+interface ShortListItem {
+  id: number
+  game_id: string
+  title: string
+  icon_url: string | null
+  os: string
+  initial_evaluator: string | null
+  final_evaluator: string | null
+  initial_note: string | null
+  initial_conclusion: string | null
+  drive_link: string | null
+  record_5min_assignee: string | null
+  record_5min_drive: string | null
+  record_20min_assignee: string | null
+  record_20min_drive: string | null
+  genre_1: string | null
+  genre_2: string | null
+  publisher_name: string | null
+  category_group: string
+  app_link: string | null
+}
+
+const SL_CONCLUSION_COLORS: Record<string, string> = {
+  'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
+  'Good': 'success', 'Conclusion': 'success',
+  'List_Idea': 'success', 'Priority I': 'success', 'Priority II': 'success',
+  'Priority III: Watchlist for next phase': 'running',
+  'Priority IV: Idea': 'running', 'Watchlist for next milestone': 'running',
+  'Need deeper testing': 'running', 'Wait for PlayTest': 'running',
+  'Check Market Data': 'running', 'Need Direction': 'running',
+}
+
+const CONCLUSION_OPTIONS = [
+  'Bypass', 'Conclusion', 'Good', 'Link_dead', 'M_ByPass', 'Need deeper testing', 'Skip',
+  'Wait for PlayTest', 'Priority IV: Idea', 'Priority III: Watchlist for next phase',
+  'Check Market Data', 'Watchlist for next milestone', 'Priority II', 'Priority I',
+  'Need Direction', 'List_Idea',
+]
+
+function DriveBtnSmall({ href }: { href: string }) {
+  return (
+    <a href={href} target="_blank" rel="noopener" onClick={e => e.stopPropagation()} className="drive-btn">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="23 7 16 12 23 17 23 7" />
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+      </svg>
+    </a>
+  )
+}
+
+// ── Assign Record Modal ──────────────────────────────────────────────────────
+
+function AssignRecordModal({ games, onClose, onSaved, mode = 'assign' }: {
+  games: ShortListItem[]
+  onClose: () => void
+  onSaved: () => void
+  mode?: 'assign' | 'review'
+}) {
+  const isReview = mode === 'review'
+  const original = useMemo(() => {
+    const m: Record<number, { r5: string; r20: string }> = {}
+    for (const g of games) m[g.id] = {
+      r5: isReview ? (g.record_5min_assignee || '') : '',
+      r20: isReview ? (g.record_20min_assignee || '') : '',
+    }
+    return m
+  }, [games, isReview])
+  const [rows, setRows] = useState(games)
+  const [assignments, setAssignments] = useState<Record<number, { r5: string; r20: string }>>(original)
+  const [recorders, setRecorders] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    fetch('/api/team/recorders').then(r => r.ok ? r.json() : []).then(setRecorders).catch(() => {})
+  }, [])
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return rows
+    const q = search.toLowerCase()
+    return rows.filter(r => r.title.toLowerCase().includes(q))
+  }, [rows, search])
+
+  function setAssign(id: number, field: 'r5' | 'r20', value: string) {
+    setAssignments(prev => ({
+      ...prev,
+      [id]: { ...prev[id] || { r5: '', r20: '' }, [field]: value },
+    }))
+  }
+
+  function removeRow(id: number) {
+    setRows(prev => prev.filter(r => r.id !== id))
+    setAssignments(prev => { const n = { ...prev }; delete n[id]; return n })
+  }
+
+  function bulkAssign(field: 'r5' | 'r20', value: string) {
+    setAssignments(prev => {
+      const next = { ...prev }
+      for (const game of filtered) {
+        next[game.id] = { ...next[game.id] || { r5: '', r20: '' }, [field]: value }
+      }
+      return next
+    })
+  }
+
+  // Rows whose selection differs from the original state (incl. clearing to '').
+  const changed = useMemo(() => Object.entries(assignments).filter(([id, v]) => {
+    const o = original[Number(id)] || { r5: '', r20: '' }
+    return v.r5 !== o.r5 || v.r20 !== o.r20
+  }), [assignments, original])
+
+  async function save() {
+    const batch = changed.map(([id, v]) => {
+      const o = original[Number(id)] || { r5: '', r20: '' }
+      const entry: Record<string, unknown> = { id: Number(id) }
+      // Send only the durations that changed; empty selection clears the assignee.
+      if (v.r5 !== o.r5) entry.record_5min_assignee = v.r5 || null
+      if (v.r20 !== o.r20) entry.record_20min_assignee = v.r20 || null
+      return entry
+    })
+    if (batch.length === 0) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/evaluations/assign-records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments: batch }),
+      })
+      if (res.ok) { onSaved(); onClose() }
+    } catch { /* ignore */ }
+    setSaving(false)
+  }
+
+  const assignCount = changed.length
+  const recOpts = [{ value: '', label: '—' }, ...recorders.map(r => ({ value: r, label: r }))]
+
+  return (
+    <div className="eval-modal-backdrop" onClick={onClose}>
+      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
+        style={{ padding: '24px 28px 24px', maxWidth: 1100, width: '95vw' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{isReview ? 'Review Recorders' : 'Assign Recorders'}</h2>
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
+              {rows.length} {isReview ? 'assigned' : 'unassigned'} game{rows.length !== 1 ? 's' : ''}
+              {assignCount > 0 && <> · <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{assignCount} changed</span></>}
+            </p>
+          </div>
+          <button className="btn btn-sm btn-ghost" onClick={onClose} style={{ fontSize: 18, padding: '2px 8px' }}>x</button>
+        </div>
+
+        {/* Toolbar */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+          <div className="search-wrap">
+            <span className="search-icon-abs">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+              </svg>
+            </span>
+            <input className="search-input" placeholder="Filter games..." style={{ width: 180 }}
+              value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          {recorders.length > 0 && (
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)' }}>
+              <span style={{ fontWeight: 600 }}>Bulk assign all visible:</span>
+              <div style={{ width: 120 }}>
+                <StyledSelect value="" onChange={v => { if (v) bulkAssign('r5', v) }}
+                  placeholder="5 min →" options={recOpts} style={{ fontSize: 11 }} />
+              </div>
+              <div style={{ width: 120 }}>
+                <StyledSelect value="" onChange={v => { if (v) bulkAssign('r20', v) }}
+                  placeholder="20 min →" options={recOpts} style={{ fontSize: 11 }} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ maxHeight: 'calc(80vh - 180px)', overflowY: 'auto' }}>
+          {filtered.length === 0 ? (
+            <p className="empty">{search ? 'No games match your search' : isReview ? 'No assigned games' : 'No unassigned games'}</p>
+          ) : (
+            <table className="tbl" style={{ fontSize: 12.5 }}>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
+                <tr>
+                  <th style={{ width: 36 }}>#</th>
+                  <th>Game</th>
+                  <th style={{ width: 60 }}>OS</th>
+                  <th style={{ width: 180 }}>5 min Recorder</th>
+                  <th style={{ width: 180 }}>20 min Recorder</th>
+                  <th style={{ width: 40 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((game, idx) => {
+                  const a = assignments[game.id] || { r5: '', r20: '' }
+                  const hasAssign = a.r5 || a.r20
+                  return (
+                    <tr key={game.id} className="tbl-row-premium"
+                      style={hasAssign ? { background: 'var(--accent-weak)' } : undefined}>
+                      <td className="num" style={{ color: 'var(--faint)', fontSize: 11 }}>{idx + 1}</td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {game.icon_url ? (
+                            <img src={game.icon_url} alt="" width={26} height={26} style={{ borderRadius: 6, flexShrink: 0 }} />
+                          ) : (
+                            <div style={{ width: 26, height: 26, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
+                          )}
+                          <span className="cell-name" style={{ fontSize: 12.5 }}>{game.title}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>{game.os?.toUpperCase()}</span>
+                      </td>
+                      <td>
+                        <StyledSelect value={a.r5} onChange={v => setAssign(game.id, 'r5', v)}
+                          placeholder="—" options={recOpts} style={{ fontSize: 12 }} />
+                      </td>
+                      <td>
+                        <StyledSelect value={a.r20} onChange={v => setAssign(game.id, 'r20', v)}
+                          placeholder="—" options={recOpts} style={{ fontSize: 12 }} />
+                      </td>
+                      <td>
+                        <button className="btn btn-sm btn-ghost" onClick={() => removeRow(game.id)}
+                          style={{ color: 'var(--bad)', padding: '2px 6px', fontSize: 13 }}>x</button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <span style={{ fontSize: 11, color: 'var(--faint)' }}>
+            {filtered.length} game{filtered.length !== 1 ? 's' : ''} shown
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm" onClick={onClose}>Cancel</button>
+            <button className="btn btn-sm btn-primary" onClick={save}
+              disabled={saving || assignCount === 0}>
+              {saving ? 'Saving...' : `Save ${assignCount} assignment${assignCount !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Extract Chat Text Modal ──────────────────────────────────────────────────
+
+function ExtractChatModal({ games, onClose }: {
+  games: ShortListItem[]
+  onClose: () => void
+}) {
+  const [selected, setSelected] = useState<Set<number>>(() => new Set(games.map(g => g.id)))
+  const [copied, setCopied] = useState(false)
+
+  function toggle(id: number) {
+    setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+  const allSelected = selected.size === games.length
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(games.map(g => g.id)))
+  }
+
+  const message = useMemo(() => {
+    const chosen = games.filter(g => selected.has(g.id))
+    const sections: string[] = []
+    const build = (label: string, pick: (g: ShortListItem) => string | null) => {
+      const items = chosen.filter(g => pick(g))
+      if (items.length === 0) return
+      const lines = items.map((g, i) => {
+        const head = `${i + 1}. ${g.title} - ${pick(g)}`
+        return g.app_link ? `${head}\n${g.app_link}` : head
+      })
+      sections.push(`${label}\n${lines.join('\n')}`)
+    }
+    build("20'", g => g.record_20min_assignee)
+    build("5'", g => g.record_5min_assignee)
+    return sections.join('\n\n')
+  }, [games, selected])
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(message)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* ignore */ }
+  }
+
+  return (
+    <div className="eval-modal-backdrop" onClick={onClose}>
+      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
+        style={{ padding: '24px 28px 24px', maxWidth: 980, width: '92vw' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Extract Chat Text</h2>
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
+              {selected.size}/{games.length} game{games.length !== 1 ? 's' : ''} selected
+            </p>
+          </div>
+          <button className="btn btn-sm btn-ghost" onClick={onClose} style={{ fontSize: 18, padding: '2px 8px' }}>x</button>
+        </div>
+
+        {/* Two columns: selection list + preview */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+          {/* Selection list */}
+          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span className="card-label">Games</span>
+              <button className="btn btn-sm btn-ghost" onClick={toggleAll} style={{ fontSize: 11 }}>
+                {allSelected ? 'Deselect all' : 'Select all'}
+              </button>
+            </div>
+            <div style={{ maxHeight: 'calc(80vh - 220px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+              {games.length === 0 ? (
+                <p className="empty">No assigned games</p>
+              ) : games.map(g => {
+                const checked = selected.has(g.id)
+                return (
+                  <label key={g.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                      borderBottom: '1px solid var(--border)', cursor: 'pointer',
+                      background: checked ? 'var(--accent-weak)' : 'transparent',
+                    }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggle(g.id)} />
+                    {g.icon_url ? (
+                      <img src={g.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
+                    )}
+                    <span className="cell-name" style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
+                    <span style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                      {g.record_20min_assignee && <span className="pill tag" style={{ fontSize: 9, padding: '1px 5px' }}>20&apos; {g.record_20min_assignee}</span>}
+                      {g.record_5min_assignee && <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>5&apos; {g.record_5min_assignee}</span>}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Preview */}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span className="card-label" style={{ marginBottom: 8 }}>Message preview</span>
+            <textarea
+              readOnly
+              value={message}
+              placeholder="Select at least one game..."
+              style={{
+                width: '100%', height: 'calc(80vh - 220px)', resize: 'none',
+                fontFamily: 'var(--num, monospace)', fontSize: 12.5, lineHeight: 1.6,
+                padding: '12px 14px', borderRadius: 10, border: '1px solid var(--border)',
+                background: 'var(--surface-2)', color: 'var(--text)', boxSizing: 'border-box',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <button className="btn btn-sm" onClick={onClose}>Close</button>
+          <button className="btn btn-sm btn-primary" onClick={copy} disabled={!message}>
+            {copied ? '✓ Copied!' : 'Copy message'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Skeleton Rows ────────────────────────────────────────────────────────────
+
+function SkeletonRows({ cols, rows = 5 }: { cols: number; rows?: number }) {
+  const widths = [30, 180, 120, 80, 100, 100]
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, i) => (
+        <tr key={i}>
+          {Array.from({ length: cols }).map((_, c) => (
+            <td key={c}>
+              <span className="skeleton" style={{ width: widths[c % widths.length] || 80, height: 14 }} />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  )
+}
+
+// ── Recording Status Cell ───────────────────────────────────────────────────
+
+function RecordingCell({ assignee, drive }: { assignee: string | null; drive: string | null }) {
+  if (!assignee) return <span className="rec-status none">—</span>
+  if (drive) return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span className="rec-status done">&#10003; {assignee}</span>
+      <DriveBtnSmall href={drive} />
+    </div>
+  )
+  return <span className="rec-status pending">&#9711; {assignee}</span>
+}
+
+// ── Short List Tab ───────────────────────────────────────────────────────────
+
+function ShortListTab() {
+  const { data: session } = useSession()
+  const userName = session?.user?.name || ''
+  const role = session?.user?.role
+
+  const [data, setData] = useState<ShortListItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [availableMonths, setAvailableMonths] = useState<YearMonth[]>([])
+  const [filterCategory, setFilterCategory] = useState('puzzle')
+  const [filterConclusions, setFilterConclusions] = useState<string[]>(['List_Idea'])
+  const [availableConclusions, setAvailableConclusions] = useState<string[]>(CONCLUSION_OPTIONS)
+  const [filterAssignment, setFilterAssignment] = useState('')
+  const [filterMonth, setFilterMonth] = useState<YearMonth | null>(null)
+  // First load sends month=auto; server resolves current month or latest with data.
+  const [autoMonth, setAutoMonth] = useState(true)
+  const suppressFetchRef = useRef(false)
+  const fetchSeqRef = useRef(0)
+  const [showAssignModal, setShowAssignModal] = useState(false)
+  const [showReviewModal, setShowReviewModal] = useState(false)
+  const [showExtractModal, setShowExtractModal] = useState(false)
+  const [detailGameId, setDetailGameId] = useState<string | null>(null)
+
+  const fetchData = useCallback(async () => {
+    const seq = ++fetchSeqRef.current
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ category: filterCategory, limit: '500' })
+      if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
+      if (filterAssignment) params.set('assignment_status', filterAssignment)
+      if (autoMonth) {
+        params.set('month', 'auto')
+      } else if (filterMonth) {
+        params.set('year', String(filterMonth.year))
+        params.set('month', String(filterMonth.month))
+      }
+      const res = await fetch(`/api/evaluations?${params}`)
+      const json = await res.json()
+      if (seq !== fetchSeqRef.current) return // stale response; a newer fetch owns the state
+      setData(json.data || [])
+      setTotal(json.total || 0)
+      if (json.available_months) setAvailableMonths(json.available_months)
+      if (autoMonth && json.applied_month !== undefined) {
+        // Lock in the server-resolved month: the picker shows it and all
+        // later fetches use explicit params instead of re-resolving auto.
+        const ap = json.applied_month as YearMonth | null
+        suppressFetchRef.current = true
+        setAutoMonth(false)
+        setFilterMonth(ap)
+      }
+      if (json.available_conclusions?.length) {
+        // keep currently-selected values visible even if filtered out by scope
+        const merged = Array.from(new Set([...json.available_conclusions, ...filterConclusions]))
+        setAvailableConclusions(CONCLUSION_OPTIONS.filter(c => merged.includes(c)).concat(merged.filter(c => !CONCLUSION_OPTIONS.includes(c))))
+      }
+    } catch { /* ignore */ }
+    setLoading(false)
+  }, [filterCategory, filterConclusions, filterAssignment, filterMonth, autoMonth])
+
+  useEffect(() => {
+    if (suppressFetchRef.current) {
+      suppressFetchRef.current = false
+      return
+    }
+    fetchData()
+  }, [fetchData])
+
+  const unassigned = useMemo(() =>
+    data.filter(d => !d.record_5min_assignee && !d.record_20min_assignee),
+    [data]
+  )
+
+  const assigned = useMemo(() =>
+    data.filter(d => d.record_5min_assignee || d.record_20min_assignee),
+    [data]
+  )
+
+  const withDrive = useMemo(() =>
+    data.filter(d => d.record_5min_drive || d.record_20min_drive),
+    [data]
+  )
+
+  function clickStat(filter: string) {
+    setFilterAssignment(prev => prev === filter ? '' : filter)
+  }
+
+  return (
+    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div className="page-head" style={{ marginBottom: 10 }}>
+        <div>
+          <h1 className="h-title">Videos</h1>
+          <p className="h-sub">{total} games · Short List · {filterCategory}</p>
+        </div>
+      </div>
+
+      {/* Stats summary */}
+      {!loading && data.length > 0 && (
+        <div className="stats-row-compact">
+          <div className={`stat-card-compact${filterAssignment === '' ? ' active-filter' : ''}`}
+            onClick={() => clickStat('')}>
+            <span className="scc-label">Total</span>
+            <span className="scc-num">{data.length}</span>
+            <span className="scc-sub">games loaded</span>
+          </div>
+          <div className={`stat-card-compact${filterAssignment === 'assigned' ? ' active-filter' : ''}`}
+            onClick={() => clickStat('assigned')}>
+            <span className="scc-label">Assigned</span>
+            <span className="scc-num">{assigned.length}</span>
+            <span className="scc-sub">{data.length > 0 ? Math.round(assigned.length / data.length * 100) : 0}% of total</span>
+          </div>
+          <div className={`stat-card-compact${filterAssignment === 'unassigned' ? ' active-filter' : ''}`}
+            onClick={() => clickStat('unassigned')}
+            style={unassigned.length > 0 ? { borderColor: 'var(--warn)', background: 'var(--warn-weak)' } : undefined}>
+            <span className="scc-label">Unassigned</span>
+            <span className="scc-num" style={unassigned.length > 0 ? { color: 'var(--warn)' } : undefined}>{unassigned.length}</span>
+            <span className="scc-sub">need assignment</span>
+          </div>
+          <div className="stat-card-compact" style={{ cursor: 'default' }}>
+            <span className="scc-label">With Drive</span>
+            <span className="scc-num">{withDrive.length}</span>
+            <span className="scc-sub">recordings uploaded</span>
+          </div>
+        </div>
+      )}
+
+      <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
+        <MonthPicker available={availableMonths} value={filterMonth}
+          onChange={v => { setAutoMonth(false); setFilterMonth(v) }} />
+
+        <div style={{ width: 140 }}>
+          <StyledSelect
+            value={filterCategory}
+            onChange={setFilterCategory}
+            placeholder="Category"
+            options={[
+              { value: 'puzzle', label: 'Puzzle' },
+              { value: 'arcade', label: 'Arcade' },
+              { value: 'simulation', label: 'Simulation' },
+            ]}
+          />
+        </div>
+
+        <div style={{ width: 200 }}>
+          <MultiSelect
+            value={filterConclusions}
+            onChange={setFilterConclusions}
+            placeholder="Conclusions"
+            options={availableConclusions.map(c => ({ value: c, label: c }))}
+          />
+        </div>
+
+        <div className="seg-wrapper">
+          {[
+            { value: '', label: 'All' },
+            { value: 'unassigned', label: 'Unassigned' },
+            { value: 'assigned', label: 'Assigned' },
+          ].map(s => (
+            <button key={s.value}
+              className={`seg-btn-premium${filterAssignment === s.value ? ' active' : ''}`}
+              onClick={() => setFilterAssignment(s.value)}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="sync" style={{ fontSize: 12.5, fontWeight: 600 }}>
+            {loading ? 'Loading...' : `${total} results`}
+          </span>
+          <button className="btn btn-sm" onClick={() => setShowReviewModal(true)} disabled={assigned.length === 0}>
+            Review Assign
+            {assigned.length > 0 && <span className="badge-count">{assigned.length}</span>}
+          </button>
+          <button className="btn btn-sm" onClick={() => setShowExtractModal(true)} disabled={assigned.length === 0}>
+            Extract Chat
+          </button>
+          <button className="btn btn-sm btn-primary" onClick={() => setShowAssignModal(true)}>
+            Assign Record
+            {unassigned.length > 0 && <span className="badge-count">{unassigned.length}</span>}
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+          <table className="tbl">
+            <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
+              <tr>
+                <th style={{ width: 36 }}>#</th>
+                <th>Game</th>
+                <th>Note</th>
+                <th>Conclusion</th>
+                <th style={{ width: 140 }}>5 min</th>
+                <th style={{ width: 140 }}>20 min</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.length === 0 && !loading && (
+                <tr><td colSpan={6} className="empty">No games found</td></tr>
+              )}
+              {loading && <SkeletonRows cols={6} />}
+              {data.map((item, idx) => (
+                <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
+                  onClick={() => setDetailGameId(item.game_id)}>
+                  <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 200 }}>
+                      {item.icon_url ? (
+                        <img src={item.icon_url} alt="" width={28} height={28} style={{ borderRadius: 6, flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
+                        <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                          <span className="pill muted" style={{ padding: '1px 5px', fontSize: 9 }}>{item.os?.toUpperCase()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div title={item.initial_note || undefined}
+                      style={{ fontSize: 12, color: item.initial_note ? 'var(--text)' : 'var(--faint)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: item.initial_note ? 'help' : undefined }}>
+                      {item.initial_note || '—'}
+                    </div>
+                  </td>
+                  <td>
+                    {item.initial_conclusion
+                      ? <span className={`badge ${SL_CONCLUSION_COLORS[item.initial_conclusion] || 'neutral'}`}>{item.initial_conclusion}</span>
+                      : <span className="badge idle">Pending</span>}
+                  </td>
+                  <td>
+                    <RecordingCell assignee={item.record_5min_assignee} drive={item.record_5min_drive} />
+                  </td>
+                  <td>
+                    <RecordingCell assignee={item.record_20min_assignee} drive={item.record_20min_drive} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {showAssignModal && (
+        <AssignRecordModal
+          games={unassigned}
+          onClose={() => setShowAssignModal(false)}
+          onSaved={fetchData}
+        />
+      )}
+
+      {showReviewModal && (
+        <AssignRecordModal
+          games={assigned}
+          mode="review"
+          onClose={() => setShowReviewModal(false)}
+          onSaved={fetchData}
+        />
+      )}
+
+      {showExtractModal && (
+        <ExtractChatModal
+          games={assigned}
+          onClose={() => setShowExtractModal(false)}
+        />
+      )}
+
+      {detailGameId && (
+        <div className="eval-modal-backdrop" onClick={() => setDetailGameId(null)}>
+          <div className="eval-modal-container" onClick={e => e.stopPropagation()}
+            style={{ padding: '20px 24px 24px' }}>
+            <EvalDetailPanel
+              initialGameId={detailGameId}
+              gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
+              role={role}
+              userName={userName}
+              canAssignRecords
+              onClose={() => setDetailGameId(null)}
+              onNavigate={setDetailGameId}
+              onSaved={fetchData}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Record Video Table ───────────────────────────────────────────────────────
+
+function RecordTable({ label, items, loading, onClickGame }: {
+  label: string
+  items: { item: ShortListItem; assignee: string | null; drive: string | null }[]
+  loading: boolean
+  onClickGame: (gameId: string) => void
+}) {
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <span className="card-label">{label}</span>
+        <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 600 }}>{items.length} game{items.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+        <table className="tbl">
+          <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
+            <tr>
+              <th style={{ width: 36 }}>#</th>
+              <th>Game</th>
+              <th>Category</th>
+              <th style={{ width: 200 }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 && !loading && (
+              <tr><td colSpan={4} className="empty">No recordings</td></tr>
+            )}
+            {loading && <SkeletonRows cols={4} />}
+            {items.map(({ item, assignee, drive }, idx) => (
+              <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
+                onClick={() => onClickGame(item.game_id)}>
+                <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 160 }}>
+                    {item.icon_url ? (
+                      <img src={item.icon_url} alt="" width={28} height={28} style={{ borderRadius: 6, flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span className="pill muted" style={{ fontSize: 10, padding: '1px 6px' }}>{item.category_group}</span>
+                </td>
+                <td>
+                  <RecordingCell assignee={assignee} drive={drive} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Record Video Tab ─────────────────────────────────────────────────────────
+
+function RecordVideoTab() {
+  const { data: session } = useSession()
+  const userName = session?.user?.name || ''
+  const role = session?.user?.role
+
+  const [data, setData] = useState<ShortListItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [filterCategory, setFilterCategory] = useState('')
+  const [filterType, setFilterType] = useState<'all' | '5min' | '20min'>('all')
+  const [filterStatus, setFilterStatus] = useState<'' | 'pending' | 'done'>('')
+  const [search, setSearch] = useState('')
+  const [detailGameId, setDetailGameId] = useState<string | null>(null)
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const categories = filterCategory ? [filterCategory] : ['puzzle', 'arcade', 'simulation']
+      const results = await Promise.all(
+        categories.map(cat => {
+          const params = new URLSearchParams({ category: cat, limit: '500', has_recording: 'true' })
+          if (role !== 'admin' && role !== 'moderator' && userName) params.set('recorder', userName)
+          return fetch(`/api/evaluations?${params}`).then(r => r.json())
+        })
+      )
+      const all = results.flatMap(r => r.data || [])
+      setData(all)
+    } catch { /* ignore */ }
+    setLoading(false)
+  }, [filterCategory, userName, role])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  const baseFiltered = useMemo(() => {
+    let list = data
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(d => d.title.toLowerCase().includes(q))
+    }
+    return list
+  }, [data, search])
+
+  const stats = useMemo(() => {
+    let r5 = 0, r20 = 0, done5 = 0, done20 = 0
+    for (const d of data) {
+      if (d.record_5min_assignee) { r5++; if (d.record_5min_drive) done5++ }
+      if (d.record_20min_assignee) { r20++; if (d.record_20min_drive) done20++ }
+    }
+    return { total: data.length, r5, r20, done5, done20, done: done5 + done20, pending: (r5 - done5) + (r20 - done20) }
+  }, [data])
+
+  const list5 = useMemo(() => {
+    return baseFiltered
+      .filter(d => d.record_5min_assignee)
+      .filter(d => {
+        if (filterStatus === 'done') return !!d.record_5min_drive
+        if (filterStatus === 'pending') return !d.record_5min_drive
+        return true
+      })
+      .map(item => ({ item, assignee: item.record_5min_assignee, drive: item.record_5min_drive }))
+  }, [baseFiltered, filterStatus])
+
+  const list20 = useMemo(() => {
+    return baseFiltered
+      .filter(d => d.record_20min_assignee)
+      .filter(d => {
+        if (filterStatus === 'done') return !!d.record_20min_drive
+        if (filterStatus === 'pending') return !d.record_20min_drive
+        return true
+      })
+      .map(item => ({ item, assignee: item.record_20min_assignee, drive: item.record_20min_drive }))
+  }, [baseFiltered, filterStatus])
+
+  const show5 = filterType === 'all' || filterType === '5min'
+  const show20 = filterType === 'all' || filterType === '20min'
+  const totalShown = (show5 ? list5.length : 0) + (show20 ? list20.length : 0)
+
+  return (
+    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div className="page-head" style={{ marginBottom: 10 }}>
+        <div>
+          <h1 className="h-title">Videos</h1>
+          <p className="h-sub">{data.length} games · Record Video{role !== 'admin' && role !== 'moderator' && userName ? ` · ${userName}` : ''}</p>
+        </div>
+      </div>
+
+      {/* User context banner */}
+      {!loading && data.length > 0 && (
+        <div className="user-context-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+              {role !== 'admin' && role !== 'moderator' && userName
+                ? <>Hi {userName.split(' ')[0]}! You have <strong>{stats.pending}</strong> recording{stats.pending !== 1 ? 's' : ''} to submit.</>
+                : <>{stats.total} games with recording assignments</>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 20 }}>
+            <div className="banner-stat">
+              <div className="banner-stat-num" style={{ color: 'var(--text)' }}>{stats.r5}</div>
+              <div className="banner-stat-label">5 min</div>
+            </div>
+            <div className="banner-stat">
+              <div className="banner-stat-num" style={{ color: 'var(--text)' }}>{stats.r20}</div>
+              <div className="banner-stat-label">20 min</div>
+            </div>
+            <div className="banner-stat">
+              <div className="banner-stat-num" style={{ color: 'var(--good)' }}>{stats.done}</div>
+              <div className="banner-stat-label">Done</div>
+            </div>
+            <div className="banner-stat">
+              <div className="banner-stat-num" style={{ color: stats.pending > 0 ? 'var(--warn)' : 'var(--faint)' }}>{stats.pending}</div>
+              <div className="banner-stat-label">Pending</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
+        <div className="search-wrap">
+          <span className="search-icon-abs">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+            </svg>
+          </span>
+          <input className="search-input" placeholder="Search games..."
+            value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+        <div style={{ width: 160 }}>
+          <StyledSelect
+            value={filterCategory}
+            onChange={setFilterCategory}
+            placeholder="All categories"
+            options={[
+              { value: '', label: 'All categories' },
+              { value: 'puzzle', label: 'Puzzle' },
+              { value: 'arcade', label: 'Arcade' },
+              { value: 'simulation', label: 'Simulation' },
+            ]}
+          />
+        </div>
+
+        <div className="seg-wrapper">
+          {([
+            { value: 'all', label: 'All' },
+            { value: '5min', label: '5 min' },
+            { value: '20min', label: '20 min' },
+          ] as const).map(s => (
+            <button key={s.value}
+              className={`seg-btn-premium${filterType === s.value ? ' active' : ''}`}
+              onClick={() => setFilterType(s.value)}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="seg-wrapper">
+          {([
+            { value: '', label: 'All' },
+            { value: 'pending', label: 'Pending' },
+            { value: 'done', label: 'Done' },
+          ] as const).map(s => (
+            <button key={s.value}
+              className={`seg-btn-premium${filterStatus === s.value ? ' active' : ''}`}
+              onClick={() => setFilterStatus(s.value)}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>
+          {loading ? 'Loading...' : `${totalShown} results`}
+        </span>
+      </div>
+
+      {/* Split tables */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16, overflow: 'hidden' }}>
+        {show5 && <RecordTable label="5 MIN" items={list5} loading={loading} onClickGame={setDetailGameId} />}
+        {show20 && <RecordTable label="20 MIN" items={list20} loading={loading} onClickGame={setDetailGameId} />}
+      </div>
+
+      {detailGameId && (
+        <div className="eval-modal-backdrop" onClick={() => setDetailGameId(null)}>
+          <div className="eval-modal-container" onClick={e => e.stopPropagation()}
+            style={{ padding: '20px 24px 24px' }}>
+            <EvalDetailPanel
+              initialGameId={detailGameId}
+              gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
+              role={role}
+              userName={userName}
+              readOnly
+              onClose={() => setDetailGameId(null)}
+              onNavigate={setDetailGameId}
+              onSaved={() => {}}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Page Router ──────────────────────────────────────────────────────────────
+
+export default function VideosPage() {
+  const searchParams = useSearchParams()
+  const tab = searchParams.get('tab') || 'youtube'
+
+  if (tab === 'short_list') return <ShortListTab />
+  if (tab === 'record_video') return <RecordVideoTab />
+  return <YouTubeTab />
 }
