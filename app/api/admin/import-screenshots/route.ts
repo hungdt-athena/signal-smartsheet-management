@@ -54,8 +54,9 @@ export async function POST(req: NextRequest) {
     const byId = new Map<string, Item>()
     for (const raw of body.items) {
       const gameId = typeof raw.game_id === 'string' ? raw.game_id.trim() : ''
+      // https-only: blocks data:/http(internal-IP) targets reaching the server-side fetch.
       const urls = Array.isArray(raw.image_urls)
-        ? raw.image_urls.filter((u): u is string => typeof u === 'string' && u.length > 0).slice(0, MAX_URLS_PER_GAME)
+        ? raw.image_urls.filter((u): u is string => typeof u === 'string' && u.startsWith('https://')).slice(0, MAX_URLS_PER_GAME)
         : []
       if (!gameId || urls.length === 0 || byId.has(gameId)) continue
       byId.set(gameId, { game_id: gameId, image_urls: urls })
