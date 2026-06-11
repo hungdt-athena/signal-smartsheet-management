@@ -1,90 +1,83 @@
-# Smartsheet Cell-Image Fallback for StoreKit Screenshots — Design
+# Smartsheet Sync v2 — Cell Images, Demo Drive, Update Flow — Design
 
-**Date:** 2026-06-12
-**Scope:** new `POST /api/admin/import-screenshots` route, new n8n workflow `workflows/smartsheet-storekit-images.json`
+**Date:** 2026-06-12 (supersedes the earlier same-day "cell-image fallback" draft — scope expanded per user)
+**Scope:** new `POST /api/admin/import-screenshots` route, modified `workflows/smartsheet-to-db-evaluations.json` (flow 1, full re-sync), new `workflows/smartsheet-db-update-sync.json` (flow 2, incremental), small `EvalDetailPanel` addition.
 
 ## Problem
 
-For games whose StoreKit screenshots never arrived from the store API, evaluators paste a hand-taken screenshot directly into the **StoreKit column cell** on the games Smartsheets. Those images are invisible to the app. We want them pulled into Supabase as the game's manual screenshots so they show up in the eval detail panel — using the existing manual-screenshots pipeline (display + lazy cleanup when real StoreKit data arrives).
+Three gaps between the games Smartsheets and the DB:
+1. **StoreKit cell images.** For games whose StoreKit screenshots never arrived from the store API, evaluators paste a hand-taken screenshot into the StoreKit column cell. Invisible to the app today.
+2. **Drive Video column.** Holds a **demo video** link (unrelated to the 5/20-minute record videos — an earlier misunderstanding caused it to be skipped from import). Needs syncing.
+3. **Ongoing edits.** The team still works on Smartsheet until the app is published, so the DB drifts. A second flow must pick up changed rows and update the DB.
 
 ## Decisions (confirmed with user)
 
-- Image source: **cell images in the StoreKit column** (the same column whose `x` text value means dead link). One Smartsheet cell holds at most one image, so a game gets at most one screenshot from this source.
-- Direction: Smartsheet → DB. The DB is composed from several Smartsheets (one per category), so the sync runs **per sheet**: puzzle `2184120410001284`, arcade `3926172768358276`, simulation `7899099241074564`.
-- Runs as a **one-time backfill now**, and the same pieces are reusable from the future scheduled sync (idempotent thanks to skip rules).
-- **Skip rule:** a game is skipped when it already has StoreKit screenshots (`metadata->'screenshot_urls'` non-empty) **or** already has manual screenshots (`manual_screenshot_urls` non-empty — hand-uploaded images win), or doesn't exist in `game_info`.
-- Architecture: **hybrid**. The Smartsheet token lives only in n8n (cred `vAGuEElrZVb7OOoI`), so n8n resolves temporary image URLs; the Next app downloads/uploads/persists, reusing `lib/supabase-storage.ts` and the `sql.json` jsonb idiom (single-encoding — the double-encode bug class is already fixed and tested).
+- **Demo drive mapping:** Smartsheet `Drive Video` → existing `game_evaluations.drive_link` (it is independent of `record_5min_drive`/`record_20min_drive`; no migration needed). Shown as its own "Demo Video (Drive)" field in the detail panel.
+- **Flow 1 (full re-sync):** modify the existing `smartsheet-to-db-evaluations.json` to (a) DELETE the category at the start of the run, (b) map `Drive Video` → `drive_link`, (c) also catch StoreKit cell images and deliver them to the new app endpoint. One sheet per run (OOM rule), user runs it once per sheet to rebuild the DB.
+- **Flow 2 (incremental, new):** `GET /sheets/{id}?rowsModifiedSince=<now − 48h>` per sheet (all sheets in one run — modified-row payloads are small), **upsert** with `ON CONFLICT (game_id, category_group) DO UPDATE` on the sync-able fields, plus the same image catch. Scheduled daily (created inactive; user activates). Overlap-safe and stateless (fixed 48h lookback, upserts are idempotent).
+- **Conflict rule:** until the app is published, **Smartsheet wins** for sync-able fields (initial_evaluator, assigned_date, evaluate_date, initial_note, initial_conclusion, genre_1/2, youtube_link, drive_link). App-only fields are never touched by sync: `final_evaluator`, `record_*`, and `manual_screenshot_urls` (hand uploads win over cell images via the endpoint's skip rule).
+- Architecture unchanged from v1 draft: Smartsheet token lives only in n8n → n8n resolves temporary image URLs via `POST /2.0/imageurls`; the app endpoint downloads/uploads/persists using existing `lib/supabase-storage.ts` + `sql.json`.
 
 ## Components
 
-### 1. `POST /api/admin/import-screenshots` (new route)
+### 1. `POST /api/admin/import-screenshots` (new route — unchanged from v1 draft)
 
-Auth: `x-webhook-secret` header (n8n server-to-server) OR admin session — same dual scheme as `app/api/admin/import-evaluations/route.ts`. `maxDuration = 60`.
+Auth: `x-webhook-secret` OR admin session (same as `import-evaluations`). Body `{ items: [{ game_id, image_urls[] }] }`, ≤50 items, ≤10 URLs/game. Per game: skip when not in `game_info`, when `metadata->'screenshot_urls'` is a non-empty array, or when `manual_screenshot_urls` is non-empty; otherwise download (15s timeout, ≤5 MB, png/jpeg/webp by content-type), upload via `uploadScreenshot`, append once with `${sql.json(uploadedUrls)}`. Response: counts + `failed[]`. 503 when storage unconfigured. Both flows call this endpoint; idempotency lives here.
 
-Request body:
-```json
-{ "items": [ { "game_id": "...", "image_urls": ["https://...temporary..."] } ] }
-```
-Limits: ≤50 items per call; ≤10 URLs per game (in practice 1 — one cell image). Invalid body → 400. Storage unconfigured → 503.
+### 2. Flow 1 — `workflows/smartsheet-to-db-evaluations.json` (modified)
 
-Per item:
-1. Normalize: drop entries without `game_id` or with empty `image_urls`; dedup by `game_id` (first wins); cap URLs at 10.
-2. One batched state query:
-   ```sql
-   SELECT game_id,
-     CASE WHEN jsonb_typeof(metadata->'screenshot_urls') = 'array'
-          THEN jsonb_array_length(metadata->'screenshot_urls') ELSE 0 END > 0 AS has_storekit,
-     CASE WHEN jsonb_typeof(metadata->'manual_screenshot_urls') = 'array'
-          THEN jsonb_array_length(metadata->'manual_screenshot_urls') ELSE 0 END > 0 AS has_manual
-   FROM game_info WHERE game_id IN (...)
-   ```
-3. Skip → counters (`skipped_not_found`, `skipped_has_storekit`, `skipped_has_manual`).
-4. Otherwise download each URL server-side: `fetch` with a 15s `AbortSignal.timeout`, require 2xx, content-type whitelist `image/png|jpeg|webp` (parameters stripped), body ≤5 MB. Upload survivors via `uploadScreenshot(game_id, buf, ext, i)`.
-5. If ≥1 image uploaded: one `jsonb_set` append UPDATE using `${sql.json(uploadedUrls)}` (NEVER `JSON.stringify(...)::jsonb`). Count as `uploaded`. If every URL failed: push `{ game_id, error }` to `failed[]`.
+Existing graph: manual trigger → Sheet IDs (one id, swap per run) → Get Sheet (`includeAll=true`) → Build SQL (json_to_recordset insert) → Insert Rows (Postgres cred `KBZC0RGIJsc8d7GK`). Changes:
+- **Build SQL** adds `drive_link: clean(row['Drive Video'])` to the record and to the INSERT column list/recordset definition, and now prefixes the statement with `DELETE FROM game_evaluations WHERE category_group = '<category>';` (single execution, category is a code-node constant — clearing per category per run as requested).
+- **New image branch** off Get Sheet: Collect Cell Images (rows with `cells[StoreKit].image.id` + GameID, batches of 50) → IF non-empty → `POST /2.0/imageurls` → Build Items (join URLs by imageId, chunks of 50) → IF non-empty → `POST {APP_URL}/api/admin/import-screenshots` with `x-webhook-secret`.
 
-Response:
-```json
-{ "ok": true, "received": n, "uploaded": n, "skipped_has_storekit": n,
-  "skipped_has_manual": n, "skipped_not_found": n, "failed": [{ "game_id": "...", "error": "..." }] }
-```
-n8n logs these counts to the `flow_log` Google Sheet per repo convention.
+### 3. Flow 2 — `workflows/smartsheet-db-update-sync.json` (new)
 
-### 2. n8n workflow `workflows/smartsheet-storekit-images.json` (new)
+Schedule trigger (daily, imported inactive) + manual trigger. Config node lists ALL `{sheetId, category}` pairs (puzzle `2184120410001284` — note puzzle data spans ~6 sheets, user appends the remaining ids — arcade `3926172768358276`, simulation `7899099241074564`).
 
-Manual-trigger workflow, importable into n8n cloud (`autoai9.app.n8n.cloud`), following the conventions of the existing `workflows/smartsheet-to-db-evaluations.json` (credential IDs, app URL, `x-webhook-secret`, flow_log logging — the implementer must read that file and mirror its patterns).
+Per sheet: `GET /2.0/sheets/{id}?rowsModifiedSince={{ ISO(now − 48h) }}&includeAll=true` → returns only rows modified in the window. Then:
+- **Upsert branch:** same row-flattening as flow 1 →
+  ```sql
+  INSERT INTO game_evaluations (game_id, category_group, initial_evaluator, assigned_date,
+    evaluate_date, initial_note, initial_conclusion, genre_1, genre_2, youtube_link, drive_link)
+  SELECT ... FROM json_to_recordset($jrows$...$jrows$::json) AS v(...)
+  WHERE EXISTS (SELECT 1 FROM game_info gi WHERE gi.game_id = v.game_id)
+  ON CONFLICT (game_id, category_group) DO UPDATE SET
+    initial_evaluator = EXCLUDED.initial_evaluator,
+    assigned_date     = EXCLUDED.assigned_date,
+    evaluate_date     = EXCLUDED.evaluate_date,
+    initial_note      = EXCLUDED.initial_note,
+    initial_conclusion= EXCLUDED.initial_conclusion,
+    genre_1           = EXCLUDED.genre_1,
+    genre_2           = EXCLUDED.genre_2,
+    youtube_link      = EXCLUDED.youtube_link,
+    drive_link        = EXCLUDED.drive_link,
+    updated_at        = NOW();
+  ```
+  (new games inserted, changed games overwritten — Smartsheet wins; app-only columns untouched)
+- **Image branch:** identical to flow 1's, over the modified rows only.
+- **flow_log:** one row per run (`name='smartsheet-update-sync'`, note = aggregate counts JSON) to spreadsheet `1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg` tab `flow_log`, Google Sheets cred `UMl5XCc7aOcf9yi3`.
 
-Per category sheet (3 configured items):
-1. `GET /2.0/sheets/{sheetId}/columns` → find column IDs for `GameID` and `StoreKit` by title.
-2. `GET /2.0/sheets/{sheetId}?columnIds=<gameId>,<storekit>&include=objectValue` → slim row payload (simulation has ~17.5k rows; fetching only 2 columns keeps it manageable).
-3. Code node: keep rows where the StoreKit cell has `image.id` and GameID is non-empty → `{ game_id, imageId }`.
-4. `POST /2.0/imageurls` in batches (≤50 imageIds per call) → temporary URLs (they expire in ~30 minutes; the flow proceeds to delivery immediately).
-5. Code node: build `{ items: [{ game_id, image_urls: [url] }] }` chunks of 50.
-6. `POST {APP_URL}/api/admin/import-screenshots` with `x-webhook-secret` per chunk.
-7. Aggregate counts → append one `flow_log` row per category (`date, name='storekit-images-<category>', status, note=counts JSON, sheet_id`).
+### 4. `EvalDetailPanel` — Demo Video field
 
-### 3. No UI or cleanup changes
+Add a "Demo Video (Drive)" field in the Evaluation card (above the YouTube link): an URL input bound to the existing `driveLink` state (already wired into save → PATCH `drive_link`), editable under `canEditEval`, with an "Open demo video" link when set. The list table's existing Drive/Video button already displays `drive_link` — no other UI changes.
 
-Images land in `manual_screenshot_urls`, so the existing card displays them and the existing lazy cleanup removes them when real StoreKit data arrives. Nothing else to touch.
+## Lifecycle
+
+1. User runs flow 1 once per sheet → DB rebuilt (category cleared first), images backfilled.
+2. Flow 2 runs daily while the team still edits Smartsheet → changed rows upserted, new images caught.
+3. When the app is published and the team moves off Smartsheet, the user deactivates flow 2. `drive_link` then becomes app-editable via the new panel field; manual screenshots continue working as before.
 
 ## Error handling
 
-- Per-URL download failures degrade to `failed[]`/partial uploads — never abort the batch.
-- Expired Smartsheet URLs → download 403/410 → lands in `failed[]`; re-running the flow regenerates URLs.
-- Re-runs are idempotent: once a game has manual screenshots it's skipped (`skipped_has_manual`).
-- The route never deletes anything.
+- Endpoint: per-URL failures → `failed[]`; partial success persists; never deletes anything; expired Smartsheet URLs simply fail and are retried next run.
+- Flow 2 lookback (48h) > schedule period (24h) → missed runs self-heal; double-processing is harmless (upserts + endpoint skip rules).
+- Flow 1 DELETE+INSERT runs as one Postgres execution per sheet; a failed insert leaves the category empty but re-running the flow restores it (acceptable for a manual backfill).
 
 ## Out of scope (YAGNI)
 
-- Row attachments (paper-clip files) — user confirmed images are cell images.
-- Multi-image per game from Smartsheet (cells hold one image).
-- Scheduling the n8n flow (it will be invoked from the future phase-2 sync; for now manual runs).
-- Backfilling games whose StoreKit cell holds only `x` (dead link) — no image to take.
+- Row attachments (paper-clips); multi-image cells; webhook-based real-time sync; syncing DB → Smartsheet (one direction only); migrating `drive_link` semantics after publish.
 
 ## Testing
 
-- Jest (node), mocking `@/lib/db`, `@/lib/supabase-storage`, and `global.fetch`:
-  - 401 without secret/admin; 503 unconfigured; 400 bad body / >50 items
-  - skip paths: not found, has storekit, has manual
-  - happy path: downloads, uploads, single `sql.json` UPDATE param is the raw URL array, correct counters
-  - download failure and non-image content-type → `failed[]` / partial
-- n8n flow: dry-run on the puzzle sheet (smallest, 391 rows) first; verify `flow_log` row + spot-check one game in the UI.
+- Jest for the endpoint (mock db/storage/fetch): auth, 503, 400, three skip paths, happy path asserting raw-array `sql.json` param, download failure, bad content-type.
+- Workflows: JSON validity check (`python3 json.load`), then live dry-run: flow 1 on the puzzle sheet, flow 2 manual run right after (should report ~0 changes), verify flow_log rows + spot-check one game with a pasted StoreKit image and one with a Drive Video link.

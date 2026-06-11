@@ -1,21 +1,23 @@
-# Smartsheet Cell-Image Fallback Implementation Plan
+# Smartsheet Sync v2 Implementation Plan (images + demo drive + update flow)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Pull screenshots that evaluators pasted into the StoreKit column cells on the games Smartsheets into Supabase as each game's manual screenshots, for games that have neither StoreKit nor manual images yet.
+**Goal:** Rebuild the Smartsheet→DB sync so it carries StoreKit cell images (→ Supabase manual screenshots), the Drive Video demo link (→ `drive_link`), and keeps the DB updated daily while the team still edits Smartsheet.
 
-**Architecture:** The Smartsheet token lives only in n8n, so an n8n workflow (one sheet per run — the DB is composed from several Smartsheets) collects `{game_id, imageId}` pairs from StoreKit cells, resolves temporary image URLs via `POST /2.0/imageurls`, and POSTs `{items: [{game_id, image_urls}]}` batches to a new app endpoint. The endpoint downloads each image server-side and reuses the existing manual-screenshots machinery (`uploadScreenshot`, `sql.json` jsonb append, skip rules). Idempotent: games already having StoreKit or manual screenshots are skipped, so re-runs and future scheduled syncs are safe.
+**Architecture:** A new app endpoint ingests image URL batches (n8n holds the Smartsheet token and resolves temporary URLs via `POST /2.0/imageurls`). Flow 1 (existing `smartsheet-to-db-evaluations.json`, modified) does the one-time full rebuild: DELETE category → insert with `drive_link` → image branch. Flow 2 (new) runs daily with `rowsModifiedSince=now−48h` and upserts (`ON CONFLICT DO UPDATE`, Smartsheet wins on sync-able fields; app-only fields untouched) + the same image branch. The detail panel gains a Demo Video field bound to the already-wired `driveLink` state.
 
-**Tech Stack:** Next.js 14 App Router route handler, `lib/supabase-storage.ts` (existing), postgres.js `sql.json`, Jest (node), n8n workflow JSON (manual trigger).
+**Tech Stack:** Next.js 14 route handler, `lib/supabase-storage.ts`, postgres.js `sql.json`, Jest (node), n8n workflow JSON.
 
 **Spec:** `docs/superpowers/specs/2026-06-12-smartsheet-screenshot-fallback-design.md`
 
-**Grounding facts (verified in repo):**
-- Reference n8n flow: `workflows/smartsheet-to-db-evaluations.json` — manual trigger, ONE sheet id per run (big sheets OOM n8n), Smartsheet HTTP header-auth credential placeholder `REPLACE_WITH_YOUR_SMARTSHEET_HEADER_AUTH_CRED_ID`.
-- flow_log convention: Google Sheets node, documentId `1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg`, sheetName `flow_log` (columns date, name, status, note, sheet_id), credential `googleSheetsOAuth2Api` id `UMl5XCc7aOcf9yi3` name `HandoverRequest-HungDT` (see `workflows/smartsheet-delete-monitor.json`).
-- Sheet ids: puzzle `2184120410001284`, arcade `3926172768358276`, simulation `7899099241074564` (puzzle is additionally split across ~6 sheets — the Config node holds one id, swapped per run).
-- App-side auth pattern: `x-webhook-secret` header OR admin session — copy from `app/api/admin/import-evaluations/route.ts:50-59`.
-- jsonb writes MUST use `${sql.json(value)}` — `JSON.stringify(...)::jsonb` double-encodes in postgres.js (bug already hit and fixed in the screenshots route).
+**Grounding facts (verified):**
+- Flow 1 file `workflows/smartsheet-to-db-evaluations.json`: manualTrigger → `Sheet IDs` code (ONE id per run; big sheets OOM n8n) → `Get Sheet` (httpRequest 4.2, `includeAll=true`, httpHeaderAuth cred placeholder `REPLACE_WITH_YOUR_SMARTSHEET_HEADER_AUTH_CRED_ID`) → `Build SQL` (json_to_recordset with `$jrows$` dollar-quoting) → `Insert Rows` (postgres cred id `KBZC0RGIJsc8d7GK`).
+- flow_log: Google Sheets node v4.5, documentId `1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg`, sheetName `flow_log` (date, name, status, note, sheet_id), cred `googleSheetsOAuth2Api` id `UMl5XCc7aOcf9yi3` name `HandoverRequest-HungDT` (shape in `workflows/smartsheet-delete-monitor.json`).
+- Sheet ids: puzzle `2184120410001284` (puzzle spans ~6 sheets — user appends the rest), arcade `3926172768358276`, simulation `7899099241074564`.
+- `game_evaluations` has `drive_link` and `updated_at`; unique key `(game_id, category_group)`; FK to `game_info(game_id)`.
+- App auth pattern (`x-webhook-secret` OR admin session): `app/api/admin/import-evaluations/route.ts:50-59`.
+- jsonb writes MUST use `${sql.json(value)}` — `JSON.stringify(...)::jsonb` double-encodes (bug fixed in commit b51aceb).
+- `EvalDetailPanel.tsx` already holds `driveLink` state synced from `ev.drive_link` and `save()` sends `body.drive_link` when changed — only the input JSX is missing.
 
 ---
 
@@ -25,9 +27,7 @@
 - Create: `__tests__/api/import-screenshots.test.ts`
 - Create: `app/api/admin/import-screenshots/route.ts`
 
-- [ ] **Step 1: Write the failing tests**
-
-Create `__tests__/api/import-screenshots.test.ts`:
+- [ ] **Step 1: Write the failing tests** — create `__tests__/api/import-screenshots.test.ts`:
 
 ```typescript
 /**
@@ -181,7 +181,7 @@ describe('POST /api/admin/import-screenshots', () => {
 
 - [ ] **Step 2: Run `npx jest __tests__/api/import-screenshots.test.ts` — verify FAIL (module not found). Record output.**
 
-- [ ] **Step 3: Implement `app/api/admin/import-screenshots/route.ts`**
+- [ ] **Step 3: Implement `app/api/admin/import-screenshots/route.ts`:**
 
 ```typescript
 import { NextRequest, NextResponse } from 'next/server'
@@ -312,14 +312,9 @@ export async function POST(req: NextRequest) {
 }
 ```
 
-- [ ] **Step 4: Run `npx jest __tests__/api/import-screenshots.test.ts` → 8 tests PASS**
-
-- [ ] **Step 5: Lint + typecheck + full feature suites**
-
-Run: `npx tsc --noEmit && npx next lint --file app/api/admin/import-screenshots/route.ts && npx jest __tests__/api/ __tests__/lib/`
-Expected: clean; only the 3 pre-existing evaluators/workflows-trigger failures remain.
-
-- [ ] **Step 6: Commit (only the two named files — dirty tree)**
+- [ ] **Step 4: `npx jest __tests__/api/import-screenshots.test.ts` → 8 PASS**
+- [ ] **Step 5: `npx tsc --noEmit && npx next lint --file app/api/admin/import-screenshots/route.ts && npx jest __tests__/api/ __tests__/lib/`** — clean; only the 3 pre-existing evaluators/workflows-trigger failures remain.
+- [ ] **Step 6: Commit**
 
 ```bash
 git add app/api/admin/import-screenshots/route.ts __tests__/api/import-screenshots.test.ts
@@ -328,148 +323,283 @@ git commit -m "feat: import-screenshots API ingesting Smartsheet cell images as 
 
 ---
 
-### Task 2: n8n workflow `workflows/smartsheet-storekit-images.json`
+### Task 2: Demo Video field in `EvalDetailPanel`
 
 **Files:**
-- Create: `workflows/smartsheet-storekit-images.json`
+- Modify: `components/EvalDetailPanel.tsx`
 
-Read `workflows/smartsheet-to-db-evaluations.json` first (the conventions: manual trigger, one-sheet-per-run Config code node, Smartsheet header-auth credential placeholder) and the flow_log Google Sheets node in `workflows/smartsheet-delete-monitor.json`.
+The panel already has `const [driveLink, setDriveLink] = useState('')`, `applyData` sets it from `data.drive_link`, and `save()` sends `body.drive_link = driveLink` when changed — only the input JSX is missing.
 
-- [ ] **Step 1: Write the workflow file** with this exact node graph (positions are layout-only; keep the JSON valid for n8n import):
+- [ ] **Step 1: Add the field.** In the Evaluation card, directly ABOVE the `{ev.youtube_link && (` block, insert:
 
-`Run (manual)` → `Config (swap per run)` → `Get Sheet` → `Collect Cell Images` → `Has Images?` (IF) → `Get Image URLs` → `Build Items` → `Has Items?` (IF) → `Send To App` → `Summary` → `Log flow_log`
-
-Node specs:
-
-1. **Run (manual)** — `n8n-nodes-base.manualTrigger`.
-
-2. **Config (swap per run)** — `n8n-nodes-base.code`:
-```javascript
-// ONE sheet per run (big sheets OOM n8n — same rule as smartsheet-to-db-evaluations).
-// Swap these two lines per run. Sheets: puzzle 2184120410001284 (split across ~6 ids),
-// arcade 3926172768358276, simulation 7899099241074564.
-const sheetId = '2184120410001284';
-const category = 'puzzle';
-return [{ json: { sheetId, category } }];
+```tsx
+              <div className="field">
+                <span className="label">Demo Video (Drive)</span>
+                <input
+                  className="input"
+                  type="url"
+                  value={driveLink}
+                  onChange={e => { setDriveLink(e.target.value); setDirty(true) }}
+                  placeholder="https://drive.google.com/..."
+                  disabled={!canEditEval}
+                />
+                {ev.drive_link && (
+                  <a href={ev.drive_link} target="_blank" rel="noopener"
+                    style={{ fontSize: 12, color: 'var(--accent)', wordBreak: 'break-all' }}>
+                    Open demo video
+                  </a>
+                )}
+              </div>
 ```
 
-3. **Get Sheet** — `n8n-nodes-base.httpRequest` v4.2: `=https://api.smartsheet.com/2.0/sheets/{{ $json.sheetId }}?includeAll=true`, `genericCredentialType`/`httpHeaderAuth`, credentials id `REPLACE_WITH_YOUR_SMARTSHEET_HEADER_AUTH_CRED_ID` name `Smartsheet Authorization Header` (same placeholder convention as the reference flow — the user wires the real credential on import).
+- [ ] **Step 2: `npx tsc --noEmit && npx next lint --file components/EvalDetailPanel.tsx`** — clean (img warnings pre-existing).
+- [ ] **Step 3: Commit**
 
-4. **Collect Cell Images** — `n8n-nodes-base.code`:
+```bash
+git add components/EvalDetailPanel.tsx
+git commit -m "feat: demo video (drive_link) field in eval detail panel"
+```
+
+---
+
+### Task 3: Flow 1 — modify `workflows/smartsheet-to-db-evaluations.json`
+
+**Files:**
+- Modify: `workflows/smartsheet-to-db-evaluations.json`
+
+Read the file first. Keep the existing 4 nodes/positions; make these changes:
+
+- [ ] **Step 1: Build SQL node — add drive_link + DELETE prefix.** In the `jsCode`:
+  - In the `out.push({...})` object add: `drive_link: clean(row['Drive Video']),`
+  - Extend the INSERT statement: column list gains `drive_link`; the SELECT gains `v.drive_link`; the recordset definition gains `drive_link text`.
+  - Prefix the statement (same string, before `INSERT`):
+    `"DELETE FROM game_evaluations WHERE category_group = '" + category + "';\n"`
+    (`category` is the code-node constant `'puzzle'` etc. — not user input; one DELETE per run as decided).
+
+- [ ] **Step 2: Add the image branch** — 5 new nodes, all fed from `Get Sheet` (second connection from its output):
+
+  a. **Collect Cell Images** (`n8n-nodes-base.code`):
+  ```javascript
+  // Rows whose StoreKit cell holds a pasted image → { game_id, imageId },
+  // batched 50 per item for POST /imageurls.
+  const out = [];
+  const seen = new Set();
+  for (const item of $input.all()) {
+    const data = item.json || {};
+    const cols = data.columns || [];
+    const idByTitle = Object.fromEntries(cols.map(c => [c.title, c.id]));
+    const gameIdCol = idByTitle['GameID'];
+    const storeKitCol = idByTitle['StoreKit'];
+    if (!gameIdCol || !storeKitCol) continue;
+    for (const r of (data.rows || [])) {
+      let gameId = null, imageId = null;
+      for (const cell of (r.cells || [])) {
+        if (cell.columnId === gameIdCol && cell.value != null) gameId = String(cell.value).trim();
+        if (cell.columnId === storeKitCol && cell.image && cell.image.id) imageId = cell.image.id;
+      }
+      if (!gameId || !imageId || seen.has(gameId)) continue;
+      seen.add(gameId);
+      out.push({ game_id: gameId, imageId });
+    }
+  }
+  const batches = [];
+  for (let i = 0; i < out.length; i += 50) batches.push({ json: { batch: out.slice(i, i + 50) } });
+  return batches.length ? batches : [{ json: { batch: [] } }];
+  ```
+
+  b. **Has Images?** (`n8n-nodes-base.if`): number condition `={{ $json.batch.length }}` larger than `0`; false branch ends.
+
+  c. **Get Image URLs** (`n8n-nodes-base.httpRequest` 4.2): POST `https://api.smartsheet.com/2.0/imageurls`, same Smartsheet httpHeaderAuth credential placeholder as `Get Sheet`, `specifyBody: json`, `jsonBody`: `={{ JSON.stringify($json.batch.map(b => ({ imageId: b.imageId }))) }}`.
+
+  d. **Build Items** (`n8n-nodes-base.code`):
+  ```javascript
+  // Join temporary URLs (expire ~30 min) back to game_ids by imageId; chunk 50 per app call.
+  const sent = $('Has Images?').all();
+  const responses = $input.all();
+  const items = [];
+  for (let i = 0; i < responses.length; i++) {
+    const batch = (sent[i] && sent[i].json.batch) || [];
+    const urlById = Object.fromEntries(((responses[i].json || {}).imageUrls || []).map(u => [u.imageId, u.url]));
+    for (const b of batch) {
+      const url = urlById[b.imageId];
+      if (url) items.push({ game_id: b.game_id, image_urls: [url] });
+    }
+  }
+  const chunks = [];
+  for (let i = 0; i < items.length; i += 50) chunks.push({ json: { items: items.slice(i, i + 50) } });
+  return chunks.length ? chunks : [{ json: { items: [] } }];
+  ```
+
+  e. **Has Items?** (`n8n-nodes-base.if`): `={{ $json.items.length }}` > 0 → **Send To App** (`n8n-nodes-base.httpRequest` 4.2): POST `=REPLACE_WITH_APP_URL/api/admin/import-screenshots`, `specifyBody: json`, `jsonBody`: `={{ JSON.stringify({ items: $json.items }) }}`, sendHeaders with header `x-webhook-secret` = `REPLACE_WITH_WEBHOOK_SECRET` (placeholder convention — user fills on import).
+
+- [ ] **Step 3: Validate** — `python3 -c "import json; d=json.load(open('workflows/smartsheet-to-db-evaluations.json')); print(len(d['nodes']), 'nodes'); assert all(any(n['name']==k for n in d['nodes']) for k in d['connections'])"`
+  Expected: `9 nodes`, no assertion error. Also verify the Build SQL code string still parses as a JSON string (no raw newlines outside `\n`).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add workflows/smartsheet-to-db-evaluations.json
+git commit -m "feat: flow 1 clears category, syncs Drive Video, catches StoreKit cell images"
+```
+
+---
+
+### Task 4: Flow 2 — create `workflows/smartsheet-db-update-sync.json`
+
+**Files:**
+- Create: `workflows/smartsheet-db-update-sync.json`
+
+Node graph (mirror flow 1's JSON style; read `workflows/smartsheet-delete-monitor.json` for the exact Google Sheets append node shape):
+
+`Run (manual)` + `Daily (schedule)` → `Config` → `Get Modified Rows` → [upsert branch: `Build Upsert SQL` → `Upsert Rows`] and [image branch: `Collect Cell Images` → `Has Images?` → `Get Image URLs` → `Build Items` → `Has Items?` → `Send To App`] → both branches → `Summary` → `Log flow_log`
+
+- [ ] **Step 1: Write the workflow.** Node specs:
+
+1. **Run (manual)** — `n8n-nodes-base.manualTrigger`. **Daily (schedule)** — `n8n-nodes-base.scheduleTrigger` (interval: days=1, trigger at 06:00). Both connect to `Config`. The workflow JSON ships with `"active": false`.
+
+2. **Config** — `n8n-nodes-base.code`:
 ```javascript
-// Rows whose StoreKit cell holds a pasted image → { game_id, imageId },
-// batched 50 per item for POST /imageurls.
+// ALL sheets in one run — rowsModifiedSince keeps payloads small.
+// Add the remaining puzzle sheet ids here (puzzle spans ~6 sheets).
+const LOOKBACK_HOURS = 48;
+const sheets = [
+  { sheetId: '2184120410001284', category: 'puzzle' },
+  { sheetId: '3926172768358276', category: 'arcade' },
+  { sheetId: '7899099241074564', category: 'simulation' },
+];
+const since = new Date(Date.now() - LOOKBACK_HOURS * 3600 * 1000).toISOString();
+return sheets.map(s => ({ json: { ...s, since } }));
+```
+
+3. **Get Modified Rows** — `n8n-nodes-base.httpRequest` 4.2: `=https://api.smartsheet.com/2.0/sheets/{{ $json.sheetId }}?rowsModifiedSince={{ $json.since }}&includeAll=true`, Smartsheet httpHeaderAuth placeholder cred. Output: one item per sheet, only rows modified in the window (columns array still complete).
+
+4. **Build Upsert SQL** — `n8n-nodes-base.code` (same flatten/clean/parse helpers as flow 1's Build SQL — copy them; category comes from the paired Config item):
+```javascript
 const out = [];
 const seen = new Set();
-for (const item of $input.all()) {
-  const data = item.json || {};
+function clean(v){ const s = v == null ? '' : String(v).trim(); return s === '' ? null : s; }
+function parseTs(v){ const s = clean(v); if(!s) return null; const d = new Date(s); return isNaN(d.getTime()) ? null : d.toISOString(); }
+function parseDate(v){ const t = parseTs(v); return t ? t.slice(0,10) : null; }
+
+const configs = $('Config').all();
+const inputs = $input.all();
+for (let idx = 0; idx < inputs.length; idx++) {
+  const data = inputs[idx].json || {};
+  const category = configs[idx].json.category;
   const cols = data.columns || [];
-  const idByTitle = Object.fromEntries(cols.map(c => [c.title, c.id]));
-  const gameIdCol = idByTitle['GameID'];
-  const storeKitCol = idByTitle['StoreKit'];
-  if (!gameIdCol || !storeKitCol) continue;
+  const idToTitle = Object.fromEntries(cols.map(c => [c.id, c.title]));
   for (const r of (data.rows || [])) {
-    let gameId = null, imageId = null;
+    const row = {};
     for (const cell of (r.cells || [])) {
-      if (cell.columnId === gameIdCol && cell.value != null) gameId = String(cell.value).trim();
-      if (cell.columnId === storeKitCol && cell.image && cell.image.id) imageId = cell.image.id;
+      const t = idToTitle[cell.columnId];
+      if (t) row[t] = cell.value != null ? cell.value : (cell.displayValue != null ? cell.displayValue : '');
     }
-    if (!gameId || !imageId || seen.has(gameId)) continue;
-    seen.add(gameId);
-    out.push({ game_id: gameId, imageId });
+    const gameId = clean(row['GameID']);
+    if (!gameId) continue;
+    const key = category + ':' + gameId;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const sk = (clean(row['StoreKit']) || '').toLowerCase();
+    let conclusion = clean(row['Initial Conclusion']);
+    if (sk === 'x') conclusion = 'Link_dead';
+    out.push({
+      game_id: gameId,
+      category_group: category,
+      initial_evaluator: clean(row['Initial Evaluator']),
+      assigned_date: parseDate(row['Assigned Date']),
+      evaluate_date: parseTs(row['Evaluate Date']),
+      initial_note: clean(row['Initial Evaluator note']),
+      initial_conclusion: conclusion,
+      genre_1: clean(row['Genre 1']),
+      genre_2: clean(row['Genre 2']),
+      youtube_link: clean(row['Youtube Video']),
+      drive_link: clean(row['Drive Video']),
+    });
   }
 }
-const batches = [];
-for (let i = 0; i < out.length; i += 50) batches.push({ json: { batch: out.slice(i, i + 50) } });
-return batches.length ? batches : [{ json: { batch: [] } }];
+
+if (out.length === 0) return [{ json: { sql: 'SELECT 1;', count: 0 } }];
+
+const jsonLit = JSON.stringify(out);
+const sql =
+  "INSERT INTO game_evaluations (game_id, category_group, initial_evaluator, assigned_date, evaluate_date, initial_note, initial_conclusion, genre_1, genre_2, youtube_link, drive_link)\n" +
+  "SELECT v.game_id, v.category_group, v.initial_evaluator, v.assigned_date, v.evaluate_date, v.initial_note, v.initial_conclusion, v.genre_1, v.genre_2, v.youtube_link, v.drive_link\n" +
+  "FROM json_to_recordset($jrows$" + jsonLit + "$jrows$::json) AS v(\n" +
+  "  game_id text, category_group text, initial_evaluator text, assigned_date date,\n" +
+  "  evaluate_date timestamptz, initial_note text, initial_conclusion text,\n" +
+  "  genre_1 text, genre_2 text, youtube_link text, drive_link text)\n" +
+  "WHERE EXISTS (SELECT 1 FROM game_info gi WHERE gi.game_id = v.game_id)\n" +
+  "ON CONFLICT (game_id, category_group) DO UPDATE SET\n" +
+  "  initial_evaluator = EXCLUDED.initial_evaluator,\n" +
+  "  assigned_date = EXCLUDED.assigned_date,\n" +
+  "  evaluate_date = EXCLUDED.evaluate_date,\n" +
+  "  initial_note = EXCLUDED.initial_note,\n" +
+  "  initial_conclusion = EXCLUDED.initial_conclusion,\n" +
+  "  genre_1 = EXCLUDED.genre_1,\n" +
+  "  genre_2 = EXCLUDED.genre_2,\n" +
+  "  youtube_link = EXCLUDED.youtube_link,\n" +
+  "  drive_link = EXCLUDED.drive_link,\n" +
+  "  updated_at = NOW();";
+
+return [{ json: { sql, count: out.length } }];
 ```
+(Smartsheet wins on these fields; `final_evaluator`, `record_*`, manual screenshots untouched.)
 
-5. **Has Images?** — `n8n-nodes-base.if`: number condition `={{ $json.batch.length }}` larger than `0`. False branch ends.
+5. **Upsert Rows** — `n8n-nodes-base.postgres` 2.6, executeQuery `={{ $json.sql }}`, credential id `KBZC0RGIJsc8d7GK` name `Postgres`.
 
-6. **Get Image URLs** — `n8n-nodes-base.httpRequest` v4.2: POST `https://api.smartsheet.com/2.0/imageurls`, same Smartsheet credential, `specifyBody: json`, `jsonBody`: `={{ JSON.stringify($json.batch.map(b => ({ imageId: b.imageId }))) }}`. (Response: `{ imageUrls: [{ imageId, url }], urlExpiresInMillis }` — URLs are temporary, so the flow continues to delivery immediately.)
+6–10. **Image branch** — identical five nodes to flow 1 Task 3 Step 2 (Collect Cell Images / Has Images? / Get Image URLs / Build Items / Has Items? → Send To App), fed from `Get Modified Rows`'s output, with the same code and the same `REPLACE_WITH_APP_URL` / `REPLACE_WITH_WEBHOOK_SECRET` placeholders.
 
-7. **Build Items** — `n8n-nodes-base.code`:
+11. **Summary** — `n8n-nodes-base.code`, fed from BOTH `Upsert Rows` and `Send To App`:
 ```javascript
-// Join temporary URLs back to game_ids by imageId; chunk 50 per app call.
-const sent = $('Has Images?').all();      // batches, same order as responses
-const responses = $input.all();
-const items = [];
-for (let i = 0; i < responses.length; i++) {
-  const batch = (sent[i] && sent[i].json.batch) || [];
-  const urlById = Object.fromEntries(((responses[i].json || {}).imageUrls || []).map(u => [u.imageId, u.url]));
-  for (const b of batch) {
-    const url = urlById[b.imageId];
-    if (url) items.push({ game_id: b.game_id, image_urls: [url] });
-  }
-}
-const chunks = [];
-for (let i = 0; i < items.length; i += 50) chunks.push({ json: { items: items.slice(i, i + 50) } });
-return chunks.length ? chunks : [{ json: { items: [] } }];
-```
-
-8. **Has Items?** — `n8n-nodes-base.if`: `={{ $json.items.length }}` larger than `0`.
-
-9. **Send To App** — `n8n-nodes-base.httpRequest` v4.2: POST `=REPLACE_WITH_APP_URL/api/admin/import-screenshots`, `specifyBody: json`, `jsonBody`: `={{ JSON.stringify({ items: $json.items }) }}`, sendHeaders with header `x-webhook-secret` value `REPLACE_WITH_WEBHOOK_SECRET` (user fills both placeholders on import; APP_URL is the Replit deployment).
-
-10. **Summary** — `n8n-nodes-base.code`:
-```javascript
-// One flow_log row per run with aggregate counts from all app responses.
-const agg = { uploaded: 0, skipped_has_storekit: 0, skipped_has_manual: 0, skipped_not_found: 0, failed: 0 };
+const agg = { upserted: 0, uploaded: 0, skipped_has_storekit: 0, skipped_has_manual: 0, skipped_not_found: 0, failed: 0 };
 for (const item of $input.all()) {
   const j = item.json || {};
+  if (typeof j.count === 'number') agg.upserted += j.count;       // from Build Upsert SQL passthrough
   agg.uploaded += j.uploaded || 0;
   agg.skipped_has_storekit += j.skipped_has_storekit || 0;
   agg.skipped_has_manual += j.skipped_has_manual || 0;
   agg.skipped_not_found += j.skipped_not_found || 0;
   agg.failed += (j.failed || []).length;
 }
-const cfg = $('Config (swap per run)').first().json;
 return [{ json: {
   date: new Date().toISOString(),
-  name: 'storekit-images-' + cfg.category,
+  name: 'smartsheet-update-sync',
   status: agg.failed === 0 ? 'success' : 'partial',
   note: JSON.stringify(agg),
-  sheet_id: cfg.sheetId,
+  sheet_id: '',
 } }];
 ```
+Note: the Postgres node's output doesn't echo `count` — wire `Build Upsert SQL` → `Upsert Rows` → `Summary` and read the upsert count via `$('Build Upsert SQL').all()` inside Summary instead if simpler; either approach is fine as long as the note carries a real count.
 
-11. **Log flow_log** — `n8n-nodes-base.googleSheets` v4.5, operation `append`, documentId `1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg` (mode id), sheetName `flow_log` (mode name), columns mapped from `date, name, status, note, sheet_id`, credential `googleSheetsOAuth2Api` id `UMl5XCc7aOcf9yi3` name `HandoverRequest-HungDT` (copy the exact parameter shape from the flow_log node in `workflows/smartsheet-delete-monitor.json`).
+12. **Log flow_log** — Google Sheets append, documentId `1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg`, sheetName `flow_log`, columns date/name/status/note/sheet_id, cred `UMl5XCc7aOcf9yi3` `HandoverRequest-HungDT` (copy node shape from `workflows/smartsheet-delete-monitor.json`).
 
-- [ ] **Step 2: Validate the JSON**
-
-Run: `python3 -c "import json; d=json.load(open('workflows/smartsheet-storekit-images.json')); print(len(d['nodes']), 'nodes,', len(d['connections']), 'connections')"`
-Expected: `11 nodes, 10 connections` (every non-trigger node referenced in `connections`; IF nodes wire their `true` output forward).
+- [ ] **Step 2: Validate** — `python3 -c "import json; d=json.load(open('workflows/smartsheet-db-update-sync.json')); print(len(d['nodes']), 'nodes,', len(d['connections']), 'connection sources')"`
+  Expected: 13 nodes (2 triggers + 11), every named connection source exists.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add workflows/smartsheet-storekit-images.json
-git commit -m "feat: n8n flow pulling StoreKit cell images into the screenshots API"
+git add workflows/smartsheet-db-update-sync.json
+git commit -m "feat: daily Smartsheet update-sync flow (rowsModifiedSince upsert + cell images)"
 ```
 
 ---
 
-### Task 3: Verify + handoff
+### Task 5: Verify + handoff
 
-**Files:** none (verification only)
+**Files:** none
 
-- [ ] **Step 1: Build**
-
-Run: `npm run build`
-Expected: clean.
-
-- [ ] **Step 2: Local endpoint smoke (optional, requires env)**
-
-With the dev server running and a known game_id lacking StoreKit:
+- [ ] **Step 1: `npm run build`** — clean.
+- [ ] **Step 2: Endpoint smoke (optional, env required):**
 ```bash
 curl -s -X POST localhost:3333/api/admin/import-screenshots \
   -H "Content-Type: application/json" -H "x-webhook-secret: $WEBHOOK_SECRET" \
-  -d '{"items":[{"game_id":"<id>","image_urls":["https://picsum.photos/600/400.jpg"]}]}'
+  -d '{"items":[{"game_id":"<id-without-storekit>","image_urls":["https://picsum.photos/600/400.jpg"]}]}'
 ```
-Expected: `uploaded: 1` (or the appropriate skip counter), image visible in the eval detail modal.
-
-- [ ] **Step 3: Handoff checklist for the user (n8n side — manual)**
-
-1. Import `workflows/smartsheet-storekit-images.json` into n8n cloud.
-2. Wire the Smartsheet header-auth credential on `Get Sheet` + `Get Image URLs`; set `REPLACE_WITH_APP_URL` and `REPLACE_WITH_WEBHOOK_SECRET` on `Send To App`.
-3. Run with the **puzzle** sheet first (smallest), check the `flow_log` row + spot-check one game in the UI, then swap the Config node per sheet (arcade, simulation, remaining puzzle sheet ids) and re-run.
+Expected: `uploaded: 1` or the correct skip counter; image visible in the detail modal.
+- [ ] **Step 3: Handoff checklist (n8n, manual):**
+1. Re-import the modified `smartsheet-to-db-evaluations.json` and the new `smartsheet-db-update-sync.json` into n8n cloud.
+2. Wire the Smartsheet header-auth credential on every Smartsheet HTTP node; fill `REPLACE_WITH_APP_URL` (Replit deployment) and `REPLACE_WITH_WEBHOOK_SECRET` on both `Send To App` nodes; confirm Postgres + Google Sheets credentials resolved.
+3. **Full rebuild:** run flow 1 once per sheet (swap the Sheet IDs/category constants each run: puzzle ids ×~6, arcade, simulation). Each run clears that category first.
+4. Run flow 2 manually right after — it should report ~0 changes (everything just synced). Check the `flow_log` rows.
+5. Activate flow 2's daily schedule. Deactivate it when the team stops working on Smartsheet (app published).
