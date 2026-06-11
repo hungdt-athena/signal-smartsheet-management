@@ -1,0 +1,490 @@
+{
+  "name": "smartsheet-db-update-sync",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-manual",
+      "name": "Run (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "trigger-daily",
+      "name": "Daily (schedule)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ALL sheets in one run -- rowsModifiedSince keeps payloads small.\n// Add the remaining puzzle sheet ids here (puzzle spans ~6 sheets).\nconst LOOKBACK_HOURS = 48;\nconst sheets = [\n  { sheetId: '2184120410001284', category: 'puzzle' },\n  { sheetId: '3926172768358276', category: 'arcade' },\n  { sheetId: '7899099241074564', category: 'simulation' },\n];\nconst since = new Date(Date.now() - LOOKBACK_HOURS * 3600 * 1000).toISOString();\nreturn sheets.map(s => ({ json: { ...s, since } }));\n"
+      },
+      "id": "config",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.smartsheet.com/2.0/sheets/{{ $json.sheetId }}?rowsModifiedSince={{ $json.since }}&includeAll=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "get-modified",
+      "name": "Get Modified Rows",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        100
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_SMARTSHEET_HEADER_AUTH_CRED_ID",
+          "name": "Smartsheet Authorization Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Upsert modified rows. Smartsheet wins on sync-able fields; app-only\n// columns (final_evaluator, record_*, manual screenshots) are never touched.\nconst out = [];\nconst seen = new Set();\nfunction clean(v){ const s = v == null ? '' : String(v).trim(); return s === '' ? null : s; }\nfunction parseTs(v){ const s = clean(v); if(!s) return null; const d = new Date(s); return isNaN(d.getTime()) ? null : d.toISOString(); }\nfunction parseDate(v){ const t = parseTs(v); return t ? t.slice(0,10) : null; }\n\nconst configs = $('Config').all();\nconst inputs = $input.all();\nfor (let idx = 0; idx < inputs.length; idx++) {\n  const data = inputs[idx].json || {};\n  const category = configs[idx].json.category;\n  const cols = data.columns || [];\n  const idToTitle = Object.fromEntries(cols.map(c => [c.id, c.title]));\n  for (const r of (data.rows || [])) {\n    const row = {};\n    for (const cell of (r.cells || [])) {\n      const t = idToTitle[cell.columnId];\n      if (t) row[t] = cell.value != null ? cell.value : (cell.displayValue != null ? cell.displayValue : '');\n    }\n    const gameId = clean(row['GameID']);\n    if (!gameId) continue;\n    const key = category + ':' + gameId;\n    if (seen.has(key)) continue;\n    seen.add(key);\n    const sk = (clean(row['StoreKit']) || '').toLowerCase();\n    let conclusion = clean(row['Initial Conclusion']);\n    if (sk === 'x') conclusion = 'Link_dead';\n    out.push({\n      game_id: gameId,\n      category_group: category,\n      initial_evaluator: clean(row['Initial Evaluator']),\n      assigned_date: parseDate(row['Assigned Date']),\n      evaluate_date: parseTs(row['Evaluate Date']),\n      initial_note: clean(row['Initial Evaluator note']),\n      initial_conclusion: conclusion,\n      genre_1: clean(row['Genre 1']),\n      genre_2: clean(row['Genre 2']),\n      youtube_link: clean(row['Youtube Video']),\n      drive_link: clean(row['Drive Video']),\n    });\n  }\n}\n\nif (out.length === 0) return [{ json: { sql: 'SELECT 1;', count: 0 } }];\n\nconst jsonLit = JSON.stringify(out);\nconst sql =\n  \"INSERT INTO game_evaluations (game_id, category_group, initial_evaluator, assigned_date, evaluate_date, initial_note, initial_conclusion, genre_1, genre_2, youtube_link, drive_link)\\n\" +\n  \"SELECT v.game_id, v.category_group, v.initial_evaluator, v.assigned_date, v.evaluate_date, v.initial_note, v.initial_conclusion, v.genre_1, v.genre_2, v.youtube_link, v.drive_link\\n\" +\n  \"FROM json_to_recordset($jrows$\" + jsonLit + \"$jrows$::json) AS v(\\n\" +\n  \"  game_id text, category_group text, initial_evaluator text, assigned_date date,\\n\" +\n  \"  evaluate_date timestamptz, initial_note text, initial_conclusion text,\\n\" +\n  \"  genre_1 text, genre_2 text, youtube_link text, drive_link text)\\n\" +\n  \"WHERE EXISTS (SELECT 1 FROM game_info gi WHERE gi.game_id = v.game_id)\\n\" +\n  \"ON CONFLICT (game_id, category_group) DO UPDATE SET\\n\" +\n  \"  initial_evaluator = EXCLUDED.initial_evaluator,\\n\" +\n  \"  assigned_date = EXCLUDED.assigned_date,\\n\" +\n  \"  evaluate_date = EXCLUDED.evaluate_date,\\n\" +\n  \"  initial_note = EXCLUDED.initial_note,\\n\" +\n  \"  initial_conclusion = EXCLUDED.initial_conclusion,\\n\" +\n  \"  genre_1 = EXCLUDED.genre_1,\\n\" +\n  \"  genre_2 = EXCLUDED.genre_2,\\n\" +\n  \"  youtube_link = EXCLUDED.youtube_link,\\n\" +\n  \"  drive_link = EXCLUDED.drive_link,\\n\" +\n  \"  updated_at = NOW();\";\n\nreturn [{ json: { sql, count: out.length } }];\n"
+      },
+      "id": "build-upsert",
+      "name": "Build Upsert SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "id": "upsert-rows",
+      "name": "Upsert Rows",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2200,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "KBZC0RGIJsc8d7GK",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// One flow_log row per run with aggregate counts.\n// Send To App may not have executed (no images) -- guard the reference.\nconst agg = { upserted: 0, uploaded: 0, skipped_has_storekit: 0, skipped_has_manual: 0, skipped_not_found: 0, failed: 0 };\ntry { agg.upserted = $('Build Upsert SQL').first().json.count || 0; } catch (e) {}\nlet appItems = [];\ntry { appItems = $('Send To App').all(); } catch (e) {}\nfor (const item of appItems) {\n  const j = item.json || {};\n  agg.uploaded += j.uploaded || 0;\n  agg.skipped_has_storekit += j.skipped_has_storekit || 0;\n  agg.skipped_has_manual += j.skipped_has_manual || 0;\n  agg.skipped_not_found += j.skipped_not_found || 0;\n  agg.failed += (j.failed || []).length;\n}\nreturn [{ json: {\n  name: 'smartsheet-update-sync',\n  status: agg.failed === 0 ? 'success' : 'partial',\n  note: JSON.stringify(agg),\n} }];\n"
+      },
+      "id": "summary",
+      "name": "Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "flow_log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "name": "={{ $json.name }}",
+            "status": "={{ $json.status }}",
+            "note": "={{ $json.note }}",
+            "sheet_id": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sheet_id",
+              "displayName": "sheet_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "log-flow",
+      "name": "Log flow_log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2640,
+        100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Rows whose StoreKit cell holds a pasted image → { game_id, imageId },\n// batched 50 per item for POST /imageurls.\nconst out = [];\nconst seen = new Set();\nfor (const item of $input.all()) {\n  const data = item.json || {};\n  const cols = data.columns || [];\n  const idByTitle = Object.fromEntries(cols.map(c => [c.title, c.id]));\n  const gameIdCol = idByTitle['GameID'];\n  const storeKitCol = idByTitle['StoreKit'];\n  if (!gameIdCol || !storeKitCol) continue;\n  for (const r of (data.rows || [])) {\n    let gameId = null, imageId = null;\n    for (const cell of (r.cells || [])) {\n      if (cell.columnId === gameIdCol && cell.value != null) gameId = String(cell.value).trim();\n      if (cell.columnId === storeKitCol && cell.image && cell.image.id) imageId = cell.image.id;\n    }\n    if (!gameId || !imageId || seen.has(gameId)) continue;\n    seen.add(gameId);\n    out.push({ game_id: gameId, imageId });\n  }\n}\nconst batches = [];\nfor (let i = 0; i < out.length; i += 50) batches.push({ json: { batch: out.slice(i, i + 50) } });\nreturn batches.length ? batches : [{ json: { batch: [] } }];\n"
+      },
+      "id": "collect-cell-images",
+      "name": "Collect Cell Images",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.batch.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "has-images",
+      "name": "Has Images?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.smartsheet.com/2.0/imageurls",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.batch.map(b => ({ imageId: b.imageId }))) }}",
+        "options": {}
+      },
+      "id": "get-image-urls",
+      "name": "Get Image URLs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_SMARTSHEET_HEADER_AUTH_CRED_ID",
+          "name": "Smartsheet Authorization Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Join temporary URLs (expire ~30 min) back to game_ids by imageId; chunk 50 per app call.\nconst sent = $('Has Images?').all();\nconst responses = $input.all();\nconst items = [];\nfor (let i = 0; i < responses.length; i++) {\n  const batch = (sent[i] && sent[i].json.batch) || [];\n  const urlById = Object.fromEntries(((responses[i].json || {}).imageUrls || []).map(u => [u.imageId, u.url]));\n  for (const b of batch) {\n    const url = urlById[b.imageId];\n    if (url) items.push({ game_id: b.game_id, image_urls: [url] });\n  }\n}\nconst chunks = [];\nfor (let i = 0; i < items.length; i += 50) chunks.push({ json: { items: items.slice(i, i + 50) } });\nreturn chunks.length ? chunks : [{ json: { items: [] } }];\n"
+      },
+      "id": "build-items",
+      "name": "Build Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.items.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "has-items",
+      "name": "Has Items?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=REPLACE_WITH_APP_URL/api/admin/import-screenshots",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-webhook-secret",
+              "value": "REPLACE_WITH_WEBHOOK_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ items: $json.items }) }}",
+        "options": {}
+      },
+      "id": "send-to-app",
+      "name": "Send To App",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Run (manual)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily (schedule)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Get Modified Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Modified Rows": {
+      "main": [
+        [
+          {
+            "node": "Collect Cell Images",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Upsert SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Cell Images": {
+      "main": [
+        [
+          {
+            "node": "Has Images?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Images?": {
+      "main": [
+        [
+          {
+            "node": "Get Image URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Image URLs": {
+      "main": [
+        [
+          {
+            "node": "Build Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Items": {
+      "main": [
+        [
+          {
+            "node": "Has Items?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Items?": {
+      "main": [
+        [
+          {
+            "node": "Send To App",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Upsert SQL": {
+      "main": [
+        [
+          {
+            "node": "Upsert Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Rows": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary": {
+      "main": [
+        [
+          {
+            "node": "Log flow_log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
