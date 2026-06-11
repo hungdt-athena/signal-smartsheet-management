@@ -1003,7 +1003,12 @@ function ExtractChatModal({ games, onClose }: {
   const [copied, setCopied] = useState(false)
 
   function toggle(id: number) {
-    setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+    setSelected(s => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
   }
   const allSelected = selected.size === games.length
   function toggleAll() {
