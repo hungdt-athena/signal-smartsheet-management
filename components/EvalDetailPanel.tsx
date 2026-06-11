@@ -626,6 +626,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
           {/* Manual screenshots — only when StoreKit hasn't arrived */}
           {screenshots.length === 0 && (
             <ManualScreenshotsCard
+              key={ev.game_id}
               gameId={ev.game_id}
               urls={manualShots}
               canEdit={canEditShots}

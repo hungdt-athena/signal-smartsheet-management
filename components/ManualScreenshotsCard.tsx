@@ -49,8 +49,11 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
     return () => window.removeEventListener('paste', onPaste)
   }, [canEdit, stageFiles])
 
-  // Revoke object URLs on unmount.
-  useEffect(() => () => { staged.forEach(s => URL.revokeObjectURL(s.preview)) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Revoke object URLs on unmount (via ref — a deps-empty cleanup would
+  // close over the first render's empty array and never revoke anything).
+  const stagedRef = useRef<Staged[]>([])
+  stagedRef.current = staged
+  useEffect(() => () => { stagedRef.current.forEach(s => URL.revokeObjectURL(s.preview)) }, [])
 
   const unstage = (preview: string) => {
     setStaged(prev => {
@@ -65,7 +68,10 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
     setSaving(true)
     try {
       const form = new FormData()
-      staged.forEach(s => form.append('files', s.file, s.file.name || 'pasted.png'))
+      // Unique per-entry names: pasted files are all "image.png", and the
+      // failed[] response matches by name.
+      const uploadName = (s: Staged, i: number) => `${i}-${s.file.name || 'pasted.png'}`
+      staged.forEach((s, i) => form.append('files', s.file, uploadName(s, i)))
       const res = await fetch(`/api/evaluations/${encodeURIComponent(gameId)}/screenshots`, {
         method: 'POST', body: form,
       })
@@ -76,8 +82,8 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
         onChange(json.urls || [])
         const failedNames = new Set((json.failed || []).map((f: { name: string }) => f.name))
         setStaged(prev => {
-          prev.filter(s => !failedNames.has(s.file.name)).forEach(s => URL.revokeObjectURL(s.preview))
-          return prev.filter(s => failedNames.has(s.file.name))
+          prev.filter((s, i) => !failedNames.has(uploadName(s, i))).forEach(s => URL.revokeObjectURL(s.preview))
+          return prev.filter((s, i) => failedNames.has(uploadName(s, i)))
         })
         if (failedNames.size > 0) onToast(`${failedNames.size} ảnh lỗi — thử lưu lại`, true)
         else onToast('Đã lưu ảnh')
