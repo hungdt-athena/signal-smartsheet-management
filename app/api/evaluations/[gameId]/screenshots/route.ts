@@ -66,24 +66,22 @@ export async function POST(req: NextRequest, { params }: { params: { gameId: str
       }
     }
 
-    let urls: string[] = []
-    if (uploaded.length > 0) {
-      const rows = await sql`
-        UPDATE game_info
-        SET metadata = jsonb_set(
-          COALESCE(metadata, '{}'::jsonb),
-          '{manual_screenshot_urls}',
-          COALESCE(metadata->'manual_screenshot_urls', '[]'::jsonb) || ${JSON.stringify(uploaded)}::jsonb
-        )
-        WHERE game_id = ${gameId}
-        RETURNING metadata->'manual_screenshot_urls' AS urls
-      `
-      if (rows.length === 0) return NextResponse.json({ error: 'Game not found' }, { status: 404 })
-      urls = rows[0].urls || []
-    } else {
-      const rows = await sql`SELECT metadata->'manual_screenshot_urls' AS urls FROM game_info WHERE game_id = ${gameId}`
-      urls = rows[0]?.urls || []
+    if (uploaded.length === 0) {
+      return NextResponse.json({ error: 'All files rejected', failed }, { status: 400 })
     }
+
+    const rows = await sql`
+      UPDATE game_info
+      SET metadata = jsonb_set(
+        COALESCE(metadata, '{}'::jsonb),
+        '{manual_screenshot_urls}',
+        COALESCE(metadata->'manual_screenshot_urls', '[]'::jsonb) || ${JSON.stringify(uploaded)}::jsonb
+      )
+      WHERE game_id = ${gameId}
+      RETURNING metadata->'manual_screenshot_urls' AS urls
+    `
+    if (rows.length === 0) return NextResponse.json({ error: 'Game not found' }, { status: 404 })
+    const urls = rows[0].urls || []
 
     return NextResponse.json({ urls, failed })
   } catch (err) {

@@ -45,9 +45,15 @@ function deleteReq(body?: object): NextRequest {
 }
 
 describe('screenshots route', () => {
+  const realSkip = process.env.SKIP_AUTH
+  beforeAll(() => { process.env.SKIP_AUTH = 'false' })
+  afterAll(() => {
+    if (realSkip === undefined) delete process.env.SKIP_AUTH
+    else process.env.SKIP_AUTH = realSkip
+  })
+
   beforeEach(() => {
     jest.clearAllMocks()
-    process.env.SKIP_AUTH = 'false'
     ;(isStorageConfigured as jest.Mock).mockReturnValue(true)
     // default: admin session
     sessionMock.mockResolvedValue({ user: { role: 'admin', name: 'Boss' } })
@@ -103,6 +109,15 @@ describe('screenshots route', () => {
     expect(json.failed.map((f: { name: string }) => f.name).sort()).toEqual(['anim.gif', 'big.png'])
   })
 
+  it('400 when every file is rejected', async () => {
+    const gif = new File([new Uint8Array(10)], 'anim.gif', { type: 'image/gif' })
+    const res = await POST(postReq([gif]), PARAMS)
+    const json = await res.json()
+    expect(res.status).toBe(400)
+    expect(json.failed).toEqual([{ name: 'anim.gif', error: 'Unsupported type' }])
+    expect(uploadScreenshot).not.toHaveBeenCalled()
+  })
+
   it('appends uploaded URLs to metadata and returns the full array', async () => {
     ;(uploadScreenshot as jest.Mock)
       .mockResolvedValueOnce('https://x/u1.png')
@@ -113,6 +128,8 @@ describe('screenshots route', () => {
     expect(json.failed).toEqual([])
     const updateCall = sqlMock.mock.calls.find(c => Array.isArray(c[0]) && (c[0] as string[]).join(' ').includes('UPDATE game_info'))
     expect(updateCall).toBeTruthy()
+    // The uploaded URLs must be the jsonb parameter appended to the array.
+    expect(updateCall!.slice(1)).toContain(JSON.stringify(['https://x/u1.png', 'https://x/u2.png']))
   })
 
   it('a failed upload lands in failed[] while successes persist', async () => {
