@@ -78,6 +78,7 @@ export default function EvaluationsPage() {
   // (current month, falling back to latest with data) and echoes it back.
   const [autoMonth, setAutoMonth] = useState(true)
   const suppressFetchRef = useRef(false)
+  const fetchSeqRef = useRef(0)
 
   const [search, setSearch] = useState('')
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
@@ -98,6 +99,7 @@ export default function EvaluationsPage() {
   const sentinelRef = useRef<HTMLDivElement>(null)
 
   const fetchPage = useCallback(async (page: number, append: boolean) => {
+    const seq = ++fetchSeqRef.current
     if (append) setLoadingMore(true); else setLoading(true)
     try {
       const params = new URLSearchParams({ category, page: String(page), limit: String(PAGE_SIZE) })
@@ -117,6 +119,7 @@ export default function EvaluationsPage() {
       }
       const res = await fetch(`/api/evaluations?${params}`)
       const json = await res.json()
+      if (seq !== fetchSeqRef.current) return // stale response; a newer fetch owns the state
       const rows = json.data || []
       if (append) {
         setData(prev => [...prev, ...rows])
@@ -128,12 +131,12 @@ export default function EvaluationsPage() {
       if (json.available_conclusions) setConclusionOptions(json.available_conclusions)
       if (json.available_months) setAvailableMonths(json.available_months)
       if (autoMonth && json.applied_month !== undefined) {
+        // Lock in the server-resolved month: the picker shows it and all
+        // later fetches use explicit params instead of re-resolving auto.
         const ap = json.applied_month as YearMonth | null
-        if (ap && (ap.year !== filterMonth?.year || ap.month !== filterMonth?.month)) {
-          // Sync the picker to the server-resolved month without refetching.
-          suppressFetchRef.current = true
-          setFilterMonth(ap)
-        }
+        suppressFetchRef.current = true
+        setAutoMonth(false)
+        setFilterMonth(ap)
       }
       setHasMore(rows.length === PAGE_SIZE)
     } catch { /* ignore */ }
