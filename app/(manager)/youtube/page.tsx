@@ -1710,7 +1710,16 @@ function RecordVideoTab() {
 
 // ── Page Router ──────────────────────────────────────────────────────────────
 
+// useSearchParams requires a Suspense boundary for static prerendering.
 export default function VideosPage() {
+  return (
+    <React.Suspense>
+      <VideosPageInner />
+    </React.Suspense>
+  )
+}
+
+function VideosPageInner() {
   const searchParams = useSearchParams()
   const tab = searchParams.get('tab') || 'youtube'
 

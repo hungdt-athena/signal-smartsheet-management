@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
 import { useSession } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import { StyledSelect } from '@/components/StyledSelect'
@@ -54,7 +54,16 @@ function fmtDate(d: string | null) {
 
 const PAGE_SIZE = 200
 
+// useSearchParams requires a Suspense boundary for static prerendering.
 export default function EvaluationsPage() {
+  return (
+    <Suspense>
+      <EvaluationsPageInner />
+    </Suspense>
+  )
+}
+
+function EvaluationsPageInner() {
   const { data: session } = useSession()
   const searchParams = useSearchParams()
   const role = session?.user?.role
