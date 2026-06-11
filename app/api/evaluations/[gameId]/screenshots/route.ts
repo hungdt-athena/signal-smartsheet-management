@@ -75,7 +75,7 @@ export async function POST(req: NextRequest, { params }: { params: { gameId: str
       SET metadata = jsonb_set(
         COALESCE(metadata, '{}'::jsonb),
         '{manual_screenshot_urls}',
-        COALESCE(metadata->'manual_screenshot_urls', '[]'::jsonb) || ${JSON.stringify(uploaded)}::jsonb
+        COALESCE(metadata->'manual_screenshot_urls', '[]'::jsonb) || ${sql.json(uploaded)}
       )
       WHERE game_id = ${gameId}
       RETURNING metadata->'manual_screenshot_urls' AS urls
@@ -115,7 +115,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { gameId: s
           COALESCE((
             SELECT jsonb_agg(u)
             FROM jsonb_array_elements(COALESCE(metadata->'manual_screenshot_urls', '[]'::jsonb)) AS u
-            WHERE u != ${JSON.stringify(url)}::jsonb
+            WHERE u != ${sql.json(url)}
           ), '[]'::jsonb)
         )
         WHERE game_id = ${gameId}

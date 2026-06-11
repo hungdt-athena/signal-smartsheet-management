@@ -3,7 +3,11 @@
  */
 import { NextRequest } from 'next/server'
 
-jest.mock('@/lib/db', () => ({ sql: jest.fn() }))
+// sql.json marks a value for single JSON serialization in postgres.js;
+// the mock passes it through so call-arg assertions see the raw value.
+jest.mock('@/lib/db', () => ({
+  sql: Object.assign(jest.fn(), { json: (v: unknown) => v }),
+}))
 jest.mock('next-auth', () => ({ getServerSession: jest.fn() }))
 jest.mock('@/lib/supabase-storage', () => ({
   isStorageConfigured: jest.fn(() => true),
@@ -128,8 +132,9 @@ describe('screenshots route', () => {
     expect(json.failed).toEqual([])
     const updateCall = sqlMock.mock.calls.find(c => Array.isArray(c[0]) && (c[0] as string[]).join(' ').includes('UPDATE game_info'))
     expect(updateCall).toBeTruthy()
-    // The uploaded URLs must be the jsonb parameter appended to the array.
-    expect(updateCall!.slice(1)).toContain(JSON.stringify(['https://x/u1.png', 'https://x/u2.png']))
+    // The uploaded URLs must be passed via sql.json (raw array, single encoding) —
+    // JSON.stringify + ::jsonb double-encodes in postgres.js.
+    expect(updateCall!.slice(1)).toContainEqual(['https://x/u1.png', 'https://x/u2.png'])
   })
 
   it('a failed upload lands in failed[] while successes persist', async () => {

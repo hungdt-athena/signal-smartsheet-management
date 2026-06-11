@@ -28,9 +28,9 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
     setStaged(prev => {
       const next = [...prev]
       for (const f of files) {
-        if (!ACCEPTED.includes(f.type)) { onToast(`${f.name}: chỉ nhận PNG/JPEG/WebP`, true); continue }
-        if (f.size > MAX_SIZE) { onToast(`${f.name}: vượt quá 5MB`, true); continue }
-        if (next.length >= MAX_FILES) { onToast(`Tối đa ${MAX_FILES} ảnh mỗi lần lưu`, true); break }
+        if (!ACCEPTED.includes(f.type)) { onToast(`${f.name}: only PNG/JPEG/WebP allowed`, true); continue }
+        if (f.size > MAX_SIZE) { onToast(`${f.name}: larger than 5MB`, true); continue }
+        if (next.length >= MAX_FILES) { onToast(`Max ${MAX_FILES} images per save`, true); break }
         next.push({ file: f, preview: URL.createObjectURL(f) })
       }
       return next
@@ -78,7 +78,7 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
       })
       const json = await res.json()
       if (!res.ok) {
-        onToast(json.error || 'Lưu ảnh thất bại', true)
+        onToast(json.error || 'Failed to save screenshots', true)
       } else {
         onChange(gameId, json.urls || [])
         const failedNames = new Set((json.failed || []).map((f: { name: string }) => f.name))
@@ -86,8 +86,8 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
           prev.filter((s, i) => !failedNames.has(uploadName(s, i))).forEach(s => URL.revokeObjectURL(s.preview))
           return prev.filter((s, i) => failedNames.has(uploadName(s, i)))
         })
-        if (failedNames.size > 0) onToast(`${failedNames.size} ảnh lỗi — thử lưu lại`, true)
-        else onToast('Đã lưu ảnh')
+        if (failedNames.size > 0) onToast(`${failedNames.size} image(s) failed — try saving again`, true)
+        else onToast('Screenshots saved')
       }
     } catch { onToast('Network error', true) }
     setSaving(false)
@@ -101,8 +101,8 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
         body: JSON.stringify({ url }),
       })
       const json = await res.json()
-      if (!res.ok) onToast(json.error || 'Xoá thất bại', true)
-      else { onChange(gameId, json.urls || []); onToast('Đã xoá ảnh') }
+      if (!res.ok) onToast(json.error || 'Failed to delete', true)
+      else { onChange(gameId, json.urls || []); onToast('Screenshot deleted') }
     } catch { onToast('Network error', true) }
   }
 
@@ -134,7 +134,7 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
                 loading="lazy"
                 onError={e => { e.currentTarget.style.display = 'none' }} />
               {canEdit && (
-                <button onClick={() => removeSaved(url)} title="Xoá ảnh này"
+                <button onClick={() => removeSaved(url)} title="Delete this screenshot"
                   style={{
                     position: 'absolute', top: 6, right: 6, width: 24, height: 24, borderRadius: 12,
                     background: 'rgba(0,0,0,.55)', color: '#fff', border: 'none', cursor: 'pointer',
@@ -150,6 +150,7 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
 
       {canEdit && (
         <>
+          {/* Full dropzone with hint when empty; compact add button once images exist. */}
           <div
             onClick={() => fileInputRef.current?.click()}
             onDragOver={e => { e.preventDefault(); setDragOver(true) }}
@@ -161,10 +162,13 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
             style={{
               border: `1.5px dashed ${dragOver ? 'var(--accent)' : 'var(--border-strong)'}`,
               background: dragOver ? 'var(--accent-weak)' : 'var(--surface-2)',
-              borderRadius: 10, padding: '18px 12px', textAlign: 'center', cursor: 'pointer',
+              borderRadius: 10, textAlign: 'center', cursor: 'pointer',
               fontSize: 12, color: 'var(--muted)',
+              padding: urls.length === 0 ? '18px 12px' : '7px 12px',
             }}>
-            Dán ảnh (Ctrl+V), kéo thả, hoặc bấm để chọn — PNG/JPEG/WebP, ≤5MB
+            {urls.length === 0
+              ? 'Paste (Ctrl+V), drag & drop, or click to choose — PNG/JPEG/WebP, ≤5MB'
+              : '+ Add more'}
             <input ref={fileInputRef} type="file" multiple accept={ACCEPTED.join(',')}
               style={{ display: 'none' }}
               onChange={e => {
@@ -180,7 +184,7 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
                   <div key={s.preview} style={{ position: 'relative', flexShrink: 0 }}>
                     <img src={s.preview} alt={s.file.name}
                       style={{ height: 120, borderRadius: 8, border: '1.5px dashed var(--warn)' }} />
-                    <button onClick={() => unstage(s.preview)} title="Bỏ ảnh này" disabled={saving}
+                    <button onClick={() => unstage(s.preview)} title="Remove from staging" disabled={saving}
                       style={{
                         position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10,
                         background: 'rgba(0,0,0,.55)', color: '#fff', border: 'none', cursor: 'pointer',
@@ -193,7 +197,7 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
               </div>
               <button className="btn btn-primary" onClick={save} disabled={saving}
                 style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}>
-                {saving ? 'Đang lưu...' : `Save screenshots (${staged.length})`}
+                {saving ? 'Saving...' : `Save screenshots (${staged.length})`}
               </button>
             </>
           )}
@@ -202,7 +206,7 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
 
       {!canEdit && urls.length === 0 && (
         <div style={{ fontSize: 12, color: 'var(--faint)', textAlign: 'center', padding: '12px 0' }}>
-          Chưa có screenshot
+          No screenshots yet
         </div>
       )}
     </div>
