@@ -373,11 +373,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     setTimeout(() => setToast(null), 3000)
   }
 
-  const updateManualShots = (urls: string[]) => {
+  const updateManualShots = (gameId: string, urls: string[]) => {
+    // A late response for a game we've navigated away from must not touch
+    // the displayed state; refresh that game's cache entry instead.
+    const cached = cacheRef.current.get(gameId)
+    if (cached) cacheRef.current.set(gameId, { ...cached, manual_screenshot_urls: urls })
     setEv(prev => {
-      if (!prev) return prev
+      if (!prev || prev.game_id !== gameId) return prev
       const next = { ...prev, manual_screenshot_urls: urls }
-      cacheRef.current.set(prev.game_id, next)
+      cacheRef.current.set(gameId, next)
       return next
     })
   }

@@ -11,8 +11,9 @@ interface Props {
   gameId: string
   urls: string[]
   canEdit: boolean
-  /** Reports the authoritative URL array after every save/delete. */
-  onChange: (urls: string[]) => void
+  /** Reports the authoritative URL array after every save/delete.
+   *  Carries the gameId so late responses can't be misattributed after navigation. */
+  onChange: (gameId: string, urls: string[]) => void
   onExpand: (url: string) => void
   onToast: (msg: string, err?: boolean) => void
 }
@@ -79,7 +80,7 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
       if (!res.ok) {
         onToast(json.error || 'Lưu ảnh thất bại', true)
       } else {
-        onChange(json.urls || [])
+        onChange(gameId, json.urls || [])
         const failedNames = new Set((json.failed || []).map((f: { name: string }) => f.name))
         setStaged(prev => {
           prev.filter((s, i) => !failedNames.has(uploadName(s, i))).forEach(s => URL.revokeObjectURL(s.preview))
@@ -101,7 +102,7 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
       })
       const json = await res.json()
       if (!res.ok) onToast(json.error || 'Xoá thất bại', true)
-      else { onChange(json.urls || []); onToast('Đã xoá ảnh') }
+      else { onChange(gameId, json.urls || []); onToast('Đã xoá ảnh') }
     } catch { onToast('Network error', true) }
   }
 
@@ -179,7 +180,7 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
                   <div key={s.preview} style={{ position: 'relative', flexShrink: 0 }}>
                     <img src={s.preview} alt={s.file.name}
                       style={{ height: 120, borderRadius: 8, border: '1.5px dashed var(--warn)' }} />
-                    <button onClick={() => unstage(s.preview)} title="Bỏ ảnh này"
+                    <button onClick={() => unstage(s.preview)} title="Bỏ ảnh này" disabled={saving}
                       style={{
                         position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10,
                         background: 'rgba(0,0,0,.55)', color: '#fff', border: 'none', cursor: 'pointer',
