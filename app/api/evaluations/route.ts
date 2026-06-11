@@ -31,8 +31,8 @@ export async function GET(req: NextRequest) {
     const autoMonth = monthParam === 'auto'
     const year = parseInt(searchParams.get('year') || '0')
     const month = autoMonth ? 0 : parseInt(monthParam || '0')
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
-    const limit = Math.min(500, Math.max(10, parseInt(searchParams.get('limit') || '200')))
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1') || 1)
+    const limit = Math.min(500, Math.max(10, parseInt(searchParams.get('limit') || '200') || 200))
     const offset = (page - 1) * limit
     const wantMeta = page === 1
 
@@ -44,8 +44,9 @@ export async function GET(req: NextRequest) {
 
     const evaluatorFilter = evaluator ? sql`AND ge.initial_evaluator = ${evaluator}` : sql``
 
-    const conclusionFilter = conclusions
-      ? sql`AND ge.initial_conclusion IN ${sql(conclusions.split(',').map(c => c.trim()).filter(Boolean))}`
+    const conclusionList = conclusions.split(',').map(c => c.trim()).filter(Boolean)
+    const conclusionFilter = conclusionList.length > 0
+      ? sql`AND ge.initial_conclusion IN ${sql(conclusionList)}`
       : conclusion
         ? sql`AND ge.initial_conclusion = ${conclusion}`
         : sql``
@@ -98,6 +99,17 @@ export async function GET(req: NextRequest) {
             AND ge.assigned_date < make_date(${applied.year}, ${applied.month}, 1) + interval '1 month'`
       : sql``
 
+    // Shared by the list and stats queries — they must stay in lockstep.
+    const listFilters = sql`
+      ${evaluatorFilter}
+      ${conclusionFilter}
+      ${statusFilter}
+      ${monthFilter}
+      ${assignmentFilter}
+      ${recordingFilter}
+      ${recorderFilter}
+    `
+
     const [rows, statsRows, distinctConclusions] = await Promise.all([
       sql`
         SELECT ge.id, ge.game_id, ge.category_group, ge.genre_1, ge.genre_2,
@@ -117,13 +129,7 @@ export async function GET(req: NextRequest) {
         JOIN game_info gi ON ge.game_id = gi.game_id
         LEFT JOIN developer dev ON gi.publisher_id = dev.id
         WHERE ge.category_group = ${category}
-          ${evaluatorFilter}
-          ${conclusionFilter}
-          ${statusFilter}
-          ${monthFilter}
-          ${assignmentFilter}
-          ${recordingFilter}
-          ${recorderFilter}
+          ${listFilters}
         ORDER BY ge.assigned_date DESC, ge.imported_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `,
@@ -134,13 +140,7 @@ export async function GET(req: NextRequest) {
               count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS dead_links
             FROM game_evaluations ge
             WHERE ge.category_group = ${category}
-              ${evaluatorFilter}
-              ${conclusionFilter}
-              ${statusFilter}
-              ${monthFilter}
-              ${assignmentFilter}
-              ${recordingFilter}
-              ${recorderFilter}
+              ${listFilters}
           `
         : Promise.resolve([]),
       wantMeta
@@ -235,7 +235,7 @@ export async function PATCH(req: NextRequest) {
       UPDATE game_evaluations SET
         initial_note = COALESCE(${initial_note ?? null}, initial_note),
         initial_conclusion = COALESCE(${initial_conclusion ?? null}, initial_conclusion),
-        evaluate_date = ${initial_conclusion ? new Date().toISOString() : null}::timestamptz,
+        evaluate_date = CASE WHEN ${initial_conclusion ?? null}::text IS NOT NULL THEN NOW() ELSE evaluate_date END,
         drive_link = COALESCE(${drive_link ?? null}, drive_link),
         drive_date = CASE WHEN ${drive_link ?? null}::text IS NOT NULL THEN NOW() ELSE drive_date END,
         youtube_link = COALESCE(${youtube_link ?? null}, youtube_link),

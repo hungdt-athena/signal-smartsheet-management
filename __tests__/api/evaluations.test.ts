@@ -17,9 +17,9 @@ interface MockData {
   conclusions?: { c: string }[]
 }
 
-// Routes mock results by inspecting the SQL text. Tagged-template calls
-// receive a strings array; fragment calls (sql`AND ...`) and the
-// sql(array) IN-list helper fall through to the default branch.
+// Routes mock results by inspecting the SQL text. All tagged-template calls
+// (queries and fragments alike) receive a strings array; calls that match no
+// keyword branch — fragments and the sql(array) IN-list helper — resolve [].
 function setupSql({ months = [], rows = [], stats = [{ total: 0, evaluated: 0, dead_links: 0 }], conclusions = [] }: MockData = {}) {
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: unknown) => {
