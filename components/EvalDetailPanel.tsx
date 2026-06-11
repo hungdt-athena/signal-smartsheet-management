@@ -689,6 +689,24 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 />
               </div>
 
+              <div className="field">
+                <span className="label">Demo Video (Drive)</span>
+                <input
+                  className="input"
+                  type="url"
+                  value={driveLink}
+                  onChange={e => { setDriveLink(e.target.value); setDirty(true) }}
+                  placeholder="https://drive.google.com/..."
+                  disabled={!canEditEval}
+                />
+                {ev.drive_link && (
+                  <a href={ev.drive_link} target="_blank" rel="noopener"
+                    style={{ fontSize: 12, color: 'var(--accent)', wordBreak: 'break-all' }}>
+                    Open demo video
+                  </a>
+                )}
+              </div>
+
               {ev.youtube_link && (
                 <div className="field">
                   <span className="label">YouTube Link</span>
