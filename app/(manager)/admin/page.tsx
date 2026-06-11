@@ -1,18 +1,36 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
+import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
+
+type Role = 'admin' | 'moderator' | 'evaluator'
 
 interface User {
   id: number
   email: string
   name: string
-  role: 'admin' | 'evaluator'
+  role: Role
   created_at: string
 }
 
 const SUPER_ADMIN = 'hungdt@athena.studio'
 
+const ROLE_LABELS: Record<Role, string> = {
+  admin: 'Admin', moderator: 'Moderator', evaluator: 'Evaluator',
+}
+
 export default function AdminPage() {
+  const { data: session } = useSession()
+  const myRole = session?.user?.role
+  const isAdmin = myRole === 'admin'
+
+  // Roles this user is allowed to assign. Only admins may grant 'admin'.
+  const assignableRoles: { value: Role; label: string }[] = [
+    ...(isAdmin ? [{ value: 'admin' as Role, label: 'Admin' }] : []),
+    { value: 'moderator', label: 'Moderator' },
+    { value: 'evaluator', label: 'Evaluator' },
+  ]
+
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -20,7 +38,7 @@ export default function AdminPage() {
 
   const [newEmail, setNewEmail] = useState('')
   const [newName, setNewName] = useState('')
-  const [newRole, setNewRole] = useState<'admin' | 'evaluator'>('evaluator')
+  const [newRole, setNewRole] = useState<Role>('evaluator')
   const [adding, setAdding] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -154,8 +172,8 @@ export default function AdminPage() {
             <span className="label">Role</span>
             <StyledSelect
               value={newRole}
-              onChange={v => setNewRole(v as 'admin' | 'evaluator')}
-              options={[{ value: 'evaluator', label: 'Evaluator' }, { value: 'admin', label: 'Admin' }]}
+              onChange={v => setNewRole(v as Role)}
+              options={assignableRoles}
             />
           </div>
           <button type="submit" className="btn btn-primary" disabled={adding || !newEmail}>
@@ -200,6 +218,13 @@ export default function AdminPage() {
               )}
               {!loading && users.map(u => {
                 const isSuper = u.email === SUPER_ADMIN
+                // Moderators cannot modify or delete admin accounts.
+                const lockedForMod = !isAdmin && u.role === 'admin'
+                const rowLocked = isSuper || lockedForMod
+                // Ensure the current role is always shown as an option label.
+                const roleOpts = assignableRoles.some(o => o.value === u.role)
+                  ? assignableRoles
+                  : [{ value: u.role, label: ROLE_LABELS[u.role] }, ...assignableRoles]
                 return (
                   <tr key={u.id}>
                     <td>
@@ -212,16 +237,16 @@ export default function AdminPage() {
                     <td>
                       <StyledSelect
                         value={u.role}
-                        disabled={isSuper}
+                        disabled={rowLocked}
                         onChange={v => handleRoleChange(u.id, v)}
-                        options={[{ value: 'admin', label: 'admin' }, { value: 'evaluator', label: 'evaluator' }]}
+                        options={roleOpts}
                       />
                     </td>
                     <td style={{ color: 'var(--faint)', fontSize: 12 }}>
                       {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
                     </td>
                     <td>
-                      {!isSuper && (
+                      {!rowLocked && (
                         <button className="btn btn-sm btn-danger"
                           onClick={() => handleDelete(u.id, u.email)}>
                           Remove

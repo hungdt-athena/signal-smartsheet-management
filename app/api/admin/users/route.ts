@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
 import { requireRole } from '@/lib/auth-guard'
+import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
 const SUPER_ADMIN_EMAIL = 'hungdt@athena.studio'
+const VALID_ROLES = ['admin', 'moderator', 'evaluator']
+
+/** Role of the requester ('admin' when SKIP_AUTH is on for local dev). */
+async function callerRole(): Promise<string> {
+  if (process.env.SKIP_AUTH === 'true') return 'admin'
+  const session = await getServerSession(authOptions)
+  return session?.user?.role ?? ''
+}
 
 // GET /api/admin/users — list all users
 export async function GET() {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const users = await sql`
@@ -21,7 +31,7 @@ export async function GET() {
 
 // POST /api/admin/users — add a new user
 export async function POST(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const { email, name, role } = await req.json()
@@ -31,8 +41,12 @@ export async function POST(req: NextRequest) {
   if (!email.endsWith('@athena.studio')) {
     return NextResponse.json({ error: 'Only @athena.studio emails allowed' }, { status: 400 })
   }
-  if (!['admin', 'evaluator'].includes(role)) {
-    return NextResponse.json({ error: 'role must be admin or evaluator' }, { status: 400 })
+  if (!VALID_ROLES.includes(role)) {
+    return NextResponse.json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` }, { status: 400 })
+  }
+  // Only admins may create admins.
+  if (role === 'admin' && (await callerRole()) !== 'admin') {
+    return NextResponse.json({ error: 'Only admins can grant the admin role' }, { status: 403 })
   }
 
   const displayName = name || email.split('@')[0]
@@ -52,20 +66,30 @@ export async function POST(req: NextRequest) {
 
 // PUT /api/admin/users — update user role
 export async function PUT(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const { id, role } = await req.json()
   if (!id || !role) {
     return NextResponse.json({ error: 'id and role are required' }, { status: 400 })
   }
-  if (!['admin', 'evaluator'].includes(role)) {
-    return NextResponse.json({ error: 'role must be admin or evaluator' }, { status: 400 })
+  if (!VALID_ROLES.includes(role)) {
+    return NextResponse.json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` }, { status: 400 })
+  }
+
+  const user = await sql`SELECT email, role FROM dashboard_users WHERE id = ${id}`
+  if (user.length === 0) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+
+  // Moderators cannot grant the admin role or modify existing admins.
+  const caller = await callerRole()
+  if (caller !== 'admin' && (role === 'admin' || user[0].role === 'admin')) {
+    return NextResponse.json({ error: 'Only admins can manage admin accounts' }, { status: 403 })
   }
 
   // Prevent demoting super admin
-  const user = await sql`SELECT email FROM dashboard_users WHERE id = ${id}`
-  if (user.length > 0 && user[0].email === SUPER_ADMIN_EMAIL && role !== 'admin') {
+  if (user[0].email === SUPER_ADMIN_EMAIL && role !== 'admin') {
     return NextResponse.json({ error: 'Cannot demote super admin' }, { status: 403 })
   }
 
@@ -75,7 +99,7 @@ export async function PUT(req: NextRequest) {
 
 // DELETE /api/admin/users — remove a user
 export async function DELETE(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const { id } = await req.json()
@@ -83,10 +107,19 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'id is required' }, { status: 400 })
   }
 
+  const user = await sql`SELECT email, role FROM dashboard_users WHERE id = ${id}`
+  if (user.length === 0) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+
   // Prevent deleting super admin
-  const user = await sql`SELECT email FROM dashboard_users WHERE id = ${id}`
-  if (user.length > 0 && user[0].email === SUPER_ADMIN_EMAIL) {
+  if (user[0].email === SUPER_ADMIN_EMAIL) {
     return NextResponse.json({ error: 'Cannot delete super admin' }, { status: 403 })
+  }
+
+  // Moderators cannot delete admins.
+  if ((await callerRole()) !== 'admin' && user[0].role === 'admin') {
+    return NextResponse.json({ error: 'Only admins can delete admin accounts' }, { status: 403 })
   }
 
   await sql`DELETE FROM dashboard_users WHERE id = ${id}`

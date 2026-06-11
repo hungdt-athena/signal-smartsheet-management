@@ -5,7 +5,7 @@ import { readRealtimeStatus } from '@/lib/google-sheets'
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   try {

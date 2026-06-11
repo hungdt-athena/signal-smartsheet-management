@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 // POST /api/admin/sync-evaluators — import evaluators from initial+final sheets
 export async function POST() {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const names: string[] = []

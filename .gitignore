@@ -38,3 +38,8 @@ next-env.d.ts
 # workflows & claude local
 /workflows/
 .claude/
+
+# local-only: design refs, tool state, data dumps
+/new-ui-ref/
+/.superpowers/
+__tests__/deleted.json

@@ -5,7 +5,7 @@ import { appendFlowLog } from '@/lib/google-sheets'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const { evaluator_name, start_date, end_date, sheet_type, selected_evaluators } = await req.json()

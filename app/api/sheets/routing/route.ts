@@ -11,7 +11,7 @@ function missingConfig() {
 }
 
 export async function GET() {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const missing = missingConfig()
@@ -27,7 +27,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const missing = missingConfig()

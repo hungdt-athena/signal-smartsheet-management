@@ -5,7 +5,7 @@ import { readFlowLog } from '@/lib/google-sheets'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const limit = Number(new URL(req.url).searchParams.get('limit') ?? '50')

@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
 
 // GET /api/push-logs?date=YYYY-MM-DD
 export async function GET(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const date = new URL(req.url).searchParams.get('date') ?? new Date().toISOString().slice(0, 10)

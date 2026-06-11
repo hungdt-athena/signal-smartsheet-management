@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Dashboard trigger: forward to n8n
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const webhookUrl = process.env.WEBHOOK_SMARTSHEET_REFRESH

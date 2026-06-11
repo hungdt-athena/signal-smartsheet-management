@@ -12,7 +12,7 @@ export interface InitialEvaluator {
 }
 
 export async function GET(_req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const url = process.env.WEBHOOK_TEAM_INITIAL_GET

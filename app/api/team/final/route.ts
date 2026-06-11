@@ -9,7 +9,7 @@ export interface FinalEvaluator {
 }
 
 export async function GET(_req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   const url = process.env.WEBHOOK_TEAM_FINAL_GET
@@ -17,7 +17,14 @@ export async function GET(_req: NextRequest) {
 
   const res = await fetch(url, { cache: 'no-store' })
   if (!res.ok) return NextResponse.json({ error: 'Failed to fetch from webhook' }, { status: 502 })
-  const rawData = await res.json()
+  const text = await res.text()
+  if (!text.trim()) return NextResponse.json([], { headers: { 'Cache-Control': 'no-store' } })
+  let rawData: unknown
+  try {
+    rawData = JSON.parse(text)
+  } catch {
+    return NextResponse.json([], { headers: { 'Cache-Control': 'no-store' } })
+  }
 
   interface RawWebhookRow {
     'Evaluator Name'?: string

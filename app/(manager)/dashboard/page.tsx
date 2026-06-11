@@ -44,7 +44,7 @@ function PushCard({ label, value, accent }: { label: string; value: number | nul
 
 export default function DashboardPage() {
   const { data: session } = useSession()
-  const isAdmin = session?.user?.role === 'admin'
+  const isAdmin = session?.user?.role === 'admin' || session?.user?.role === 'moderator'
   const [stats, setStats] = useState<Stats | null>(null)
   const [sheetStats, setSheetStats] = useState<unknown[]>([])
   const [pullRefreshing, setPullRefreshing] = useState(false)

@@ -34,7 +34,7 @@ function isInRange(startDate: string, endDate: string): boolean {
 
 export default function HandoverPuzzlePage() {
   const { data: session } = useSession()
-  const isAdmin = session?.user?.role === 'admin'
+  const isAdmin = session?.user?.role === 'admin' || session?.user?.role === 'moderator'
   const userName = session?.user?.name || ''
 
   const [history, setHistory] = useState<HandoverRow[]>([])
