@@ -1,0 +1,491 @@
+{
+  "name": "db-push-assign",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-manual",
+      "name": "Run (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger-daily",
+      "name": "Daily 07:00 (UTC+7)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "N8N configs",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-config",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        220,
+        100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse rows from N8N configs sheet.\n// Looks for rows where `field` matches \"<Group> smartsheet ID\" (case-insensitive).\n// Emits one item per category_group with { category_group, categories: string[] }\nconst CATEGORY_GROUPS = ['puzzle', 'arcade', 'simulation'];\nconst rows = $input.all().map(i => i.json);\n\nconst out = [];\nfor (const group of CATEGORY_GROUPS) {\n  // Find row whose `field` value is e.g. \"Puzzle smartsheet ID\"\n  const fieldKey = group.charAt(0).toUpperCase() + group.slice(1) + ' smartsheet ID';\n  const row = rows.find(r => {\n    const f = (r.field || r.Field || '').trim();\n    return f.toLowerCase() === fieldKey.toLowerCase();\n  });\n  if (!row) continue;\n  // `content` column holds comma-separated category codes (e.g. \"puzzle,puzzle_2\")\n  // or a single value. Split, trim, filter.\n  const raw = (row.content || row.Content || '').trim();\n  if (!raw) continue;\n  const categories = raw.split(',').map(s => s.trim()).filter(Boolean);\n  out.push({ json: { category_group: group, categories } });\n}\n\nif (out.length === 0) {\n  throw new Error('No category groups found in N8N configs sheet. Check field names.');\n}\nreturn out;\n"
+      },
+      "id": "parse-config",
+      "name": "Parse Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1kR6I3DnYCn67GUqZv0ms6cksUnRTHEBQniVjOuoEqlo",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Evaluator List",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-evaluator-list",
+      "name": "Read Evaluator List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        660,
+        100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=REPLACE_WITH_APP_URL/api/admin/sync-roster",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-webhook-secret",
+              "value": "REPLACE_WITH_WEBHOOK_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ rows: $input.all().map(i => i.json) }) }}",
+        "options": {}
+      },
+      "id": "sync-roster",
+      "name": "HTTP: Sync Roster",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Emit one item per category_group from Parse Config output.\n// Each item: { category_group, categories }\nconst configItems = $('Parse Config').all();\nreturn configItems.map(i => ({ json: { category_group: i.json.category_group, categories: i.json.categories } }));\n"
+      },
+      "id": "split-per-category",
+      "name": "Split per category",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=REPLACE_WITH_APP_URL/api/cron/push-evaluations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-webhook-secret",
+              "value": "REPLACE_WITH_WEBHOOK_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ category: $json.category_group, categories: $json.categories, dryRun: true }) }}",
+        "options": {}
+      },
+      "id": "http-push",
+      "name": "HTTP: Push",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=REPLACE_WITH_APP_URL/api/cron/assign-evaluators",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-webhook-secret",
+              "value": "REPLACE_WITH_WEBHOOK_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ category: $json.category_group, dryRun: true }) }}",
+        "options": {}
+      },
+      "id": "http-assign",
+      "name": "HTTP: Assign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate pushed/assigned/per_evaluator totals from all HTTP: Assign responses.\n// HTTP: Push and HTTP: Assign both run per category (Split per category iterates).\nconst pushItems = $('HTTP: Push').all();\nconst assignItems = $('HTTP: Assign').all();\n\nlet totalPushed = 0;\nlet totalAssigned = 0;\nconst perEvaluator = {};\nconst byCategory = {};\n\nfor (const item of pushItems) {\n  const j = item.json || {};\n  totalPushed += (j.pushed || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].pushed += (j.pushed || 0);\n}\n\nfor (const item of assignItems) {\n  const j = item.json || {};\n  totalAssigned += (j.assigned || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].assigned += (j.assigned || 0);\n  // per_evaluator map from each assign response\n  for (const [ev, count] of Object.entries(j.per_evaluator || {})) {\n    perEvaluator[ev] = (perEvaluator[ev] || 0) + count;\n  }\n}\n\nconst now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });\nconst catLines = Object.entries(byCategory)\n  .map(([c, v]) => `  ${c}: pushed=${v.pushed} assigned=${v.assigned}`)\n  .join('\\n');\nconst evLines = Object.entries(perEvaluator)\n  .map(([e, v]) => `  ${e}: ${v}`)\n  .join('\\n');\n\nconst note = `[${now}] db-push-assign (dryRun=true)\\nTotal pushed: ${totalPushed} | assigned: ${totalAssigned}\\nBy category:\\n${catLines || '  (none)'}\\nBy evaluator:\\n${evLines || '  (none)'}`;\n\nconst status = (totalPushed >= 0 && totalAssigned >= 0) ? 'success' : 'error';\nreturn [{ json: { name: 'db-push-assign', status, note } }];\n"
+      },
+      "id": "summary",
+      "name": "Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "spaceId": "spaces/AAQAYTKWM1I",
+        "jsonParameters": true,
+        "messageJson": "={{\n{\n  cardsV2: [\n    {\n      cardId: \"db-push-assign-\" + $now.toMillis(),\n      card: {\n        header: {\n          title: \"DB Push+Assign Run\",\n          subtitle: \"Status: \" + $json.status,\n          imageType: \"SQUARE\"\n        },\n        sections: [\n          {\n            widgets: [\n              {\n                textParagraph: {\n                  text: $json.note.replace(/\\n/g, '<br>')\n                }\n              }\n            ]\n          }\n        ]\n      }\n    }\n  ]\n}\n}}",
+        "additionalFields": {}
+      },
+      "id": "chat-notify",
+      "name": "Google Chat Notify",
+      "type": "n8n-nodes-base.googleChat",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        0
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "5MOpxh9U04GXBIJp",
+          "name": "Google Service Account account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "flow_log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "name": "={{ $json.name }}",
+            "status": "={{ $json.status }}",
+            "note": "={{ $json.note }}",
+            "sheet_id": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sheet_id",
+              "displayName": "sheet_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "log-flow",
+      "name": "Log flow_log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1980,
+        200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "spaceId": "spaces/AAQAYTKWM1I",
+        "jsonParameters": true,
+        "messageJson": "={\n  \"cardsV2\": [\n    {\n      \"cardId\": \"error-card\",\n      \"card\": {\n        \"header\": {\n          \"title\": \"WORKFLOW EXECUTION ERROR\",\n          \"subtitle\": \"{{ $json.workflow.name }} (ID: {{ $json.workflow.id }})\"\n        },\n        \"sections\": [\n          {\n            \"widgets\": [\n              {\n                \"decoratedText\": {\n                  \"topLabel\": \"Execution\",\n                  \"text\": \"ID: {{ $json.workflow.id }}     |     Mode: {{ $json.trigger.mode }}\"\n                }\n              },\n              {\n                \"decoratedText\": {\n                  \"topLabel\": \"Last Node\",\n                  \"text\": \"{{ $json.trigger.error.name }}\"\n                }\n              },\n              {\n                \"decoratedText\": {\n                  \"topLabel\": \"Error Message\",\n                  \"text\": \"{{ $json.trigger.error.description }}\"\n                }\n              },\n              {\n                \"textParagraph\": {\n                  \"text\": \"{{ $json.trigger.error.message }}\"\n                }\n              },\n              {\n                \"buttonList\": {\n                  \"buttons\": [\n                    {\n                      \"text\": \"View Execution Details\",\n                      \"onClick\": {\n                        \"openLink\": {\n                          \"url\": \"https://autoai9.app.n8n.cloud/workflow/{{ $json.workflow.id }}\"\n                        }\n                      }\n                    }\n                  ]\n                }\n              }\n            ]\n          }\n        ]\n      }\n    }\n  ]\n}",
+        "additionalFields": {}
+      },
+      "id": "chat-error",
+      "name": "Google Chat Error",
+      "type": "n8n-nodes-base.googleChat",
+      "typeVersion": 1,
+      "position": [
+        220,
+        400
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "5MOpxh9U04GXBIJp",
+          "name": "Google Service Account account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run (manual)": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 07:00 (UTC+7)": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Parse Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Config": {
+      "main": [
+        [
+          {
+            "node": "Read Evaluator List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Evaluator List": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Sync Roster",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Sync Roster": {
+      "main": [
+        [
+          {
+            "node": "Split per category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split per category": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Push",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Push": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Assign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Assign": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary": {
+      "main": [
+        [
+          {
+            "node": "Google Chat Notify",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log flow_log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Google Chat Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
