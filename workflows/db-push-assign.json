@@ -63,7 +63,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse rows from N8N configs sheet.\n// Looks for rows where `field` matches \"<Group> smartsheet ID\" (case-insensitive).\n// Emits one item per category_group with { category_group, categories: string[] }\nconst CATEGORY_GROUPS = ['puzzle', 'arcade', 'simulation'];\nconst rows = $input.all().map(i => i.json);\n\nconst out = [];\nfor (const group of CATEGORY_GROUPS) {\n  // Find row whose `field` value is e.g. \"Puzzle smartsheet ID\"\n  const fieldKey = group.charAt(0).toUpperCase() + group.slice(1) + ' smartsheet ID';\n  const row = rows.find(r => {\n    const f = (r.field || r.Field || '').trim();\n    return f.toLowerCase() === fieldKey.toLowerCase();\n  });\n  if (!row) continue;\n  // `content` column holds comma-separated category codes (e.g. \"puzzle,puzzle_2\")\n  // or a single value. Split, trim, filter.\n  const raw = (row.content || row.Content || '').trim();\n  if (!raw) continue;\n  const categories = raw.split(',').map(s => s.trim()).filter(Boolean);\n  out.push({ json: { category_group: group, categories } });\n}\n\nif (out.length === 0) {\n  throw new Error('No category groups found in N8N configs sheet. Check field names.');\n}\nreturn out;\n"
+        "jsCode": "// Parse rows from N8N configs sheet.\n// Looks for rows where `field` matches \"<Group> smartsheet ID\" (case-insensitive regex).\n// Emits one item per category_group with { category_group, categories: string[] }\n// Categories come from the `categories_list` column (comma-separated), NOT from the smartsheet ID value.\nconst rows = $input.all().map(i => i.json);\nconst FIELD_RE = /^(.+?)\\s+smartsheet\\s+id$/i;\n\nconst out = [];\nfor (const row of rows) {\n  const fieldVal = String(row.field || row.Field || '').trim();\n  const match = fieldVal.match(FIELD_RE);\n  if (!match) continue;\n  const category_group = match[1].trim().toLowerCase();\n  if (!category_group) continue;\n  const raw = String(row.categories_list ?? row['Categories List'] ?? row['categories list'] ?? '').trim();\n  const categories = raw.split(',').map(s => s.trim()).filter(Boolean);\n  if (categories.length === 0) continue;\n  out.push({ json: { category_group, categories } });\n}\n\nif (out.length === 0) {\n  throw new Error('No category groups found in N8N configs sheet. Check field names and categories_list column.');\n}\nreturn out;\n"
       },
       "id": "parse-config",
       "name": "Parse Config",
@@ -185,7 +185,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ category: $json.category_group, dryRun: true }) }}",
+        "jsonBody": "={{ JSON.stringify({ category: $('Split per category').item.json.category_group, dryRun: true }) }}",
         "options": {}
       },
       "id": "http-assign",
@@ -199,7 +199,8 @@
     },
     {
       "parameters": {
-        "jsCode": "// Aggregate pushed/assigned/per_evaluator totals from all HTTP: Assign responses.\n// HTTP: Push and HTTP: Assign both run per category (Split per category iterates).\nconst pushItems = $('HTTP: Push').all();\nconst assignItems = $('HTTP: Assign').all();\n\nlet totalPushed = 0;\nlet totalAssigned = 0;\nconst perEvaluator = {};\nconst byCategory = {};\n\nfor (const item of pushItems) {\n  const j = item.json || {};\n  totalPushed += (j.pushed || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].pushed += (j.pushed || 0);\n}\n\nfor (const item of assignItems) {\n  const j = item.json || {};\n  totalAssigned += (j.assigned || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].assigned += (j.assigned || 0);\n  // per_evaluator map from each assign response\n  for (const [ev, count] of Object.entries(j.per_evaluator || {})) {\n    perEvaluator[ev] = (perEvaluator[ev] || 0) + count;\n  }\n}\n\nconst now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });\nconst catLines = Object.entries(byCategory)\n  .map(([c, v]) => `  ${c}: pushed=${v.pushed} assigned=${v.assigned}`)\n  .join('\\n');\nconst evLines = Object.entries(perEvaluator)\n  .map(([e, v]) => `  ${e}: ${v}`)\n  .join('\\n');\n\nconst note = `[${now}] db-push-assign (dryRun=true)\\nTotal pushed: ${totalPushed} | assigned: ${totalAssigned}\\nBy category:\\n${catLines || '  (none)'}\\nBy evaluator:\\n${evLines || '  (none)'}`;\n\nconst status = (totalPushed >= 0 && totalAssigned >= 0) ? 'success' : 'error';\nreturn [{ json: { name: 'db-push-assign', status, note } }];\n"
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Aggregate pushed/assigned/per_evaluator totals from all HTTP: Push + HTTP: Assign responses.\n// Runs once for ALL items (runOnceForAllItems mode) to produce a single roll-up item.\nconst pushItems = $('HTTP: Push').all();\nconst assignItems = $('HTTP: Assign').all();\n\nlet totalPushed = 0;\nlet totalAssigned = 0;\nconst perEvaluator = {};\nconst byCategory = {};\nlet hasError = false;\n\nfor (const item of pushItems) {\n  const j = item.json || {};\n  // Detect failure: missing ok:true or explicit error field\n  if (j.ok !== true || j.error) hasError = true;\n  totalPushed += (j.pushed || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].pushed += (j.pushed || 0);\n}\n\nfor (const item of assignItems) {\n  const j = item.json || {};\n  // Detect failure: missing ok:true or explicit error field\n  if (j.ok !== true || j.error) hasError = true;\n  totalAssigned += (j.assigned || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].assigned += (j.assigned || 0);\n  // per_evaluator map from each assign response\n  for (const [ev, count] of Object.entries(j.per_evaluator || {})) {\n    perEvaluator[ev] = (perEvaluator[ev] || 0) + count;\n  }\n}\n\nconst now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });\nconst catLines = Object.entries(byCategory)\n  .map(([c, v]) => `  ${c}: pushed=${v.pushed} assigned=${v.assigned}`)\n  .join('\\n');\nconst evLines = Object.entries(perEvaluator)\n  .map(([e, v]) => `  ${e}: ${v}`)\n  .join('\\n');\n\nconst note = `[${now}] db-push-assign (dryRun=true)\\nTotal pushed: ${totalPushed} | assigned: ${totalAssigned}\\nBy category:\\n${catLines || '  (none)'}\\nBy evaluator:\\n${evLines || '  (none)'}`;\n\nconst status = hasError ? 'error' : 'success';\nreturn [{ json: { name: 'db-push-assign', status, note } }];\n"
       },
       "id": "summary",
       "name": "Summary",
@@ -368,7 +369,7 @@
         ]
       ]
     },
-    "Daily 07:00 (UTC+7)": {
+    "Daily 07:00 VN (00:00 UTC)": {
       "main": [
         [
           {
