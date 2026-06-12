@@ -75,6 +75,16 @@ describe('POST /api/cron/assign-evaluators', () => {
     expect(q).toContain('assigned_date')
   })
 
+  it('rejects a null body with 400', async () => {
+    setupSql({})
+    const res = await POST(new NextRequest('http://localhost/api/cron/assign-evaluators', {
+      method: 'POST',
+      headers: { 'x-webhook-secret': 's3cret', 'content-type': 'application/json' },
+      body: 'null',
+    }))
+    expect(res.status).toBe(400)
+  })
+
   it('dryRun computes the split without updating', async () => {
     setupSql({
       roster: [{ name: 'A', game_platform: 'all', weight: 100 }],
