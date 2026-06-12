@@ -4,9 +4,13 @@
 import { NextRequest } from 'next/server'
 
 jest.mock('@/lib/db', () => ({ sql: jest.fn() }))
+jest.mock('next-auth', () => ({ getServerSession: jest.fn() }))
 
 import { POST } from '@/app/api/cron/push-evaluations/route'
 import { sql } from '@/lib/db'
+import { getServerSession } from 'next-auth'
+
+const sessionMock = getServerSession as jest.Mock
 
 const sqlMock = sql as unknown as jest.Mock
 
@@ -22,7 +26,7 @@ describe('POST /api/cron/push-evaluations', () => {
   const realSecret = process.env.WEBHOOK_SECRET
   beforeAll(() => { process.env.WEBHOOK_SECRET = 's3cret'; process.env.SKIP_AUTH = 'false' })
   afterAll(() => { process.env.WEBHOOK_SECRET = realSecret })
-  beforeEach(() => { sqlMock.mockReset() })
+  beforeEach(() => { sqlMock.mockReset(); sqlMock.mockResolvedValue([]); sessionMock.mockResolvedValue(null) })
 
   it('rejects a wrong secret with 401', async () => {
     const res = await post({ category: 'puzzle', categories: ['puzzle'] }, 'wrong')

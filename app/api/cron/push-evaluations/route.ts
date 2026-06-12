@@ -14,20 +14,13 @@ export const maxDuration = 60
 
 const CATEGORIES = ['puzzle', 'arcade', 'simulation']
 
-function checkWebhookSecret(req: NextRequest): 'ok' | 'wrong' | 'absent' {
+function hasWebhookSecret(req: NextRequest): boolean {
   const secret = process.env.WEBHOOK_SECRET
-  const header = req.headers.get('x-webhook-secret')
-  if (!header) return 'absent'
-  if (!!secret && header === secret) return 'ok'
-  return 'wrong'
+  return !!secret && req.headers.get('x-webhook-secret') === secret
 }
 
 export async function POST(req: NextRequest) {
-  const secretCheck = checkWebhookSecret(req)
-  if (secretCheck === 'wrong') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  if (secretCheck === 'absent') {
+  if (!hasWebhookSecret(req)) {
     const guard = await requireRole(['admin'])
     if (guard) return guard
   }
