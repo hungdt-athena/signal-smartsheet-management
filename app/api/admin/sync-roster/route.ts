@@ -30,26 +30,31 @@ export async function POST(req: NextRequest) {
   }
 
   let synced = 0
-  for (const [i, row] of body.rows.entries()) {
-    const name = String(row['Evaluator Name'] ?? '').trim()
-    if (!name) continue
-    const available = String(row['Today Available'] ?? '').trim().toLowerCase() === 'yes'
-    const platform = String(row['Game Platform'] ?? 'all').trim().toLowerCase() || 'all'
-    const weight = Number(row['Weight']) || 100
-    const category = String(row['Game Category'] ?? '').trim().toLowerCase() || null
-    await sql`
-      INSERT INTO evaluator_roster (list_type, name, today_available, game_platform, game_category, weight, sort_order, updated_at)
-      VALUES ('initial', ${name}, ${available}, ${platform}, ${category}, ${weight}, ${i}, NOW())
-      ON CONFLICT (list_type, name) DO UPDATE SET
-        today_available = EXCLUDED.today_available,
-        game_platform   = EXCLUDED.game_platform,
-        game_category   = EXCLUDED.game_category,
-        weight          = EXCLUDED.weight,
-        sort_order      = EXCLUDED.sort_order,
-        updated_at      = NOW()
-    `
-    synced++
-  }
+  try {
+    for (const [i, row] of body.rows.entries()) {
+      const name = String(row['Evaluator Name'] ?? '').trim()
+      if (!name) continue
+      const available = String(row['Today Available'] ?? '').trim().toLowerCase() === 'yes'
+      const platform = String(row['Game Platform'] ?? 'all').trim().toLowerCase() || 'all'
+      const weight = Number(row['Weight']) || 100
+      const category = String(row['Game Category'] ?? '').trim().toLowerCase() || null
+      await sql`
+        INSERT INTO evaluator_roster (list_type, name, today_available, game_platform, game_category, weight, sort_order, updated_at)
+        VALUES ('initial', ${name}, ${available}, ${platform}, ${category}, ${weight}, ${i}, NOW())
+        ON CONFLICT (list_type, name) DO UPDATE SET
+          today_available = EXCLUDED.today_available,
+          game_platform   = EXCLUDED.game_platform,
+          game_category   = EXCLUDED.game_category,
+          weight          = EXCLUDED.weight,
+          sort_order      = EXCLUDED.sort_order,
+          updated_at      = NOW()
+      `
+      synced++
+    }
 
-  return NextResponse.json({ ok: true, synced })
+    return NextResponse.json({ ok: true, synced })
+  } catch (e) {
+    console.error('sync-roster DB error:', e)
+    return NextResponse.json({ error: 'DB write failed', detail: e instanceof Error ? e.message : String(e) }, { status: 500 })
+  }
 }
