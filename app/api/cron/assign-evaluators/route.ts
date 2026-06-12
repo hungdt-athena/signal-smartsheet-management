@@ -85,12 +85,12 @@ export async function POST(req: NextRequest) {
     if (!body.dryRun) {
       // One UPDATE per evaluator (grouped), assigned_date = today VN.
       const byEvaluator = new Map<string, number[]>()
-      for (const [id, name] of assignment) {
+      assignment.forEach((name, id) => {
         const ids = byEvaluator.get(name) || []
         ids.push(id)
         byEvaluator.set(name, ids)
-      }
-      for (const [name, ids] of byEvaluator) {
+      })
+      for (const [name, ids] of Array.from(byEvaluator.entries())) {
         await sql`
           UPDATE game_evaluations
           SET initial_evaluator = ${name},
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     }
 
     const perEvaluator: Record<string, number> = {}
-    for (const name of assignment.values()) perEvaluator[name] = (perEvaluator[name] || 0) + 1
+    assignment.forEach((name) => { perEvaluator[name] = (perEvaluator[name] || 0) + 1 })
 
     return NextResponse.json({
       ok: true,

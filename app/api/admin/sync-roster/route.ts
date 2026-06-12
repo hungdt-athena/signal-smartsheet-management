@@ -31,7 +31,8 @@ export async function POST(req: NextRequest) {
 
   let synced = 0
   try {
-    for (const [i, row] of body.rows.entries()) {
+    for (let i = 0; i < body.rows.length; i++) {
+      const row = body.rows[i]
       const name = String(row['Evaluator Name'] ?? '').trim()
       if (!name) continue
       const available = String(row['Today Available'] ?? '').trim().toLowerCase() === 'yes'

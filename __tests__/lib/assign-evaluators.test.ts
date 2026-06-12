@@ -27,7 +27,7 @@ describe('assignGames', () => {
     ]
     const m = assignGames(games, evals)
     expect(m.size).toBe(4)
-    const counts = [...m.values()].reduce((acc: Record<string, number>, n) => {
+    const counts = Array.from(m.values()).reduce((acc: Record<string, number>, n) => {
       acc[n] = (acc[n] || 0) + 1; return acc
     }, {})
     expect(counts).toEqual({ A: 2, B: 2 })
@@ -41,11 +41,11 @@ describe('assignGames', () => {
     ]
     const m = assignGames(games, evals)
     expect(m.size).toBe(4)
-    for (const [id, name] of m) {
+    for (const [id, name] of Array.from(m.entries())) {
       if (name === 'IOS') expect(games.find(x => x.id === id)!.os).toBe('ios')
     }
     // IOS target = round(4 * 100/400) = 1
-    expect([...m.values()].filter(n => n === 'IOS').length).toBe(1)
+    expect(Array.from(m.values()).filter(n => n === 'IOS').length).toBe(1)
   })
 
   it('leaves games unassigned when no "all" evaluator can take the rest', () => {
