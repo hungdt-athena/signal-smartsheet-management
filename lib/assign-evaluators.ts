@@ -18,7 +18,7 @@ export function splitByWeight(weights: number[], total: number): number[] {
   if (sum <= 0 || total <= 0) return weights.map(() => 0)
   const raw = weights.map(w => (total * w) / sum)
   const base = raw.map(x => Math.floor(x))
-  let rem = total - base.reduce((a, b) => a + b, 0)
+  const rem = total - base.reduce((a, b) => a + b, 0)
   const order = raw.map((_, i) => i).sort((a, b) => ((raw[b] - base[b]) - (raw[a] - base[a])) || (a - b))
   for (let i = 0; i < rem; i++) base[order[i]]++
   return base
