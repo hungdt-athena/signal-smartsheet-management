@@ -32,7 +32,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 })
   }
 
-  const category = body.category || ''
+  // category  = the category_group written to game_evaluations (one of CATEGORIES).
+  // categories = the game_info metadata category names to match against (driven by
+  //              the n8n config sheet). These two fields differ by design: e.g. the
+  //              config sheet may list ["puzzle", "word"] as the metadata categories
+  //              that map into the "puzzle" evaluation group.
+  const category = String(body.category ?? '').trim().toLowerCase()
   if (!CATEGORIES.includes(category)) {
     return NextResponse.json({ error: `category must be one of ${CATEGORIES.join(', ')}` }, { status: 400 })
   }
@@ -59,6 +64,7 @@ export async function POST(req: NextRequest) {
             SELECT 1 FROM jsonb_array_elements_text(gi.metadata -> 'categories') AS cat
             WHERE lower(cat) = ANY(${cats})
           )
+          -- intentional: mirrors the INSERT dedupe so the dry-run count is comparable to a real push
           AND NOT EXISTS (
             SELECT 1 FROM game_evaluations ge
             WHERE ge.game_id = gi.game_id AND ge.category_group = ${category}

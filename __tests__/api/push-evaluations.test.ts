@@ -59,6 +59,7 @@ describe('POST /api/cron/push-evaluations', () => {
   it('dryRun selects without inserting', async () => {
     sqlMock.mockResolvedValue([{ game_id: 'g1' }])
     const res = await post({ category: 'puzzle', categories: ['puzzle'], dryRun: true })
+    expect(res.status).toBe(200)
     const json = await res.json()
     expect(json.dryRun).toBe(true)
     expect(json.pushed).toBe(1)
