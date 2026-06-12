@@ -26,20 +26,33 @@ const CONCLUSION_COLORS: Record<string, string> = {
 
 const MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
+function todayVN() {
+  const d = new Date(Date.now() + 7 * 3600 * 1000)
+  return d.toISOString().slice(0, 10)
+}
+
 export function QuickStatsModal({ category, month, onClose }: {
   category: string
   month: YearMonth | null
   onClose: () => void
 }) {
+  const [tab, setTab] = useState<'overall' | 'evaluated'>('overall')
+  const [evalDate, setEvalDate] = useState<string>(todayVN())
   const [rows, setRows] = useState<EvaluatorStats[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
-    const params = new URLSearchParams({ category })
-    if (month) {
-      params.set('year', String(month.year))
-      params.set('month', String(month.month))
+    setLoading(true)
+    setRows([])
+    const params = new URLSearchParams({ category, tab })
+    if (tab === 'overall') {
+      if (month) {
+        params.set('year', String(month.year))
+        params.set('month', String(month.month))
+      }
+    } else {
+      if (evalDate) params.set('date', evalDate)
     }
     fetch(`/api/evaluations/quick-stats?${params}`)
       .then(r => r.json())
@@ -47,7 +60,7 @@ export function QuickStatsModal({ category, month, onClose }: {
       .catch(() => { /* ignore */ })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [category, month])
+  }, [category, month, tab, evalDate])
 
   const agg = rows.reduce(
     (a, r) => ({ total: a.total + r.total, done: a.done + r.done, drive: a.drive + r.drive_links }),
@@ -65,18 +78,52 @@ export function QuickStatsModal({ category, month, onClose }: {
     .join(' · ')
   const maxTotal = Math.max(1, ...rows.map(r => r.total))
 
+  function periodLabel() {
+    if (tab === 'evaluated') return evalDate ? `evaluated ${evalDate}` : 'all evaluated'
+    return month ? `${MONTH_NAMES[month.month]} ${month.year}` : 'all time'
+  }
+
   return (
     <div className="eval-modal-backdrop" onClick={onClose}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{ padding: '20px 24px 24px', maxWidth: 640, width: '92vw', maxHeight: '84vh', overflowY: 'auto' }}>
+        style={{ padding: '20px 24px 24px', maxWidth: 800, width: '96vw', maxHeight: '90vh', overflowY: 'auto' }}>
 
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Quick Stats</h2>
           <button className="btn btn-ghost" onClick={onClose} style={{ padding: '4px 10px', fontSize: 12 }}>✕</button>
         </div>
+
+        {/* Tabs + date picker */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 14, flexWrap: 'wrap' }}>
+          {(['overall', 'evaluated'] as const).map(t => (
+            <button key={t}
+              onClick={() => setTab(t)}
+              className={`seg-btn-premium${tab === t ? ' active' : ''}`}
+              style={{ textTransform: 'capitalize' }}>
+              {t}
+            </button>
+          ))}
+          {tab === 'evaluated' && (
+            <input
+              type="date"
+              value={evalDate}
+              onChange={e => setEvalDate(e.target.value)}
+              style={{
+                marginLeft: 8, padding: '3px 10px', fontSize: 12, borderRadius: 6,
+                border: '1px solid var(--border)', background: 'var(--surface-2)',
+                color: 'var(--text)', cursor: 'pointer',
+              }}
+            />
+          )}
+        </div>
+
+        {/* Summary line */}
         <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--faint)' }}>
-          {category}{month ? ` · ${MONTH_NAMES[month.month]} ${month.year}` : ' · all time'}
-          {!loading && ` · ${agg.total} games · ${agg.done} done · ${agg.total - agg.done} pending · ${agg.drive} drive links`}
+          {category} · {periodLabel()}
+          {!loading && ` · ${agg.total} games · ${agg.done} done`}
+          {!loading && tab === 'overall' && ` · ${agg.total - agg.done} pending`}
+          {!loading && ` · ${agg.drive} drive links`}
           {!loading && aggPlatformText && ` · ${aggPlatformText}`}
         </p>
 
@@ -91,12 +138,14 @@ export function QuickStatsModal({ category, month, onClose }: {
             const conclusionEntries = Object.entries(r.conclusions).sort((a, b) => b[1] - a[1])
             const platformEntries = Object.entries(r.platforms || {}).sort((a, b) => b[1] - a[1])
             return (
-              <div key={r.evaluator} className="card" style={{ padding: '12px 14px' }}>
+              <div key={r.evaluator} className="card" style={{ padding: '14px 16px' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8 }}>
-                  <span style={{ fontWeight: 700, fontSize: 13.5 }}>{r.evaluator}</span>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{r.evaluator}</span>
                   <span style={{ fontSize: 12, color: 'var(--faint)' }}>
                     {r.total} games · <span style={{ color: 'var(--good, #16a34a)' }}>{r.done} done</span>
-                    {' · '}<span style={{ color: r.pending > 0 ? 'var(--warn)' : 'var(--faint)' }}>{r.pending} pending</span>
+                    {tab === 'overall' && (
+                      <>{' · '}<span style={{ color: r.pending > 0 ? 'var(--warn)' : 'var(--faint)' }}>{r.pending} pending</span></>
+                    )}
                   </span>
                   <span style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
                     {platformEntries.map(([os, n]) => (
@@ -104,16 +153,19 @@ export function QuickStatsModal({ category, month, onClose }: {
                         {PLATFORM_LABELS[os] || os.toUpperCase()} {n}
                       </span>
                     ))}
-                    <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 4 }}>{pct}%</span>
+                    {tab === 'overall' && (
+                      <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 4 }}>{pct}%</span>
+                    )}
                   </span>
                 </div>
 
-                {/* done vs pending bar, width scaled to the busiest evaluator */}
-                <div style={{ height: 8, borderRadius: 4, background: 'var(--surface-3)', overflow: 'hidden', width: `${Math.round((r.total / maxTotal) * 100)}%`, minWidth: 60, display: 'flex' }}>
-                  <div style={{ width: `${pct}%`, background: 'var(--accent)', borderRadius: 4 }} />
-                </div>
+                {tab === 'overall' && (
+                  <div style={{ height: 8, borderRadius: 4, background: 'var(--surface-3)', overflow: 'hidden', width: `${Math.round((r.total / maxTotal) * 100)}%`, minWidth: 60, display: 'flex', marginBottom: 8 }}>
+                    <div style={{ width: `${pct}%`, background: 'var(--accent)', borderRadius: 4 }} />
+                  </div>
+                )}
 
-                <div style={{ display: 'flex', gap: 5, marginTop: 9, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
                   {conclusionEntries.map(([c, n]) => (
                     <span key={c} className={`badge ${CONCLUSION_COLORS[c] || 'neutral'}`} style={{ fontSize: 10.5 }}>
                       {c} · {n}

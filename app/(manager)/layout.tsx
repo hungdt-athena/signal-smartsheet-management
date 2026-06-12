@@ -39,10 +39,11 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/evaluations?cat=puzzle', label: 'Puzzle' },
     { href: '/evaluations?cat=arcade', label: 'Arcade' },
     { href: '/evaluations?cat=simulation', label: 'Simulation' },
+    { href: '/evaluations?cat=short_list', label: 'Short List' },
   ]},
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
-    { href: '/youtube?tab=short_list', label: 'Short List' },
+    { href: '/youtube?tab=short_list', label: 'Assign Record' },
     { href: '/youtube?tab=record_video', label: 'Record Video' },
   ]},
   { href: '/admin',           label: 'Admin',      icon: 'shield', adminOnly: true },

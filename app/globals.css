@@ -652,6 +652,25 @@ input:checked + .slider:before {
   background-color: var(--accent-weak) !important;
 }
 
+/* Per-cell copy button — hidden until the row is hovered, then faint. */
+.cell-copy {
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 1px;
+  margin-left: 2px;
+  color: var(--faint);
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.tbl-row-premium:hover .cell-copy { opacity: 0.45; }
+.cell-copy:hover { opacity: 1 !important; color: var(--accent); }
+.cell-copy.done { opacity: 1 !important; color: var(--good); }
+
 /* User Badge */
 .user-avatar-pill {
   display: inline-flex;

@@ -17,6 +17,9 @@ export interface EvalDetail {
   evaluate_date: string | null
   initial_note: string | null
   initial_conclusion: string | null
+  final_conclusion: string | null
+  batch: string | null
+  current_batch?: string | null
   record_assignee: string | null
   record_assign_date: string | null
   record_5min_assignee: string | null
@@ -71,6 +74,16 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
 
+const MONTH_ABBR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// Weekly batch labels for a month, e.g. weekBatches(2026, 6) →
+// ['W1 Jun, 2026', 'W2 Jun, 2026', 'W3 Jun, 2026', 'W4 Jun, 2026'].
+// month is 1-12. Matches column A of the IDEA_LIST sheet.
+export function weekBatches(year: number, month: number): string[] {
+  const m = MONTH_ABBR[month] || ''
+  return [1, 2, 3, 4].map(w => `W${w} ${m}, ${year}`)
+}
+
 function fmtDateTime(d: string | null) {
   if (!d) return '—'
   return new Date(d).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -85,11 +98,33 @@ export async function fetchEvalByGameId(gameId: string): Promise<EvalDetail | nu
   } catch { return null }
 }
 
-function InfoField({ label, value }: { label: string; value: string | null | undefined }) {
+function InfoField({ label, value, copyValue }: { label: string; value: string | null | undefined; copyValue?: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    if (!copyValue) return
+    try {
+      await navigator.clipboard.writeText(copyValue)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* ignore */ }
+  }
   return (
     <div>
       <div className="label" style={{ marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 13, fontWeight: 500 }}>{value || '—'}</div>
+      <div style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span>{value || '—'}</span>
+        {copyValue && (
+          <button onClick={copy} title={`Copy ${label}`}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: copied ? 'var(--good)' : 'var(--faint)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            {copied ? '✓' : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -128,16 +163,69 @@ function FileNameField({ name }: { name: string }) {
   )
 }
 
+function TitleCopyButton({ title }: { title: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(title)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* ignore */ }
+  }
+  return (
+    <button onClick={copy} title="Copy title"
+      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: copied ? 'var(--good)' : 'var(--faint)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+      {copied ? '✓' : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
+// Persistent save-state badge so it's always clear whether the form matches
+// what's stored. Orange dot = pending edits; green check = in sync with server.
+function SaveStatus({ dirty }: { dirty: boolean }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 999,
+      color: dirty ? 'var(--warn)' : 'var(--good)',
+      background: dirty ? 'var(--warn-weak)' : 'var(--good-weak)',
+      border: `1px solid ${dirty ? 'var(--warn)' : 'var(--good)'}`,
+    }}>
+      {dirty ? (
+        <>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)' }} />
+          Unsaved changes
+        </>
+      ) : (
+        <>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          Saved
+        </>
+      )}
+    </span>
+  )
+}
+
 function ProgressTracker({ ev }: { ev: EvalDetail }) {
   const recAssignees = Array.from(new Set([ev.record_5min_assignee, ev.record_20min_assignee].filter(Boolean)))
   const recDrives = !!(ev.record_5min_drive || ev.record_20min_drive)
-  // Final step tracks the 5/20-min report videos only — the demo drive link
+  // "Video Uploaded" tracks the 5/20-min report videos only — the demo drive link
   // (ev.drive_link) belongs to the evaluation step, not this recording pipeline.
-  const steps = [
+  const steps: {
+    label: string; completed: boolean; date?: string | null; assignee?: string | null; sub?: string | null
+  }[] = [
     { label: 'Assigned Playtest', completed: !!ev.initial_evaluator, date: ev.assigned_date, assignee: ev.initial_evaluator },
     { label: 'Evaluated', completed: !!ev.evaluate_date, date: ev.evaluate_date },
-    { label: 'Assigned Report Video', completed: recAssignees.length > 0, date: ev.record_5min_date || ev.record_20min_date, assignee: recAssignees.join(', ') || null },
-    { label: 'Video 5/20 min Uploaded', completed: recDrives, date: ev.record_5min_drive_date || ev.record_20min_drive_date }
+    { label: 'Final Conclusion', completed: !!ev.final_conclusion, sub: ev.final_conclusion },
+    { label: 'Assigned Record Video', completed: recAssignees.length > 0, date: ev.record_5min_date || ev.record_20min_date, assignee: recAssignees.join(', ') || null },
+    { label: 'Video Uploaded', completed: recDrives, date: ev.record_5min_drive_date || ev.record_20min_drive_date }
   ]
 
   return (
@@ -207,8 +295,13 @@ function ProgressTracker({ ev }: { ev: EvalDetail }) {
                     👤 {step.assignee}
                   </span>
                 )}
+                {step.sub && (
+                  <span style={{ fontSize: 11, fontWeight: 600, color: isCompleted ? 'var(--text)' : 'var(--muted)', marginTop: 1 }}>
+                    {step.sub}
+                  </span>
+                )}
                 {step.date && (
-                  <span style={{ fontSize: 10, color: 'var(--faint)', marginTop: step.assignee ? 1 : 2 }}>
+                  <span style={{ fontSize: 10, color: 'var(--faint)', marginTop: step.assignee || step.sub ? 1 : 2 }}>
                     {fmtDate(step.date)}
                   </span>
                 )}
@@ -239,12 +332,13 @@ interface Props {
   userName: string
   readOnly?: boolean
   canAssignRecords?: boolean
+  hideRecordSections?: boolean
   onNavigate?: (gameId: string) => void
   onSaved?: (ev: EvalDetail) => void
   onClose?: () => void
 }
 
-export default function EvalDetailPanel({ initialGameId, gameList, role, userName, readOnly, canAssignRecords, onNavigate, onSaved, onClose }: Props) {
+export default function EvalDetailPanel({ initialGameId, gameList, role, userName, readOnly, canAssignRecords, hideRecordSections, onNavigate, onSaved, onClose }: Props) {
   const [currentGameId, setCurrentGameId] = useState(initialGameId)
   const [ev, setEv] = useState<EvalDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -253,6 +347,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
   const [note, setNote] = useState('')
   const [conclusion, setConclusion] = useState('')
+  const [batch, setBatch] = useState('')
   const [driveLink, setDriveLink] = useState('')
   const [drive5, setDrive5] = useState('')
   const [drive20, setDrive20] = useState('')
@@ -299,6 +394,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     const c = data.initial_conclusion || ''
     setConclusion(c)
     setDeadLink(c === 'Link_dead')
+    setBatch(data.batch || '')
     setDriveLink(data.drive_link || '')
     setDrive5(data.record_5min_drive || '')
     setDrive20(data.record_20min_drive || '')
@@ -422,6 +518,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       if (canEditEval) {
         body.initial_note = note
         if (conclusion) body.initial_conclusion = conclusion
+        // Batch only applies to List_Idea games. Managers pick freely; evaluators
+        // are forced into the team's current batch (set by a manager).
+        if (conclusion === 'List_Idea') {
+          const effBatch = isManager ? batch : (ev.current_batch || '')
+          if (effBatch && effBatch !== (ev.batch || '')) body.batch = effBatch
+        }
         if (driveLink && driveLink !== ev.drive_link) body.drive_link = driveLink
       }
       if (canEdit5 && drive5 && drive5 !== ev.record_5min_drive) body.record_5min_drive = drive5
@@ -522,7 +624,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 <div style={{ width: 56, height: 56, borderRadius: 12, background: 'var(--surface-3)', flexShrink: 0 }} />
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, lineHeight: 1.3 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   {ev.app_link ? (
                     <a href={ev.app_link} target="_blank" rel="noopener"
                       style={{ color: 'var(--accent)', textDecoration: 'none', display: 'inline' }}>
@@ -534,9 +636,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                       </svg>
                     </a>
                   ) : ev.title}
+                  <TitleCopyButton title={ev.title} />
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 5, wordBreak: 'break-all' }}>
-                  {ev.game_id} · <span style={{ textTransform: 'capitalize' }}>{ev.category_group}</span>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                  <span style={{ wordBreak: 'break-all' }}>{ev.game_id}</span>
+                  <TitleCopyButton title={ev.game_id} />
+                  <span>·</span>
+                  <span style={{ textTransform: 'capitalize' }}>{ev.category_group}</span>
                 </div>
                 {ev.subtitle && <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 5 }}>{ev.subtitle}</div>}
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
@@ -551,7 +657,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
             {/* Info grid with QR */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '10px 10px' }}>
-              <InfoField label="Publisher" value={ev.publisher_name} />
+              <InfoField label="Publisher" value={ev.publisher_name} copyValue={ev.publisher_name || ''} />
               <InfoField label="Evaluator" value={ev.initial_evaluator} />
               {ev.app_link ? (
                 <div 
@@ -589,19 +695,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               ) : <div />}
               <InfoField label="Genre" value={[ev.genre_1, ev.genre_2].filter(Boolean).join(' / ') || '—'} />
               <InfoField label="Assigned" value={fmtDate(ev.assigned_date)} />
-              <InfoField label="Release Date" value={fmtDate(ev.release_date)} />
+              <InfoField label="Release Date" value={fmtDate(ev.release_date)} copyValue={ev.release_date ? fmtDate(ev.release_date) : ''} />
               <InfoField label="Evaluated" value={fmtDateTime(ev.evaluate_date)} />
             </div>
 
-            {ev.description && (
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-                <div className="label" style={{ marginBottom: 4 }}>Description</div>
-                <div
-                  style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)', maxHeight: 240, overflowY: 'auto' }}
-                  dangerouslySetInnerHTML={{ __html: ev.description }}
-                />
-              </div>
-            )}
           </div>
 
           {/* StoreKit screenshots */}
@@ -641,6 +738,19 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               onToast={showToast}
             />
           )}
+
+          {/* Description */}
+          {ev.description && (
+            <div className="card" style={{ margin: 0 }}>
+              <div className="card-head">
+                <span className="card-label">Description</span>
+              </div>
+              <div
+                style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)', maxHeight: 300, overflowY: 'auto' }}
+                dangerouslySetInnerHTML={{ __html: ev.description }}
+              />
+            </div>
+          )}
         </div>
 
         {/* Right: Evaluation form */}
@@ -648,7 +758,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
           <div className="card" style={{ margin: 0 }}>
             <div className="card-head">
               <span className="card-label">Evaluation</span>
-              {dirty && <span style={{ fontSize: 11, color: 'var(--warn)', fontWeight: 600 }}>Unsaved</span>}
+              {canEdit && <SaveStatus dirty={dirty} />}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -677,6 +787,41 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   disabled={!canEditEval || deadLink}
                 />
               </div>
+
+              {/* Batch picker — only for List_Idea games, to bucket them into a
+                  weekly batch for the Short List. Managers pick freely; evaluators
+                  are forced into the team's current batch (set by a manager). */}
+              {conclusion === 'List_Idea' && (
+                <div className="field">
+                  <span className="label">Batch (week)</span>
+                  {isManager ? (
+                    <StyledSelect
+                      value={batch}
+                      onChange={v => { setBatch(v); setDirty(true) }}
+                      placeholder="Select batch..."
+                      options={(() => {
+                        const now = new Date()
+                        const opts = weekBatches(now.getFullYear(), now.getMonth() + 1)
+                        const cur = ev.current_batch
+                        const merged = [...opts]
+                        if (cur && !merged.includes(cur)) merged.unshift(cur)
+                        if (batch && !merged.includes(batch)) merged.unshift(batch)
+                        return [{ value: '', label: '— none —' }, ...merged.map(b => ({ value: b, label: b }))]
+                      })()}
+                      disabled={!canEditEval}
+                    />
+                  ) : ev.current_batch ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--accent-weak)', border: '1px solid var(--accent-border)', borderRadius: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>{ev.current_batch}</span>
+                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>· current batch (auto-assigned)</span>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'var(--warn)', padding: '8px 12px', background: 'var(--warn-weak)', borderRadius: 8 }}>
+                      No active batch — ask a manager to set the current batch.
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="field">
                 <span className="label">Note</span>
@@ -720,16 +865,26 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               )}
 
               {canEditEval && (
-                <button className="btn btn-primary" onClick={save} disabled={saving || !dirty}
-                  style={{ width: '100%', justifyContent: 'center', marginTop: 2 }}>
-                  {saving ? 'Saving...' : 'Save Evaluation'}
+                <button className={`btn ${dirty ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !dirty}
+                  style={{
+                    width: '100%', justifyContent: 'center', marginTop: 2, gap: 6,
+                    ...(dirty ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
+                  }}>
+                  {saving ? 'Saving...' : dirty ? 'Save Evaluation' : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      Saved — no changes
+                    </>
+                  )}
                 </button>
               )}
             </div>
           </div>
 
           {/* Record Video — 5 min */}
-          {(ev.record_5min_assignee || canEditAssignee) && (
+          {!hideRecordSections && (ev.record_5min_assignee || canEditAssignee) && (
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 5 min</span>
@@ -769,7 +924,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
           )}
 
           {/* Record Video — 20 min */}
-          {(ev.record_20min_assignee || canEditAssignee) && (
+          {!hideRecordSections && (ev.record_20min_assignee || canEditAssignee) && (
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 20 min</span>
@@ -809,10 +964,20 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
           )}
 
           {/* Save button for record changes */}
-          {(ev.record_5min_assignee || ev.record_20min_assignee || canEditAssignee) && (canEdit5 || canEdit20 || canEditAssignee) && (
-            <button className="btn btn-primary" onClick={save} disabled={saving || !dirty}
-              style={{ width: '100%', justifyContent: 'center' }}>
-              {saving ? 'Saving...' : 'Save Changes'}
+          {!hideRecordSections && (ev.record_5min_assignee || ev.record_20min_assignee || canEditAssignee) && (canEdit5 || canEdit20 || canEditAssignee) && (
+            <button className={`btn ${dirty ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !dirty}
+              style={{
+                width: '100%', justifyContent: 'center', gap: 6,
+                ...(dirty ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
+              }}>
+              {saving ? 'Saving...' : dirty ? 'Save Changes' : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Saved — no changes
+                </>
+              )}
             </button>
           )}
 

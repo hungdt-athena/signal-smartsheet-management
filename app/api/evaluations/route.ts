@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
     const evaluator = searchParams.get('evaluator') || ''
     const conclusion = searchParams.get('conclusion') || ''
     const conclusions = searchParams.get('conclusions') || ''
+    const batch = searchParams.get('batch') || ''
     const status = searchParams.get('status') || ''
     const assignmentStatus = searchParams.get('assignment_status') || ''
     const hasRecording = searchParams.get('has_recording') || ''
@@ -31,6 +32,8 @@ export async function GET(req: NextRequest) {
     const autoMonth = monthParam === 'auto'
     const year = parseInt(searchParams.get('year') || '0')
     const month = autoMonth ? 0 : parseInt(monthParam || '0')
+    const day = parseInt(searchParams.get('day') || '0')
+    const sortParam = searchParams.get('sort') === 'asc' ? 'asc' : 'desc'
     const page = Math.max(1, parseInt(searchParams.get('page') || '1') || 1)
     const limit = Math.min(500, Math.max(10, parseInt(searchParams.get('limit') || '200') || 200))
     const offset = (page - 1) * limit
@@ -51,6 +54,8 @@ export async function GET(req: NextRequest) {
       : conclusion
         ? sql`AND ge.initial_conclusion = ${conclusion}`
         : sql``
+
+    const batchFilter = batch ? sql`AND ge.batch = ${batch}` : sql``
 
     const assignmentFilter = assignmentStatus === 'unassigned'
       ? sql`AND ge.record_5min_assignee IS NULL AND ge.record_20min_assignee IS NULL`
@@ -95,7 +100,12 @@ export async function GET(req: NextRequest) {
       applied = { year, month }
     }
 
-    const monthFilter = applied
+    // day filter overrides month filter: shows only rows evaluated on that specific day
+    const dayFilter = applied && day > 0
+      ? sql`AND ge.evaluate_date::date = make_date(${applied.year}, ${applied.month}, ${day})`
+      : sql``
+
+    const monthFilter = applied && day === 0
       ? sql`AND ge.assigned_date >= make_date(${applied.year}, ${applied.month}, 1)
             AND ge.assigned_date < make_date(${applied.year}, ${applied.month}, 1) + interval '1 month'`
       : sql``
@@ -106,6 +116,8 @@ export async function GET(req: NextRequest) {
       ${conclusionFilter}
       ${statusFilter}
       ${monthFilter}
+      ${dayFilter}
+      ${batchFilter}
       ${assignmentFilter}
       ${recordingFilter}
       ${recorderFilter}
@@ -115,7 +127,7 @@ export async function GET(req: NextRequest) {
       sql`
         SELECT ge.id, ge.game_id, ge.category_group, ge.genre_1, ge.genre_2,
           ge.initial_evaluator, ge.final_evaluator, ge.assigned_date,
-          ge.evaluate_date, ge.initial_note, ge.initial_conclusion,
+          ge.evaluate_date, ge.initial_note, ge.initial_conclusion, ge.final_conclusion, ge.batch,
           ge.record_assignee, ge.record_assign_date,
           ge.record_5min_assignee, ge.record_5min_date,
           ge.record_5min_drive, ge.record_5min_drive_date,
@@ -131,7 +143,9 @@ export async function GET(req: NextRequest) {
         LEFT JOIN developer dev ON gi.publisher_id = dev.id
         WHERE ge.category_group = ${category}
           ${listFilters}
-        ORDER BY ge.assigned_date DESC, ge.imported_at DESC
+        ${sortParam === 'asc'
+          ? sql`ORDER BY ge.assigned_date ASC, ge.imported_at ASC`
+          : sql`ORDER BY ge.assigned_date DESC, ge.imported_at DESC`}
         LIMIT ${limit} OFFSET ${offset}
       `,
       wantMeta
@@ -186,6 +200,8 @@ export async function GET(req: NextRequest) {
       const present: string[] = distinctConclusions.map(r => r.c)
       body.available_conclusions = CONCLUSION_OPTIONS.filter(c => present.includes(c))
         .concat(present.filter(c => !CONCLUSION_OPTIONS.includes(c)).sort())
+      const cfg = await sql`SELECT value FROM app_config WHERE key = ${`current_batch:${category}`}`
+      body.current_batch = cfg[0]?.value ?? null
     }
 
     return NextResponse.json(body)
@@ -202,7 +218,7 @@ export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
     const {
-      id, initial_note, initial_conclusion, drive_link, youtube_link,
+      id, initial_note, initial_conclusion, final_conclusion, batch, drive_link, youtube_link,
       record_5min_assignee, record_20min_assignee,
       record_5min_drive, record_20min_drive,
     } = body
@@ -211,6 +227,9 @@ export async function PATCH(req: NextRequest) {
 
     if (initial_conclusion && !CONCLUSION_OPTIONS.includes(initial_conclusion)) {
       return NextResponse.json({ error: 'Invalid conclusion' }, { status: 400 })
+    }
+    if (final_conclusion && !CONCLUSION_OPTIONS.includes(final_conclusion)) {
+      return NextResponse.json({ error: 'Invalid final conclusion' }, { status: 400 })
     }
 
     // Ownership enforcement: non-admins may only edit content/recordings of games
@@ -228,7 +247,7 @@ export async function PATCH(req: NextRequest) {
         if (owned.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
         const row = owned[0]
         const editsContent = initial_note !== undefined || initial_conclusion !== undefined
-          || drive_link !== undefined || youtube_link !== undefined
+          || drive_link !== undefined || youtube_link !== undefined || batch !== undefined
         // Case-insensitive: imported sheet names have casing drift (Huydd vs HuyDD).
         const same = (a: string | null, b: string | null | undefined) =>
           !!a && !!b && a.toLowerCase() === b.toLowerCase()
@@ -245,6 +264,9 @@ export async function PATCH(req: NextRequest) {
         if (record_5min_assignee !== undefined || record_20min_assignee !== undefined) {
           return NextResponse.json({ error: 'Forbidden: cannot reassign here' }, { status: 403 })
         }
+        if (final_conclusion !== undefined) {
+          return NextResponse.json({ error: 'Forbidden: final conclusion requires manager role' }, { status: 403 })
+        }
       }
     }
 
@@ -253,6 +275,8 @@ export async function PATCH(req: NextRequest) {
         initial_note = COALESCE(${initial_note ?? null}, initial_note),
         initial_conclusion = COALESCE(${initial_conclusion ?? null}, initial_conclusion),
         evaluate_date = CASE WHEN ${initial_conclusion ?? null}::text IS NOT NULL THEN NOW() ELSE evaluate_date END,
+        final_conclusion = COALESCE(${final_conclusion ?? null}, final_conclusion),
+        batch = COALESCE(${batch ?? null}, batch),
         drive_link = COALESCE(${drive_link ?? null}, drive_link),
         drive_date = CASE WHEN ${drive_link ?? null}::text IS NOT NULL THEN NOW() ELSE drive_date END,
         youtube_link = COALESCE(${youtube_link ?? null}, youtube_link),

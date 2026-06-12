@@ -29,7 +29,7 @@ export async function GET(
     const rows = await sql`
       SELECT ge.id, ge.game_id, ge.category_group, ge.genre_1, ge.genre_2,
         ge.initial_evaluator, ge.final_evaluator, ge.assigned_date,
-        ge.evaluate_date, ge.initial_note, ge.initial_conclusion,
+        ge.evaluate_date, ge.initial_note, ge.initial_conclusion, ge.final_conclusion, ge.batch,
         ge.record_assignee, ge.record_assign_date,
         ge.record_5min_assignee, ge.record_5min_date,
         ge.record_5min_drive, ge.record_5min_drive_date,
@@ -64,6 +64,10 @@ export async function GET(
       if (hasManual) cleanupManualScreenshots(gameId)
       row.manual_screenshot_urls = null
     }
+    // Team-wide "current batch" for this game's category — drives the forced
+    // batch evaluators get when marking List_Idea (see EvalDetailPanel).
+    const cfg = await sql`SELECT value FROM app_config WHERE key = ${`current_batch:${row.category_group}`}`
+    row.current_batch = cfg[0]?.value ?? null
     return NextResponse.json({ data: row })
   } catch (err) {
     console.error('GET /api/evaluations/[gameId] error:', err)

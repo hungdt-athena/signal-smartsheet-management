@@ -7,8 +7,8 @@ import { sql } from '@/lib/db'
 export const dynamic = 'force-dynamic'
 
 // GET /api/evaluations/quick-stats — per-evaluator totals for the stats modal.
-// Managers (admin/moderator) see every evaluator; evaluators only themselves —
-// enforced server-side from the session, not from a query param.
+// tab=overall (default): all assigned games, filter by assigned_date month
+// tab=evaluated: only games with evaluate_date, filter by evaluate_date date (YYYY-MM-DD)
 export async function GET(req: NextRequest) {
   const guard = await requireAuth()
   if (guard) return guard
@@ -16,8 +16,11 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = req.nextUrl
     const category = searchParams.get('category') || 'puzzle'
+    const tab = searchParams.get('tab') || 'overall'
     const year = parseInt(searchParams.get('year') || '0')
     const month = parseInt(searchParams.get('month') || '0')
+    // date param: YYYY-MM-DD for evaluated tab day filter
+    const dateParam = searchParams.get('date') || ''
 
     let restrictTo = ''
     if (process.env.SKIP_AUTH !== 'true') {
@@ -29,21 +32,36 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const monthFilter = year > 0 && month > 0
-      ? sql`AND ge.assigned_date >= make_date(${year}, ${month}, 1)
-            AND ge.assigned_date < make_date(${year}, ${month}, 1) + interval '1 month'`
-      : sql``
     const evaluatorFilter = restrictTo
       ? sql`AND lower(ge.initial_evaluator) = lower(${restrictTo})`
       : sql``
+
+    let timeFilter
+    if (tab === 'evaluated') {
+      if (dateParam) {
+        timeFilter = sql`AND ge.evaluate_date::date = ${dateParam}::date`
+      } else {
+        timeFilter = sql`AND ge.evaluate_date IS NOT NULL`
+      }
+    } else {
+      timeFilter = year > 0 && month > 0
+        ? sql`AND ge.assigned_date >= make_date(${year}, ${month}, 1)
+              AND ge.assigned_date < make_date(${year}, ${month}, 1) + interval '1 month'`
+        : sql``
+    }
+
+    const evalFilter = tab === 'evaluated'
+      ? sql`AND ge.evaluate_date IS NOT NULL`
+      : sql``
+
     const baseWhere = sql`
       ge.category_group = ${category}
         AND ge.initial_evaluator IS NOT NULL
-        ${monthFilter}
+        ${evalFilter}
+        ${timeFilter}
         ${evaluatorFilter}
     `
 
-    // Grouped case-insensitively (sheet data has Huydd vs HuyDD drift).
     const [totals, conclusions, platforms] = await Promise.all([
       sql`
         SELECT lower(ge.initial_evaluator) AS k,

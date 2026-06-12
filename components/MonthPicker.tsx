@@ -1,9 +1,13 @@
 'use client'
 import { useState, useEffect, useRef, useMemo } from 'react'
 
-export interface YearMonth { year: number; month: number }
+export interface YearMonth { year: number; month: number; day?: number }
 
 const MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function daysInMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate()
+}
 
 export function MonthPicker({ available, value, onChange }: {
   available: YearMonth[]
@@ -26,6 +30,13 @@ export function MonthPicker({ available, value, onChange }: {
     [available, activeYear]
   )
 
+  const [hoveredMonth, setHoveredMonth] = useState<number | null>(null)
+  const activeMonth = hoveredMonth ?? (value?.year === activeYear ? (value?.month ?? null) : null)
+
+  useEffect(() => {
+    if (!open) { setHoveredYear(null); setHoveredMonth(null) }
+  }, [open])
+
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
@@ -35,7 +46,17 @@ export function MonthPicker({ available, value, onChange }: {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  const label = value ? `${MONTH_NAMES[value.month]} ${value.year}` : 'All months'
+  function labelText() {
+    if (!value) return 'All time'
+    if (value.day) return `${value.day} ${MONTH_NAMES[value.month]} ${value.year}`
+    return `${MONTH_NAMES[value.month]} ${value.year}`
+  }
+
+  const totalDays = activeYear && activeMonth ? daysInMonth(activeYear, activeMonth) : 0
+  const dayRows: number[][] = []
+  for (let d = 1; d <= totalDays; d += 7) {
+    dayRows.push(Array.from({ length: Math.min(7, totalDays - d + 1) }, (_, i) => d + i))
+  }
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -46,7 +67,7 @@ export function MonthPicker({ available, value, onChange }: {
           <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" />
           <line x1="3" y1="10" x2="21" y2="10" />
         </svg>
-        {label}
+        {labelText()}
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -56,23 +77,26 @@ export function MonthPicker({ available, value, onChange }: {
         <div style={{
           position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 200,
           background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-          boxShadow: '0 8px 24px rgba(0,0,0,.25)', display: 'flex', minWidth: 260,
+          boxShadow: '0 8px 24px rgba(0,0,0,.25)', display: 'flex',
           overflow: 'hidden',
         }}>
-          <div style={{ borderRight: '1px solid var(--border)', padding: '6px 0', minWidth: 80 }}>
+          {/* Year column */}
+          <div style={{ borderRight: '1px solid var(--border)', padding: '6px 0', minWidth: 72 }}>
             <div style={{ padding: '4px 12px', fontSize: 10, fontWeight: 600, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.5px' }}>Year</div>
             <button
               onClick={() => { onChange(null); setOpen(false) }}
-              onMouseEnter={() => setHoveredYear(null)}
+              onMouseEnter={() => { setHoveredYear(null); setHoveredMonth(null) }}
               style={{
                 display: 'block', width: '100%', padding: '6px 12px', border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
-                background: !value ? 'var(--surface-3)' : 'transparent', color: !value ? 'var(--accent)' : 'var(--text)', fontWeight: !value ? 600 : 400,
+                background: !value ? 'var(--surface-3)' : 'transparent',
+                color: !value ? 'var(--accent)' : 'var(--text)',
+                fontWeight: !value ? 600 : 400,
               }}>
               All
             </button>
             {years.map(y => (
               <button key={y}
-                onMouseEnter={() => setHoveredYear(y)}
+                onMouseEnter={() => { setHoveredYear(y); setHoveredMonth(null) }}
                 style={{
                   display: 'block', width: '100%', padding: '6px 12px', border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
                   background: activeYear === y ? 'var(--surface-3)' : 'transparent',
@@ -84,18 +108,20 @@ export function MonthPicker({ available, value, onChange }: {
             ))}
           </div>
 
+          {/* Month column */}
           {activeYear && (
-            <div style={{ padding: '6px 0', minWidth: 160 }}>
+            <div style={{ borderRight: activeMonth ? '1px solid var(--border)' : 'none', padding: '6px 0', minWidth: 150 }}>
               <div style={{ padding: '4px 12px', fontSize: 10, fontWeight: 600, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.5px' }}>Month</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 2, padding: '2px 6px' }}>
                 {monthsForYear.map(m => {
-                  const selected = value?.year === activeYear && value?.month === m
+                  const selected = value?.year === activeYear && value?.month === m && !value?.day
                   return (
                     <button key={m}
+                      onMouseEnter={() => setHoveredMonth(m)}
                       onClick={() => { onChange({ year: activeYear, month: m }); setOpen(false) }}
                       style={{
                         padding: '6px 4px', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, textAlign: 'center',
-                        background: selected ? 'var(--accent)' : 'transparent',
+                        background: selected ? 'var(--accent)' : (activeMonth === m ? 'var(--surface-3)' : 'transparent'),
                         color: selected ? '#fff' : 'var(--text)',
                         fontWeight: selected ? 600 : 400,
                       }}>
@@ -103,6 +129,35 @@ export function MonthPicker({ available, value, onChange }: {
                     </button>
                   )
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Day column */}
+          {activeYear && activeMonth && (
+            <div style={{ padding: '6px 0', minWidth: 186 }}>
+              <div style={{ padding: '4px 12px', fontSize: 10, fontWeight: 600, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '.5px' }}>Day</div>
+              <div style={{ padding: '2px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {dayRows.map((row, ri) => (
+                  <div key={ri} style={{ display: 'flex', gap: 2 }}>
+                    {row.map(d => {
+                      const selected = value?.year === activeYear && value?.month === activeMonth && value?.day === d
+                      return (
+                        <button key={d}
+                          onClick={() => { onChange({ year: activeYear, month: activeMonth, day: d }); setOpen(false) }}
+                          style={{
+                            width: 24, height: 24, border: 'none', borderRadius: 5, cursor: 'pointer',
+                            fontSize: 11.5, textAlign: 'center', flexShrink: 0,
+                            background: selected ? 'var(--accent)' : 'transparent',
+                            color: selected ? '#fff' : 'var(--text)',
+                            fontWeight: selected ? 600 : 400,
+                          }}>
+                          {d}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
           )}
