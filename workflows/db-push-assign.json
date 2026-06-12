@@ -18,13 +18,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 7 * * *"
+              "expression": "0 0 * * *"
             }
           ]
         }
       },
       "id": "trigger-daily",
-      "name": "Daily 07:00 (UTC+7)",
+      "name": "Daily 07:00 VN (00:00 UTC)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
