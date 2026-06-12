@@ -42,7 +42,8 @@ export async function GET(req: NextRequest) {
         ? sql`AND ge.initial_conclusion IS NOT NULL`
         : sql``
 
-    const evaluatorFilter = evaluator ? sql`AND ge.initial_evaluator = ${evaluator}` : sql``
+    // Case-insensitive: sheet data has casing drift (Huydd vs HuyDD) — match all variants.
+    const evaluatorFilter = evaluator ? sql`AND lower(ge.initial_evaluator) = lower(${evaluator})` : sql``
 
     const conclusionList = conclusions.split(',').map(c => c.trim()).filter(Boolean)
     const conclusionFilter = conclusionList.length > 0
@@ -110,7 +111,7 @@ export async function GET(req: NextRequest) {
       ${recorderFilter}
     `
 
-    const [rows, statsRows, distinctConclusions] = await Promise.all([
+    const [rows, statsRows, distinctConclusions, distinctEvaluators] = await Promise.all([
       sql`
         SELECT ge.id, ge.game_id, ge.category_group, ge.genre_1, ge.genre_2,
           ge.initial_evaluator, ge.final_evaluator, ge.assigned_date,
@@ -136,8 +137,7 @@ export async function GET(req: NextRequest) {
       wantMeta
         ? sql`
             SELECT count(*)::int AS total,
-              count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL)::int AS evaluated,
-              count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS dead_links
+              count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL)::int AS evaluated
             FROM game_evaluations ge
             WHERE ge.category_group = ${category}
               ${listFilters}
@@ -153,22 +153,36 @@ export async function GET(req: NextRequest) {
               ${monthFilter}
           `
         : Promise.resolve([]),
+      // Full evaluator list for the category — deliberately ignores month and
+      // pagination so the filter dropdown shows everyone, not just whoever
+      // happens to be in the currently loaded rows. Grouped case-insensitively
+      // (sheet data has Huydd vs HuyDD drift); the dominant casing wins.
+      wantMeta
+        ? sql`
+            SELECT mode() WITHIN GROUP (ORDER BY ge.initial_evaluator) AS e
+            FROM game_evaluations ge
+            WHERE ge.category_group = ${category}
+              AND ge.initial_evaluator IS NOT NULL
+            GROUP BY lower(ge.initial_evaluator)
+            ORDER BY 1
+          `
+        : Promise.resolve([]),
     ])
 
     const body: Record<string, unknown> = { data: rows, page, limit }
 
     if (wantMeta) {
-      const s = statsRows[0] || { total: 0, evaluated: 0, dead_links: 0 }
+      const s = statsRows[0] || { total: 0, evaluated: 0 }
       body.total = s.total
       body.stats = {
         total: s.total,
         evaluated: s.evaluated,
         pending: s.total - s.evaluated,
-        dead_links: s.dead_links,
       }
       body.applied_month = applied
       body.available_months = availableMonths
       body.conclusion_options = CONCLUSION_OPTIONS
+      body.available_evaluators = distinctEvaluators.map(r => r.e)
       const present: string[] = distinctConclusions.map(r => r.c)
       body.available_conclusions = CONCLUSION_OPTIONS.filter(c => present.includes(c))
         .concat(present.filter(c => !CONCLUSION_OPTIONS.includes(c)).sort())
@@ -215,13 +229,16 @@ export async function PATCH(req: NextRequest) {
         const row = owned[0]
         const editsContent = initial_note !== undefined || initial_conclusion !== undefined
           || drive_link !== undefined || youtube_link !== undefined
-        if (editsContent && row.initial_evaluator !== me) {
+        // Case-insensitive: imported sheet names have casing drift (Huydd vs HuyDD).
+        const same = (a: string | null, b: string | null | undefined) =>
+          !!a && !!b && a.toLowerCase() === b.toLowerCase()
+        if (editsContent && !same(row.initial_evaluator, me)) {
           return NextResponse.json({ error: 'Forbidden: not your evaluation' }, { status: 403 })
         }
-        if (record_5min_drive !== undefined && row.record_5min_assignee !== me) {
+        if (record_5min_drive !== undefined && !same(row.record_5min_assignee, me)) {
           return NextResponse.json({ error: 'Forbidden: not your recording' }, { status: 403 })
         }
-        if (record_20min_drive !== undefined && row.record_20min_assignee !== me) {
+        if (record_20min_drive !== undefined && !same(row.record_20min_assignee, me)) {
           return NextResponse.json({ error: 'Forbidden: not your recording' }, { status: 403 })
         }
         // Reassigning recorders is a manager action — use /api/evaluations/assign-records.

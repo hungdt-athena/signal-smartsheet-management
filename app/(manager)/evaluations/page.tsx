@@ -6,6 +6,7 @@ import { StyledSelect } from '@/components/StyledSelect'
 import { MonthPicker } from '@/components/MonthPicker'
 import type { YearMonth } from '@/components/MonthPicker'
 import EvalDetailPanel from '@/components/EvalDetailPanel'
+import { QuickStatsModal } from '@/components/QuickStatsModal'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
 
 interface Evaluation {
@@ -74,6 +75,7 @@ function EvaluationsPageInner() {
   const [data, setData] = useState<Evaluation[]>([])
   const [total, setTotal] = useState(0)
   const [conclusionOptions, setConclusionOptions] = useState<string[]>([])
+  const [evaluatorOptions, setEvaluatorOptions] = useState<string[]>([])
   const [availableMonths, setAvailableMonths] = useState<YearMonth[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -90,17 +92,17 @@ function EvaluationsPageInner() {
   const fetchSeqRef = useRef(0)
 
   const [search, setSearch] = useState('')
+  const [showQuickStats, setShowQuickStats] = useState(false)
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
   const [detailList, setDetailList] = useState<EvalListItem[]>([])
   const [activeGameId, setActiveGameId] = useState<string | null>(null)
   const activeRowRef = useRef<HTMLTableRowElement | null>(null)
 
-  const [apiStats, setApiStats] = useState({ total: 0, evaluated: 0, pending: 0, dead_links: 0 })
+  const [apiStats, setApiStats] = useState({ total: 0, evaluated: 0, pending: 0 })
   const stats = useMemo(() => ({
     totalCount: apiStats.total,
     evaluatedCount: apiStats.evaluated,
     pendingCount: apiStats.pending,
-    deadLinkCount: apiStats.dead_links,
     percent: apiStats.total > 0 ? Math.round((apiStats.evaluated / apiStats.total) * 100) : 0,
   }), [apiStats])
 
@@ -138,6 +140,7 @@ function EvaluationsPageInner() {
       if (json.total !== undefined) setTotal(json.total)
       if (json.stats) setApiStats(json.stats)
       if (json.available_conclusions) setConclusionOptions(json.available_conclusions)
+      if (json.available_evaluators) setEvaluatorOptions(json.available_evaluators)
       if (json.available_months) setAvailableMonths(json.available_months)
       if (autoMonth && json.applied_month !== undefined) {
         // Lock in the server-resolved month: the picker shows it and all
@@ -181,7 +184,11 @@ function EvaluationsPageInner() {
     return data.filter(d => d.title.toLowerCase().includes(q) || d.game_id.toLowerCase().includes(q))
   }, [data, search])
 
-  const evaluators = Array.from(new Set(data.map(d => d.initial_evaluator).filter(Boolean) as string[]))
+  // Server-provided full list for the category (ignores month + pagination);
+  // fall back to deriving from loaded rows until the first page-1 response lands.
+  const evaluators = evaluatorOptions.length > 0
+    ? evaluatorOptions
+    : Array.from(new Set(data.map(d => d.initial_evaluator).filter(Boolean) as string[]))
 
   const openDetail = (gameId: string) => {
     const list = filtered.map(d => ({ game_id: d.game_id, title: d.title }))
@@ -238,12 +245,20 @@ function EvaluationsPageInner() {
           </div>
           <span className="stat-subtext">Awaiting evaluation</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">Dead Links</span>
-          <div className="stat-val" style={{ color: stats.deadLinkCount > 0 ? 'var(--bad)' : 'var(--text)' }}>
-            {stats.deadLinkCount}
+        <div className="stat-card" role="button" tabIndex={0}
+          onClick={() => setShowQuickStats(true)}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setShowQuickStats(true) }}
+          style={{ cursor: 'pointer' }}>
+          <span className="stat-label">Quick Stats</span>
+          <div className="stat-val" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
+            </svg>
+            View
           </div>
-          <span className="stat-subtext">Invalid store pages</span>
+          <span className="stat-subtext">Per-evaluator breakdown</span>
         </div>
       </div>
 
@@ -408,6 +423,15 @@ function EvaluationsPageInner() {
           )}
         </div>
       </div>
+
+      {/* Quick Stats Modal */}
+      {showQuickStats && (
+        <QuickStatsModal
+          category={category}
+          month={filterMonth}
+          onClose={() => setShowQuickStats(false)}
+        />
+      )}
 
       {/* Detail Modal */}
       {detailGameId && (

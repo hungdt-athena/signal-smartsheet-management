@@ -84,48 +84,58 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Nav */}
-        <div className="sb-section">Workspace</div>
         <nav className="sb-nav">
-          {visibleItems.map(item => {
-            const childPaths = item.children?.map(c => new URL(c.href, 'http://x').pathname) ?? []
-            const active = pathname === item.href
-              || pathname.startsWith(item.href + '/')
-              || childPaths.some(cp => pathname === cp || pathname.startsWith(cp + '/'))
-            const currentCat = searchParams.get('cat') || 'puzzle'
-            return (
-              <div key={item.href}>
-                <Link href={item.children ? item.children[0].href : item.href}
-                  className={'sb-item' + (active ? ' active' : '')}>
-                  <span className="sb-ico">
-                    <SIcon d={ICONS[item.icon]} size={17} />
-                  </span>
-                  <span>{item.label}</span>
-                </Link>
-                {item.children && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingLeft: 28, marginTop: 2, marginBottom: 4 }}>
-                    {item.children.map(sub => {
-                      const subUrl = new URL(sub.href, 'http://x')
-                      const subPath = subUrl.pathname
-                      const subCat = subUrl.searchParams.get('cat') || ''
-                      const subTab = subUrl.searchParams.get('tab') || ''
-                      const currentTab = searchParams.get('tab') || ''
-                      const subActive = subCat
-                        ? currentCat === subCat && pathname.startsWith(item.href)
-                        : subTab
-                          ? currentTab === subTab && pathname.startsWith(item.href)
-                          : pathname === subPath || pathname.startsWith(subPath + '/')
-                      return (
-                        <Link key={sub.href} href={sub.href}
-                          className={'sb-sub' + (subActive ? ' active' : '')}>
-                          {sub.label}
-                        </Link>
-                      )
-                    })}
+          {[
+            { section: 'Workspace', items: visibleItems.filter(i => i.href !== '/admin') },
+            { section: 'System', items: visibleItems.filter(i => i.href === '/admin') },
+          ].filter(g => g.items.length > 0).map(group => (
+            <div key={group.section}>
+              <div className="sb-section">{group.section}</div>
+              {group.items.map(item => {
+                const childPaths = item.children?.map(c => new URL(c.href, 'http://x').pathname) ?? []
+                const childActive = childPaths.some(cp => pathname === cp || pathname.startsWith(cp + '/'))
+                const selfActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                const currentCat = searchParams.get('cat') || 'puzzle'
+                // Parent of an active child gets accent text only — the child's
+                // pill carries the highlight, keeping one level visually "selected".
+                const itemClass = item.children
+                  ? 'sb-item' + ((selfActive || childActive) ? ' parent-active' : '')
+                  : 'sb-item' + (selfActive ? ' active' : '')
+                return (
+                  <div key={item.href} className="sb-group">
+                    <Link href={item.children ? item.children[0].href : item.href} className={itemClass}>
+                      <span className="sb-ico">
+                        <SIcon d={ICONS[item.icon]} size={17} />
+                      </span>
+                      <span>{item.label}</span>
+                    </Link>
+                    {item.children && (
+                      <div className="sb-children">
+                        {item.children.map(sub => {
+                          const subUrl = new URL(sub.href, 'http://x')
+                          const subPath = subUrl.pathname
+                          const subCat = subUrl.searchParams.get('cat') || ''
+                          const subTab = subUrl.searchParams.get('tab') || ''
+                          const currentTab = searchParams.get('tab') || ''
+                          const subActive = subCat
+                            ? currentCat === subCat && pathname.startsWith(item.href)
+                            : subTab
+                              ? currentTab === subTab && pathname.startsWith(item.href)
+                              : pathname === subPath || pathname.startsWith(subPath + '/')
+                          return (
+                            <Link key={sub.href} href={sub.href}
+                              className={'sb-sub' + (subActive ? ' active' : '')}>
+                              {sub.label}
+                            </Link>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )
-          })}
+                )
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* Footer */}

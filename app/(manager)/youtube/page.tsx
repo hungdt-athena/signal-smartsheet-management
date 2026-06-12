@@ -1349,15 +1349,16 @@ function ShortListTab() {
                 <th>Game</th>
                 <th>Note</th>
                 <th>Conclusion</th>
+                <th style={{ width: 90 }}>Drive Demo</th>
                 <th style={{ width: 140 }}>5 min</th>
                 <th style={{ width: 140 }}>20 min</th>
               </tr>
             </thead>
             <tbody>
               {data.length === 0 && !loading && (
-                <tr><td colSpan={6} className="empty">No games found</td></tr>
+                <tr><td colSpan={7} className="empty">No games found</td></tr>
               )}
-              {loading && <SkeletonRows cols={6} />}
+              {loading && <SkeletonRows cols={7} />}
               {data.map((item, idx) => (
                 <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
                   onClick={() => setDetailGameId(item.game_id)}>
@@ -1371,8 +1372,14 @@ function ShortListTab() {
                       )}
                       <div style={{ minWidth: 0 }}>
                         <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
-                        <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                        <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap', alignItems: 'center' }}>
                           <span className="pill muted" style={{ padding: '1px 5px', fontSize: 9 }}>{item.os?.toUpperCase()}</span>
+                          {[item.genre_1, item.genre_2].filter(Boolean).map(g => (
+                            <span key={g} className="pill tag" style={{ padding: '1px 5px', fontSize: 9 }}>{g}</span>
+                          ))}
+                          {item.initial_evaluator && (
+                            <span style={{ fontSize: 10.5, color: 'var(--faint)', fontWeight: 600 }}>{item.initial_evaluator}</span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1387,6 +1394,11 @@ function ShortListTab() {
                     {item.initial_conclusion
                       ? <span className={`badge ${SL_CONCLUSION_COLORS[item.initial_conclusion] || 'neutral'}`}>{item.initial_conclusion}</span>
                       : <span className="badge idle">Pending</span>}
+                  </td>
+                  <td>
+                    {item.drive_link
+                      ? <DriveBtnSmall href={item.drive_link} />
+                      : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
                   </td>
                   <td>
                     <RecordingCell assignee={item.record_5min_assignee} drive={item.record_5min_drive} />

@@ -131,11 +131,13 @@ function FileNameField({ name }: { name: string }) {
 function ProgressTracker({ ev }: { ev: EvalDetail }) {
   const recAssignees = Array.from(new Set([ev.record_5min_assignee, ev.record_20min_assignee].filter(Boolean)))
   const recDrives = !!(ev.record_5min_drive || ev.record_20min_drive)
+  // Final step tracks the 5/20-min report videos only — the demo drive link
+  // (ev.drive_link) belongs to the evaluation step, not this recording pipeline.
   const steps = [
     { label: 'Assigned Playtest', completed: !!ev.initial_evaluator, date: ev.assigned_date, assignee: ev.initial_evaluator },
     { label: 'Evaluated', completed: !!ev.evaluate_date, date: ev.evaluate_date },
     { label: 'Assigned Report Video', completed: recAssignees.length > 0, date: ev.record_5min_date || ev.record_20min_date, assignee: recAssignees.join(', ') || null },
-    { label: 'Drive Video', completed: recDrives || !!ev.drive_link, date: ev.drive_date }
+    { label: 'Video 5/20 min Uploaded', completed: recDrives, date: ev.record_5min_drive_date || ev.record_20min_drive_date }
   ]
 
   return (
