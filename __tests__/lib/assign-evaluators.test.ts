@@ -59,6 +59,11 @@ describe('assignGames', () => {
     expect(() => assignGames([g(1, 'ios')], [])).toThrow('evaluator list empty')
   })
 
+  it('returns empty map when games list is empty (no throw)', () => {
+    const m = assignGames([], [{ name: 'A', platform: 'all', weight: 100 }])
+    expect(m.size).toBe(0)
+  })
+
   it('treats unknown/blank platform and weight as all/100', () => {
     const games = [g(1, null), g(2, 'ios')]
     const evals = [{ name: 'A', platform: '', weight: 0 }]

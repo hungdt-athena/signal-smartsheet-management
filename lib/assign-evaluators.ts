@@ -19,7 +19,7 @@ export function splitByWeight(weights: number[], total: number): number[] {
   const raw = weights.map(w => (total * w) / sum)
   const base = raw.map(x => Math.floor(x))
   let rem = total - base.reduce((a, b) => a + b, 0)
-  const order = raw.map((_, i) => i).sort((a, b) => (raw[b] - base[b]) - (raw[a] - base[a]))
+  const order = raw.map((_, i) => i).sort((a, b) => ((raw[b] - base[b]) - (raw[a] - base[a])) || (a - b))
   for (let i = 0; i < rem; i++) base[order[i]]++
   return base
 }
@@ -49,6 +49,10 @@ export function assignGames(
   let remaining = [...games]
 
   // Phase 1: platform-specific evaluators take matching games up to target.
+  // NOTE: targets are computed against the GLOBAL game count (all evaluators' weights).
+  // A platform-specific evaluator with fewer matching games than its target under-fills;
+  // the gap flows into Phase 1's leftover → Phase 2 'all' evaluators. Intentional: matches
+  // the original n8n `assigned2` behavior.
   evaluators.forEach((e, i) => {
     if (e.platform === 'all') return
     const take = remaining.filter(g => gameMatchesPlatform(g, e.platform)).slice(0, targets[i])
