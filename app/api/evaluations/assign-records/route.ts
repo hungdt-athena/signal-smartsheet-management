@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
@@ -11,7 +11,7 @@ interface Assignment {
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await requireAuth()
+  const guard = await requireRole(['admin'])
   if (guard) return guard
 
   try {

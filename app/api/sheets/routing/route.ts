@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth-guard'
+import { requireAuth } from '@/lib/auth-guard'
 import { readRoutingBlocking, updateRoutingBlocking } from '@/lib/google-sheets'
 
 export const dynamic = 'force-dynamic'
@@ -11,7 +11,7 @@ function missingConfig() {
 }
 
 export async function GET() {
-  const guard = await requireRole(['admin', 'moderator'])
+  const guard = await requireAuth()
   if (guard) return guard
 
   const missing = missingConfig()
@@ -27,7 +27,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const guard = await requireRole(['admin', 'moderator'])
+  const guard = await requireAuth()
   if (guard) return guard
 
   const missing = missingConfig()

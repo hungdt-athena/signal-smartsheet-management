@@ -26,7 +26,8 @@ const ICONS: Record<string, string | string[]> = {
   table:  ['M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18'],
 }
 
-interface NavItem { href: string; label: string; icon: keyof typeof ICONS; adminOnly?: boolean; roles?: string[]; children?: { href: string; label: string }[] }
+interface NavChild { href: string; label: string; roles?: string[] }
+interface NavItem { href: string; label: string; icon: keyof typeof ICONS; adminOnly?: boolean; roles?: string[]; children?: NavChild[] }
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/smartsheet',      label: 'Smartsheet',  icon: 'table',  adminOnly: true, children: [
@@ -35,16 +36,18 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/team',            label: 'Team' },
     { href: '/handover-puzzle', label: 'Handover' },
   ]},
+  // Arcade/Simulation hidden from non-admins while still in development.
   { href: '/evaluations',     label: 'Evaluations', icon: 'clipboard', children: [
     { href: '/evaluations?cat=puzzle', label: 'Puzzle' },
-    { href: '/evaluations?cat=arcade', label: 'Arcade' },
-    { href: '/evaluations?cat=simulation', label: 'Simulation' },
+    { href: '/evaluations?cat=arcade', label: 'Arcade', roles: ['admin'] },
+    { href: '/evaluations?cat=simulation', label: 'Simulation', roles: ['admin'] },
     { href: '/evaluations?cat=short_list', label: 'Short List' },
   ]},
+  // Assign Record/Record Video hidden from non-admins while still in development.
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
-    { href: '/youtube?tab=short_list', label: 'Assign Record' },
-    { href: '/youtube?tab=record_video', label: 'Record Video' },
+    { href: '/youtube?tab=short_list', label: 'Assign Record', roles: ['admin'] },
+    { href: '/youtube?tab=record_video', label: 'Record Video', roles: ['admin'] },
   ]},
   { href: '/admin',           label: 'Admin',      icon: 'shield', adminOnly: true },
 ]
@@ -93,26 +96,28 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
             <div key={group.section}>
               <div className="sb-section">{group.section}</div>
               {group.items.map(item => {
-                const childPaths = item.children?.map(c => new URL(c.href, 'http://x').pathname) ?? []
+                // Child-level gating (e.g. in-dev tabs hidden from non-admins).
+                const childItems = item.children?.filter(c => !c.roles || c.roles.includes(role ?? '')) ?? []
+                const childPaths = childItems.map(c => new URL(c.href, 'http://x').pathname)
                 const childActive = childPaths.some(cp => pathname === cp || pathname.startsWith(cp + '/'))
                 const selfActive = pathname === item.href || pathname.startsWith(item.href + '/')
                 const currentCat = searchParams.get('cat') || 'puzzle'
                 // Parent of an active child gets accent text only — the child's
                 // pill carries the highlight, keeping one level visually "selected".
-                const itemClass = item.children
+                const itemClass = childItems.length > 0
                   ? 'sb-item' + ((selfActive || childActive) ? ' parent-active' : '')
                   : 'sb-item' + (selfActive ? ' active' : '')
                 return (
                   <div key={item.href} className="sb-group">
-                    <Link href={item.children ? item.children[0].href : item.href} className={itemClass}>
+                    <Link href={childItems.length > 0 ? childItems[0].href : item.href} className={itemClass}>
                       <span className="sb-ico">
                         <SIcon d={ICONS[item.icon]} size={17} />
                       </span>
                       <span>{item.label}</span>
                     </Link>
-                    {item.children && (
+                    {childItems.length > 0 && (
                       <div className="sb-children">
-                        {item.children.map(sub => {
+                        {childItems.map(sub => {
                           const subUrl = new URL(sub.href, 'http://x')
                           const subPath = subUrl.pathname
                           const subCat = subUrl.searchParams.get('cat') || ''
