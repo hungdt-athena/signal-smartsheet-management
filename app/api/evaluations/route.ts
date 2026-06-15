@@ -39,6 +39,16 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit
     const wantMeta = page === 1
 
+    // The month picker filters on different dates per view: the standard
+    // evaluators tab tracks when work was assigned (assigned_date); Short List
+    // tracks when games were evaluated/decided (evaluate_date), falling back to
+    // updated_at for rows synced without an eval date. Short List sends
+    // date_basis=evaluated. Columns are synced from Smartsheet.
+    const dateBasis = searchParams.get('date_basis') === 'evaluated' ? 'evaluated' : 'assigned'
+    const pickerDate = dateBasis === 'evaluated'
+      ? sql`COALESCE(ge.evaluate_date, ge.updated_at)`
+      : sql`ge.assigned_date`
+
     const statusFilter = status === 'pending'
       ? sql`AND ge.initial_conclusion IS NULL`
       : status === 'done'
@@ -75,11 +85,11 @@ export async function GET(req: NextRequest) {
     const availableMonths = (wantMeta || autoMonth)
       ? await sql`
           SELECT DISTINCT
-            EXTRACT(YEAR FROM ge.assigned_date)::int AS year,
-            EXTRACT(MONTH FROM ge.assigned_date)::int AS month
+            EXTRACT(YEAR FROM ${pickerDate})::int AS year,
+            EXTRACT(MONTH FROM ${pickerDate})::int AS month
           FROM game_evaluations ge
           WHERE ge.category_group = ${category}
-            AND ge.assigned_date IS NOT NULL
+            AND ${pickerDate} IS NOT NULL
             ${evaluatorFilter}
           ORDER BY year DESC, month DESC
         `
@@ -106,8 +116,8 @@ export async function GET(req: NextRequest) {
       : sql``
 
     const monthFilter = applied && day === 0
-      ? sql`AND ge.assigned_date >= make_date(${applied.year}, ${applied.month}, 1)
-            AND ge.assigned_date < make_date(${applied.year}, ${applied.month}, 1) + interval '1 month'`
+      ? sql`AND ${pickerDate} >= make_date(${applied.year}, ${applied.month}, 1)
+            AND ${pickerDate} < make_date(${applied.year}, ${applied.month}, 1) + interval '1 month'`
       : sql``
 
     // Shared by the list and stats queries — they must stay in lockstep.
@@ -144,8 +154,8 @@ export async function GET(req: NextRequest) {
         WHERE ge.category_group = ${category}
           ${listFilters}
         ${sortParam === 'asc'
-          ? sql`ORDER BY ge.assigned_date ASC, ge.imported_at ASC`
-          : sql`ORDER BY ge.assigned_date DESC, ge.imported_at DESC`}
+          ? sql`ORDER BY ${pickerDate} ASC, ge.imported_at ASC`
+          : sql`ORDER BY ${pickerDate} DESC, ge.imported_at DESC`}
         LIMIT ${limit} OFFSET ${offset}
       `,
       wantMeta

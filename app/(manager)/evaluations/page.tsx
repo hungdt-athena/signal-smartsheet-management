@@ -220,7 +220,8 @@ function ShortListEvalTab() {
     const seq = ++fetchSeqRef.current
     setLoading(true)
     try {
-      const params = new URLSearchParams({ category: filterCategory, limit: '500' })
+      // Short List groups by when games were evaluated, not assigned.
+      const params = new URLSearchParams({ category: filterCategory, limit: '500', date_basis: 'evaluated' })
       if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
       if (filterEvaluator) params.set('evaluator', filterEvaluator)
       if (autoMonth) {
