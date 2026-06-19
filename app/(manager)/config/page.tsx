@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
+import { DnDColumns } from '@/components/DnDColumns'
 
 type Field = 'conclusion' | 'final_conclusion'
 
@@ -108,39 +109,23 @@ function ConfigSection({
     setAdding(false)
   }
 
-  function move(i: number, dir: -1 | 1) {
-    const j = i + dir
-    if (j < 0 || j >= options.length) return
-    const ids = options.map(o => o.id)
-    ;[ids[i], ids[j]] = [ids[j], ids[i]]
-    onReorder(ids)
-  }
-
   const activeCount = options.filter(o => o.active).length
 
   return (
     <div className="card">
       <div className="card-head">
         <span className="card-label">{label}</span>
-        <span className="card-note">{note} · {activeCount}/{options.length} active</span>
+        <span className="card-note">{note} · {activeCount}/{options.length} active · drag to reorder / archive, double-click to rename</span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {options.length === 0 && !loading && <p className="empty">No options yet</p>}
-        {options.map((o, i) => (
-          <OptionItem
-            key={o.id}
-            opt={o}
-            isFirst={i === 0}
-            isLast={i === options.length - 1}
-            onUp={() => move(i, -1)}
-            onDown={() => move(i, 1)}
-            onRename={v => onRename(o.id, v)}
-            onToggle={() => onToggle(o.id, !o.active)}
-            onDelete={() => onDelete(o.id)}
-          />
-        ))}
-      </div>
+      <DnDColumns
+        items={options.map(o => ({ id: o.id, label: o.value, active: o.active }))}
+        loading={loading}
+        onToggle={(id, active) => { onToggle(id, active) }}
+        onReorder={ids => { onReorder(ids) }}
+        onRename={(id, value) => { onRename(id, value) }}
+        onDelete={id => { onDelete(id) }}
+      />
 
       <form onSubmit={handleAdd} style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         <input
@@ -157,52 +142,6 @@ function ConfigSection({
     </div>
   )
 }
-
-function OptionItem({
-  opt, isFirst, isLast, onUp, onDown, onRename, onToggle, onDelete,
-}: {
-  opt: OptionRow
-  isFirst: boolean
-  isLast: boolean
-  onUp: () => void
-  onDown: () => void
-  onRename: (value: string) => void
-  onToggle: () => void
-  onDelete: () => void
-}) {
-  const [val, setVal] = useState(opt.value)
-  // Keep local input synced when the row reorders / refetches.
-  useEffect(() => { setVal(opt.value) }, [opt.value])
-
-  function commit() {
-    const v = val.trim()
-    if (v && v !== opt.value) onRename(v)
-    else setVal(opt.value)
-  }
-
-  return (
-    <div style={{ display: 'flex', gap: 6, alignItems: 'center', opacity: opt.active ? 1 : 0.5 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <button className="btn btn-ghost btn-sm" style={arrowStyle} disabled={isFirst} onClick={onUp} title="Move up">↑</button>
-        <button className="btn btn-ghost btn-sm" style={arrowStyle} disabled={isLast} onClick={onDown} title="Move down">↓</button>
-      </div>
-      <input
-        className="input"
-        style={{ flex: 1 }}
-        value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-      />
-      <button className="btn btn-sm" onClick={onToggle} title={opt.active ? 'Disable (hide from dropdowns)' : 'Enable'}>
-        {opt.active ? 'On' : 'Off'}
-      </button>
-      <button className="btn btn-sm btn-danger" onClick={onDelete} title="Delete">✕</button>
-    </div>
-  )
-}
-
-const arrowStyle: React.CSSProperties = { padding: '0 6px', lineHeight: 1.1, minWidth: 22, height: 16, fontSize: 10 }
 
 // ── Genre → Bucket section ─────────────────────────────────────────────────────
 
@@ -274,8 +213,6 @@ function BucketGroup({
   const [newValue, setNewValue] = useState('')
   const [warn, setWarn] = useState(false)
   const [checking, setChecking] = useState(false)
-  const [dragId, setDragId] = useState<number | null>(null)
-  const [overCol, setOverCol] = useState<'used' | 'archived' | null>(null)
 
   const used = rows.filter(r => r.active)
   const archived = rows.filter(r => !r.active)
@@ -292,53 +229,17 @@ function BucketGroup({
     } finally { setChecking(false) }
   }
 
-  // Drop into a column → set the dragged mapping's active state to match the column.
-  function dropInto(targetActive: boolean) {
-    const id = dragId
-    setDragId(null); setOverCol(null)
-    if (id == null) return
-    const row = rows.find(r => r.id === id)
-    if (row && row.active !== targetActive) onToggle(id, targetActive)
-  }
-
-  function column(title: string, items: MappingRow[], targetActive: boolean, key: 'used' | 'archived') {
-    return (
-      <div
-        className={'genre-col' + (overCol === key ? ' drag-over' : '')}
-        onDragOver={e => { e.preventDefault(); setOverCol(key) }}
-        onDragLeave={() => setOverCol(c => (c === key ? null : c))}
-        onDrop={() => dropInto(targetActive)}
-      >
-        <div className="genre-col-head">{title} <span className="genre-col-count">{items.length}</span></div>
-        <div className="genre-col-body">
-          {items.length === 0 && !loading && <span className="empty" style={{ fontSize: 11 }}>Drop here</span>}
-          {items.map(r => (
-            <span
-              key={r.id}
-              className="chip chip-drag"
-              draggable
-              onDragStart={() => setDragId(r.id)}
-              onDragEnd={() => { setDragId(null); setOverCol(null) }}
-            >
-              <span className="chip-grip" aria-hidden>⠿</span>
-              {r.genre}
-              <button className="chip-x" title="Delete" onClick={() => onDelete(r.id)}>✕</button>
-            </span>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div>
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--faint)' }}>
         {label} <span style={{ fontWeight: 400 }}>· {used.length} used / {archived.length} archived</span>
       </div>
-      <div className="genre-cols">
-        {column('Used', used, true, 'used')}
-        {column('Archived', archived, false, 'archived')}
-      </div>
+      <DnDColumns
+        items={rows.map(r => ({ id: r.id, label: r.genre, active: r.active }))}
+        loading={loading}
+        onToggle={(id, active) => { onToggle(id, active) }}
+        onDelete={id => { onDelete(id) }}
+      />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
         <input className="input" style={{ flex: 1 }} value={newValue}
           onChange={e => { setNewValue(e.target.value); setWarn(false) }}

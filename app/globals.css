@@ -941,22 +941,37 @@ input:checked + .slider:before {
   transition: width 0.8s cubic-bezier(.2,.7,.3,1);
 }
 
-/* Genre→Bucket chips + Used/Archived drag columns (Config tab) */
-.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 10px;
-  border: 1px solid var(--border); border-radius: 999px; font-size: 12px; background: var(--card); }
-.chip-x { border: none; background: none; cursor: pointer; color: var(--faint);
-  font-size: 11px; padding: 0 2px; line-height: 1; }
-.chip-x:hover { color: var(--text); }
-.chip-drag { cursor: grab; user-select: none; }
-.chip-drag:active { cursor: grabbing; }
-.chip-grip { color: var(--faint); font-size: 11px; letter-spacing: -1px; }
+/* Used / Archived drag columns (Config tab) — Used is emphasized, Archived muted */
+.dnd-cols { display: flex; gap: 12px; align-items: stretch; }
+.dnd-col { min-width: 0; border-radius: 10px; padding: 12px; transition: border-color .12s, background .12s, box-shadow .12s; }
 
-.genre-cols { display: flex; gap: 10px; }
-.genre-col { flex: 1; min-width: 0; border: 1px dashed var(--border); border-radius: 8px;
-  padding: 8px; background: var(--bg); transition: border-color .12s, background .12s; }
-.genre-col.drag-over { border-color: var(--accent); background: var(--accent-weak); }
-.genre-col-head { font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
-  color: var(--faint); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
-.genre-col-count { background: var(--card); border: 1px solid var(--border); border-radius: 999px;
-  padding: 0 6px; font-size: 10px; }
-.genre-col-body { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; align-content: flex-start; }
+/* Used: prominent — larger share, solid surface, accent header */
+.dnd-col-used { flex: 1.6; border: 1.5px solid var(--border-strong, var(--border)); background: var(--card); }
+.dnd-col-used .dnd-col-head { color: var(--accent); }
+/* Archived: secondary — smaller, recessed, faint */
+.dnd-col-archived { flex: 1; border: 1px dashed var(--border); background: transparent; opacity: .82; }
+.dnd-col-archived .dnd-card { opacity: .7; }
+
+.dnd-col.drag-over { border-color: var(--accent); background: var(--accent-weak); box-shadow: 0 0 0 2px var(--accent-weak) inset; }
+.dnd-col-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--faint); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.dnd-col-count { background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
+  padding: 1px 7px; font-size: 11px; font-weight: 600; color: var(--text); }
+.dnd-col-body { display: flex; flex-wrap: wrap; gap: 8px; min-height: 44px; align-content: flex-start; }
+.dnd-empty { color: var(--faint); font-size: 12px; padding: 6px 2px; font-style: italic; }
+
+/* Cards — bigger, grabbable */
+.dnd-card { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px 6px 8px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 13px;
+  cursor: grab; user-select: none; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .12s, border-color .12s; }
+.dnd-card:hover { border-color: var(--border-strong, var(--accent)); box-shadow: 0 2px 6px rgba(0,0,0,.08); }
+.dnd-card:active { cursor: grabbing; }
+.dnd-grip { color: var(--faint); font-size: 12px; letter-spacing: -1px; cursor: grab; }
+.dnd-label { line-height: 1.2; }
+.dnd-edit { font-size: 13px; padding: 1px 4px; border: 1px solid var(--accent); border-radius: 4px;
+  background: var(--bg); color: var(--text); min-width: 80px; }
+.dnd-x { border: none; background: none; cursor: pointer; color: var(--faint); font-size: 12px;
+  padding: 0 2px; line-height: 1; }
+.dnd-x:hover { color: var(--danger, #e5484d); }
+
+@media (max-width: 720px) { .dnd-cols { flex-direction: column; } }
