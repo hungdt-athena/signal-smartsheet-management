@@ -24,6 +24,7 @@ const ICONS: Record<string, string | string[]> = {
   shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   clipboard: ['M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2', 'M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z'],
   table:  ['M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18'],
+  sliders: ['M4 21V14', 'M4 10V3', 'M12 21V12', 'M12 8V3', 'M20 21V16', 'M20 12V3', 'M1 14H7', 'M9 8H15', 'M17 16H23'],
 }
 
 interface NavChild { href: string; label: string; roles?: string[] }
@@ -42,6 +43,7 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/evaluations?cat=arcade', label: 'Arcade', roles: ['admin'] },
     { href: '/evaluations?cat=simulation', label: 'Simulation', roles: ['admin'] },
     { href: '/evaluations?cat=short_list', label: 'Short List' },
+    { href: '/evaluations?cat=assign_setup', label: 'Assign Setup', roles: ['admin', 'moderator'] },
   ]},
   // Assign Record/Record Video hidden from non-admins while still in development.
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
@@ -49,8 +51,12 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/youtube?tab=short_list', label: 'Assign Record', roles: ['admin'] },
     { href: '/youtube?tab=record_video', label: 'Record Video', roles: ['admin'] },
   ]},
-  { href: '/admin',           label: 'Admin',      icon: 'shield', adminOnly: true },
+  { href: '/admin',           label: 'Users Management', icon: 'shield', adminOnly: true },
+  { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin', 'moderator'] },
 ]
+
+// System-group items (rendered in the lower "System" nav section).
+const SYSTEM_HREFS = ['/admin', '/config']
 
 // useSearchParams requires a Suspense boundary for static prerendering.
 export default function ManagerLayout({ children }: { children: React.ReactNode }) {
@@ -90,8 +96,8 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
         {/* Nav */}
         <nav className="sb-nav">
           {[
-            { section: 'Workspace', items: visibleItems.filter(i => i.href !== '/admin') },
-            { section: 'System', items: visibleItems.filter(i => i.href === '/admin') },
+            { section: 'Workspace', items: visibleItems.filter(i => !SYSTEM_HREFS.includes(i.href)) },
+            { section: 'System', items: visibleItems.filter(i => SYSTEM_HREFS.includes(i.href)) },
           ].filter(g => g.items.length > 0).map(group => (
             <div key={group.section}>
               <div className="sb-section">{group.section}</div>

@@ -4,10 +4,13 @@ import { useSession } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import { StyledSelect } from '@/components/StyledSelect'
 import { MultiSelect } from '@/components/MultiSelect'
-import { MonthPicker } from '@/components/MonthPicker'
-import type { YearMonth } from '@/components/MonthPicker'
+import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth, valueLabel } from '@/components/DateFilter'
+import type { YearMonth } from '@/components/DateFilter'
+import { useDateFilter } from '@/hooks/useDateFilter'
+import { useConfig } from '@/hooks/useConfig'
 import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 import { QuickStatsModal } from '@/components/QuickStatsModal'
+import { AssignSetup } from '@/components/AssignSetup'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
 
 interface Evaluation {
@@ -43,8 +46,6 @@ const CONCLUSION_COLORS: Record<string, string> = {
   'Check Market Data': 'running', 'Need Direction': 'running',
 }
 
-const MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
 const CONCLUSION_OPTIONS = [
   'Bypass', 'Conclusion', 'Good', 'Link_dead', 'M_ByPass', 'Need deeper testing', 'Skip',
   'Wait for PlayTest', 'Priority IV: Idea', 'Priority III: Watchlist for next phase',
@@ -53,11 +54,8 @@ const CONCLUSION_OPTIONS = [
 ]
 
 // Final Conclusion is the moderator's triage verdict (distinct from the
-// evaluator's initial_conclusion). Its own option set + sheet-matching colors.
-const FINAL_CONCLUSION_OPTIONS = [
-  'Priority V', 'Priority IV', 'Bypass', 'Theme/Art', 'Insight', 'Watch List', 'Not Found',
-]
-
+// evaluator's initial_conclusion). Options are managed from the Config tab
+// (see useConfig); these are just the badge colors keyed by value.
 const FINAL_CONCLUSION_STYLES: Record<string, { bg: string; color: string }> = {
   'Priority V':  { bg: '#ede9fe', color: '#6d28d9' },
   'Priority IV': { bg: '#0f766e', color: '#ffffff' },
@@ -133,12 +131,15 @@ interface ShortListItem {
   batch: string | null
   drive_link: string | null
   publisher_name: string | null
+  assigned_date: string | null
+  evaluate_date: string | null
   category_group: string
 }
 
-function FinalConclusionCell({ item, isManager, onSaved }: {
+function FinalConclusionCell({ item, isManager, options, onSaved }: {
   item: ShortListItem
   isManager: boolean
+  options: string[]
   onSaved: (id: number, value: string) => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -175,7 +176,7 @@ function FinalConclusionCell({ item, isManager, onSaved }: {
         disabled={saving}
       >
         <option value="">— select —</option>
-        {FINAL_CONCLUSION_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+        {options.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
     )
   }
@@ -193,16 +194,99 @@ function FinalConclusionCell({ item, isManager, onSaved }: {
   )
 }
 
+// Demo Video cell with inline import. Games without a demo video show "+ Import";
+// clicking reveals an input to paste a Drive/video link, saved via PATCH drive_link.
+// Anyone who can see the row may attach a video (view is access-controlled upstream).
+function DemoVideoCell({ item, onSaved }: {
+  item: ShortListItem
+  onSaved: (id: number, value: string | null) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState(item.drive_link || '')
+  const [saving, setSaving] = useState(false)
+
+  const cancel = () => { setVal(item.drive_link || ''); setEditing(false) }
+
+  const save = async () => {
+    const v = val.trim()
+    if (v === (item.drive_link || '')) { setEditing(false); return }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/evaluations', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, drive_link: v || null }),
+      })
+      if (res.ok) onSaved(item.id, v || null)
+    } catch { /* ignore */ }
+    setSaving(false)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={e => e.stopPropagation()}>
+        <input
+          autoFocus
+          className="input"
+          style={{ fontSize: 11, padding: '3px 6px', width: 150 }}
+          placeholder="Paste video link…"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel() }}
+          disabled={saving}
+        />
+        <button className="btn btn-primary btn-sm" style={{ padding: '3px 7px', fontSize: 11 }} onClick={save} disabled={saving} title="Save link">✓</button>
+        <button className="btn btn-ghost btn-sm" style={{ padding: '3px 6px', fontSize: 11 }} onClick={cancel} disabled={saving} title="Cancel">✕</button>
+      </span>
+    )
+  }
+
+  if (item.drive_link) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+        <a href={item.drive_link} target="_blank" rel="noopener" onClick={e => e.stopPropagation()} className="drive-btn">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+          </svg>
+          Video
+        </a>
+        <button className="cell-copy" title="Replace video link"
+          onClick={e => { e.stopPropagation(); setVal(item.drive_link || ''); setEditing(true) }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </button>
+        <CopyBtn text={item.drive_link} />
+      </span>
+    )
+  }
+
+  return (
+    <button onClick={e => { e.stopPropagation(); setEditing(true) }}
+      title="Import a demo video link"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', background: 'transparent',
+        cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--accent)', padding: 0,
+      }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+      Import
+    </button>
+  )
+}
+
 function ShortListEvalTab() {
   const { data: session } = useSession()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
   const isManager = role === 'admin' || role === 'moderator'
+  const { final_conclusion: finalConclusionOptions } = useConfig()
 
   const [data, setData] = useState<ShortListItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [availableMonths, setAvailableMonths] = useState<YearMonth[]>([])
   const [availableEvaluators, setAvailableEvaluators] = useState<string[]>([])
   const [filterCategory, setFilterCategory] = useState('puzzle')
   const [filterConclusions, setFilterConclusions] = useState<string[]>(['List_Idea'])
@@ -210,9 +294,9 @@ function ShortListEvalTab() {
   const [filterEvaluator, setFilterEvaluator] = useState('')
   const [filterBatch, setFilterBatch] = useState('')
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
-  const [filterMonth, setFilterMonth] = useState<YearMonth | null>(null)
-  const [autoMonth, setAutoMonth] = useState(true)
-  const suppressFetchRef = useRef(false)
+  // Short List groups by when games were evaluated → default basis = evaluated.
+  const df = useDateFilter('evaluated')
+  const [sortAsc, setSortAsc] = useState(true)
   const fetchSeqRef = useRef(0)
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
 
@@ -220,29 +304,24 @@ function ShortListEvalTab() {
     const seq = ++fetchSeqRef.current
     setLoading(true)
     try {
-      // Short List groups by when games were evaluated, not assigned.
-      const params = new URLSearchParams({ category: filterCategory, limit: '500', date_basis: 'evaluated' })
+      const params = new URLSearchParams({ category: filterCategory, limit: '500' })
+      params.set('sort', sortAsc ? 'asc' : 'desc')
       if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
       if (filterEvaluator) params.set('evaluator', filterEvaluator)
-      if (autoMonth) {
-        params.set('month', 'auto')
-      } else if (filterMonth) {
-        params.set('year', String(filterMonth.year))
-        params.set('month', String(filterMonth.month))
-      }
+      for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
       const res = await fetch(`/api/evaluations?${params}`)
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return
       setData(json.data || [])
       setTotal(json.total || 0)
-      if (json.available_months) setAvailableMonths(json.available_months)
+      if (json.available_months) df.setAvailableMonths(json.available_months)
       if (json.available_evaluators) setAvailableEvaluators(json.available_evaluators)
       if (json.current_batch !== undefined) setCurrentBatch(json.current_batch)
-      if (autoMonth && json.applied_month !== undefined) {
+      if (df.autoMonth && json.applied_month !== undefined) {
         const ap = json.applied_month as YearMonth | null
-        suppressFetchRef.current = true
-        setAutoMonth(false)
-        setFilterMonth(ap)
+        df.suppressFetchRef.current = true
+        df.setAutoMonth(false)
+        df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
       if (json.available_conclusions?.length) {
         const merged = Array.from(new Set([...json.available_conclusions, ...filterConclusions]))
@@ -250,10 +329,10 @@ function ShortListEvalTab() {
       }
     } catch { /* ignore */ }
     setLoading(false)
-  }, [filterCategory, filterConclusions, filterEvaluator, filterMonth, autoMonth])
+  }, [filterCategory, filterConclusions, filterEvaluator, df.value, df.autoMonth, sortAsc])
 
   useEffect(() => {
-    if (suppressFetchRef.current) { suppressFetchRef.current = false; return }
+    if (df.suppressFetchRef.current) { df.suppressFetchRef.current = false; return }
     fetchData()
   }, [fetchData])
 
@@ -261,8 +340,13 @@ function ShortListEvalTab() {
     setData(prev => prev.map(d => d.id === id ? { ...d, final_conclusion: value } : d))
   }
 
+  const handleDriveLinkSaved = (id: number, value: string | null) => {
+    setData(prev => prev.map(d => d.id === id ? { ...d, drive_link: value } : d))
+  }
+
   // Batch filter options follow the month in the picker (UI-generated W1-W4).
-  const batchOptions = filterMonth ? weekBatches(filterMonth.year, filterMonth.month) : []
+  const filterYM = valueToYearMonth(df.value)
+  const batchOptions = filterYM ? weekBatches(filterYM.year, filterYM.month) : []
   // "All batches" = overall view; otherwise filter client-side on loaded rows.
   const shown = filterBatch ? data.filter(d => d.batch === filterBatch) : data
 
@@ -314,8 +398,8 @@ function ShortListEvalTab() {
       </div>
 
       <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
-        <MonthPicker available={availableMonths} value={filterMonth}
-          onChange={v => { setAutoMonth(false); setFilterMonth(v) }} />
+        <DateFilter value={df.value}
+          onChange={v => { df.setAutoMonth(false); df.setValue(v) }} />
 
         <div style={{ width: 140 }}>
           <StyledSelect
@@ -357,6 +441,23 @@ function ShortListEvalTab() {
           />
         </div>
 
+        <button
+          className="btn btn-sm"
+          title={sortAsc ? 'Sorted oldest first — click to sort newest first' : 'Sorted newest first — click to sort oldest first'}
+          onClick={() => setSortAsc(v => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+          {sortAsc ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 19V5M5 12l7-7 7 7" />
+            </svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14M5 12l7 7 7-7" />
+            </svg>
+          )}
+          {sortAsc ? 'Oldest first' : 'Newest first'}
+        </button>
+
         <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>
           {loading ? 'Loading...' : `${shown.length}${filterBatch ? ` / ${data.length}` : ''} results`}
         </span>
@@ -369,12 +470,12 @@ function ShortListEvalTab() {
               <tr>
                 <th style={{ width: 36 }}>#</th>
                 <th>Game</th>
-                <th>Publisher</th>
                 <th style={{ width: 110 }}>Link</th>
                 <th style={{ width: 150 }}>Final Conclusion</th>
                 <th style={{ width: 90 }}>Demo Video</th>
                 <th>Note</th>
-                <th style={{ width: 120 }}>Initial</th>
+                <th style={{ width: 96 }}>Assigned</th>
+                <th style={{ width: 96 }}>Evaluated</th>
               </tr>
             </thead>
             <tbody>
@@ -383,7 +484,7 @@ function ShortListEvalTab() {
               )}
               {loading && Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>{Array.from({ length: 8 }).map((__, c) => (
-                  <td key={c}><span className="skeleton" style={{ width: [30, 180, 120, 70, 110, 60, 160, 90][c] || 80, height: 14 }} /></td>
+                  <td key={c}><span className="skeleton" style={{ width: [30, 200, 70, 110, 60, 160, 80, 80][c] || 80, height: 14 }} /></td>
                 ))}</tr>
               ))}
               {shown.map((item, idx) => (
@@ -409,20 +510,24 @@ function ShortListEvalTab() {
                           {[item.genre_1, item.genre_2].filter(Boolean).map(g => (
                             <span key={g} className="pill tag" style={{ padding: '1px 5px', fontSize: 9 }}>{g}</span>
                           ))}
+                          {item.initial_conclusion
+                            ? <span className={`badge ${CONCLUSION_COLORS[item.initial_conclusion] || 'neutral'}`} style={{ fontSize: 9 }}>{item.initial_conclusion}</span>
+                            : <span className="badge idle" style={{ fontSize: 9 }}>Pending</span>}
                           {item.initial_evaluator && (
                             <span style={{ fontSize: 10.5, color: 'var(--faint)', fontWeight: 600 }}>{item.initial_evaluator}</span>
                           )}
                         </div>
+                        {item.publisher_name && (
+                          <div style={{ display: 'flex', alignItems: 'center', marginTop: 2 }}>
+                            <span style={{ fontSize: 11, color: 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}
+                              title={item.publisher_name}>
+                              {item.publisher_name}
+                            </span>
+                            <CopyBtn text={item.publisher_name} />
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </td>
-                  <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', maxWidth: 180 }}>
-                      <span style={{ fontSize: 12.5, color: item.publisher_name ? 'var(--text)' : 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {item.publisher_name || '—'}
-                      </span>
-                      <CopyBtn text={item.publisher_name} />
-                    </span>
                   </td>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -442,22 +547,12 @@ function ShortListEvalTab() {
                   </td>
                   <td onClick={e => e.stopPropagation()}>
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      <FinalConclusionCell item={item} isManager={isManager} onSaved={handleFinalConclusionSaved} />
+                      <FinalConclusionCell item={item} isManager={isManager} options={finalConclusionOptions} onSaved={handleFinalConclusionSaved} />
                       <CopyBtn text={item.final_conclusion} />
                     </span>
                   </td>
-                  <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      {item.drive_link ? (
-                        <a href={item.drive_link} target="_blank" rel="noopener" onClick={e => e.stopPropagation()} className="drive-btn">
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                          </svg>
-                          Video
-                        </a>
-                      ) : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
-                      <CopyBtn text={item.drive_link} />
-                    </span>
+                  <td onClick={e => e.stopPropagation()}>
+                    <DemoVideoCell item={item} onSaved={handleDriveLinkSaved} />
                   </td>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', maxWidth: 260 }}>
@@ -468,13 +563,11 @@ function ShortListEvalTab() {
                       <CopyBtn text={item.initial_note} />
                     </span>
                   </td>
-                  <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      {item.initial_conclusion
-                        ? <span className={`badge ${CONCLUSION_COLORS[item.initial_conclusion] || 'neutral'}`} style={{ fontSize: 10 }}>{item.initial_conclusion}</span>
-                        : <span className="badge idle" style={{ fontSize: 10 }}>Pending</span>}
-                      <CopyBtn text={item.initial_conclusion} />
-                    </span>
+                  <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap', color: 'var(--faint)' }}>
+                    {fmtDate(item.assigned_date)}
+                  </td>
+                  <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap', color: 'var(--faint)' }}>
+                    {fmtDate(item.evaluate_date)}
                   </td>
                 </tr>
               ))}
@@ -531,6 +624,7 @@ export default function EvaluationsPage() {
 function EvaluationsRouter() {
   const searchParams = useSearchParams()
   const category = searchParams.get('cat') || 'puzzle'
+  if (category === 'assign_setup') return <AssignSetup />
   return category === 'short_list' ? <ShortListEvalTab /> : <EvaluationsPageInner />
 }
 
@@ -546,7 +640,6 @@ function EvaluationsPageInner() {
   const [total, setTotal] = useState(0)
   const [conclusionOptions, setConclusionOptions] = useState<string[]>([])
   const [evaluatorOptions, setEvaluatorOptions] = useState<string[]>([])
-  const [availableMonths, setAvailableMonths] = useState<YearMonth[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -554,12 +647,11 @@ function EvaluationsPageInner() {
   const [filterEvaluator, setFilterEvaluator] = useState('')
   const [filterConclusion, setFilterConclusion] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
-  const [filterMonth, setFilterMonth] = useState<YearMonth | null>(null)
-  const [sortAsc, setSortAsc] = useState(false)
-  // First load sends month=auto; the server resolves the default month
+  const [sortAsc, setSortAsc] = useState(true)
+  // Standard evaluators tab tracks when work was assigned → default basis =
+  // assigned. First load sends month=auto; the server resolves the default month
   // (current month, falling back to latest with data) and echoes it back.
-  const [autoMonth, setAutoMonth] = useState(true)
-  const suppressFetchRef = useRef(false)
+  const df = useDateFilter('assigned')
   const fetchSeqRef = useRef(0)
 
   const [search, setSearch] = useState('')
@@ -595,13 +687,7 @@ function EvaluationsPageInner() {
       if (filterConclusion) params.set('conclusion', filterConclusion)
       if (filterStatus) params.set('status', filterStatus)
       params.set('sort', sortAsc ? 'asc' : 'desc')
-      if (autoMonth) {
-        params.set('month', 'auto')
-      } else if (filterMonth) {
-        params.set('year', String(filterMonth.year))
-        params.set('month', String(filterMonth.month))
-        if (filterMonth.day) params.set('day', String(filterMonth.day))
-      }
+      for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
       const res = await fetch(`/api/evaluations?${params}`)
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return // stale response; a newer fetch owns the state
@@ -615,24 +701,24 @@ function EvaluationsPageInner() {
       if (json.stats) setApiStats(json.stats)
       if (json.available_conclusions) setConclusionOptions(json.available_conclusions)
       if (json.available_evaluators) setEvaluatorOptions(json.available_evaluators)
-      if (json.available_months) setAvailableMonths(json.available_months)
-      if (autoMonth && json.applied_month !== undefined) {
+      if (json.available_months) df.setAvailableMonths(json.available_months)
+      if (df.autoMonth && json.applied_month !== undefined) {
         // Lock in the server-resolved month: the picker shows it and all
         // later fetches use explicit params instead of re-resolving auto.
         const ap = json.applied_month as YearMonth | null
-        suppressFetchRef.current = true
-        setAutoMonth(false)
-        setFilterMonth(ap)
+        df.suppressFetchRef.current = true
+        df.setAutoMonth(false)
+        df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
       setHasMore(rows.length === PAGE_SIZE)
     } catch { /* ignore */ }
     setLoading(false)
     setLoadingMore(false)
-  }, [category, filterEvaluator, filterConclusion, filterStatus, filterMonth, autoMonth, role, userName, sortAsc])
+  }, [category, filterEvaluator, filterConclusion, filterStatus, df.value, df.autoMonth, role, userName, sortAsc])
 
   useEffect(() => {
-    if (suppressFetchRef.current) {
-      suppressFetchRef.current = false
+    if (df.suppressFetchRef.current) {
+      df.suppressFetchRef.current = false
       return
     }
     pageRef.current = 1
@@ -691,7 +777,7 @@ function EvaluationsPageInner() {
           <h1 className="h-title">Evaluations</h1>
           <p className="h-sub">
             {total} games · {category}
-            {filterMonth ? ` · ${MONTH_NAMES[filterMonth.month]} ${filterMonth.year}` : ''}
+            {df.value.from ? ` · ${valueLabel(df.value)}` : ''}
             {role !== 'admin' && role !== 'moderator' && userName ? ` · ${userName}` : ''}
           </p>
         </div>
@@ -748,10 +834,9 @@ function EvaluationsPageInner() {
             value={search} onChange={e => setSearch(e.target.value)} />
         </div>
 
-        <MonthPicker
-          available={availableMonths}
-          value={filterMonth}
-          onChange={v => { setAutoMonth(false); setFilterMonth(v) }}
+        <DateFilter
+          value={df.value}
+          onChange={v => { df.setAutoMonth(false); df.setValue(v) }}
         />
 
         <div className="seg-wrapper">
@@ -943,7 +1028,7 @@ function EvaluationsPageInner() {
       {showQuickStats && (
         <QuickStatsModal
           category={category}
-          month={filterMonth}
+          month={valueToYearMonth(df.value)}
           onClose={() => setShowQuickStats(false)}
         />
       )}
