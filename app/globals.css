@@ -485,6 +485,16 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
   }
 }
 
+/* Fullscreen: EvalDetailPanel renders a hidden .eval-fs-on marker when toggled,
+   which expands its containing modal to fill the viewport. */
+.eval-modal-container:has(.eval-fs-on) {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+}
+
 /* Switch Toggle Custom */
 .switch {
   position: relative;
@@ -930,3 +940,10 @@ input:checked + .slider:before {
   background: var(--good);
   transition: width 0.8s cubic-bezier(.2,.7,.3,1);
 }
+
+/* Genre→Bucket chips (Config tab) */
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 10px;
+  border: 1px solid var(--border); border-radius: 999px; font-size: 12px; background: var(--card); }
+.chip-x { border: none; background: none; cursor: pointer; color: var(--faint);
+  font-size: 11px; padding: 0 2px; line-height: 1; }
+.chip-x:hover { color: var(--text); }
