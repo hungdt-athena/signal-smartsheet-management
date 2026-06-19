@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hướng dẫn Evaluator — Signal</title>
+<style>
+  :root{
+    --font:'IBM Plex Sans',system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --bg:#f7f8fa; --surface:#ffffff; --surface-2:#f5f6f8; --surface-3:#eef0f4; --sb-bg:#fbfbfc;
+    --border:#e7e9ee; --border-strong:#d7dae1;
+    --text:#1a1c22; --muted:#59606e; --faint:#99a0ad;
+    --good:#1f9d57; --good-weak:#e8f6ee; --warn:#b9760a; --warn-weak:#fbf1de;
+    --bad:#d23b3b; --bad-weak:#fbeaea;
+    --accent:#2f6bed; --accent-strong:#2455c9; --accent-weak:#eef3ff; --accent-border:#cfddfb;
+    --radius:12px;
+    --shadow-sm:0 1px 2px rgba(20,24,40,.05);
+    --shadow-md:0 6px 22px rgba(20,24,40,.09);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);
+    line-height:1.62;font-size:15.5px;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:900px;margin:0 auto;padding:34px 20px 90px;}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+  /* ---------- hero ---------- */
+  .brand{display:flex;align-items:center;gap:11px;margin-bottom:26px;}
+  .mark{width:38px;height:38px;border-radius:11px;background:linear-gradient(150deg,var(--accent),#5a86f2);
+    display:grid;place-items:center;flex-shrink:0;box-shadow:var(--shadow-sm);}
+  .mark span{width:14px;height:14px;border-radius:5px;background:#fff;display:block;}
+  .brand b{font-size:15px;letter-spacing:.1px;display:block;line-height:1.2}
+  .brand small{color:var(--faint);font-size:12px;}
+  h1{font-size:32px;line-height:1.18;margin:0 0 13px;letter-spacing:-.6px;}
+  .lede{font-size:17px;color:var(--muted);max-width:660px;margin:0;}
+
+  /* ---------- lifecycle strip ---------- */
+  .life{margin:30px 0 6px;background:var(--surface);border:1px solid var(--border);border-radius:16px;
+    padding:20px 20px 16px;box-shadow:var(--shadow-sm);}
+  .life .cap{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:0 0 14px;}
+  .life-row{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;}
+  .life-node{flex:1 1 120px;min-width:120px;position:relative;padding:0 8px;}
+  .life-node .b{display:flex;flex-direction:column;gap:3px;padding:11px 12px;border-radius:11px;height:100%;
+    background:var(--surface-2);border:1px solid var(--border);}
+  .life-node.you .b{background:var(--accent-weak);border-color:var(--accent-border);}
+  .life-node .t{font-size:13px;font-weight:700;}
+  .life-node.you .t{color:var(--accent-strong)}
+  .life-node .d{font-size:11.5px;color:var(--faint);line-height:1.4}
+  .life-node .who{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);margin-top:2px}
+  .life-node.you .who{color:var(--accent)}
+  .life-arrow{display:flex;align-items:center;color:var(--border-strong);font-size:17px;padding:0 1px;}
+  .note-cap{font-size:12.5px;color:var(--faint);margin:13px 2px 0;}
+
+  /* ---------- toc ---------- */
+  nav.toc{margin:26px 0 0;padding:16px 18px;background:var(--surface);border:1px solid var(--border);
+    border-radius:14px;box-shadow:var(--shadow-sm);}
+  nav.toc p{margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--faint);text-transform:uppercase;}
+  nav.toc ol{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:5px 18px;counter-reset:t;}
+  nav.toc a{counter-increment:t;display:flex;gap:11px;align-items:baseline;color:var(--muted);font-size:14.5px;padding:4px 0;}
+  nav.toc a::before{content:counter(t);color:var(--accent);font-weight:700;font-variant-numeric:tabular-nums;min-width:15px;}
+  nav.toc a:hover{color:var(--text);text-decoration:none}
+
+  /* ---------- sections ---------- */
+  section{margin-top:44px;scroll-margin-top:18px;}
+  .step-head{display:flex;align-items:center;gap:13px;margin-bottom:14px;}
+  .num{width:32px;height:32px;border-radius:10px;background:var(--accent);color:#fff;
+    font-weight:800;font-size:15px;display:grid;place-items:center;flex-shrink:0;box-shadow:var(--shadow-sm);}
+  h2{font-size:22px;margin:0;letter-spacing:-.3px;}
+  section > p{color:var(--muted);margin:0 0 14px;}
+  section p:last-child{margin-bottom:0}
+  .h3{font-size:14px;font-weight:700;color:var(--text);margin:20px 0 8px;}
+
+  ul.clean{margin:0 0 14px;padding:0;list-style:none;}
+  ul.clean li{position:relative;padding-left:22px;margin:9px 0;color:var(--muted);}
+  ul.clean li::before{content:"";position:absolute;left:3px;top:10px;width:6px;height:6px;border-radius:50%;background:var(--accent);}
+  ul.clean li b{color:var(--text);font-weight:600}
+
+  .key{display:inline-block;background:#fff;border:1px solid var(--border-strong);border-bottom-width:2px;
+    border-radius:6px;padding:0 7px;font-size:12.5px;font-family:var(--mono);color:var(--text);}
+
+  /* ---------- callouts ---------- */
+  .callout{display:flex;gap:12px;border-radius:13px;padding:14px 16px;margin:16px 0;border:1px solid;align-items:flex-start;}
+  .callout .ico{flex-shrink:0;font-size:17px;line-height:1.5;}
+  .callout p{margin:0;font-size:15px;color:var(--muted)}
+  .callout b{color:var(--text)}
+  .callout.tip{background:var(--accent-weak);border-color:var(--accent-border);}
+  .callout.warn{background:var(--warn-weak);border-color:#ecd9ab;}
+  .callout.good{background:var(--good-weak);border-color:#bfe3cd;}
+
+  /* ---------- tables ---------- */
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px;background:var(--surface);
+    border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow-sm);}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:top;}
+  tr:last-child td{border-bottom:none}
+  th{color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;background:var(--surface-2);}
+  td b{color:var(--text)}
+  .tbl-scroll{overflow-x:auto}
+
+  /* ---------- pills (faithful to app) ---------- */
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;white-space:nowrap;}
+  .pill.idea{background:var(--good-weak);color:var(--good);}
+  .pill.bypass{background:var(--bad-weak);color:var(--bad);}
+  .pill.tag{background:var(--accent-weak);color:var(--accent-strong);}
+  .pill.muted{background:var(--surface-3);color:var(--muted);}
+  .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;white-space:nowrap;}
+  .badge.success{background:var(--good-weak);color:var(--good);}
+  .badge.running{background:var(--warn-weak);color:var(--warn);}
+  .bdot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;}
+
+  /* ================= UI MOCKS — faithful to the real app ================= */
+  .mock{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;margin:16px 0 8px;box-shadow:var(--shadow-sm);}
+  .mock-cap{font-size:12.5px;color:var(--faint);text-align:center;margin:0 0 18px;font-style:italic;}
+
+  /* sidebar */
+  .mk-sb{max-width:248px;background:var(--sb-bg);border:1px solid var(--border);border-radius:13px;padding:14px 12px;}
+  .mk-brand{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
+  .mk-brand .m{width:30px;height:30px;border-radius:9px;background:linear-gradient(150deg,var(--accent),#5a86f2);display:grid;place-items:center;}
+  .mk-brand .m span{width:11px;height:11px;border-radius:4px;background:#fff;display:block}
+  .mk-brand b{font-size:13.5px;line-height:1.1;display:block}
+  .mk-brand small{font-size:10.5px;color:var(--faint)}
+  .mk-sec{font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);padding:6px 9px;}
+  .mk-item{display:flex;align-items:center;gap:11px;padding:8px 9px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--muted);}
+  .mk-item.active{background:var(--accent-weak);color:var(--accent-strong);}
+  .mk-item svg{width:16px;height:16px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .mk-sub{padding:6px 9px 6px 38px;font-size:12.5px;color:var(--faint);border-radius:7px;display:block;}
+  .mk-sub.active{background:var(--accent-weak);color:var(--accent-strong);font-weight:700;}
+
+  /* table mock */
+  .mk-tbl{width:100%;border-collapse:collapse;font-size:13px;margin:0;box-shadow:none;border:none;border-radius:0;}
+  .mk-tbl th{background:none;border-bottom:1px solid var(--border);padding:7px 10px;font-size:10px;}
+  .mk-tbl td{padding:11px 10px;border-bottom:1px solid var(--border);}
+  .mk-tbl tr:last-child td{border-bottom:none}
+  .mk-game{display:flex;align-items:center;gap:9px}
+  .mk-ico{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#dfe6f5,#cbd6ee);flex-shrink:0}
+  .mk-game b{font-size:13px}
+
+  /* eval form mock */
+  .mk-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:11px;border-bottom:1px solid var(--border);}
+  .mk-label{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);}
+  .mk-field{margin-bottom:13px;}
+  .mk-field:last-child{margin-bottom:0}
+  .mk-field .l{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;}
+  .mk-input{display:flex;align-items:center;justify-content:space-between;width:100%;background:var(--surface);
+    border:1px solid var(--border-strong);border-radius:8px;padding:9px 12px;color:var(--text);font-size:13.5px;}
+  .mk-input.ph{color:var(--faint);}
+  .mk-input.area{min-height:56px;align-items:flex-start;color:var(--text)}
+  .mk-input.sel::after{content:"⌄";color:var(--faint);font-size:15px;line-height:1;margin-top:-3px;}
+  .mk-btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;background:var(--accent);color:#fff;
+    border-radius:8px;padding:11px;font-weight:700;font-size:13.5px;margin-top:4px;}
+  .mk-row{display:flex;align-items:center;justify-content:space-between;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:13px;}
+  .mk-row .rt{font-weight:700;font-size:13px;}
+  .mk-row .rd{font-size:11px;color:var(--faint);margin-top:1px;}
+
+  /* faithful switch: off = gray; on(dead link) = red */
+  .mk-sw{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0;}
+  .mk-sw .tr{position:absolute;inset:0;border-radius:24px;background:var(--surface-3);border:1px solid var(--border-strong);}
+  .mk-sw .tr::before{content:"";position:absolute;height:16px;width:16px;left:3px;bottom:2.5px;border-radius:50%;background:var(--muted);transition:.2s;}
+  .mk-sw.on .tr{background:var(--bad-weak);border-color:var(--bad);}
+  .mk-sw.on .tr::before{transform:translateX(20px);background:var(--bad);}
+  .mk-sw.on.acc .tr{background:var(--accent-weak);border-color:var(--accent);}
+  .mk-sw.on.acc .tr::before{background:var(--accent);}
+  .mk-toggle-line{display:flex;align-items:center;justify-content:flex-end;gap:9px;}
+  .mk-toggle-line .lab{font-size:12.5px;font-weight:700;}
+  .mk-toggle-line .lab.on{color:var(--accent)} .mk-toggle-line .lab.off{color:var(--faint)}
+
+  .mk-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;border:1px solid;}
+  .mk-badge.unsaved{color:var(--warn);background:var(--warn-weak);border-color:#e6cf9e;}
+  .mk-badge.saved{color:var(--good);background:var(--good-weak);border-color:#bfe3cd;}
+  .mk-dot{width:6px;height:6px;border-radius:50%;display:inline-block;background:var(--warn)}
+
+  .mk-batch{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:var(--accent-weak);
+    border:1px solid var(--accent-border);border-radius:8px;padding:9px 13px;}
+  .mk-batch .bb{font-size:13.5px;font-weight:800;color:var(--accent-strong);}
+  .mk-batch .bd{font-size:11.5px;color:var(--muted);}
+
+  .mk-drop{border:1.5px dashed var(--border-strong);background:var(--surface-2);border-radius:11px;text-align:center;
+    padding:26px 14px;color:var(--muted);font-size:12.5px;}
+  .mk-drop .big{display:block;font-size:22px;margin-bottom:8px;opacity:.5;}
+  .mk-pillsm{display:inline-block;padding:1px 7px;border-radius:999px;font-size:9px;font-weight:700;background:var(--surface-3);
+    color:var(--faint);margin-left:6px;vertical-align:middle;text-transform:uppercase;letter-spacing:.04em;}
+
+  /* progress tracker */
+  .mk-prog{display:flex;align-items:center;justify-content:space-between;gap:4px;overflow-x:auto;padding:3px 2px;}
+  .mk-step{display:flex;align-items:center;gap:7px;flex-shrink:0;}
+  .mk-bub{width:23px;height:23px;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:800;flex-shrink:0;
+    background:var(--surface-2);border:1px solid var(--border-strong);color:var(--faint);}
+  .mk-bub.done{background:var(--good-weak);border-color:var(--good);color:var(--good);}
+  .mk-bub.cur{background:var(--accent-weak);border-color:var(--accent);color:var(--accent);}
+  .mk-step .st{font-size:11.5px;font-weight:600;white-space:nowrap;color:var(--faint);}
+  .mk-step.cur .st{color:var(--text)} .mk-step.done .st{color:var(--muted)}
+  .mk-line{flex:1;min-width:14px;height:2px;background:var(--border-strong);}
+  .mk-line.done{background:var(--good)}
+
+  /* can/can't */
+  .cando{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0;}
+  .cando .col{border:1px solid var(--border);border-radius:13px;padding:15px 17px;background:var(--surface);box-shadow:var(--shadow-sm);}
+  .cando h4{margin:0 0 10px;font-size:14px;display:flex;align-items:center;gap:7px;}
+  .cando.yes h4{color:var(--good)} .cando .no h4{color:var(--bad)}
+  .cando ul{margin:0;padding:0;list-style:none}
+  .cando li{font-size:13.5px;color:var(--muted);padding:5px 0 5px 20px;position:relative;}
+  .cando .col.y li::before{content:"✓";position:absolute;left:0;color:var(--good);font-weight:800}
+  .cando .col.n li::before{content:"✕";position:absolute;left:0;color:var(--bad);font-weight:800}
+
+  footer{margin-top:58px;padding-top:22px;border-top:1px solid var(--border);color:var(--faint);font-size:13px;}
+
+  @media(max-width:620px){
+    h1{font-size:26px} .lede{font-size:15.5px} body{font-size:15px}
+    nav.toc ol{grid-template-columns:1fr}
+    .cando{grid-template-columns:1fr}
+    .life-arrow{display:none} .life-node{flex-basis:100%}
+    .wrap{padding:26px 16px 64px}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <!-- ===== HERO ===== -->
+  <div class="brand">
+    <div class="mark"><span></span></div>
+    <div><b>Signal</b><small>Smartsheet Ops</small></div>
+  </div>
+  <h1>Hướng dẫn dùng app cho Evaluator</h1>
+  <p class="lede">Mọi thứ bạn cần để bắt đầu: đăng nhập, nhận game được giao, đánh note &amp; conclusion, chụp screenshot, và đưa game tiềm năng vào Short List.</p>
+
+  <!-- ===== LIFECYCLE ===== -->
+  <div class="life">
+    <p class="cap">Bạn nằm ở đâu trong quy trình</p>
+    <div class="life-row">
+      <div class="life-node"><div class="b"><span class="t">Game được giao</span><span class="d">Hệ thống gán game vào danh sách của bạn</span><span class="who">Tự động</span></div></div>
+      <div class="life-arrow">→</div>
+      <div class="life-node you"><div class="b"><span class="t">Bạn đánh giá</span><span class="d">Note + Conclusion (+ screenshot nếu cần)</span><span class="who">Bạn ★</span></div></div>
+      <div class="life-arrow">→</div>
+      <div class="life-node you"><div class="b"><span class="t">List_Idea → Batch</span><span class="d">Game hay được gom vào batch tuần</span><span class="who">Bạn ★</span></div></div>
+      <div class="life-arrow">→</div>
+      <div class="life-node"><div class="b"><span class="t">Short List</span><span class="d">Mod xem lại, đặt Final Conclusion</span><span class="who">Mod</span></div></div>
+      <div class="life-arrow">→</div>
+      <div class="life-node"><div class="b"><span class="t">Record / Video</span><span class="d">Quay video cho game được chọn</span><span class="who">Recorder</span></div></div>
+    </div>
+    <p class="note-cap">Phần của bạn là 2 bước ở giữa (★). Hai bước cuối do mod &amp; recorder lo — bạn không cần đụng tới.</p>
+  </div>
+
+  <nav class="toc">
+    <p>Nội dung</p>
+    <ol>
+      <li><a href="#dangnhap">Đăng nhập</a></li>
+      <li><a href="#manhinh">Màn hình chính</a></li>
+      <li><a href="#mogame">Mở một game</a></li>
+      <li><a href="#danhgia">Note &amp; Conclusion</a></li>
+      <li><a href="#screenshot">Screenshot</a></li>
+      <li><a href="#save">Save &amp; Auto-save</a></li>
+      <li><a href="#shortlist">List_Idea → Short List</a></li>
+      <li><a href="#meo">Mẹo &amp; FAQ</a></li>
+    </ol>
+  </nav>
+
+  <!-- ===== 1 ===== -->
+  <section id="dangnhap">
+    <div class="step-head"><div class="num">1</div><h2>Đăng nhập</h2></div>
+    <p>Mở app, bấm <b>“Sign in with Google”</b> và đăng nhập bằng <b>tài khoản Athena</b> của bạn. Xong là vào thẳng — không cần đăng ký gì thêm.</p>
+    <div class="callout tip">
+      <span class="ico">💡</span>
+      <p>Nếu đăng nhập xong mà chưa thấy game nào, báo manager — có thể danh sách của bạn chưa được cập nhật trong hệ thống.</p>
+    </div>
+  </section>
+
+  <!-- ===== 2 ===== -->
+  <section id="manhinh">
+    <div class="step-head"><div class="num">2</div><h2>Màn hình chính</h2></div>
+    <p>Sidebar bên trái có 2 chỗ bạn dùng thường xuyên — nằm trong mục <b>Evaluations</b>:</p>
+    <div class="mock">
+      <div class="mk-sb">
+        <div class="mk-brand"><div class="m"><span></span></div><div><b>Signal</b><small>Smartsheet Ops</small></div></div>
+        <div class="mk-sec">Workspace</div>
+        <div class="mk-item active">
+          <svg viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z"/></svg>
+          Evaluations
+        </div>
+        <span class="mk-sub active">Evaluate</span>
+        <span class="mk-sub">Short List</span>
+        <div class="mk-item" style="margin-top:4px">
+          <svg viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7zM1 5h15v14H1z"/></svg>
+          Videos
+        </div>
+        <span class="mk-sub">YouTube</span>
+      </div>
+    </div>
+    <p class="mock-cap">Sidebar — đúng các mục bạn sẽ thấy (mục đang chọn được tô xanh)</p>
+    <ul class="clean">
+      <li><b>Evaluate</b> — bảng tất cả game được giao cho bạn để đánh giá.</li>
+      <li><b>Short List</b> — những game bạn đã chốt là <span class="pill idea">List_Idea</span>, để mod xem lại và chốt cuối.</li>
+    </ul>
+    <div class="h3">Bảng Evaluate trông như thế nào</div>
+    <div class="mock">
+      <div class="mk-head"><span class="mk-label">Evaluate · Puzzle</span><span style="font-size:11.5px;color:var(--faint)">3 games</span></div>
+      <div class="tbl-scroll">
+        <table class="mk-tbl">
+          <tr><th>Game</th><th>Genre</th><th>Status</th><th>Evaluated</th></tr>
+          <tr><td><div class="mk-game"><span class="mk-ico"></span><b>Block Blast Saga</b></div></td><td><span class="pill muted">Puzzle</span></td><td><span class="badge success"><span class="bdot"></span>Done</span></td><td style="color:var(--faint)">18/06/26</td></tr>
+          <tr><td><div class="mk-game"><span class="mk-ico"></span><b>Word Cross Mania</b></div></td><td><span class="pill muted">Word</span></td><td><span class="badge running"><span class="bdot"></span>Pending</span></td><td style="color:var(--faint)">—</td></tr>
+          <tr><td><div class="mk-game"><span class="mk-ico"></span><b>Tile Match 3D</b></div></td><td><span class="pill muted">Casual</span></td><td><span class="badge running"><span class="bdot"></span>Pending</span></td><td style="color:var(--faint)">—</td></tr>
+        </table>
+      </div>
+    </div>
+    <p class="mock-cap">Click một dòng để mở game ra đánh giá</p>
+    <p>Bạn có thể lọc nhanh bằng filter: <b>ngày</b> được giao, <b>trạng thái</b> (Pending / Done / All), và <b>conclusion</b>.</p>
+  </section>
+
+  <!-- ===== 3 ===== -->
+  <section id="mogame">
+    <div class="step-head"><div class="num">3</div><h2>Mở một game để đánh giá</h2></div>
+    <p>Click một dòng → panel chi tiết mở ra. Trên cùng là <b>progress tracker</b> cho biết game đang ở bước nào:</p>
+    <div class="mock">
+      <div class="mk-prog">
+        <div class="mk-step done"><span class="mk-bub done">✓</span><span class="st">Assigned</span></div>
+        <div class="mk-line done"></div>
+        <div class="mk-step cur"><span class="mk-bub cur">2</span><span class="st">Evaluated</span></div>
+        <div class="mk-line"></div>
+        <div class="mk-step"><span class="mk-bub">3</span><span class="st">Final Conclusion</span></div>
+        <div class="mk-line"></div>
+        <div class="mk-step"><span class="mk-bub">4</span><span class="st">Record</span></div>
+        <div class="mk-line"></div>
+        <div class="mk-step"><span class="mk-bub">5</span><span class="st">Video</span></div>
+      </div>
+    </div>
+    <p class="mock-cap">Game này đang ở bước “Evaluated” — đang chờ bạn đánh giá</p>
+    <p>Trong panel bạn còn thấy:</p>
+    <ul class="clean">
+      <li><b>Game Info</b> — icon, tên (bấm để mở store), thể loại, publisher, ngày được giao.</li>
+      <li><b>QR “Scan to download”</b> — quét bằng điện thoại để cài game lên máy mà test.</li>
+      <li><b>Screenshots</b> và <b>khối Evaluation</b> để bạn làm việc (mục 4–6 bên dưới).</li>
+    </ul>
+    <div class="callout tip">
+      <span class="ico">⌨️</span>
+      <p>Dùng phím <span class="key">←</span> <span class="key">→</span> để chuyển nhanh giữa các game, <span class="key">Esc</span> để đóng panel. Đỡ phải click qua lại.</p>
+    </div>
+  </section>
+
+  <!-- ===== 4 ===== -->
+  <section id="danhgia">
+    <div class="step-head"><div class="num">4</div><h2>Đánh giá: Note &amp; Conclusion</h2></div>
+    <p>Khối <b>Evaluation</b> bên phải panel là nơi bạn làm việc chính:</p>
+    <div class="mock">
+      <div class="mk-head">
+        <span class="mk-label">Evaluation</span>
+        <span class="mk-badge unsaved"><span class="mk-dot"></span> Unsaved changes</span>
+      </div>
+      <div class="mk-row">
+        <div><div class="rt">Dead link status</div><div class="rd">Mark game store link as invalid</div></div>
+        <span class="mk-sw"><span class="tr"></span></span>
+      </div>
+      <div class="mk-field">
+        <span class="l">Initial Conclusion</span>
+        <div class="mk-input sel">List_Idea</div>
+      </div>
+      <div class="mk-field">
+        <span class="l">Note</span>
+        <div class="mk-input area">Gameplay loop gây nghiện, art chỉn chu — có tiềm năng làm theme...</div>
+      </div>
+      <div class="mk-field">
+        <span class="l">Demo Video (Drive)</span>
+        <div class="mk-input ph">https://drive.google.com/...</div>
+      </div>
+      <div class="mk-btn">Save Evaluation</div>
+    </div>
+    <p class="mock-cap">Khối Evaluation thật trong panel — badge cam báo còn thay đổi chưa lưu</p>
+
+    <div class="h3">Mỗi conclusion nghĩa là gì &amp; chọn khi nào</div>
+    <div class="tbl-scroll">
+    <table>
+      <tr><th>Lựa chọn</th><th>Chọn khi</th><th>Điều gì xảy ra sau đó</th></tr>
+      <tr>
+        <td><span class="pill bypass">Bypass</span></td>
+        <td>Game không đạt, không đáng theo dõi tiếp.</td>
+        <td>Game bị loại khỏi luồng và được đánh dấu <b>done</b>.</td>
+      </tr>
+      <tr>
+        <td><span class="pill idea">List_Idea</span></td>
+        <td>Game có tiềm năng, bạn muốn giữ lại.</td>
+        <td>Tự vào <b>batch tuần</b> → xuất hiện ở <b>Short List</b> cho mod chốt (xem mục 7).</td>
+      </tr>
+      <tr>
+        <td><span class="pill bypass">Dead link</span><span style="font-size:11px;color:var(--faint)"> (toggle)</span></td>
+        <td>Link store hỏng / không truy cập được.</td>
+        <td>Đặt trạng thái <b>Link_dead</b>, đánh dấu done — không cần đánh giá tiếp.</td>
+      </tr>
+    </table>
+    </div>
+    <div class="callout warn">
+      <span class="ico">⚠️</span>
+      <p><b>Game chỉ tính là “done” khi bạn đã chọn Conclusion.</b> Chỉ điền Note thôi thì game vẫn ở trạng thái Pending. Đặt conclusion xong, hệ thống tự ghi ngày <b>Evaluated</b>.</p>
+    </div>
+  </section>
+
+  <!-- ===== 5 ===== -->
+  <section id="screenshot">
+    <div class="step-head"><div class="num">5</div><h2>Screenshot</h2></div>
+    <ul class="clean">
+      <li><b>Game có sẵn StoreKit</b> — screenshot hiện sẵn trong panel, bạn không cần làm gì.</li>
+      <li><b>Game không có</b> — tự chụp màn hình rồi up thẳng vào site ở khối <b>Screenshots</b>:</li>
+    </ul>
+    <div class="mock">
+      <div class="mk-head" style="border:none;margin:0 0 11px;padding:0">
+        <span class="mk-label">Screenshots <span class="mk-pillsm">manual</span></span>
+      </div>
+      <div class="mk-drop">
+        <span class="big">⬆</span>
+        Paste (Ctrl+V), drag &amp; drop, or click to choose — PNG/JPEG/WebP, ≤5MB
+      </div>
+    </div>
+    <p class="mock-cap">Ô up ảnh — chỉ hiện khi game chưa có screenshot StoreKit</p>
+    <ul class="clean">
+      <li><b>Paste</b> — copy ảnh rồi nhấn <span class="key">Ctrl</span>+<span class="key">V</span> ngay trên panel.</li>
+      <li><b>Kéo &amp; thả</b> — kéo file ảnh vào ô viền đứt nét.</li>
+      <li><b>Chọn file</b> — click vào ô để mở hộp chọn file.</li>
+    </ul>
+    <p>Giới hạn: <b>PNG / JPEG / WebP</b>, mỗi ảnh <b>≤ 5MB</b>, tối đa <b>10 ảnh mỗi lần</b>. Ảnh hiện viền cam (đang chờ) → bấm <b>“Save screenshots”</b> để lưu. Xoá ảnh đã lưu bằng dấu <b>✕</b> ở góc ảnh.</p>
+    <div class="callout good">
+      <span class="ico">✓</span>
+      <p>Khi screenshot StoreKit chính thức về sau này, ảnh bạn up tay sẽ tự được thay thế — không cần dọn thủ công.</p>
+    </div>
+  </section>
+
+  <!-- ===== 6 ===== -->
+  <section id="save">
+    <div class="step-head"><div class="num">6</div><h2>Save &amp; Auto-save</h2></div>
+    <p>Góc phải trên cùng của panel có toggle <b>Auto-save</b> — quyết định cách lưu:</p>
+    <div class="mock" style="display:flex;flex-direction:column;gap:14px">
+      <div class="mk-toggle-line"><span class="lab on">Auto-save</span><span class="mk-sw on acc"><span class="tr"></span></span></div>
+      <div style="height:1px;background:var(--border)"></div>
+      <div class="mk-toggle-line"><span class="lab off">Auto-save</span><span class="mk-sw"><span class="tr"></span></span></div>
+    </div>
+    <p class="mock-cap">Trên: Auto-save BẬT · Dưới: Auto-save TẮT</p>
+    <ul class="clean">
+      <li><b>Auto-save BẬT</b> — app tự lưu khoảng <b>0.8 giây</b> sau khi bạn ngừng gõ. Không cần bấm nút.</li>
+      <li><b>Auto-save TẮT</b> — <b>bắt buộc bấm nút Save</b>. Quên là thay đổi sẽ mất khi đóng / đổi game.</li>
+    </ul>
+    <p>Cạnh khối Evaluation luôn có badge trạng thái cho biết bạn đã lưu chưa:</p>
+    <div class="tbl-scroll">
+    <table>
+      <tr><th>Badge</th><th>Nghĩa là</th></tr>
+      <tr><td><span class="mk-badge unsaved"><span class="mk-dot"></span> Unsaved changes</span></td><td>Còn thay đổi <b>chưa lưu</b> — nếu auto-save đang tắt thì nhớ bấm Save.</td></tr>
+      <tr><td><span class="mk-badge saved">✓ Saved</span></td><td>Mọi thứ đã được lưu, khớp với server.</td></tr>
+    </table>
+    </div>
+    <div class="callout tip">
+      <span class="ico">💡</span>
+      <p>Lựa chọn Auto-save được nhớ riêng theo trình duyệt của bạn — bật một lần là lần sau vào vẫn còn.</p>
+    </div>
+  </section>
+
+  <!-- ===== 7 ===== -->
+  <section id="shortlist">
+    <div class="step-head"><div class="num">7</div><h2>List_Idea → Batch → Short List</h2></div>
+    <p>Đây là luồng cho những game bạn thấy đáng giữ lại. Khi bạn đặt conclusion <span class="pill idea">List_Idea</span>, game <b>tự động được gán vào batch tuần hiện tại</b> của team (W1 / W2 / W3 / W4 trong tháng). Bạn không phải chọn batch thủ công — panel chỉ hiển thị batch đang active:</p>
+    <div class="mock">
+      <div class="mk-field" style="margin:0">
+        <span class="l">Batch (week)</span>
+        <div class="mk-batch"><span class="bb">W3 Jun, 2026</span><span class="bd">· current batch (auto-assigned)</span></div>
+      </div>
+    </div>
+    <p class="mock-cap">Batch chỉ hiện khi conclusion là List_Idea — gán tự động theo tuần</p>
+    <p>Sau đó game xuất hiện ở tab <b>Short List</b>, nơi mod xem lại và đặt <b>Final Conclusion</b>. Bạn xem được Short List, nhưng phần Final Conclusion do mod phụ trách.</p>
+  </section>
+
+  <!-- ===== 8 ===== -->
+  <section id="meo">
+    <div class="step-head"><div class="num">8</div><h2>Mẹo nhanh &amp; FAQ</h2></div>
+
+    <div class="h3">Mẹo nhanh</div>
+    <ul class="clean">
+      <li><b>Phím tắt</b> — <span class="key">←</span> <span class="key">→</span> chuyển game, <span class="key">Esc</span> đóng panel, <span class="key">Ctrl</span>+<span class="key">V</span> dán screenshot.</li>
+      <li><b>Mở store</b> — bấm tên game để mở trang store ở tab mới.</li>
+      <li><b>Copy nhanh</b> — có nút copy cạnh tên game và game_id.</li>
+      <li><b>“Clear all”</b> — xoá nhanh toàn bộ field đánh giá (bấm 2 lần để xác nhận).</li>
+      <li><b>Fullscreen</b> — nút mở rộng panel để xem thoải mái hơn.</li>
+    </ul>
+
+    <div class="h3">FAQ</div>
+    <table>
+      <tr><th>Tình huống</th><th>Cách xử lý</th></tr>
+      <tr><td><b>Đăng nhập xong không thấy game</b></td><td>Báo manager — danh sách của bạn có thể chưa được cập nhật.</td></tr>
+      <tr><td><b>Lỡ tắt auto-save</b></td><td>Badge cam “Unsaved changes” sẽ nhắc — bấm Save trước khi đổi / đóng game.</td></tr>
+      <tr><td><b>Up ảnh báo lỗi</b></td><td>Kiểm tra: đúng PNG/JPEG/WebP, mỗi ảnh ≤ 5MB, tối đa 10 ảnh/lần.</td></tr>
+      <tr><td><b>Chọn List_Idea mà chưa có batch</b></td><td>Nhờ manager set <b>current batch</b> cho team rồi lưu lại.</td></tr>
+    </table>
+  </section>
+
+  <footer>
+    Signal · Smartsheet Ops — hướng dẫn dành cho Evaluator. Có gì chưa rõ cứ hỏi manager nhé.
+  </footer>
+</div>
+
+</body>
+</html>
