@@ -10,7 +10,10 @@ interface InitialEvaluator {
   today_available: 'Yes' | 'No'
   game_platform: string
   game_category: string
+  weight: number
 }
+
+const WEIGHT_OPTS = [30, 50, 70, 100].map(w => ({ value: String(w), label: String(w) }))
 
 interface FinalEvaluator {
   row_number: number
@@ -30,8 +33,11 @@ function InitialTable() {
   const [pendingPlatform, setPendingPlatform] = useState<Record<number, string>>({})
   const [savingPlatform, setSavingPlatform] = useState<Set<number>>(new Set())
 
+  const [pendingWeight, setPendingWeight] = useState<Record<number, number>>({})
+  const [savingWeight, setSavingWeight] = useState<Set<number>>(new Set())
+
   const [showAdd, setShowAdd] = useState(false)
-  const [addForm, setAddForm] = useState({ name: '', today_available: 'Yes' as 'Yes' | 'No', game_platform: 'all', game_category: '' })
+  const [addForm, setAddForm] = useState({ name: '', today_available: 'Yes' as 'Yes' | 'No', game_platform: 'all', game_category: '', weight: 100 })
   const [adding, setAdding] = useState(false)
   const [removing, setRemoving] = useState<Set<number>>(new Set())
 
@@ -91,6 +97,26 @@ function InitialTable() {
     }
   }
 
+  async function handleWeightConfirm(rowNum: number) {
+    const value = pendingWeight[rowNum]
+    if (!value) return
+    setSavingWeight(s => new Set(Array.from(s).concat([rowNum])))
+    try {
+      const res = await fetch('/api/team/initial/weight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ row_number: rowNum, weight: value }),
+      })
+      if (!res.ok) throw new Error()
+      setRows(r => r.map(ev => ev.row_number === rowNum ? { ...ev, weight: value } : ev))
+      setPendingWeight(p => { const n = { ...p }; delete n[rowNum]; return n })
+    } catch {
+      setError('Failed to update weight.')
+    } finally {
+      setSavingWeight(s => { const n = new Set(s); n.delete(rowNum); return n })
+    }
+  }
+
   async function handleRemove(rowNum: number) {
     setRemoving(s => new Set(Array.from(s).concat([rowNum])))
     try {
@@ -118,7 +144,7 @@ function InitialTable() {
         body: JSON.stringify(addForm),
       })
       if (!res.ok) throw new Error()
-      setAddForm({ name: '', today_available: 'Yes', game_platform: '', game_category: '' })
+      setAddForm({ name: '', today_available: 'Yes', game_platform: 'all', game_category: '', weight: 100 })
       setShowAdd(false)
       const freshRes = await fetch('/api/team/initial', { cache: 'no-store' })
       if (freshRes.ok) setRows(await freshRes.json())
@@ -148,15 +174,16 @@ function InitialTable() {
               <th>Today Available</th>
               <th>Game Platform</th>
               <th>Game Category</th>
+              <th style={{ width: 90 }}>Weight</th>
               <th style={{ width: 80 }}></th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && !loading && (
-              <tr><td colSpan={5} className="empty">No data — click Refresh to load</td></tr>
+              <tr><td colSpan={6} className="empty">No data — click Refresh to load</td></tr>
             )}
             {loading && (
-              <tr><td colSpan={5} className="empty">Loading...</td></tr>
+              <tr><td colSpan={6} className="empty">Loading...</td></tr>
             )}
             {!loading && rows.map(ev => {
               const pending = pendingAvail[ev.row_number]
@@ -206,6 +233,29 @@ function InitialTable() {
                   </td>
                   <td style={{ color: 'var(--faint)' }}>{ev.game_category || '—'}</td>
                   <td>
+                    {(() => {
+                      const pendingW = pendingWeight[ev.row_number]
+                      const currentW = pendingW ?? ev.weight ?? 100
+                      const isDirtyW = pendingW !== undefined && pendingW !== ev.weight
+                      const isSavingW = savingWeight.has(ev.row_number)
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <StyledSelect
+                            value={String(currentW)}
+                            onChange={v => setPendingWeight(p => ({ ...p, [ev.row_number]: Number(v) }))}
+                            options={WEIGHT_OPTS}
+                          />
+                          {isDirtyW && (
+                            <button className="btn btn-sm btn-primary"
+                              onClick={() => handleWeightConfirm(ev.row_number)} disabled={isSavingW}>
+                              {isSavingW ? '...' : 'Confirm'}
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })()}
+                  </td>
+                  <td>
                     <button className="btn btn-sm btn-danger"
                       onClick={() => handleRemove(ev.row_number)} disabled={removing.has(ev.row_number)}>
                       {removing.has(ev.row_number) ? '...' : 'Remove'}
@@ -242,13 +292,20 @@ function InitialTable() {
                 </td>
                 <td style={{ color: 'var(--faint)', fontSize: 12 }}>—</td>
                 <td>
+                  <StyledSelect
+                    value={String(addForm.weight)}
+                    onChange={v => setAddForm(f => ({ ...f, weight: Number(v) }))}
+                    options={WEIGHT_OPTS}
+                  />
+                </td>
+                <td>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button className="btn btn-sm btn-primary"
                       onClick={handleAdd} disabled={adding || !addForm.name.trim()}>
                       {adding ? '...' : 'Add'}
                     </button>
                     <button className="btn btn-sm"
-                      onClick={() => { setShowAdd(false); setAddForm({ name: '', today_available: 'Yes', game_platform: 'all', game_category: '' }) }}>
+                      onClick={() => { setShowAdd(false); setAddForm({ name: '', today_available: 'Yes', game_platform: 'all', game_category: '', weight: 100 }) }}>
                       ✕
                     </button>
                   </div>

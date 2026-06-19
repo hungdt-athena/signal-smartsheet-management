@@ -9,6 +9,7 @@ export interface InitialEvaluator {
   today_available: 'Yes' | 'No'
   game_platform: string
   game_category: string
+  weight: number
 }
 
 export async function GET(_req: NextRequest) {
@@ -28,6 +29,7 @@ export async function GET(_req: NextRequest) {
     'Today Available': 'Yes' | 'No'
     'Game Platform': string
     'Game Category': string
+    'Weight'?: string | number
   }
 
   // Transform Google Sheets fields → expected schema, filter empty rows
@@ -39,6 +41,7 @@ export async function GET(_req: NextRequest) {
       today_available: row['Today Available'],
       game_platform: (row['Game Platform'] ?? '').toLowerCase(),
       game_category: row['Game Category'],
+      weight: Number(row['Weight']) || 100,
     }))
 
   return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } })
