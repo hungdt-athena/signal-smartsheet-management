@@ -39,9 +39,7 @@ const NAV_ITEMS: NavItem[] = [
   ]},
   // Arcade/Simulation hidden from non-admins while still in development.
   { href: '/evaluations',     label: 'Evaluations', icon: 'clipboard', children: [
-    { href: '/evaluations?cat=puzzle', label: 'Puzzle' },
-    { href: '/evaluations?cat=arcade', label: 'Arcade', roles: ['admin'] },
-    { href: '/evaluations?cat=simulation', label: 'Simulation', roles: ['admin'] },
+    { href: '/evaluations?cat=evaluate', label: 'Evaluate' },
     { href: '/evaluations?cat=short_list', label: 'Short List' },
     { href: '/evaluations?cat=assign_setup', label: 'Assign Setup', roles: ['admin', 'moderator'] },
   ]},

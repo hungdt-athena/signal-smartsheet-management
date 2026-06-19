@@ -941,9 +941,22 @@ input:checked + .slider:before {
   transition: width 0.8s cubic-bezier(.2,.7,.3,1);
 }
 
-/* Genre→Bucket chips (Config tab) */
+/* Genre→Bucket chips + Used/Archived drag columns (Config tab) */
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 10px;
   border: 1px solid var(--border); border-radius: 999px; font-size: 12px; background: var(--card); }
 .chip-x { border: none; background: none; cursor: pointer; color: var(--faint);
   font-size: 11px; padding: 0 2px; line-height: 1; }
 .chip-x:hover { color: var(--text); }
+.chip-drag { cursor: grab; user-select: none; }
+.chip-drag:active { cursor: grabbing; }
+.chip-grip { color: var(--faint); font-size: 11px; letter-spacing: -1px; }
+
+.genre-cols { display: flex; gap: 10px; }
+.genre-col { flex: 1; min-width: 0; border: 1px dashed var(--border); border-radius: 8px;
+  padding: 8px; background: var(--bg); transition: border-color .12s, background .12s; }
+.genre-col.drag-over { border-color: var(--accent); background: var(--accent-weak); }
+.genre-col-head { font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--faint); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.genre-col-count { background: var(--card); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0 6px; font-size: 10px; }
+.genre-col-body { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; align-content: flex-start; }

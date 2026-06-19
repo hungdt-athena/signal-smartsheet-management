@@ -11,6 +11,7 @@ import { useConfig } from '@/hooks/useConfig'
 import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 import { QuickStatsModal } from '@/components/QuickStatsModal'
 import { AssignSetup } from '@/components/AssignSetup'
+import { BUCKETS, type Bucket } from '@/lib/buckets'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
 
 interface Evaluation {
@@ -630,11 +631,12 @@ function EvaluationsRouter() {
 
 function EvaluationsPageInner() {
   const { data: session } = useSession()
-  const searchParams = useSearchParams()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
 
-  const category = searchParams.get('cat') || 'puzzle'
+  // The three buckets are merged into one "Evaluate" tab; the active bucket is
+  // in-page state (was the ?cat= query param when each bucket had its own nav entry).
+  const [category, setCategory] = useState<Bucket>('puzzle')
 
   const [data, setData] = useState<Evaluation[]>([])
   const [total, setTotal] = useState(0)
@@ -780,6 +782,14 @@ function EvaluationsPageInner() {
             {df.value.from ? ` · ${valueLabel(df.value)}` : ''}
             {role !== 'admin' && role !== 'moderator' && userName ? ` · ${userName}` : ''}
           </p>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {BUCKETS.map(b => (
+            <button key={b} className={`seg-btn-premium${category === b ? ' active' : ''}`}
+              onClick={() => setCategory(b)}>
+              {b.charAt(0).toUpperCase() + b.slice(1)}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -1043,7 +1053,7 @@ function EvaluationsPageInner() {
               gameList={detailList}
               role={role}
               userName={userName}
-              hideRecordSections={category === 'short_list'}
+              hideRecordSections={false}
               onClose={handleClose}
               onNavigate={handleNavigate}
               onSaved={(fresh: EvalDetail) => {

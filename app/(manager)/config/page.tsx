@@ -274,6 +274,11 @@ function BucketGroup({
   const [newValue, setNewValue] = useState('')
   const [warn, setWarn] = useState(false)
   const [checking, setChecking] = useState(false)
+  const [dragId, setDragId] = useState<number | null>(null)
+  const [overCol, setOverCol] = useState<'used' | 'archived' | null>(null)
+
+  const used = rows.filter(r => r.active)
+  const archived = rows.filter(r => !r.active)
 
   async function attemptAdd() {
     const g = newValue.trim()
@@ -287,23 +292,54 @@ function BucketGroup({
     } finally { setChecking(false) }
   }
 
+  // Drop into a column → set the dragged mapping's active state to match the column.
+  function dropInto(targetActive: boolean) {
+    const id = dragId
+    setDragId(null); setOverCol(null)
+    if (id == null) return
+    const row = rows.find(r => r.id === id)
+    if (row && row.active !== targetActive) onToggle(id, targetActive)
+  }
+
+  function column(title: string, items: MappingRow[], targetActive: boolean, key: 'used' | 'archived') {
+    return (
+      <div
+        className={'genre-col' + (overCol === key ? ' drag-over' : '')}
+        onDragOver={e => { e.preventDefault(); setOverCol(key) }}
+        onDragLeave={() => setOverCol(c => (c === key ? null : c))}
+        onDrop={() => dropInto(targetActive)}
+      >
+        <div className="genre-col-head">{title} <span className="genre-col-count">{items.length}</span></div>
+        <div className="genre-col-body">
+          {items.length === 0 && !loading && <span className="empty" style={{ fontSize: 11 }}>Drop here</span>}
+          {items.map(r => (
+            <span
+              key={r.id}
+              className="chip chip-drag"
+              draggable
+              onDragStart={() => setDragId(r.id)}
+              onDragEnd={() => { setDragId(null); setOverCol(null) }}
+            >
+              <span className="chip-grip" aria-hidden>⠿</span>
+              {r.genre}
+              <button className="chip-x" title="Delete" onClick={() => onDelete(r.id)}>✕</button>
+            </span>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div>
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--faint)' }}>
-        {label} <span style={{ fontWeight: 400 }}>· {rows.filter(r => r.active).length}/{rows.length}</span>
+        {label} <span style={{ fontWeight: 400 }}>· {used.length} used / {archived.length} archived</span>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-        {rows.length === 0 && !loading && <span className="empty">No genres</span>}
-        {rows.map(r => (
-          <span key={r.id} className="chip" style={{ opacity: r.active ? 1 : 0.45 }}>
-            {r.genre}
-            <button className="chip-x" title={r.active ? 'Disable' : 'Enable'}
-              onClick={() => onToggle(r.id, !r.active)}>{r.active ? '⊘' : '⊙'}</button>
-            <button className="chip-x" title="Delete" onClick={() => onDelete(r.id)}>✕</button>
-          </span>
-        ))}
+      <div className="genre-cols">
+        {column('Used', used, true, 'used')}
+        {column('Archived', archived, false, 'archived')}
       </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
         <input className="input" style={{ flex: 1 }} value={newValue}
           onChange={e => { setNewValue(e.target.value); setWarn(false) }}
           onKeyDown={e => { if (e.key === 'Enter') attemptAdd() }}
