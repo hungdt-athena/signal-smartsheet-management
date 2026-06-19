@@ -2,9 +2,13 @@
  * @jest-environment node
  */
 import { NextRequest } from 'next/server'
-import { POST } from '@/app/api/team/initial/weight/route'
 
-const realFetch = global.fetch
+jest.mock('@/lib/google-sheets', () => ({ updateEvaluatorWeight: jest.fn() }))
+
+import { POST } from '@/app/api/team/initial/weight/route'
+import { updateEvaluatorWeight } from '@/lib/google-sheets'
+
+const updateMock = updateEvaluatorWeight as unknown as jest.Mock
 
 function req(body: unknown) {
   return new NextRequest('http://localhost/api/team/initial/weight', {
@@ -14,23 +18,30 @@ function req(body: unknown) {
 
 describe('POST /api/team/initial/weight', () => {
   const realSkip = process.env.SKIP_AUTH
-  beforeAll(() => { process.env.SKIP_AUTH = 'true'; process.env.WEBHOOK_TEAM_INITIAL_WEIGHT = 'http://hook' })
-  afterAll(() => { process.env.SKIP_AUTH = realSkip; global.fetch = realFetch })
+  beforeAll(() => { process.env.SKIP_AUTH = 'true' })
+  afterAll(() => { process.env.SKIP_AUTH = realSkip })
+  beforeEach(() => updateMock.mockReset())
 
   it('rejects a weight outside 30/50/70/100', async () => {
     const r = await POST(req({ row_number: 2, weight: 60 }))
     expect(r.status).toBe(400)
+    expect(updateMock).not.toHaveBeenCalled()
   })
 
-  it('forwards a valid weight to the webhook', async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: true }) as never
+  it('rejects a missing row_number', async () => {
+    const r = await POST(req({ weight: 70 }))
+    expect(r.status).toBe(400)
+  })
+
+  it('writes a valid weight to the sheet', async () => {
+    updateMock.mockResolvedValue(undefined)
     const r = await POST(req({ row_number: 2, weight: 70 }))
     expect(await r.json()).toEqual({ ok: true })
-    expect(global.fetch).toHaveBeenCalledWith('http://hook', expect.objectContaining({ method: 'POST' }))
+    expect(updateMock).toHaveBeenCalledWith(2, 70)
   })
 
-  it('returns 502 when the webhook fails', async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: false }) as never
+  it('returns 502 when the sheet write fails', async () => {
+    updateMock.mockRejectedValue(new Error('sheet down'))
     const r = await POST(req({ row_number: 2, weight: 70 }))
     expect(r.status).toBe(502)
   })

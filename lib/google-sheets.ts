@@ -307,6 +307,39 @@ export async function updateHandoverLogStatus(rowIndex: number, status: string) 
   })
 }
 
+// ── Evaluator List tab (shared spreadsheet with Handover Log) ────────────────
+// The Team "Initial Evaluator" data lives here. Reads still flow through the
+// WEBHOOK_TEAM_INITIAL_GET n8n webhook; the Weight cell is written directly.
+const EVALUATOR_LIST_SPREADSHEET_ID = process.env.EVALUATOR_LIST_SPREADSHEET_ID || HANDOVER_LOG_SPREADSHEET_ID
+const EVALUATOR_LIST_SHEET = process.env.EVALUATOR_LIST_SHEET_NAME || 'Evaluator List'
+
+// 0-based column index → A1 letter (handles columns past Z).
+function columnLetter(index: number): string {
+  let n = index, letter = ''
+  do { letter = String.fromCharCode(65 + (n % 26)) + letter; n = Math.floor(n / 26) - 1 } while (n >= 0)
+  return letter
+}
+
+// Write the Weight cell for one Evaluator List row. `rowNumber` is the 1-based
+// sheet row (header = 1), matching the row_number the GET webhook returns.
+export async function updateEvaluatorWeight(rowNumber: number, weight: number): Promise<void> {
+  const auth = getAuthClient()
+  const sheets = google.sheets({ version: 'v4', auth })
+  const head = await sheets.spreadsheets.values.get({
+    spreadsheetId: EVALUATOR_LIST_SPREADSHEET_ID,
+    range: `${EVALUATOR_LIST_SHEET}!1:1`,
+  })
+  const headers = (head.data.values?.[0] ?? []).map((h: string) => String(h).toLowerCase().trim())
+  const idx = headers.indexOf('weight')
+  if (idx === -1) throw new Error('Weight column not found in Evaluator List sheet')
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: EVALUATOR_LIST_SPREADSHEET_ID,
+    range: `${EVALUATOR_LIST_SHEET}!${columnLetter(idx)}${rowNumber}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[weight]] },
+  })
+}
+
 export async function deleteYtbRow(rowIndex: number) {
   const auth = getAuthClient()
   const sheets = google.sheets({ version: 'v4', auth })
