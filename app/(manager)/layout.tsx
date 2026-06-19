@@ -87,7 +87,7 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
           <div className="sb-mark"><span /></div>
           <div>
             <p className="sb-name">Signal</p>
-            <p className="sb-tag">Smartsheet Ops</p>
+            <p className="sb-tag">Playtest Management</p>
           </div>
         </div>
 

@@ -35,7 +35,7 @@ function LoginForm() {
           </div>
           <div>
             <h1 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Signal</h1>
-            <p style={{ fontSize: 12, color: 'var(--faint)', margin: 0, marginTop: 2 }}>Smartsheet Management</p>
+            <p style={{ fontSize: 12, color: 'var(--faint)', margin: 0, marginTop: 2 }}>Playtest Management</p>
           </div>
         </div>
 
