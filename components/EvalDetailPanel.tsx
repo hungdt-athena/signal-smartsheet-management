@@ -52,12 +52,10 @@ export interface EvalDetail {
 
 export interface EvalListItem { game_id: string; title: string }
 
-const CONCLUSION_OPTIONS = [
-  'Bypass', 'Conclusion', 'Good', 'Link_dead', 'M_ByPass', 'Need deeper testing', 'Skip',
-  'Wait for PlayTest', 'Priority IV: Idea', 'Priority III: Watchlist for next phase',
-  'Check Market Data', 'Watchlist for next milestone', 'Priority II', 'Priority I',
-  'Need Direction', 'List_Idea',
-]
+// The Initial Conclusion an evaluator picks is just two outcomes: Bypass (drop) or
+// List_Idea (keep → buckets into a weekly batch). Link_dead is set via the dead-link
+// toggle, not this dropdown. Legacy sheet values still display (merged in below).
+const INITIAL_CONCLUSION_OPTIONS = ['Bypass', 'List_Idea']
 
 const CONCLUSION_COLORS: Record<string, string> = {
   'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
@@ -187,6 +185,21 @@ function TitleCopyButton({ title }: { title: string }) {
 
 // Persistent save-state badge so it's always clear whether the form matches
 // what's stored. Orange dot = pending edits; green check = in sync with server.
+function ClearBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} title="Clear this field"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none', border: 'none',
+        cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--faint)', padding: '0 2px',
+      }}>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 6L6 18M6 6l12 12" />
+      </svg>
+      Clear
+    </button>
+  )
+}
+
 function SaveStatus({ dirty }: { dirty: boolean }) {
   return (
     <span style={{
@@ -360,10 +373,19 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [expandedImg, setExpandedImg] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
+  const [autoSave, setAutoSave] = useState(false)
+  const [confirmClearAll, setConfirmClearAll] = useState(false)
 
   useEffect(() => {
     setMounted(true)
+    // Auto-save preference is remembered per browser/user.
+    try { setAutoSave(localStorage.getItem('eval:autoSave') === '1') } catch { /* ignore */ }
   }, [])
+
+  useEffect(() => {
+    try { localStorage.setItem('eval:autoSave', autoSave ? '1' : '0') } catch { /* ignore */ }
+  }, [autoSave])
 
   const cacheRef = useRef<Map<string, EvalDetail>>(new Map())
 
@@ -459,12 +481,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       if (e.key === 'ArrowRight') { e.preventDefault(); goNext() }
       if (e.key === 'Escape') {
         if (expandedImg) setExpandedImg(null)
+        else if (fullscreen) setFullscreen(false)
         else onClose?.()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [goPrev, goNext, expandedImg, onClose])
+  }, [goPrev, goNext, expandedImg, fullscreen, onClose])
 
   const showToast = (msg: string, err = false) => {
     setToast({ msg, err })
@@ -516,15 +539,16 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     try {
       const body: Record<string, unknown> = { id: ev.id }
       if (canEditEval) {
+        // Always send these so an emptied field clears the column (see PATCH handler).
         body.initial_note = note
-        if (conclusion) body.initial_conclusion = conclusion
+        body.initial_conclusion = conclusion
         // Batch only applies to List_Idea games. Managers pick freely; evaluators
         // are forced into the team's current batch (set by a manager).
         if (conclusion === 'List_Idea') {
           const effBatch = isManager ? batch : (ev.current_batch || '')
           if (effBatch && effBatch !== (ev.batch || '')) body.batch = effBatch
         }
-        if (driveLink && driveLink !== ev.drive_link) body.drive_link = driveLink
+        body.drive_link = driveLink
       }
       if (canEdit5 && drive5 && drive5 !== ev.record_5min_drive) body.record_5min_drive = drive5
       if (canEdit20 && drive20 && drive20 !== ev.record_20min_drive) body.record_20min_drive = drive20
@@ -551,6 +575,40 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     setSaving(false)
   }
 
+  // Auto-save: when enabled, persist edits ~800ms after the user stops changing
+  // fields. A ref keeps the effect pointed at the latest save() closure without
+  // re-arming the timer on every render. Switching games / unmounting clears the
+  // pending timer (applyData resets dirty=false, so a stale save can't fire).
+  const saveRef = useRef(save)
+  saveRef.current = save
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!autoSave || !dirty || saving || !canEdit) return
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+    autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 800)
+    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSave, dirty, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, drive5, drive20, rec5Assignee, rec20Assignee])
+
+  const clearField = (f: 'note' | 'conclusion' | 'drive') => {
+    if (!canEditEval) return
+    if (f === 'note') setNote('')
+    else if (f === 'conclusion') { setConclusion(''); setDeadLink(false) }
+    else if (f === 'drive') setDriveLink('')
+    setDirty(true)
+  }
+
+  const clearAll = () => {
+    if (!canEditEval) return
+    if (!confirmClearAll) {
+      setConfirmClearAll(true)
+      setTimeout(() => setConfirmClearAll(false), 3000)
+      return
+    }
+    setNote(''); setConclusion(''); setDeadLink(false); setDriveLink(''); setBatch('')
+    setDirty(true); setConfirmClearAll(false)
+  }
+
   if (loading && !ev) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>Loading...</div>
   if (!ev) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>Not found</div>
 
@@ -562,6 +620,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
   return (
     <>
+      {/* Marker: when present, the parent .eval-modal-container expands to fill the
+          viewport via a :has() rule in globals.css (no prop plumbing needed). */}
+      {fullscreen && <div className="eval-fs-on" hidden />}
       {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
         {onClose && (
@@ -601,6 +662,28 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             {ev.initial_conclusion}
           </span>
         )}
+        {canEdit && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap', marginRight: 2 }}
+            title="Auto-save changes as you edit">
+            <span style={{ fontSize: 12, fontWeight: 600, color: autoSave ? 'var(--accent)' : 'var(--faint)' }}>Auto-save</span>
+            <label className="switch">
+              <input type="checkbox" checked={autoSave} onChange={e => setAutoSave(e.target.checked)} />
+              <span className="slider"></span>
+            </label>
+          </div>
+        )}
+        <button className="btn btn-sm btn-ghost" onClick={() => setFullscreen(v => !v)}
+          title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}>
+          {fullscreen ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 3v4a1 1 0 0 1-1 1H3M21 8h-4a1 1 0 0 1-1-1V3M3 16h4a1 1 0 0 1 1 1v4M16 21v-4a1 1 0 0 1 1-1h4" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />
+            </svg>
+          )}
+        </button>
       </div>
 
       {/* Progress Tracker */}
@@ -758,7 +841,20 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
           <div className="card" style={{ margin: 0 }}>
             <div className="card-head">
               <span className="card-label">Evaluation</span>
-              {canEdit && <SaveStatus dirty={dirty} />}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
+                {canEditEval && (
+                  <button onClick={clearAll}
+                    title="Clear all evaluation fields"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 600,
+                      padding: '2px 6px', borderRadius: 6,
+                      color: confirmClearAll ? 'var(--bad)' : 'var(--faint)',
+                    }}>
+                    {confirmClearAll ? 'Click to confirm' : 'Clear all'}
+                  </button>
+                )}
+                {canEdit && <SaveStatus dirty={dirty} />}
+              </div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -778,12 +874,26 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               )}
 
               <div className="field">
-                <span className="label">Initial Conclusion</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span className="label">Initial Conclusion</span>
+                  {canEditEval && conclusion && !deadLink && <ClearBtn onClick={() => clearField('conclusion')} />}
+                </div>
                 <StyledSelect
                   value={conclusion}
-                  onChange={v => { setConclusion(v); setDeadLink(v === 'Link_dead'); setDirty(true) }}
+                  onChange={v => {
+                    setConclusion(v)
+                    setDeadLink(v === 'Link_dead')
+                    // List_Idea auto-fills the batch with the team's current batch
+                    // (managers can still change it; evaluators see it forced below).
+                    if (v === 'List_Idea' && isManager && !batch) setBatch(ev.current_batch || '')
+                    setDirty(true)
+                  }}
                   placeholder="Select conclusion..."
-                  options={CONCLUSION_OPTIONS.map(c => ({ value: c, label: c }))}
+                  options={(() => {
+                    const opts = [...INITIAL_CONCLUSION_OPTIONS]
+                    if (conclusion && conclusion !== 'Link_dead' && !opts.includes(conclusion)) opts.unshift(conclusion)
+                    return opts.map(c => ({ value: c, label: c }))
+                  })()}
                   disabled={!canEditEval || deadLink}
                 />
               </div>
@@ -824,7 +934,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               )}
 
               <div className="field">
-                <span className="label">Note</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span className="label">Note</span>
+                  {canEditEval && note && <ClearBtn onClick={() => clearField('note')} />}
+                </div>
                 <textarea
                   className="input"
                   rows={3}
@@ -837,7 +950,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               </div>
 
               <div className="field">
-                <span className="label">Demo Video (Drive)</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span className="label">Demo Video (Drive)</span>
+                  {canEditEval && driveLink && <ClearBtn onClick={() => clearField('drive')} />}
+                </div>
                 <input
                   className="input"
                   type="url"
@@ -870,12 +986,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                     width: '100%', justifyContent: 'center', marginTop: 2, gap: 6,
                     ...(dirty ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
                   }}>
-                  {saving ? 'Saving...' : dirty ? 'Save Evaluation' : (
+                  {saving ? 'Saving...' : dirty ? (autoSave ? 'Save now' : 'Save Evaluation') : (
                     <>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
-                      Saved — no changes
+                      {autoSave ? 'Auto-save on — saved' : 'Saved — no changes'}
                     </>
                   )}
                 </button>

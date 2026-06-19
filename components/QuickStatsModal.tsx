@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import type { YearMonth } from '@/components/MonthPicker'
+import type { YearMonth } from '@/components/DateFilter'
 
 interface EvaluatorStats {
   evaluator: string

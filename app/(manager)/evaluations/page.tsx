@@ -740,6 +740,15 @@ function EvaluationsPageInner() {
     return () => observer.disconnect()
   }, [hasMore, loading, loadingMore, fetchPage])
 
+  // Pending games have no evaluated date — force the date filter onto the
+  // 'assigned' basis so the (now-hidden) evaluated toggle can't leave a stale
+  // date_basis=evaluated on the query.
+  useEffect(() => {
+    if (filterStatus === 'pending' && df.value.basis === 'evaluated') {
+      df.setValue(v => ({ ...v, basis: 'assigned' }))
+    }
+  }, [filterStatus, df.value.basis])
+
   const filtered = useMemo(() => {
     if (!search.trim()) return data
     const q = search.toLowerCase()
@@ -847,6 +856,7 @@ function EvaluationsPageInner() {
         <DateFilter
           value={df.value}
           onChange={v => { df.setAutoMonth(false); df.setValue(v) }}
+          hideEvaluated={filterStatus === 'pending'}
         />
 
         <div className="seg-wrapper">

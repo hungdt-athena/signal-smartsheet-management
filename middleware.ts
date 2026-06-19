@@ -17,7 +17,7 @@ export default withAuth(
 
     // Manager tier (admin + moderator). Mirrors the sidebar `adminOnly` group
     // and the requireManager()/requireRole(['admin','moderator']) API guards.
-    const managerPaths = ['/dashboard', '/operations', '/team', '/admin']
+    const managerPaths = ['/dashboard', '/operations', '/team', '/admin', '/config']
     if (managerPaths.some(p => pathname.startsWith(p)) && !isManager) {
       return NextResponse.redirect(new URL('/handover-puzzle', req.url))
     }
@@ -56,5 +56,6 @@ export const config = {
     '/handover/:path*',
     '/drive-videos/:path*',
     '/admin/:path*',
+    '/config/:path*',
   ],
 }

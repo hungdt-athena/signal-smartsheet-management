@@ -4,8 +4,9 @@ import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { MultiSelect } from '@/components/MultiSelect'
-import { MonthPicker } from '@/components/MonthPicker'
-import type { YearMonth } from '@/components/MonthPicker'
+import { DateFilter, dateFilterParams, monthToValue } from '@/components/DateFilter'
+import type { YearMonth } from '@/components/DateFilter'
+import { useDateFilter } from '@/hooks/useDateFilter'
 import EvalDetailPanel from '@/components/EvalDetailPanel'
 
 interface YtbRow {
@@ -1165,15 +1166,13 @@ function ShortListTab() {
   const [data, setData] = useState<ShortListItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [availableMonths, setAvailableMonths] = useState<YearMonth[]>([])
   const [filterCategory, setFilterCategory] = useState('puzzle')
   const [filterConclusions, setFilterConclusions] = useState<string[]>(['List_Idea'])
   const [availableConclusions, setAvailableConclusions] = useState<string[]>(CONCLUSION_OPTIONS)
   const [filterAssignment, setFilterAssignment] = useState('')
-  const [filterMonth, setFilterMonth] = useState<YearMonth | null>(null)
+  // Videos workflow keys off assignment timing → default basis = assigned.
   // First load sends month=auto; server resolves current month or latest with data.
-  const [autoMonth, setAutoMonth] = useState(true)
-  const suppressFetchRef = useRef(false)
+  const df = useDateFilter('assigned')
   const fetchSeqRef = useRef(0)
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [showReviewModal, setShowReviewModal] = useState(false)
@@ -1187,25 +1186,20 @@ function ShortListTab() {
       const params = new URLSearchParams({ category: filterCategory, limit: '500' })
       if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
       if (filterAssignment) params.set('assignment_status', filterAssignment)
-      if (autoMonth) {
-        params.set('month', 'auto')
-      } else if (filterMonth) {
-        params.set('year', String(filterMonth.year))
-        params.set('month', String(filterMonth.month))
-      }
+      for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
       const res = await fetch(`/api/evaluations?${params}`)
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return // stale response; a newer fetch owns the state
       setData(json.data || [])
       setTotal(json.total || 0)
-      if (json.available_months) setAvailableMonths(json.available_months)
-      if (autoMonth && json.applied_month !== undefined) {
+      if (json.available_months) df.setAvailableMonths(json.available_months)
+      if (df.autoMonth && json.applied_month !== undefined) {
         // Lock in the server-resolved month: the picker shows it and all
         // later fetches use explicit params instead of re-resolving auto.
         const ap = json.applied_month as YearMonth | null
-        suppressFetchRef.current = true
-        setAutoMonth(false)
-        setFilterMonth(ap)
+        df.suppressFetchRef.current = true
+        df.setAutoMonth(false)
+        df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
       if (json.available_conclusions?.length) {
         // keep currently-selected values visible even if filtered out by scope
@@ -1214,11 +1208,11 @@ function ShortListTab() {
       }
     } catch { /* ignore */ }
     setLoading(false)
-  }, [filterCategory, filterConclusions, filterAssignment, filterMonth, autoMonth])
+  }, [filterCategory, filterConclusions, filterAssignment, df.value, df.autoMonth])
 
   useEffect(() => {
-    if (suppressFetchRef.current) {
-      suppressFetchRef.current = false
+    if (df.suppressFetchRef.current) {
+      df.suppressFetchRef.current = false
       return
     }
     fetchData()
@@ -1283,8 +1277,8 @@ function ShortListTab() {
       )}
 
       <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
-        <MonthPicker available={availableMonths} value={filterMonth}
-          onChange={v => { setAutoMonth(false); setFilterMonth(v) }} />
+        <DateFilter value={df.value}
+          onChange={v => { df.setAutoMonth(false); df.setValue(v) }} />
 
         <div style={{ width: 140 }}>
           <StyledSelect

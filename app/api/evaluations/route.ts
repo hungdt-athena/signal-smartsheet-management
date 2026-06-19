@@ -3,15 +3,9 @@ import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
+import { getConfigValues } from '@/lib/config'
 
 export const dynamic = 'force-dynamic'
-
-const CONCLUSION_OPTIONS = [
-  'Bypass', 'Conclusion', 'Good', 'Link_dead', 'M_ByPass', 'Need deeper testing', 'Skip',
-  'Wait for PlayTest', 'Priority IV: Idea', 'Priority III: Watchlist for next phase',
-  'Check Market Data', 'Watchlist for next milestone', 'Priority II', 'Priority I',
-  'Need Direction', 'List_Idea',
-]
 
 export async function GET(req: NextRequest) {
   const guard = await requireAuth()
@@ -33,6 +27,10 @@ export async function GET(req: NextRequest) {
     const year = parseInt(searchParams.get('year') || '0')
     const month = autoMonth ? 0 : parseInt(monthParam || '0')
     const day = parseInt(searchParams.get('day') || '0')
+    // New canonical date params (YYYY-MM-DD, inclusive). year/month/day kept as a
+    // fallback so any caller not yet migrated to from/to keeps working.
+    const from = searchParams.get('from') || ''
+    const to = searchParams.get('to') || ''
     const sortParam = searchParams.get('sort') === 'asc' ? 'asc' : 'desc'
     const page = Math.max(1, parseInt(searchParams.get('page') || '1') || 1)
     const limit = Math.min(500, Math.max(10, parseInt(searchParams.get('limit') || '200') || 200))
@@ -95,29 +93,45 @@ export async function GET(req: NextRequest) {
         `
       : []
 
-    // month=auto → current month (Asia/Ho_Chi_Minh) if it has data, else latest with data.
-    let applied: { year: number; month: number } | null = null
-    if (autoMonth) {
+    // Resolve the active inclusive date range [rangeFrom, rangeTo] (YYYY-MM-DD).
+    // Priority: explicit from/to → year/month(/day) → month=auto. appliedMonth is
+    // echoed back (applied_month) so the client can lock in the auto-resolved month.
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const isoDate = (y: number, m: number, d: number) => `${y}-${pad(m)}-${pad(d)}`
+    const lastDay = (y: number, m: number) => new Date(y, m, 0).getDate()
+
+    let rangeFrom: string | null = null
+    let rangeTo: string | null = null
+    let appliedMonth: { year: number; month: number } | null = null
+
+    if (from && to) {
+      rangeFrom = from
+      rangeTo = to
+    } else if (year > 0 && month > 0 && day > 0) {
+      rangeFrom = rangeTo = isoDate(year, month, day)
+    } else if (year > 0 && month > 0) {
+      appliedMonth = { year, month }
+      rangeFrom = isoDate(year, month, 1)
+      rangeTo = isoDate(year, month, lastDay(year, month))
+    } else if (autoMonth) {
       const nowVN = new Date(Date.now() + 7 * 3600 * 1000)
       const curY = nowVN.getUTCFullYear()
       const curM = nowVN.getUTCMonth() + 1
       if (availableMonths.some(m => m.year === curY && m.month === curM)) {
-        applied = { year: curY, month: curM }
+        appliedMonth = { year: curY, month: curM }
       } else if (availableMonths.length > 0) {
-        applied = { year: availableMonths[0].year, month: availableMonths[0].month }
+        appliedMonth = { year: availableMonths[0].year, month: availableMonths[0].month }
       }
-    } else if (year > 0 && month > 0) {
-      applied = { year, month }
+      if (appliedMonth) {
+        rangeFrom = isoDate(appliedMonth.year, appliedMonth.month, 1)
+        rangeTo = isoDate(appliedMonth.year, appliedMonth.month, lastDay(appliedMonth.year, appliedMonth.month))
+      }
     }
 
-    // day filter overrides month filter: shows only rows evaluated on that specific day
-    const dayFilter = applied && day > 0
-      ? sql`AND ge.evaluate_date::date = make_date(${applied.year}, ${applied.month}, ${day})`
-      : sql``
-
-    const monthFilter = applied && day === 0
-      ? sql`AND ${pickerDate} >= make_date(${applied.year}, ${applied.month}, 1)
-            AND ${pickerDate} < make_date(${applied.year}, ${applied.month}, 1) + interval '1 month'`
+    // One range filter on pickerDate covers day / month / custom-range alike.
+    const rangeFilter = rangeFrom && rangeTo
+      ? sql`AND ${pickerDate} >= ${rangeFrom}::date
+            AND ${pickerDate} < ${rangeTo}::date + interval '1 day'`
       : sql``
 
     // Shared by the list and stats queries — they must stay in lockstep.
@@ -125,8 +139,7 @@ export async function GET(req: NextRequest) {
       ${evaluatorFilter}
       ${conclusionFilter}
       ${statusFilter}
-      ${monthFilter}
-      ${dayFilter}
+      ${rangeFilter}
       ${batchFilter}
       ${assignmentFilter}
       ${recordingFilter}
@@ -174,7 +187,7 @@ export async function GET(req: NextRequest) {
             WHERE ge.category_group = ${category}
               AND ge.initial_conclusion IS NOT NULL
               ${evaluatorFilter}
-              ${monthFilter}
+              ${rangeFilter}
           `
         : Promise.resolve([]),
       // Full evaluator list for the category — deliberately ignores month and
@@ -203,13 +216,14 @@ export async function GET(req: NextRequest) {
         evaluated: s.evaluated,
         pending: s.total - s.evaluated,
       }
-      body.applied_month = applied
+      body.applied_month = appliedMonth
       body.available_months = availableMonths
-      body.conclusion_options = CONCLUSION_OPTIONS
+      const conclusionOptions = await getConfigValues('conclusion')
+      body.conclusion_options = conclusionOptions
       body.available_evaluators = distinctEvaluators.map(r => r.e)
       const present: string[] = distinctConclusions.map(r => r.c)
-      body.available_conclusions = CONCLUSION_OPTIONS.filter(c => present.includes(c))
-        .concat(present.filter(c => !CONCLUSION_OPTIONS.includes(c)).sort())
+      body.available_conclusions = conclusionOptions.filter(c => present.includes(c))
+        .concat(present.filter(c => !conclusionOptions.includes(c)).sort())
       const cfg = await sql`SELECT value FROM app_config WHERE key = ${`current_batch:${category}`}`
       body.current_batch = cfg[0]?.value ?? null
     }
@@ -235,11 +249,17 @@ export async function PATCH(req: NextRequest) {
 
     if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
 
-    if (initial_conclusion && !CONCLUSION_OPTIONS.includes(initial_conclusion)) {
-      return NextResponse.json({ error: 'Invalid conclusion' }, { status: 400 })
+    if (initial_conclusion) {
+      const opts = await getConfigValues('conclusion')
+      if (!opts.includes(initial_conclusion)) {
+        return NextResponse.json({ error: 'Invalid conclusion' }, { status: 400 })
+      }
     }
-    if (final_conclusion && !CONCLUSION_OPTIONS.includes(final_conclusion)) {
-      return NextResponse.json({ error: 'Invalid final conclusion' }, { status: 400 })
+    if (final_conclusion) {
+      const opts = await getConfigValues('final_conclusion')
+      if (!opts.includes(final_conclusion)) {
+        return NextResponse.json({ error: 'Invalid final conclusion' }, { status: 400 })
+      }
     }
 
     // Ownership enforcement: non-admins may only edit content/recordings of games
@@ -256,8 +276,11 @@ export async function PATCH(req: NextRequest) {
         `
         if (owned.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
         const row = owned[0]
+        // drive_link (demo video) is intentionally NOT ownership-gated: the Short
+        // List view is only delivered to the right people, so anyone who can see a
+        // row may attach/import its demo video. Note/conclusion/batch stay gated.
         const editsContent = initial_note !== undefined || initial_conclusion !== undefined
-          || drive_link !== undefined || youtube_link !== undefined || batch !== undefined
+          || youtube_link !== undefined || batch !== undefined
         // Case-insensitive: imported sheet names have casing drift (Huydd vs HuyDD).
         const same = (a: string | null, b: string | null | undefined) =>
           !!a && !!b && a.toLowerCase() === b.toLowerCase()
@@ -280,15 +303,31 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    // Clearable eval fields use a "provided-flag" pattern instead of COALESCE so
+    // an explicit empty value clears the column to NULL (COALESCE can only keep or
+    // set non-null). A field absent from the body is left untouched; a field sent
+    // as '' / null is cleared. Date stamps only advance for real (non-null) values.
+    const provided = (k: string) => Object.prototype.hasOwnProperty.call(body, k)
+    const clean = (v: unknown): string | null => (v === '' || v === null || v === undefined ? null : String(v))
+    const noteProvided = provided('initial_note'), noteVal = clean(initial_note)
+    const concProvided = provided('initial_conclusion'), concVal = clean(initial_conclusion)
+    const dlProvided = provided('drive_link'), dlVal = clean(drive_link)
+
     const result = await sql`
       UPDATE game_evaluations SET
-        initial_note = COALESCE(${initial_note ?? null}, initial_note),
-        initial_conclusion = COALESCE(${initial_conclusion ?? null}, initial_conclusion),
-        evaluate_date = CASE WHEN ${initial_conclusion ?? null}::text IS NOT NULL THEN NOW() ELSE evaluate_date END,
+        initial_note = CASE WHEN ${noteProvided} THEN ${noteVal} ELSE initial_note END,
+        initial_conclusion = CASE WHEN ${concProvided} THEN ${concVal} ELSE initial_conclusion END,
+        evaluate_date = CASE
+          WHEN ${concProvided} AND ${concVal}::text IS NOT NULL THEN NOW()
+          WHEN ${concProvided} AND ${concVal}::text IS NULL THEN NULL
+          ELSE evaluate_date END,
         final_conclusion = COALESCE(${final_conclusion ?? null}, final_conclusion),
         batch = COALESCE(${batch ?? null}, batch),
-        drive_link = COALESCE(${drive_link ?? null}, drive_link),
-        drive_date = CASE WHEN ${drive_link ?? null}::text IS NOT NULL THEN NOW() ELSE drive_date END,
+        drive_link = CASE WHEN ${dlProvided} THEN ${dlVal} ELSE drive_link END,
+        drive_date = CASE
+          WHEN ${dlProvided} AND ${dlVal}::text IS NOT NULL THEN NOW()
+          WHEN ${dlProvided} AND ${dlVal}::text IS NULL THEN NULL
+          ELSE drive_date END,
         youtube_link = COALESCE(${youtube_link ?? null}, youtube_link),
         record_5min_assignee = COALESCE(${record_5min_assignee ?? null}, record_5min_assignee),
         record_5min_date = CASE WHEN ${record_5min_assignee ?? null}::text IS NOT NULL AND record_5min_assignee IS NULL THEN NOW() ELSE record_5min_date END,

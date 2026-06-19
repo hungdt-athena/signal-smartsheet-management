@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DateFilter — affordance mockups</title>
+<style>
+  :root{
+    --bg:#f7f8fa;--surface:#ffffff;--surface-2:#f5f6f8;--surface-3:#eef0f4;
+    --border:#e7e9ee;--border-strong:#d7dae1;
+    --text:#1a1c22;--muted:#59606e;--faint:#99a0ad;
+    --accent:#2f6bed;--accent-strong:#2455c9;--accent-weak:#eef3ff;--accent-border:#cfddfb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:32px;}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.02em;margin:0 0 4px}
+  .lead{color:var(--muted);font-size:13px;margin:0 0 28px;max-width:720px}
+  .grid{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+  .variant{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    overflow:hidden;width:330px;box-shadow:0 1px 2px rgba(20,22,30,.04)}
+  .v-head{padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface-2)}
+  .v-tag{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.5px;
+    text-transform:uppercase;padding:2px 8px;border-radius:99px;margin-bottom:6px}
+  .v-tag.base{background:var(--surface-3);color:var(--muted)}
+  .v-tag.rec{background:var(--accent-weak);color:var(--accent-strong)}
+  .v-title{font-size:14px;font-weight:700;margin:0}
+  .v-note{font-size:12px;color:var(--muted);margin:4px 0 0}
+  .v-body{padding:16px}
+
+  /* ---- shared picker pieces ---- */
+  .cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .nav{border:none;background:transparent;cursor:pointer;color:var(--muted);
+    padding:2px 8px;border-radius:6px;font-size:16px;line-height:1}
+  .nav:hover{background:var(--surface-2)}
+  .mhdr{border:none;cursor:pointer;font-size:13px;font-weight:600;border-radius:6px;
+    padding:3px 10px;background:transparent;color:var(--text);display:inline-flex;
+    align-items:center;gap:5px;transition:background .12s}
+  .grid7{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+  .wd{text-align:center;font-size:10px;font-weight:600;color:var(--faint);padding:2px 0}
+  .day{height:32px;border:none;border-radius:6px;cursor:pointer;font-size:12.5px;
+    background:transparent;color:var(--text)}
+  .day:hover{background:var(--surface-2)}
+  .day.range{background:var(--surface-3)}
+  .day.end{background:var(--accent);color:#fff;font-weight:600}
+  .day.month{background:var(--accent-weak);color:var(--accent-strong);font-weight:600}
+  .day.today{outline:1px solid var(--border-strong)}
+  .day.today-dot{position:relative}
+  .day.today-dot::after{content:"";position:absolute;left:50%;bottom:4px;transform:translateX(-50%);
+    width:4px;height:4px;border-radius:99px;background:var(--accent)}
+  .hint{font-size:11px;color:var(--faint);margin-top:10px}
+  .underline{text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;
+    text-decoration-color:var(--accent-border)}
+  .month-btn{display:block;width:100%;margin-top:12px;padding:8px;border-radius:8px;
+    border:1px dashed var(--accent-border);background:var(--accent-weak);color:var(--accent-strong);
+    font-size:12.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;
+    justify-content:center;gap:6px}
+  .month-btn:hover{background:#e3edff}
+  .month-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  svg{flex-shrink:0}
+</style>
+</head>
+<body>
+  <h1>DateFilter — "select whole month" affordance</h1>
+  <p class="lead">Cùng một calendar, khác nhau ở cách báo cho user biết có thể chọn <b>nguyên tháng</b>, và cách hiển thị khi đã chọn tháng (so với một range 1–30). Cột xám = hiện tại; cột xanh = đề xuất.</p>
+
+  <div class="grid">
+
+    <!-- BASELINE -->
+    <div class="variant">
+      <div class="v-head">
+        <span class="v-tag base">Hiện tại</span>
+        <p class="v-title">Baseline</p>
+        <p class="v-note">Header click được nhưng không có dấu hiệu; tháng nhìn như range 1→30.</p>
+      </div>
+      <div class="v-body">
+        <div class="cal-head">
+          <button class="nav">‹</button>
+          <button class="mhdr" title="Select whole month">Jun 2026</button>
+          <button class="nav">›</button>
+        </div>
+        <div class="grid7">
+          <div class="wd">Su</div><div class="wd">Mo</div><div class="wd">Tu</div><div class="wd">We</div><div class="wd">Th</div><div class="wd">Fr</div><div class="wd">Sa</div>
+        </div>
+        <div class="grid7" id="cal-base"></div>
+      </div>
+    </div>
+
+    <!-- OPTION A -->
+    <div class="variant">
+      <div class="v-head">
+        <span class="v-tag rec">Đề xuất A</span>
+        <p class="v-title">Header có affordance + tháng highlight đều</p>
+        <p class="v-note">Underline chấm + icon lịch + hover nền. Tooltip rõ nghĩa. Cả tháng cùng 1 màu → khác hẳn range.</p>
+      </div>
+      <div class="v-body">
+        <div class="cal-head">
+          <button class="nav">‹</button>
+          <button class="mhdr underline" id="hdrA" title="Click to select all of Jun 2026">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Jun 2026
+          </button>
+          <button class="nav">›</button>
+        </div>
+        <div class="grid7">
+          <div class="wd">Su</div><div class="wd">Mo</div><div class="wd">Tu</div><div class="wd">We</div><div class="wd">Th</div><div class="wd">Fr</div><div class="wd">Sa</div>
+        </div>
+        <div class="grid7" id="cal-A"></div>
+      </div>
+    </div>
+
+    <!-- OPTION B -->
+    <div class="variant">
+      <div class="v-head">
+        <span class="v-tag rec">Đề xuất B</span>
+        <p class="v-title">Nút "Select entire month" riêng</p>
+        <p class="v-note">Không bắt user đoán. Nút nói thẳng hành động, đổi xanh khi đang active.</p>
+      </div>
+      <div class="v-body">
+        <div class="cal-head">
+          <button class="nav">‹</button>
+          <button class="mhdr">Jun 2026</button>
+          <button class="nav">›</button>
+        </div>
+        <div class="grid7">
+          <div class="wd">Su</div><div class="wd">Mo</div><div class="wd">Tu</div><div class="wd">We</div><div class="wd">Th</div><div class="wd">Fr</div><div class="wd">Sa</div>
+        </div>
+        <div class="grid7" id="cal-B"></div>
+        <button class="month-btn active">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Select entire month
+        </button>
+      </div>
+    </div>
+
+    <!-- OPTION C -->
+    <div class="variant">
+      <div class="v-head">
+        <span class="v-tag rec">Đề xuất C (combo)</span>
+        <p class="v-title">A + B + today dot + hint</p>
+        <p class="v-note">Đầy đủ nhất: header affordance, nút riêng, today là chấm xanh dễ thấy, hint dòng dưới.</p>
+      </div>
+      <div class="v-body">
+        <div class="cal-head">
+          <button class="nav">‹</button>
+          <button class="mhdr underline" title="Click to select all of Jun 2026">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Jun 2026
+          </button>
+          <button class="nav">›</button>
+        </div>
+        <div class="grid7">
+          <div class="wd">Su</div><div class="wd">Mo</div><div class="wd">Tu</div><div class="wd">We</div><div class="wd">Th</div><div class="wd">Fr</div><div class="wd">Sa</div>
+        </div>
+        <div class="grid7" id="cal-C"></div>
+        <button class="month-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Select entire month
+        </button>
+        <p class="hint">Click a day, then another day to make a range.</p>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+  // Jun 2026: 1st = Monday (lead 1). 30 days. Today = 18.
+  function build(elId, style){
+    const el = document.getElementById(elId);
+    const lead = 1, total = 30, today = 18;
+    for(let i=0;i<lead;i++){ el.appendChild(document.createElement('div')); }
+    for(let d=1; d<=total; d++){
+      const b = document.createElement('button');
+      b.className = 'day';
+      b.textContent = d;
+      if(style === 'rangeLook'){
+        // baseline: 1 and 30 as endpoints, middle as range fill
+        if(d===1 || d===30) b.classList.add('end');
+        else b.classList.add('range');
+        if(d===today) b.classList.add('today');
+      } else if(style === 'monthFlat'){
+        b.classList.add('month');
+        if(d===today) b.classList.add('today');
+      } else if(style === 'monthFlatDot'){
+        b.classList.add('month');
+        if(d===today) b.classList.add('today-dot');
+      }
+      el.appendChild(b);
+    }
+  }
+  build('cal-base','rangeLook');
+  build('cal-A','monthFlat');
+  build('cal-B','monthFlat');
+  build('cal-C','monthFlatDot');
+</script>
+</body>
+</html>
