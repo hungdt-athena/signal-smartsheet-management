@@ -44,6 +44,11 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/evaluations?cat=short_list', label: 'Short List' },
     { href: '/evaluations?cat=assign_setup', label: 'Assign Setup', roles: ['admin', 'moderator'] },
   ]},
+  { href: '/weekly-feedback', label: 'Weekly Feedback', icon: 'clipboard',
+    roles: ['admin', 'moderator', 'evaluator'], children: [
+      { href: '/weekly-feedback?view=batch', label: 'By Week' },
+      { href: '/weekly-feedback?view=list',  label: 'List' },
+    ]},
   // Assign Record/Record Video hidden from non-admins while still in development.
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
