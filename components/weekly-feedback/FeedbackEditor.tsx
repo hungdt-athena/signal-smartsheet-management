@@ -21,7 +21,7 @@ export function FeedbackEditor({ value, onChange }: { value: unknown; onChange: 
   })
   if (!editor) return null
 
-  const btn = (active: boolean) => ({ fontWeight: active ? 700 : 400 })
+  const cls = (active: boolean) => (active ? 'is-active' : undefined)
   const insertGame = (g: GameAlikeGame) => {
     setShowInsert(false)
     if (g.app_link) {
@@ -45,11 +45,11 @@ export function FeedbackEditor({ value, onChange }: { value: unknown; onChange: 
   return (
     <div className="wf-editor">
       <div className="wf-toolbar">
-        <button type="button" style={btn(editor.isActive('bold'))} onClick={() => editor.chain().focus().toggleBold().run()}>B</button>
-        <button type="button" style={btn(editor.isActive('italic'))} onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></button>
-        <button type="button" style={btn(editor.isActive('underline'))} onClick={() => editor.chain().focus().toggleUnderline().run()}><u>U</u></button>
-        <button type="button" style={btn(editor.isActive('bulletList'))} onClick={() => editor.chain().focus().toggleBulletList().run()}>• List</button>
-        <button type="button" style={btn(editor.isActive('link'))} onClick={setLink}>Link</button>
+        <button type="button" className={cls(editor.isActive('bold'))} onClick={() => editor.chain().focus().toggleBold().run()}>B</button>
+        <button type="button" className={cls(editor.isActive('italic'))} onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></button>
+        <button type="button" className={cls(editor.isActive('underline'))} onClick={() => editor.chain().focus().toggleUnderline().run()}><u>U</u></button>
+        <button type="button" className={cls(editor.isActive('bulletList'))} onClick={() => editor.chain().focus().toggleBulletList().run()}>• List</button>
+        <button type="button" className={cls(editor.isActive('link'))} onClick={setLink}>Link</button>
         <button type="button" onClick={() => setShowInsert(v => !v)}>+ Game</button>
       </div>
       {showInsert && <GameSearch onPick={insertGame} />}

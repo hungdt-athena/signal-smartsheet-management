@@ -11,6 +11,7 @@ import { useConfig } from '@/hooks/useConfig'
 import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 import { QuickStatsModal } from '@/components/QuickStatsModal'
 import { AssignSetup } from '@/components/AssignSetup'
+import { WeeklyFeedbackTab } from '@/components/weekly-feedback/WeeklyFeedbackTab'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
 
@@ -636,6 +637,7 @@ function EvaluationsRouter() {
   const searchParams = useSearchParams()
   const category = searchParams.get('cat') || 'puzzle'
   if (category === 'assign_setup') return <AssignSetup />
+  if (category === 'weekly_feedback') return <WeeklyFeedbackTab />
   return category === 'short_list' ? <ShortListEvalTab /> : <EvaluationsPageInner />
 }
 

@@ -20,5 +20,17 @@ export async function GET() {
     GROUP BY batch
     ORDER BY MAX(COALESCE(assigned_date, imported_at::date)) DESC NULLS LAST
   `
-  return NextResponse.json({ batches: rows.map(r => r.batch) })
+
+  // Distinct evaluator names across ALL categories — union of initial/final
+  // evaluator columns. Powers the admin/moderator picker in the Weekly Feedback
+  // tab (avoids the n8n-webhook /api/evaluators, which 500s).
+  const evalRows = await sql<{ name: string }[]>`
+    SELECT DISTINCT name FROM (
+      SELECT initial_evaluator AS name FROM game_evaluations WHERE initial_evaluator IS NOT NULL
+      UNION
+      SELECT final_evaluator   AS name FROM game_evaluations WHERE final_evaluator   IS NOT NULL
+    ) e ORDER BY name
+  `
+
+  return NextResponse.json({ batches: rows.map(r => r.batch), evaluators: evalRows.map(r => r.name) })
 }
