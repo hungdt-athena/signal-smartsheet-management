@@ -26,7 +26,7 @@
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 
   /* ---------- hero ---------- */
-  .brand{display:flex;align-items:center;gap:11px;margin-bottom:26px;}
+  .brand{display:flex;align-items:center;gap:11px;margin-bottom:20px;}
   .mark{width:38px;height:38px;border-radius:11px;background:linear-gradient(150deg,var(--accent),#5a86f2);
     display:grid;place-items:center;flex-shrink:0;box-shadow:var(--shadow-sm);}
   .mark span{width:14px;height:14px;border-radius:5px;background:#fff;display:block;}
@@ -34,6 +34,18 @@
   .brand small{color:var(--faint);font-size:12px;}
   h1{font-size:32px;line-height:1.18;margin:0 0 13px;letter-spacing:-.6px;}
   .lede{font-size:17px;color:var(--muted);max-width:660px;margin:0;}
+
+  /* ---------- language tabs ---------- */
+  .lang-tabs{display:inline-flex;gap:4px;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:11px;padding:4px;margin-bottom:26px;box-shadow:var(--shadow-sm);}
+  .lang-tab{appearance:none;border:none;cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:700;
+    color:var(--muted);background:transparent;border-radius:8px;padding:7px 16px;display:flex;align-items:center;gap:7px;
+    transition:background .15s,color .15s;}
+  .lang-tab:hover{color:var(--text)}
+  .lang-tab.active{background:var(--surface);color:var(--accent-strong);box-shadow:var(--shadow-sm);}
+  .lang-tab .flag{font-size:15px;line-height:1}
+  [data-lang-content]{display:none}
+  [data-lang-content].active{display:block}
 
   /* ---------- lifecycle strip ---------- */
   .life{margin:30px 0 6px;background:var(--surface);border:1px solid var(--border);border-radius:16px;
@@ -217,11 +229,22 @@
 <body>
 
 <div class="wrap">
-  <!-- ===== HERO ===== -->
+  <!-- ===== HERO (shared) ===== -->
   <div class="brand">
     <div class="mark"><span></span></div>
     <div><b>Signal</b><small>Playtest Management</small></div>
   </div>
+
+  <!-- ===== LANGUAGE TABS ===== -->
+  <div class="lang-tabs" role="tablist" aria-label="Language">
+    <button class="lang-tab" data-lang="vi" role="tab"><span class="flag">🇻🇳</span> Tiếng Việt</button>
+    <button class="lang-tab" data-lang="en" role="tab"><span class="flag">🇬🇧</span> English</button>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- =====================  TIẾNG VIỆT  ======================= -->
+  <!-- ========================================================= -->
+  <div data-lang-content="vi">
   <h1>Hướng dẫn dùng app cho Evaluator</h1>
   <p class="lede">Mọi thứ bạn cần để bắt đầu: đăng nhập, nhận game được giao, đánh note &amp; conclusion, chụp screenshot, và đưa game tiềm năng vào Short List.</p>
 
@@ -245,19 +268,19 @@
   <nav class="toc">
     <p>Nội dung</p>
     <ol>
-      <li><a href="#dangnhap">Đăng nhập</a></li>
-      <li><a href="#manhinh">Màn hình chính</a></li>
-      <li><a href="#mogame">Mở một game</a></li>
-      <li><a href="#danhgia">Note &amp; Conclusion</a></li>
-      <li><a href="#screenshot">Screenshot</a></li>
-      <li><a href="#save">Save &amp; Auto-save</a></li>
-      <li><a href="#shortlist">List_Idea → Short List</a></li>
-      <li><a href="#meo">Mẹo &amp; FAQ</a></li>
+      <li><a href="#vi-dangnhap">Đăng nhập</a></li>
+      <li><a href="#vi-manhinh">Màn hình chính</a></li>
+      <li><a href="#vi-mogame">Mở một game</a></li>
+      <li><a href="#vi-danhgia">Note &amp; Conclusion</a></li>
+      <li><a href="#vi-screenshot">Screenshot</a></li>
+      <li><a href="#vi-save">Save &amp; Auto-save</a></li>
+      <li><a href="#vi-shortlist">List_Idea → Short List</a></li>
+      <li><a href="#vi-meo">Mẹo &amp; FAQ</a></li>
     </ol>
   </nav>
 
   <!-- ===== 1 ===== -->
-  <section id="dangnhap">
+  <section id="vi-dangnhap">
     <div class="step-head"><div class="num">1</div><h2>Đăng nhập</h2></div>
     <p>Mở app, bấm <b>“Sign in with Google”</b> và đăng nhập bằng <b>tài khoản Athena</b> của bạn. Xong là vào thẳng — không cần đăng ký gì thêm.</p>
     <div class="callout tip">
@@ -267,7 +290,7 @@
   </section>
 
   <!-- ===== 2 ===== -->
-  <section id="manhinh">
+  <section id="vi-manhinh">
     <div class="step-head"><div class="num">2</div><h2>Màn hình chính</h2></div>
     <p>Sidebar bên trái có 2 chỗ bạn dùng thường xuyên — nằm trong mục <b>Evaluations</b>:</p>
     <div class="mock">
@@ -309,7 +332,7 @@
   </section>
 
   <!-- ===== 3 ===== -->
-  <section id="mogame">
+  <section id="vi-mogame">
     <div class="step-head"><div class="num">3</div><h2>Mở một game để đánh giá</h2></div>
     <p>Click một dòng → panel chi tiết mở ra. Trên cùng là <b>progress tracker</b> cho biết game đang ở bước nào:</p>
     <div class="mock">
@@ -339,7 +362,7 @@
   </section>
 
   <!-- ===== 4 ===== -->
-  <section id="danhgia">
+  <section id="vi-danhgia">
     <div class="step-head"><div class="num">4</div><h2>Đánh giá: Note &amp; Conclusion</h2></div>
     <p>Khối <b>Evaluation</b> bên phải panel là nơi bạn làm việc chính:</p>
     <div class="mock">
@@ -395,7 +418,7 @@
   </section>
 
   <!-- ===== 5 ===== -->
-  <section id="screenshot">
+  <section id="vi-screenshot">
     <div class="step-head"><div class="num">5</div><h2>Screenshot</h2></div>
     <ul class="clean">
       <li><b>Game có sẵn StoreKit</b> — screenshot hiện sẵn trong panel, bạn không cần làm gì.</li>
@@ -424,7 +447,7 @@
   </section>
 
   <!-- ===== 6 ===== -->
-  <section id="save">
+  <section id="vi-save">
     <div class="step-head"><div class="num">6</div><h2>Save &amp; Auto-save</h2></div>
     <p>Góc phải trên cùng của panel có toggle <b>Auto-save</b> — quyết định cách lưu:</p>
     <div class="mock" style="display:flex;flex-direction:column;gap:14px">
@@ -452,7 +475,7 @@
   </section>
 
   <!-- ===== 7 ===== -->
-  <section id="shortlist">
+  <section id="vi-shortlist">
     <div class="step-head"><div class="num">7</div><h2>List_Idea → Batch → Short List</h2></div>
     <p>Đây là luồng cho những game bạn thấy đáng giữ lại. Khi bạn đặt conclusion <span class="pill idea">List_Idea</span>, game <b>tự động được gán vào batch tuần hiện tại</b> của team (W1 / W2 / W3 / W4 trong tháng). Bạn không phải chọn batch thủ công — panel chỉ hiển thị batch đang active:</p>
     <div class="mock">
@@ -466,7 +489,7 @@
   </section>
 
   <!-- ===== 8 ===== -->
-  <section id="meo">
+  <section id="vi-meo">
     <div class="step-head"><div class="num">8</div><h2>Mẹo nhanh &amp; FAQ</h2></div>
 
     <div class="h3">Mẹo nhanh</div>
@@ -491,7 +514,310 @@
   <footer>
     Signal · Playtest Management — hướng dẫn dành cho Evaluator. Có gì chưa rõ cứ hỏi manager nhé.
   </footer>
+  </div><!-- /vi -->
+
+  <!-- ========================================================= -->
+  <!-- =======================  ENGLISH  ======================== -->
+  <!-- ========================================================= -->
+  <div data-lang-content="en">
+  <h1>Evaluator app guide</h1>
+  <p class="lede">Everything you need to get started: sign in, pick up your assigned games, write notes &amp; conclusions, capture screenshots, and push promising games to the Short List.</p>
+
+  <!-- ===== LIFECYCLE ===== -->
+  <div class="life">
+    <p class="cap">Where you sit in the workflow</p>
+    <div class="life-row">
+      <div class="life-node"><div class="b"><span class="t">Game assigned</span><span class="d">The system adds games to your list</span><span class="who">Automatic</span></div></div>
+      <div class="life-arrow">→</div>
+      <div class="life-node you"><div class="b"><span class="t">You evaluate</span><span class="d">Note + Conclusion (+ screenshot if needed)</span><span class="who">You ★</span></div></div>
+      <div class="life-arrow">→</div>
+      <div class="life-node you"><div class="b"><span class="t">List_Idea → Batch</span><span class="d">Good games grouped into the weekly batch</span><span class="who">You ★</span></div></div>
+      <div class="life-arrow">→</div>
+      <div class="life-node"><div class="b"><span class="t">Short List</span><span class="d">Mod reviews, sets the Final Conclusion</span><span class="who">Mod</span></div></div>
+      <div class="life-arrow">→</div>
+      <div class="life-node"><div class="b"><span class="t">Record / Video</span><span class="d">Record a video for selected games</span><span class="who">Recorder</span></div></div>
+    </div>
+    <p class="note-cap">Your part is the two middle steps (★). The last two are handled by the mod &amp; recorder — you don't need to touch them.</p>
+  </div>
+
+  <nav class="toc">
+    <p>Contents</p>
+    <ol>
+      <li><a href="#en-login">Sign in</a></li>
+      <li><a href="#en-home">Main screen</a></li>
+      <li><a href="#en-open">Open a game</a></li>
+      <li><a href="#en-evaluate">Note &amp; Conclusion</a></li>
+      <li><a href="#en-screenshot">Screenshots</a></li>
+      <li><a href="#en-save">Save &amp; Auto-save</a></li>
+      <li><a href="#en-shortlist">List_Idea → Short List</a></li>
+      <li><a href="#en-tips">Tips &amp; FAQ</a></li>
+    </ol>
+  </nav>
+
+  <!-- ===== 1 ===== -->
+  <section id="en-login">
+    <div class="step-head"><div class="num">1</div><h2>Sign in</h2></div>
+    <p>Open the app, click <b>“Sign in with Google”</b> and log in with your <b>Athena account</b>. That's it — you're in straight away, no extra sign-up needed.</p>
+    <div class="callout tip">
+      <span class="ico">💡</span>
+      <p>If you're signed in but don't see any games, let your manager know — your list may not be updated in the system yet.</p>
+    </div>
+  </section>
+
+  <!-- ===== 2 ===== -->
+  <section id="en-home">
+    <div class="step-head"><div class="num">2</div><h2>Main screen</h2></div>
+    <p>The left sidebar has the two places you'll use most — both under <b>Evaluations</b>:</p>
+    <div class="mock">
+      <div class="mk-sb">
+        <div class="mk-brand"><div class="m"><span></span></div><div><b>Signal</b><small>Playtest Management</small></div></div>
+        <div class="mk-sec">Workspace</div>
+        <div class="mk-item active">
+          <svg viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z"/></svg>
+          Evaluations
+        </div>
+        <span class="mk-sub active">Evaluate</span>
+        <span class="mk-sub">Short List</span>
+        <div class="mk-item" style="margin-top:4px">
+          <svg viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7zM1 5h15v14H1z"/></svg>
+          Videos
+        </div>
+        <span class="mk-sub">YouTube</span>
+      </div>
+    </div>
+    <p class="mock-cap">The sidebar — exactly the items you'll see (the active item is highlighted blue)</p>
+    <ul class="clean">
+      <li><b>Evaluate</b> — the table of every game assigned to you to evaluate.</li>
+      <li><b>Short List</b> — games you've marked as <span class="pill idea">List_Idea</span>, for the mod to review and finalize.</li>
+    </ul>
+    <div class="h3">What the Evaluate table looks like</div>
+    <div class="mock">
+      <div class="mk-head"><span class="mk-label">Evaluate · Puzzle</span><span style="font-size:11.5px;color:var(--faint)">3 games</span></div>
+      <div class="tbl-scroll">
+        <table class="mk-tbl">
+          <tr><th>Game</th><th>Genre</th><th>Status</th><th>Evaluated</th></tr>
+          <tr><td><div class="mk-game"><span class="mk-ico"></span><b>Block Blast Saga</b></div></td><td><span class="pill muted">Puzzle</span></td><td><span class="badge success"><span class="bdot"></span>Done</span></td><td style="color:var(--faint)">18/06/26</td></tr>
+          <tr><td><div class="mk-game"><span class="mk-ico"></span><b>Word Cross Mania</b></div></td><td><span class="pill muted">Word</span></td><td><span class="badge running"><span class="bdot"></span>Pending</span></td><td style="color:var(--faint)">—</td></tr>
+          <tr><td><div class="mk-game"><span class="mk-ico"></span><b>Tile Match 3D</b></div></td><td><span class="pill muted">Casual</span></td><td><span class="badge running"><span class="bdot"></span>Pending</span></td><td style="color:var(--faint)">—</td></tr>
+        </table>
+      </div>
+    </div>
+    <p class="mock-cap">Click a row to open the game for evaluation</p>
+    <p>You can filter quickly by: assigned <b>date</b>, <b>status</b> (Pending / Done / All), and <b>conclusion</b>.</p>
+  </section>
+
+  <!-- ===== 3 ===== -->
+  <section id="en-open">
+    <div class="step-head"><div class="num">3</div><h2>Open a game to evaluate</h2></div>
+    <p>Click a row → the detail panel opens. At the top is a <b>progress tracker</b> showing which step the game is on:</p>
+    <div class="mock">
+      <div class="mk-prog">
+        <div class="mk-step done"><span class="mk-bub done">✓</span><span class="st">Assigned</span></div>
+        <div class="mk-line done"></div>
+        <div class="mk-step cur"><span class="mk-bub cur">2</span><span class="st">Evaluated</span></div>
+        <div class="mk-line"></div>
+        <div class="mk-step"><span class="mk-bub">3</span><span class="st">Final Conclusion</span></div>
+        <div class="mk-line"></div>
+        <div class="mk-step"><span class="mk-bub">4</span><span class="st">Record</span></div>
+        <div class="mk-line"></div>
+        <div class="mk-step"><span class="mk-bub">5</span><span class="st">Video</span></div>
+      </div>
+    </div>
+    <p class="mock-cap">This game is on the “Evaluated” step — waiting for your evaluation</p>
+    <p>In the panel you'll also see:</p>
+    <ul class="clean">
+      <li><b>Game Info</b> — icon, name (click to open the store), genre, publisher, and the date it was assigned.</li>
+      <li><b>QR “Scan to download”</b> — scan with your phone to install the game and test it.</li>
+      <li><b>Screenshots</b> and the <b>Evaluation block</b> where you do your work (steps 4–6 below).</li>
+    </ul>
+    <div class="callout tip">
+      <span class="ico">⌨️</span>
+      <p>Use <span class="key">←</span> <span class="key">→</span> to jump between games quickly and <span class="key">Esc</span> to close the panel. Saves you clicking back and forth.</p>
+    </div>
+  </section>
+
+  <!-- ===== 4 ===== -->
+  <section id="en-evaluate">
+    <div class="step-head"><div class="num">4</div><h2>Evaluating: Note &amp; Conclusion</h2></div>
+    <p>The <b>Evaluation</b> block on the right of the panel is where you do the main work:</p>
+    <div class="mock">
+      <div class="mk-head">
+        <span class="mk-label">Evaluation</span>
+        <span class="mk-badge unsaved"><span class="mk-dot"></span> Unsaved changes</span>
+      </div>
+      <div class="mk-row">
+        <div><div class="rt">Dead link status</div><div class="rd">Mark game store link as invalid</div></div>
+        <span class="mk-sw"><span class="tr"></span></span>
+      </div>
+      <div class="mk-field">
+        <span class="l">Initial Conclusion</span>
+        <div class="mk-input sel">List_Idea</div>
+      </div>
+      <div class="mk-field">
+        <span class="l">Note</span>
+        <div class="mk-input area">Addictive gameplay loop, polished art — strong potential as a theme...</div>
+      </div>
+      <div class="mk-field">
+        <span class="l">Demo Video (Drive)</span>
+        <div class="mk-input ph">https://drive.google.com/...</div>
+      </div>
+      <div class="mk-btn">Save Evaluation</div>
+    </div>
+    <p class="mock-cap">The real Evaluation block in the panel — the orange badge flags unsaved changes</p>
+
+    <div class="h3">What each conclusion means &amp; when to pick it</div>
+    <div class="tbl-scroll">
+    <table>
+      <tr><th>Option</th><th>Pick it when</th><th>What happens next</th></tr>
+      <tr>
+        <td><span class="pill bypass">Bypass</span></td>
+        <td>The game doesn't make the cut and isn't worth following.</td>
+        <td>The game leaves the pipeline and is marked <b>done</b>.</td>
+      </tr>
+      <tr>
+        <td><span class="pill idea">List_Idea</span></td>
+        <td>The game has potential and you want to keep it.</td>
+        <td>It auto-joins the <b>weekly batch</b> → appears in the <b>Short List</b> for the mod to finalize (see step 7).</td>
+      </tr>
+      <tr>
+        <td><span class="pill bypass">Dead link</span><span style="font-size:11px;color:var(--faint)"> (toggle)</span></td>
+        <td>The store link is broken / unreachable.</td>
+        <td>Sets the status to <b>Link_dead</b> and marks done — no further evaluation needed.</td>
+      </tr>
+    </table>
+    </div>
+    <div class="callout warn">
+      <span class="ico">⚠️</span>
+      <p><b>A game only counts as “done” once you've picked a Conclusion.</b> Filling in just the Note leaves it Pending. Once you set the conclusion, the system records the <b>Evaluated</b> date automatically.</p>
+    </div>
+  </section>
+
+  <!-- ===== 5 ===== -->
+  <section id="en-screenshot">
+    <div class="step-head"><div class="num">5</div><h2>Screenshots</h2></div>
+    <ul class="clean">
+      <li><b>Game has StoreKit</b> — screenshots already show in the panel, nothing for you to do.</li>
+      <li><b>Game doesn't</b> — take screenshots yourself and upload them straight into the site in the <b>Screenshots</b> block:</li>
+    </ul>
+    <div class="mock">
+      <div class="mk-head" style="border:none;margin:0 0 11px;padding:0">
+        <span class="mk-label">Screenshots <span class="mk-pillsm">manual</span></span>
+      </div>
+      <div class="mk-drop">
+        <span class="big">⬆</span>
+        Paste (Ctrl+V), drag &amp; drop, or click to choose — PNG/JPEG/WebP, ≤5MB
+      </div>
+    </div>
+    <p class="mock-cap">The upload box — only shows when the game has no StoreKit screenshots</p>
+    <ul class="clean">
+      <li><b>Paste</b> — copy an image, then press <span class="key">Ctrl</span>+<span class="key">V</span> right on the panel.</li>
+      <li><b>Drag &amp; drop</b> — drag image files into the dashed box.</li>
+      <li><b>Choose a file</b> — click the box to open the file picker.</li>
+    </ul>
+    <p>Limits: <b>PNG / JPEG / WebP</b>, each image <b>≤ 5MB</b>, up to <b>10 images at a time</b>. New images show an orange border (pending) → click <b>“Save screenshots”</b> to save. Remove a saved image with the <b>✕</b> in its corner.</p>
+    <div class="callout good">
+      <span class="ico">✓</span>
+      <p>When official StoreKit screenshots arrive later, your manually uploaded ones are replaced automatically — no cleanup needed.</p>
+    </div>
+  </section>
+
+  <!-- ===== 6 ===== -->
+  <section id="en-save">
+    <div class="step-head"><div class="num">6</div><h2>Save &amp; Auto-save</h2></div>
+    <p>The top-right corner of the panel has an <b>Auto-save</b> toggle — it decides how saving works:</p>
+    <div class="mock" style="display:flex;flex-direction:column;gap:14px">
+      <div class="mk-toggle-line"><span class="lab on">Auto-save</span><span class="mk-sw on acc"><span class="tr"></span></span></div>
+      <div style="height:1px;background:var(--border)"></div>
+      <div class="mk-toggle-line"><span class="lab off">Auto-save</span><span class="mk-sw"><span class="tr"></span></span></div>
+    </div>
+    <p class="mock-cap">Top: Auto-save ON · Bottom: Auto-save OFF</p>
+    <ul class="clean">
+      <li><b>Auto-save ON</b> — the app saves on its own about <b>0.8 seconds</b> after you stop typing. No button needed.</li>
+      <li><b>Auto-save OFF</b> — <b>you must click Save</b>. Forget, and your changes are lost when you close / switch games.</li>
+    </ul>
+    <p>Next to the Evaluation block there's always a status badge telling you whether you've saved:</p>
+    <div class="tbl-scroll">
+    <table>
+      <tr><th>Badge</th><th>Means</th></tr>
+      <tr><td><span class="mk-badge unsaved"><span class="mk-dot"></span> Unsaved changes</span></td><td>You have <b>unsaved</b> changes — if auto-save is off, remember to click Save.</td></tr>
+      <tr><td><span class="mk-badge saved">✓ Saved</span></td><td>Everything is saved and in sync with the server.</td></tr>
+    </table>
+    </div>
+    <div class="callout tip">
+      <span class="ico">💡</span>
+      <p>Your Auto-save choice is remembered per browser — turn it on once and it stays on next time.</p>
+    </div>
+  </section>
+
+  <!-- ===== 7 ===== -->
+  <section id="en-shortlist">
+    <div class="step-head"><div class="num">7</div><h2>List_Idea → Batch → Short List</h2></div>
+    <p>This is the flow for games you think are worth keeping. When you set the conclusion to <span class="pill idea">List_Idea</span>, the game is <b>automatically assigned to the team's current weekly batch</b> (W1 / W2 / W3 / W4 of the month). You don't pick the batch manually — the panel just shows the active batch:</p>
+    <div class="mock">
+      <div class="mk-field" style="margin:0">
+        <span class="l">Batch (week)</span>
+        <div class="mk-batch"><span class="bb">W3 Jun, 2026</span><span class="bd">· current batch (auto-assigned)</span></div>
+      </div>
+    </div>
+    <p class="mock-cap">The batch only shows when the conclusion is List_Idea — auto-assigned by week</p>
+    <p>The game then appears in the <b>Short List</b> tab, where the mod reviews it and sets the <b>Final Conclusion</b>. You can view the Short List, but the Final Conclusion is the mod's job.</p>
+  </section>
+
+  <!-- ===== 8 ===== -->
+  <section id="en-tips">
+    <div class="step-head"><div class="num">8</div><h2>Quick tips &amp; FAQ</h2></div>
+
+    <div class="h3">Quick tips</div>
+    <ul class="clean">
+      <li><b>Shortcuts</b> — <span class="key">←</span> <span class="key">→</span> switch games, <span class="key">Esc</span> close the panel, <span class="key">Ctrl</span>+<span class="key">V</span> paste a screenshot.</li>
+      <li><b>Open the store</b> — click the game name to open the store page in a new tab.</li>
+      <li><b>Quick copy</b> — there's a copy button next to the game name and game_id.</li>
+      <li><b>“Clear all”</b> — quickly wipe every evaluation field (click twice to confirm).</li>
+      <li><b>Fullscreen</b> — a button to expand the panel for a roomier view.</li>
+    </ul>
+
+    <div class="h3">FAQ</div>
+    <table>
+      <tr><th>Situation</th><th>What to do</th></tr>
+      <tr><td><b>Signed in but no games show up</b></td><td>Tell your manager — your list may not be updated yet.</td></tr>
+      <tr><td><b>Accidentally turned auto-save off</b></td><td>The orange “Unsaved changes” badge will remind you — click Save before switching / closing a game.</td></tr>
+      <tr><td><b>Image upload errors out</b></td><td>Check: it's PNG/JPEG/WebP, each ≤ 5MB, max 10 images per batch.</td></tr>
+      <tr><td><b>Picked List_Idea but there's no batch</b></td><td>Ask your manager to set the team's <b>current batch</b>, then save again.</td></tr>
+    </table>
+  </section>
+
+  <footer>
+    Signal · Playtest Management — Evaluator guide. Anything unclear? Just ask your manager.
+  </footer>
+  </div><!-- /en -->
 </div>
+
+<script>
+  (function(){
+    var TITLES = { vi: 'Hướng dẫn Evaluator — Signal', en: 'Evaluator Guide — Signal' };
+    var tabs = document.querySelectorAll('.lang-tab');
+    function setLang(lang, push){
+      if(lang !== 'en') lang = 'vi';
+      document.documentElement.lang = lang;
+      document.title = TITLES[lang];
+      document.querySelectorAll('[data-lang-content]').forEach(function(el){
+        el.classList.toggle('active', el.getAttribute('data-lang-content') === lang);
+      });
+      tabs.forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-lang') === lang); });
+      if(push && location.hash.replace('#','') !== lang){
+        history.replaceState(null, '', '#' + lang);
+      }
+    }
+    tabs.forEach(function(b){
+      b.addEventListener('click', function(){ setLang(b.getAttribute('data-lang'), true); });
+    });
+    window.addEventListener('hashchange', function(){
+      var h = location.hash.replace('#','');
+      if(h === 'vi' || h === 'en') setLang(h, false);
+    });
+    setLang(location.hash.replace('#',''), true);
+  })();
+</script>
 
 </body>
 </html>

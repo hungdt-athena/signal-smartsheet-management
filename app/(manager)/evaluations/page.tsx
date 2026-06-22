@@ -297,7 +297,8 @@ function ShortListEvalTab() {
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
   // Short List groups by when games were evaluated → default basis = evaluated.
   const df = useDateFilter('evaluated')
-  const [sortAsc, setSortAsc] = useState(true)
+  // Default to newest-first so the most recently evaluated games surface on top.
+  const [sortAsc, setSortAsc] = useState(false)
   const fetchSeqRef = useRef(0)
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
 

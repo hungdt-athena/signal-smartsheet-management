@@ -25,10 +25,11 @@ const ICONS: Record<string, string | string[]> = {
   clipboard: ['M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2', 'M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z'],
   table:  ['M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18'],
   sliders: ['M4 21V14', 'M4 10V3', 'M12 21V12', 'M12 8V3', 'M20 21V16', 'M20 12V3', 'M1 14H7', 'M9 8H15', 'M17 16H23'],
+  book:   ['M4 19.5A2.5 2.5 0 0 1 6.5 17H20', 'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'],
 }
 
-interface NavChild { href: string; label: string; roles?: string[] }
-interface NavItem { href: string; label: string; icon: keyof typeof ICONS; adminOnly?: boolean; roles?: string[]; children?: NavChild[] }
+interface NavChild { href: string; label: string; roles?: string[]; external?: boolean }
+interface NavItem { href: string; label: string; icon: keyof typeof ICONS; adminOnly?: boolean; roles?: string[]; external?: boolean; children?: NavChild[] }
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/smartsheet',      label: 'Smartsheet',  icon: 'table',  adminOnly: true, children: [
@@ -51,6 +52,10 @@ const NAV_ITEMS: NavItem[] = [
   ]},
   { href: '/admin',           label: 'Users Management', icon: 'shield', adminOnly: true },
   { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin', 'moderator'] },
+  { href: '/guide',           label: 'Guide',      icon: 'book', external: true, children: [
+    { href: '/evaluator-guide.html#vi', label: 'VI', external: true },
+    { href: '/evaluator-guide.html#en', label: 'EN', external: true },
+  ]},
 ]
 
 // System-group items (rendered in the lower "System" nav section).
@@ -111,14 +116,26 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
                 const itemClass = childItems.length > 0
                   ? 'sb-item' + ((selfActive || childActive) ? ' parent-active' : '')
                   : 'sb-item' + (selfActive ? ' active' : '')
+                const parentHref = childItems.length > 0 ? childItems[0].href : item.href
+                const parentInner = (
+                  <>
+                    <span className="sb-ico">
+                      <SIcon d={ICONS[item.icon]} size={17} />
+                    </span>
+                    <span>{item.label}</span>
+                  </>
+                )
                 return (
                   <div key={item.href} className="sb-group">
-                    <Link href={childItems.length > 0 ? childItems[0].href : item.href} className={itemClass}>
-                      <span className="sb-ico">
-                        <SIcon d={ICONS[item.icon]} size={17} />
-                      </span>
-                      <span>{item.label}</span>
-                    </Link>
+                    {item.external ? (
+                      <a href={parentHref} target="_blank" rel="noopener noreferrer" className={itemClass}>
+                        {parentInner}
+                      </a>
+                    ) : (
+                      <Link href={parentHref} className={itemClass}>
+                        {parentInner}
+                      </Link>
+                    )}
                     {childItems.length > 0 && (
                       <div className="sb-children">
                         {childItems.map(sub => {
@@ -132,9 +149,14 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
                             : subTab
                               ? currentTab === subTab && pathname.startsWith(item.href)
                               : pathname === subPath || pathname.startsWith(subPath + '/')
-                          return (
-                            <Link key={sub.href} href={sub.href}
-                              className={'sb-sub' + (subActive ? ' active' : '')}>
+                          const subClass = 'sb-sub' + (subActive ? ' active' : '')
+                          return sub.external ? (
+                            <a key={sub.href} href={sub.href} target="_blank" rel="noopener noreferrer"
+                              className={subClass}>
+                              {sub.label}
+                            </a>
+                          ) : (
+                            <Link key={sub.href} href={sub.href} className={subClass}>
                               {sub.label}
                             </Link>
                           )

@@ -7,5 +7,7 @@ export default async function RootPage() {
   const session = await getServerSession(authOptions)
   if (!session) redirect('/login')
   if (session.user.role === 'admin' || session.user.role === 'moderator') redirect('/dashboard')
-  redirect('/handover')
+  // Evaluators (and any non-manager role) land on Evaluate — the first page
+  // visible in their sidebar. Must stay in sync with the middleware fallback.
+  redirect('/evaluations')
 }

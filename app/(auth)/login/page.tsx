@@ -51,7 +51,7 @@ function LoginForm() {
 
         <button
           className="btn btn-primary"
-          onClick={() => signIn('google', { callbackUrl: '/dashboard' })}
+          onClick={() => signIn('google', { callbackUrl: '/' })}
           style={{ width: '100%', justifyContent: 'center', padding: '10px 16px', fontSize: 13 }}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
@@ -63,19 +63,34 @@ function LoginForm() {
           Sign in with Google
         </button>
 
-        <a
-          className="btn"
-          href="/evaluator-guide.html"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ width: '100%', justifyContent: 'center', padding: '10px 16px', fontSize: 13, marginTop: 10, textDecoration: 'none' }}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-            <path d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z" />
-          </svg>
-          Hướng dẫn dùng app (Evaluator)
-        </a>
+        <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+          <a
+            className="btn"
+            href="/evaluator-guide.html#vi"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ flex: 1, justifyContent: 'center', padding: '10px 16px', fontSize: 13, textDecoration: 'none' }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+              <path d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z" />
+            </svg>
+            Hướng dẫn (VI)
+          </a>
+          <a
+            className="btn"
+            href="/evaluator-guide.html#en"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ flex: 1, justifyContent: 'center', padding: '10px 16px', fontSize: 13, textDecoration: 'none' }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+              <path d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z" />
+            </svg>
+            Guide (EN)
+          </a>
+        </div>
 
         <p style={{ fontSize: 11, color: 'var(--faint)', textAlign: 'center', marginTop: 14 }}>
           Only @athena.studio accounts
