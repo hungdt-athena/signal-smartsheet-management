@@ -25,11 +25,10 @@ function putReq(body: unknown) {
 
 describe('/api/weekly-feedback', () => {
   const realSkip = process.env.SKIP_AUTH
+  beforeEach(() => { process.env.SKIP_AUTH = ''; sqlMock.mockReset(); sessionMock.mockReset() })
   afterAll(() => { process.env.SKIP_AUTH = realSkip })
-  beforeEach(() => { sqlMock.mockReset(); sessionMock.mockReset() })
 
   it('GET list forces evaluator to the session user for a non-manager', async () => {
-    process.env.SKIP_AUTH = ''
     sessionMock.mockResolvedValue({ user: { name: 'Alice', role: 'evaluator' } })
     sqlMock.mockResolvedValue([])
     await getReq('evaluator=Bob') // attempts to read Bob's
@@ -43,14 +42,12 @@ describe('/api/weekly-feedback', () => {
   })
 
   it('PUT blocks writing to another evaluator (403)', async () => {
-    process.env.SKIP_AUTH = ''
     sessionMock.mockResolvedValue({ user: { name: 'Alice', role: 'admin' } })
     const res = await putReq({ batch: 'W1 Jun, 2026', evaluator: 'Bob', feedback: {}, game_alike: [] })
     expect(res.status).toBe(403)
   })
 
   it('PUT upserts for the session user', async () => {
-    process.env.SKIP_AUTH = ''
     sessionMock.mockResolvedValue({ user: { name: 'Alice', role: 'evaluator' } })
     sqlMock.mockResolvedValue([{ batch: 'W1 Jun, 2026', evaluator: 'Alice', feedback: {}, game_alike: [], updated_at: 'now' }])
     const res = await putReq({ batch: 'W1 Jun, 2026', feedback: { type: 'doc' }, game_alike: [] })
@@ -60,7 +57,6 @@ describe('/api/weekly-feedback', () => {
   })
 
   it('PUT rejects a missing batch (400)', async () => {
-    process.env.SKIP_AUTH = ''
     sessionMock.mockResolvedValue({ user: { name: 'Alice', role: 'evaluator' } })
     const res = await putReq({ feedback: {}, game_alike: [] })
     expect(res.status).toBe(400)

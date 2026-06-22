@@ -54,6 +54,7 @@ export async function PUT(req: NextRequest) {
   const guard = await requireAuth()
   if (guard) return guard
 
+  // 403 check below is role-blind by design: admins cannot write others' feedback either.
   const { name } = await resolveSession()
   let body: { batch?: string; evaluator?: string; feedback?: unknown; game_alike?: unknown }
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Bad JSON' }, { status: 400 }) }
@@ -66,6 +67,7 @@ export async function PUT(req: NextRequest) {
   if (process.env.SKIP_AUTH !== 'true' && body.evaluator && body.evaluator.toLowerCase() !== name.toLowerCase()) {
     return NextResponse.json({ error: 'Forbidden: can only edit your own feedback' }, { status: 403 })
   }
+  // Empty or absent evaluator is treated as "use session name" — safe fallback.
   const evaluator = process.env.SKIP_AUTH === 'true' ? (body.evaluator || name || 'dev') : name
   if (!evaluator) return NextResponse.json({ error: 'No evaluator identity' }, { status: 400 })
 
