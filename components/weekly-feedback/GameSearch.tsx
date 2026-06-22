@@ -55,7 +55,7 @@ export function GameSearch({ onPick }: { onPick: (g: GameAlikeGame) => void }) {
       {loading && <span className="wf-hint">searching…</span>}
       {noMatchLink && (
         <button type="button" onClick={addManual} className="wf-addmanual">
-          Not in DB — add "{noMatchLink}" manually
+          Not in DB — add &quot;{noMatchLink}&quot; manually
         </button>
       )}
       {hits.length > 0 && (
