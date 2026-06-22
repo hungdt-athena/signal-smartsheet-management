@@ -33,27 +33,11 @@ function sanitizeNode(node: unknown): unknown {
   return out
 }
 
-function sanitizeGameAlike(sections: unknown[]): unknown[] {
-  return sections.map((s) => {
-    const sec = (s ?? {}) as { games?: unknown; [k: string]: unknown }
-    const games = Array.isArray(sec.games) ? sec.games : []
-    return {
-      ...sec,
-      games: games.map((g) => {
-        const game = (g ?? {}) as { app_link?: unknown; icon_url?: unknown; [k: string]: unknown }
-        return {
-          ...game,
-          app_link: isSafeHref(game.app_link) ? game.app_link : null,
-          icon_url: isSafeHref(game.icon_url) ? game.icon_url : null,
-        }
-      }),
-    }
-  })
-}
-
-function sanitizeFeedback(feedback: unknown): unknown {
-  if (!feedback || typeof feedback !== 'object') return feedback
-  return sanitizeNode(feedback)
+// Both `feedback` and `game_alike` are Tiptap documents (rich text + inline game
+// hyperlinks); sanitize their link marks the same way.
+function sanitizeDoc(doc: unknown): unknown {
+  if (!doc || typeof doc !== 'object') return doc
+  return sanitizeNode(doc)
 }
 
 interface SessionInfo { isManager: boolean; name: string }
@@ -121,8 +105,8 @@ export async function PUT(req: NextRequest) {
   const evaluator = process.env.SKIP_AUTH === 'true' ? (body.evaluator || name || 'dev') : name
   if (!evaluator) return NextResponse.json({ error: 'No evaluator identity' }, { status: 400 })
 
-  const feedback = sanitizeFeedback(body.feedback ?? null)
-  const gameAlike = sanitizeGameAlike(Array.isArray(body.game_alike) ? body.game_alike : [])
+  const feedback = sanitizeDoc(body.feedback ?? null)
+  const gameAlike = sanitizeDoc(body.game_alike ?? null)
 
   const rows = await sql`
     INSERT INTO weekly_feedback (batch, evaluator, feedback, game_alike, updated_at)

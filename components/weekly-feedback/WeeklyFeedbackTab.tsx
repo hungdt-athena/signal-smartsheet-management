@@ -4,11 +4,9 @@ import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { FeedbackEditor } from './FeedbackEditor'
-import { GameAlikeEditor } from './GameAlikeEditor'
 import { FeedbackView } from './FeedbackView'
-import { GameAlikeSection } from './types'
 
-interface WeeklyRecord { batch: string; evaluator: string; feedback: unknown; game_alike: GameAlikeSection[]; updated_at: string }
+interface WeeklyRecord { batch: string; evaluator: string; feedback: unknown; game_alike: unknown; updated_at: string }
 
 export function WeeklyFeedbackTab() {
   const { data: session } = useSession()
@@ -25,7 +23,7 @@ export function WeeklyFeedbackTab() {
   const [selectedBatch, setSelectedBatch] = useState('')
 
   const [feedback, setFeedback] = useState<unknown>(null)
-  const [gameAlike, setGameAlike] = useState<GameAlikeSection[]>([])
+  const [gameAlike, setGameAlike] = useState<unknown>(null)
   const [records, setRecords] = useState<WeeklyRecord[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -53,7 +51,7 @@ export function WeeklyFeedbackTab() {
     if (isManager && evaluator) qs.set('evaluator', evaluator)
     fetch(`/api/weekly-feedback?${qs}`).then(r => r.json()).then(d => {
       setFeedback(d.record?.feedback ?? null)
-      setGameAlike(d.record?.game_alike ?? [])
+      setGameAlike(d.record?.game_alike ?? null)
       setDirty(false); dirtyRef.current = false
     })
   }, [view, selectedBatch, evaluator, isManager])
@@ -78,6 +76,15 @@ export function WeeklyFeedbackTab() {
   // Unsaved guard so the deploy watcher / page close never drops edits.
   useEffect(() => registerUnsavedGuard({ isDirty: () => dirtyRef.current, flush: () => save() }), [save])
   const markDirty = () => { setDirty(true); dirtyRef.current = true }
+
+  // Auto-save: persist ~1s after edits stop. Editing feedback/gameAlike changes
+  // `save` (it closes over them), which re-runs this effect and resets the timer
+  // — a natural debounce. `dirty` gates it; saving clears dirty and stops the loop.
+  useEffect(() => {
+    if (!dirty || !viewingSelf || !selectedBatch) return
+    const t = setTimeout(() => { void save() }, 1000)
+    return () => clearTimeout(t)
+  }, [dirty, viewingSelf, selectedBatch, save])
 
   const openBatch = (b: string) => { setSelectedBatch(b); setView('week') }
 
@@ -130,15 +137,13 @@ export function WeeklyFeedbackTab() {
             <p className="h-sub" style={{ padding: 8 }}>Select a week to view or edit feedback.</p>
           ) : viewingSelf ? (
             <>
-              <h3 className="wf-label">Feedback</h3>
+              <div className="wf-label-row">
+                <h3 className="wf-label">Feedback</h3>
+                <span className="wf-savestate">{saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'All changes saved'}</span>
+              </div>
               <FeedbackEditor value={feedback} onChange={v => { setFeedback(v); markDirty() }} />
               <h3 className="wf-label">Game Alike</h3>
-              <GameAlikeEditor value={gameAlike} onChange={v => { setGameAlike(v); markDirty() }} />
-              <div style={{ marginTop: 12 }}>
-                <button className="btn btn-sm" disabled={!dirty || saving} onClick={save}>
-                  {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
-                </button>
-              </div>
+              <FeedbackEditor value={gameAlike} onChange={v => { setGameAlike(v); markDirty() }} />
             </>
           ) : (
             <FeedbackView feedback={feedback} gameAlike={gameAlike} />

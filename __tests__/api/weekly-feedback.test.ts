@@ -62,32 +62,32 @@ describe('/api/weekly-feedback', () => {
     expect(res.status).toBe(400)
   })
 
-  it('PUT sanitizes game_alike: nulls unsafe app_link/icon_url, keeps safe ones', async () => {
+  it('PUT strips unsafe link-mark hrefs from the game_alike doc, keeps safe ones', async () => {
     sessionMock.mockResolvedValue({ user: { name: 'Alice', role: 'evaluator' } })
-    sqlMock.mockResolvedValue([{ batch: 'W1 Jun, 2026', evaluator: 'Alice', feedback: {}, game_alike: [], updated_at: 'now' }])
+    sqlMock.mockResolvedValue([{ batch: 'W1 Jun, 2026', evaluator: 'Alice', feedback: null, game_alike: null, updated_at: 'now' }])
+    // game_alike is now a Tiptap doc (free rich text + inline game links), so it
+    // is sanitized exactly like feedback: link marks with unsafe hrefs are dropped.
     await putReq({
       batch: 'W1 Jun, 2026',
-      feedback: { type: 'doc' },
-      game_alike: [
-        {
-          name: 'Section A',
-          games: [
-            { game_id: '1', title: 'GameOne', app_link: 'javascript:alert(1)', icon_url: 'https://example.com/icon.png' },
-            { game_id: '2', title: 'GameTwo', app_link: 'https://apps.apple.com/app/id123', icon_url: 'data:text/html,x' },
+      feedback: null,
+      game_alike: {
+        type: 'doc',
+        content: [{
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'bad', marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }] },
+            { type: 'text', text: 'good', marks: [{ type: 'link', attrs: { href: 'https://ok.example/app' } }] },
           ],
-        },
-      ],
+        }],
+      },
     })
-    // sql is called as a tagged template: calls[0] = [stringsArray, ...values]
+    // sql is a tagged template: calls[0] = [stringsArray, batch, evaluator, feedbackDoc, gameAlikeDoc]
     const boundValues = sqlMock.mock.calls[0].slice(1)
-    const gameAlikeArg = boundValues.find((v: unknown) => Array.isArray(v)) as Array<{ games: Array<{ app_link: unknown; icon_url: unknown }> }>
-    expect(gameAlikeArg).toBeDefined()
-    const games = gameAlikeArg[0].games
-    // game[0]: unsafe app_link nulled, safe icon_url kept
-    expect(games[0].app_link).toBeNull()
-    expect(games[0].icon_url).toBe('https://example.com/icon.png')
-    // game[1]: safe app_link kept, unsafe icon_url nulled
-    expect(games[1].app_link).toBe('https://apps.apple.com/app/id123')
-    expect(games[1].icon_url).toBeNull()
+    const gameAlikeDoc = boundValues[3] as { content: Array<{ content: Array<{ marks: Array<{ attrs: { href: string } }> }> }> }
+    const inline = gameAlikeDoc.content[0].content
+    // 'bad' text: javascript: link mark removed
+    expect(inline[0].marks).toHaveLength(0)
+    // 'good' text: https link mark kept
+    expect(inline[1].marks[0].attrs.href).toBe('https://ok.example/app')
   })
 })
