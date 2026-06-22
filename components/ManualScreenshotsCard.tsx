@@ -1,11 +1,19 @@
 'use client'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp']
 const MAX_FILES = 10
 const MAX_SIZE = 5 * 1024 * 1024
 
 interface Staged { file: File; preview: string }
+
+/** Imperative handle so a parent (e.g. the eval panel's unified Save button)
+ *  can flush staged uploads as part of its own save instead of a second click. */
+export interface ManualScreenshotsHandle {
+  /** Upload any staged screenshots. Resolves true when all succeeded (or none staged). */
+  flush: () => Promise<boolean>
+  hasStaged: () => boolean
+}
 
 interface Props {
   gameId: string
@@ -16,9 +24,16 @@ interface Props {
   onChange: (gameId: string, urls: string[]) => void
   onExpand: (url: string) => void
   onToast: (msg: string, err?: boolean) => void
+  /** When true, the parent owns saving (folds staged uploads into its Save button +
+   *  auto-save): hide the standalone Save button and just report the staged count. */
+  deferSave?: boolean
+  /** Notifies the parent how many screenshots are staged (drives its dirty state). */
+  onStagedChange?: (count: number) => void
 }
 
-export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange, onExpand, onToast }: Props) {
+const ManualScreenshotsCard = forwardRef<ManualScreenshotsHandle, Props>(function ManualScreenshotsCard(
+  { gameId, urls, canEdit, onChange, onExpand, onToast, deferSave = false, onStagedChange }, ref,
+) {
   const [staged, setStaged] = useState<Staged[]>([])
   const [saving, setSaving] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -64,9 +79,15 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
     })
   }
 
-  const save = async () => {
-    if (staged.length === 0 || saving) return
+  // Keep the parent's dirty/save state in sync with how many shots are staged.
+  useEffect(() => { onStagedChange?.(staged.length) }, [staged.length, onStagedChange])
+
+  // Upload staged screenshots. `silent` suppresses the success toast so a unified
+  // parent save (eval + screenshots) can show a single "Saved" message instead.
+  const uploadStaged = useCallback(async (silent = false): Promise<boolean> => {
+    if (staged.length === 0 || saving) return true
     setSaving(true)
+    let ok = false
     try {
       const form = new FormData()
       // Unique per-entry names: pasted files are all "image.png", and the
@@ -87,11 +108,17 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
           return prev.filter((s, i) => failedNames.has(uploadName(s, i)))
         })
         if (failedNames.size > 0) onToast(`${failedNames.size} image(s) failed — try saving again`, true)
-        else onToast('Screenshots saved')
+        else { ok = true; if (!silent) onToast('Screenshots saved') }
       }
     } catch { onToast('Network error', true) }
     setSaving(false)
-  }
+    return ok
+  }, [staged, saving, gameId, onChange, onToast])
+
+  useImperativeHandle(ref, () => ({
+    flush: () => uploadStaged(true),
+    hasStaged: () => staged.length > 0,
+  }), [uploadStaged, staged.length])
 
   const removeSaved = async (url: string) => {
     try {
@@ -195,10 +222,16 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
                   </div>
                 ))}
               </div>
-              <button className="btn btn-primary" onClick={save} disabled={saving}
-                style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}>
-                {saving ? 'Saving...' : `Save screenshots (${staged.length})`}
-              </button>
+              {deferSave ? (
+                <p style={{ fontSize: 11.5, color: 'var(--faint)', textAlign: 'center', margin: '8px 0 0' }}>
+                  {staged.length} pending — will be saved with the evaluation
+                </p>
+              ) : (
+                <button className="btn btn-primary" onClick={() => uploadStaged(false)} disabled={saving}
+                  style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}>
+                  {saving ? 'Saving...' : `Save screenshots (${staged.length})`}
+                </button>
+              )}
             </>
           )}
         </>
@@ -211,4 +244,6 @@ export default function ManualScreenshotsCard({ gameId, urls, canEdit, onChange,
       )}
     </div>
   )
-}
+})
+
+export default ManualScreenshotsCard

@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { StyledSelect } from '@/components/StyledSelect'
-import ManualScreenshotsCard from '@/components/ManualScreenshotsCard'
+import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
 import QRCode from 'qrcode'
 
 export interface EvalDetail {
@@ -369,6 +369,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const [recorders, setRecorders] = useState<string[]>([])
   const [deadLink, setDeadLink] = useState(false)
   const [dirty, setDirty] = useState(false)
+  // Manual screenshots staged in the child card. Folded into the unified save so
+  // there's no separate "Save screenshots" click (and auto-save picks them up).
+  const screenshotRef = useRef<ManualScreenshotsHandle>(null)
+  const [stagedShots, setStagedShots] = useState(0)
 
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [expandedImg, setExpandedImg] = useState<string | null>(null)
@@ -518,6 +522,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const canEditAssignee = !readOnly && isManager && !!canAssignRecords
   // Any editable surface → show the save button.
   const canEdit = canEditEval || canEdit5 || canEdit20 || canEditAssignee
+  // The eval editor's Save button also flushes staged screenshots, so staged
+  // shots count as unsaved work for it (the card hides its own button then).
+  const needsSave = dirty || (canEditEval && stagedShots > 0)
 
   useEffect(() => {
     if (!canEditAssignee) return
@@ -537,6 +544,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     if (!ev || !canEdit) return
     setSaving(true)
     try {
+      // Flush staged screenshots first so one Save persists both. Silent success —
+      // the eval PATCH below shows the single "Saved" toast; the refetch picks up
+      // the new screenshot URLs from the server.
+      if (canEditEval) await screenshotRef.current?.flush()
       const body: Record<string, unknown> = { id: ev.id }
       if (canEditEval) {
         // Always send these so an emptied field clears the column (see PATCH handler).
@@ -583,12 +594,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   saveRef.current = save
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (!autoSave || !dirty || saving || !canEdit) return
+    if (!autoSave || !needsSave || saving || !canEdit) return
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 800)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSave, dirty, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, drive5, drive20, rec5Assignee, rec20Assignee])
+  }, [autoSave, needsSave, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots])
 
   const clearField = (f: 'note' | 'conclusion' | 'drive') => {
     if (!canEditEval) return
@@ -813,12 +824,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
           {screenshots.length === 0 && (
             <ManualScreenshotsCard
               key={ev.game_id}
+              ref={screenshotRef}
               gameId={ev.game_id}
               urls={manualShots}
               canEdit={canEditShots}
               onChange={updateManualShots}
               onExpand={setExpandedImg}
               onToast={showToast}
+              deferSave={canEditEval}
+              onStagedChange={setStagedShots}
             />
           )}
 
@@ -853,7 +867,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                     {confirmClearAll ? 'Click to confirm' : 'Clear all'}
                   </button>
                 )}
-                {canEdit && <SaveStatus dirty={dirty} />}
+                {canEdit && <SaveStatus dirty={needsSave} />}
               </div>
             </div>
 
@@ -981,12 +995,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               )}
 
               {canEditEval && (
-                <button className={`btn ${dirty ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !dirty}
+                <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave}
                   style={{
                     width: '100%', justifyContent: 'center', marginTop: 2, gap: 6,
-                    ...(dirty ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
+                    ...(needsSave ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
                   }}>
-                  {saving ? 'Saving...' : dirty ? (autoSave ? 'Save now' : 'Save Evaluation') : (
+                  {saving ? 'Saving...' : needsSave ? (autoSave ? 'Save now' : 'Save Evaluation') : (
                     <>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
