@@ -27,6 +27,12 @@ function sanitizeNode(node: unknown): unknown {
       return isSafeHref(mark?.attrs?.href)
     })
   }
+  // gameMention is a node (not a mark) with an href attribute — sanitize it too.
+  const typed = n as { type?: string; attrs?: { href?: unknown } }
+  if (typed.type === 'gameMention') {
+    const attrs = (typed.attrs ?? {}) as Record<string, unknown>
+    out.attrs = { ...attrs, href: isSafeHref(attrs.href) ? attrs.href : null }
+  }
   if (Array.isArray(n.content)) {
     out.content = (n.content as unknown[]).map(sanitizeNode)
   }

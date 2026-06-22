@@ -62,6 +62,33 @@ describe('/api/weekly-feedback', () => {
     expect(res.status).toBe(400)
   })
 
+  it('PUT strips unsafe gameMention node href, keeps safe ones', async () => {
+    sessionMock.mockResolvedValue({ user: { name: 'Alice', role: 'evaluator' } })
+    sqlMock.mockResolvedValue([{ batch: 'W1 Jun, 2026', evaluator: 'Alice', feedback: null, game_alike: null, updated_at: 'now' }])
+    await putReq({
+      batch: 'W1 Jun, 2026',
+      feedback: {
+        type: 'doc',
+        content: [{
+          type: 'paragraph',
+          content: [
+            { type: 'gameMention', attrs: { gameId: '1', title: 'Bad Game', href: 'javascript:alert(1)', icon: null } },
+            { type: 'gameMention', attrs: { gameId: '2', title: 'Good Game', href: 'https://apps.apple.com/app/id123', icon: null } },
+          ],
+        }],
+      },
+      game_alike: null,
+    })
+    // sql`...` → calls[0] = [stringsArray, batch, evaluator, feedbackDoc, gameAlikeDoc]
+    const boundValues = sqlMock.mock.calls[0].slice(1)
+    const feedbackDoc = boundValues[2] as { content: Array<{ content: Array<{ attrs: { href: string | null } }> }> }
+    const nodes = feedbackDoc.content[0].content
+    // unsafe href must be nulled
+    expect(nodes[0].attrs.href).toBeNull()
+    // safe https href must be kept
+    expect(nodes[1].attrs.href).toBe('https://apps.apple.com/app/id123')
+  })
+
   it('PUT strips unsafe link-mark hrefs from the game_alike doc, keeps safe ones', async () => {
     sessionMock.mockResolvedValue({ user: { name: 'Alice', role: 'evaluator' } })
     sqlMock.mockResolvedValue([{ batch: 'W1 Jun, 2026', evaluator: 'Alice', feedback: null, game_alike: null, updated_at: 'now' }])

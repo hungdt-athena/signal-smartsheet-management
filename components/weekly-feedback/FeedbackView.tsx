@@ -4,8 +4,9 @@ import { generateHTML } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
+import { GameMention } from './GameMention'
 
-const EXTS = [StarterKit, Underline, Link]
+const EXTS = [StarterKit, Underline, Link, GameMention]
 
 // Both feedback and game_alike are Tiptap documents. Render one to HTML; guard
 // against null / non-doc values (e.g. legacy `[]` game_alike) so it never throws.
