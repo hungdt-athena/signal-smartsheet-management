@@ -309,7 +309,16 @@ function ShortListEvalTab() {
       const params = new URLSearchParams({ category: filterCategory, limit: '500' })
       params.set('sort', sortAsc ? 'asc' : 'desc')
       if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
-      if (filterEvaluator) params.set('evaluator', filterEvaluator)
+      // Evaluators are locked to their own rows; managers may filter freely.
+      if (!isManager) {
+        if (userName) params.set('evaluator', userName)
+      } else if (filterEvaluator) {
+        params.set('evaluator', filterEvaluator)
+      }
+      // Filter batch server-side: doing it client-side over the 500-row page meant
+      // batch rows outside the loaded window vanished (and the count flipped with
+      // sort direction). Let the DB filter before LIMIT instead.
+      if (filterBatch) params.set('batch', filterBatch)
       for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
       const res = await fetch(`/api/evaluations?${params}`)
       const json = await res.json()
@@ -331,7 +340,7 @@ function ShortListEvalTab() {
       }
     } catch { /* ignore */ }
     setLoading(false)
-  }, [filterCategory, filterConclusions, filterEvaluator, df.value, df.autoMonth, sortAsc])
+  }, [filterCategory, filterConclusions, filterEvaluator, filterBatch, df.value, df.autoMonth, sortAsc, isManager, userName])
 
   useEffect(() => {
     if (df.suppressFetchRef.current) { df.suppressFetchRef.current = false; return }
@@ -349,8 +358,6 @@ function ShortListEvalTab() {
   // Batch filter options follow the month in the picker (UI-generated W1-W4).
   const filterYM = valueToYearMonth(df.value)
   const batchOptions = filterYM ? weekBatches(filterYM.year, filterYM.month) : []
-  // "All batches" = overall view; otherwise filter client-side on loaded rows.
-  const shown = filterBatch ? data.filter(d => d.batch === filterBatch) : data
 
   // Manager control: set the team's current batch. Offer this + next calendar
   // month's weeks so W4→W1-next-month rollover (after the 28th) is one click.
@@ -416,14 +423,16 @@ function ShortListEvalTab() {
           />
         </div>
 
-        <div style={{ width: 180 }}>
-          <StyledSelect
-            value={filterEvaluator}
-            onChange={setFilterEvaluator}
-            placeholder="All evaluators"
-            options={[{ value: '', label: 'All evaluators' }, ...availableEvaluators.map(e => ({ value: e, label: e }))]}
-          />
-        </div>
+        {isManager && (
+          <div style={{ width: 180 }}>
+            <StyledSelect
+              value={filterEvaluator}
+              onChange={setFilterEvaluator}
+              placeholder="All evaluators"
+              options={[{ value: '', label: 'All evaluators' }, ...availableEvaluators.map(e => ({ value: e, label: e }))]}
+            />
+          </div>
+        )}
 
         <div style={{ width: 160 }}>
           <StyledSelect
@@ -461,7 +470,7 @@ function ShortListEvalTab() {
         </button>
 
         <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>
-          {loading ? 'Loading...' : `${shown.length}${filterBatch ? ` / ${data.length}` : ''} results`}
+          {loading ? 'Loading...' : `${data.length} results`}
         </span>
       </div>
 
@@ -481,7 +490,7 @@ function ShortListEvalTab() {
               </tr>
             </thead>
             <tbody>
-              {shown.length === 0 && !loading && (
+              {data.length === 0 && !loading && (
                 <tr><td colSpan={8} className="empty">No games found</td></tr>
               )}
               {loading && Array.from({ length: 5 }).map((_, i) => (
@@ -489,7 +498,7 @@ function ShortListEvalTab() {
                   <td key={c}><span className="skeleton" style={{ width: [30, 200, 70, 110, 60, 160, 80, 80][c] || 80, height: 14 }} /></td>
                 ))}</tr>
               ))}
-              {shown.map((item, idx) => (
+              {data.map((item, idx) => (
                 <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
                   onClick={() => setDetailGameId(item.game_id)}>
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
