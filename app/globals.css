@@ -975,3 +975,16 @@ input:checked + .slider:before {
 .dnd-x:hover { color: var(--danger, #e5484d); }
 
 @media (max-width: 720px) { .dnd-cols { flex-direction: column; } }
+
+/* ===== Weekly Feedback Styles ===== */
+.wf-page .wf-toolbar { display: flex; gap: 6px; margin-bottom: 6px; }
+.wf-page .wf-toolbar button { padding: 2px 8px; }
+.wf-prose { border: 1px solid #ddd; border-radius: 6px; padding: 10px; min-height: 160px; }
+.wf-prose:focus-within { border-color: #888; }
+.wf-section { border: 1px solid #eee; border-radius: 6px; padding: 8px; margin: 8px 0; }
+.wf-section-head { display: flex; gap: 6px; align-items: center; }
+.wf-chips { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.wf-chip { display: inline-flex; align-items: center; gap: 4px; background: #f3f4f6; border-radius: 999px; padding: 2px 8px; }
+.wf-hits { list-style: none; margin: 0; padding: 0; border: 1px solid #ddd; max-height: 240px; overflow: auto; }
+.wf-hits li button { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; padding: 4px 8px; }
+.wf-list td { vertical-align: top; border-bottom: 1px solid #eee; padding: 8px; }
