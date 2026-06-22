@@ -15,7 +15,7 @@ export function FeedbackEditor({ value, onChange }: { value: unknown; onChange: 
       Underline,
       Link.configure({ openOnClick: false, autolink: true }),
     ],
-    content: (value as object) ?? '',
+    content: (typeof value === 'object' && value !== null ? value : '') as object | string,
     onUpdate: ({ editor }) => onChange(editor.getJSON()),
     immediatelyRender: false,
   })
@@ -26,7 +26,11 @@ export function FeedbackEditor({ value, onChange }: { value: unknown; onChange: 
     setShowInsert(false)
     if (g.app_link) {
       editor.chain().focus()
-        .insertContent(`<a href="${g.app_link}">${g.title}</a> `).run()
+        .insertContent([
+          { type: 'text', text: g.title, marks: [{ type: 'link', attrs: { href: g.app_link } }] },
+          { type: 'text', text: ' ' },
+        ])
+        .run()
     } else {
       editor.chain().focus().insertContent(`${g.title} `).run()
     }
