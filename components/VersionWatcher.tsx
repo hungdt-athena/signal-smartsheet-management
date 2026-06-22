@@ -131,20 +131,33 @@ export default function VersionWatcher() {
         boxShadow: 'var(--shadow-lg)', fontSize: 13.5, lineHeight: 1.4,
       }}
     >
-      <span style={{ fontSize: 17, lineHeight: 1 }} aria-hidden>{showUpdate ? '🔄' : '📢'}</span>
+      <span aria-hidden style={{ display: 'flex', flexShrink: 0, color: 'var(--accent)' }}>
+        {showUpdate ? (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10" />
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          </svg>
+        ) : (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
+        )}
+      </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, color: 'var(--text)' }}>
-          {showUpdate ? 'Đã có bản cập nhật mới' : 'Thông báo'}
+          {showUpdate ? 'Update available' : 'Announcement'}
         </div>
         <div style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 1 }}>
-          {notice || 'Tải lại trang để dùng phiên bản mới nhất. Việc đang làm sẽ được lưu trước khi tải lại.'}
+          {notice || 'Reload to get the latest version — your work is saved first.'}
         </div>
       </div>
       {showUpdate ? (
         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
           {!reloading && (
             <button className="btn" onClick={snoozeUpdate} style={{ fontSize: 12.5, padding: '6px 11px' }}>
-              Để sau
+              Later
             </button>
           )}
           <button
@@ -153,12 +166,12 @@ export default function VersionWatcher() {
             disabled={reloading}
             style={{ fontSize: 12.5, padding: '6px 13px' }}
           >
-            {reloading ? 'Đang lưu…' : 'Tải lại ngay'}
+            {reloading ? 'Saving…' : 'Reload now'}
           </button>
         </div>
       ) : (
         <button className="btn" onClick={dismissNotice} style={{ fontSize: 12.5, padding: '6px 13px', flexShrink: 0 }}>
-          Đã hiểu
+          Got it
         </button>
       )}
     </div>
