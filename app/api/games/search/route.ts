@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     const rows = await sql<GameRow[]>`
       SELECT game_id, title, app_link, icon_url
       FROM game_info
-      WHERE game_id = ${parsed.storeId} OR app_link ILIKE ${'%' + parsed.storeId + '%'}
+      WHERE (game_id = ${parsed.storeId} OR app_link ILIKE ${'%' + parsed.storeId + '%'}) AND is_active = true
       LIMIT 1
     `
     return NextResponse.json({ results: rows })

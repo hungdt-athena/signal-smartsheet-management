@@ -12,6 +12,10 @@ export const dynamic = 'force-dynamic'
 // otherwise a crafted javascript:/data: href would XSS an admin viewing it.
 const SAFE_HREF = /^(https?:\/\/|mailto:|tel:|\/|#)/i
 
+function isSafeHref(href: unknown): boolean {
+  return typeof href === 'string' && SAFE_HREF.test(href.trim())
+}
+
 function sanitizeNode(node: unknown): unknown {
   if (!node || typeof node !== 'object') return node
   const n = node as { marks?: unknown; content?: unknown; [k: string]: unknown }
@@ -20,14 +24,31 @@ function sanitizeNode(node: unknown): unknown {
     out.marks = (n.marks as unknown[]).filter((m) => {
       const mark = m as { type?: string; attrs?: { href?: unknown } }
       if (mark?.type !== 'link') return true
-      const href = mark?.attrs?.href
-      return typeof href === 'string' && SAFE_HREF.test(href.trim())
+      return isSafeHref(mark?.attrs?.href)
     })
   }
   if (Array.isArray(n.content)) {
     out.content = (n.content as unknown[]).map(sanitizeNode)
   }
   return out
+}
+
+function sanitizeGameAlike(sections: unknown[]): unknown[] {
+  return sections.map((s) => {
+    const sec = (s ?? {}) as { games?: unknown; [k: string]: unknown }
+    const games = Array.isArray(sec.games) ? sec.games : []
+    return {
+      ...sec,
+      games: games.map((g) => {
+        const game = (g ?? {}) as { app_link?: unknown; icon_url?: unknown; [k: string]: unknown }
+        return {
+          ...game,
+          app_link: isSafeHref(game.app_link) ? game.app_link : null,
+          icon_url: isSafeHref(game.icon_url) ? game.icon_url : null,
+        }
+      }),
+    }
+  })
 }
 
 function sanitizeFeedback(feedback: unknown): unknown {
@@ -101,7 +122,7 @@ export async function PUT(req: NextRequest) {
   if (!evaluator) return NextResponse.json({ error: 'No evaluator identity' }, { status: 400 })
 
   const feedback = sanitizeFeedback(body.feedback ?? null)
-  const gameAlike = Array.isArray(body.game_alike) ? body.game_alike : []
+  const gameAlike = sanitizeGameAlike(Array.isArray(body.game_alike) ? body.game_alike : [])
 
   const rows = await sql`
     INSERT INTO weekly_feedback (batch, evaluator, feedback, game_alike, updated_at)

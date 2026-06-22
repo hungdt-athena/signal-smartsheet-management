@@ -61,4 +61,33 @@ describe('/api/weekly-feedback', () => {
     const res = await putReq({ feedback: {}, game_alike: [] })
     expect(res.status).toBe(400)
   })
+
+  it('PUT sanitizes game_alike: nulls unsafe app_link/icon_url, keeps safe ones', async () => {
+    sessionMock.mockResolvedValue({ user: { name: 'Alice', role: 'evaluator' } })
+    sqlMock.mockResolvedValue([{ batch: 'W1 Jun, 2026', evaluator: 'Alice', feedback: {}, game_alike: [], updated_at: 'now' }])
+    await putReq({
+      batch: 'W1 Jun, 2026',
+      feedback: { type: 'doc' },
+      game_alike: [
+        {
+          name: 'Section A',
+          games: [
+            { game_id: '1', title: 'GameOne', app_link: 'javascript:alert(1)', icon_url: 'https://example.com/icon.png' },
+            { game_id: '2', title: 'GameTwo', app_link: 'https://apps.apple.com/app/id123', icon_url: 'data:text/html,x' },
+          ],
+        },
+      ],
+    })
+    // sql is called as a tagged template: calls[0] = [stringsArray, ...values]
+    const boundValues = sqlMock.mock.calls[0].slice(1)
+    const gameAlikeArg = boundValues.find((v: unknown) => Array.isArray(v)) as Array<{ games: Array<{ app_link: unknown; icon_url: unknown }> }>
+    expect(gameAlikeArg).toBeDefined()
+    const games = gameAlikeArg[0].games
+    // game[0]: unsafe app_link nulled, safe icon_url kept
+    expect(games[0].app_link).toBeNull()
+    expect(games[0].icon_url).toBe('https://example.com/icon.png')
+    // game[1]: safe app_link kept, unsafe icon_url nulled
+    expect(games[1].app_link).toBe('https://apps.apple.com/app/id123')
+    expect(games[1].icon_url).toBeNull()
+  })
 })
