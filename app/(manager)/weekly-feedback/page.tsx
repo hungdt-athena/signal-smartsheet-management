@@ -1,5 +1,6 @@
 'use client'
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { FeedbackEditor } from '@/components/weekly-feedback/FeedbackEditor'
@@ -32,7 +33,7 @@ function Inner() {
   const viewingSelf = !isManager || !evaluator || evaluator.toLowerCase() === (session?.user?.name || '').toLowerCase()
 
   useEffect(() => {
-    fetch('/api/weekly-feedback/batches').then(r => r.json()).then(d => setBatches(d.batches || []))
+    fetch('/api/weekly-feedback/batches').then(r => r.json()).then(d => setBatches(d.batches || [])).catch(() => setBatches([]))
     if (isManager) {
       fetch('/api/evaluators')
         .then(r => (r.ok ? r.json() : []))
@@ -86,8 +87,8 @@ function Inner() {
             {evaluators.map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         )}
-        <a href="/weekly-feedback?view=batch">By Week</a>
-        <a href="/weekly-feedback?view=list">List</a>
+        <Link href="/weekly-feedback?view=batch">By Week</Link>
+        <Link href="/weekly-feedback?view=list">List</Link>
       </div>
 
       {view === 'batch' && (
