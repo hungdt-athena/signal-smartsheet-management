@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { StyledSelect } from '@/components/StyledSelect'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
+import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import QRCode from 'qrcode'
 
 export interface EvalDetail {
@@ -592,6 +593,17 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // pending timer (applyData resets dirty=false, so a stale save can't fire).
   const saveRef = useRef(save)
   saveRef.current = save
+
+  // Expose this panel's unsaved state to the global deploy-reload guard so a
+  // version refresh (and a browser close/refresh) flushes — never silently drops —
+  // in-progress edits. Registered once; reads live state through refs.
+  const needsSaveRef = useRef(false)
+  needsSaveRef.current = canEdit && needsSave
+  useEffect(() => registerUnsavedGuard({
+    isDirty: () => needsSaveRef.current,
+    flush: () => saveRef.current(),
+  }), [])
+
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (!autoSave || !needsSave || saving || !canEdit) return
