@@ -34,6 +34,8 @@ describe('GET /api/games/search', () => {
     })
     const text = (sqlMock.mock.calls[0][0] as string[]).join(' ')
     expect(text).toContain('ILIKE')
+    // Verify the actual bound wildcard value was interpolated
+    expect(sqlMock.mock.calls[0]).toContain('%color%')
   })
 
   it('matches by store id when link is provided', async () => {
@@ -41,6 +43,9 @@ describe('GET /api/games/search', () => {
     const res = await get('link=' + encodeURIComponent('https://apps.apple.com/us/app/x/id6757068097'))
     const body = await res.json()
     expect(body.results[0].game_id).toBe('6757068097')
+    // Verify sql was called and the parsed store id was bound as a parameter
+    expect(sqlMock).toHaveBeenCalledTimes(1)
+    expect(sqlMock.mock.calls[0]).toContain('6757068097')
   })
 
   it('returns [] for an unparseable link', async () => {
