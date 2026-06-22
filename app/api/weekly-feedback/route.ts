@@ -6,6 +6,35 @@ import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
+// Tiptap's Link extension only sanitizes hrefs at editor-input time, not when
+// generateHTML serializes stored JSON. Feedback can be written via the API
+// directly, so strip link marks with unsafe href protocols before persisting —
+// otherwise a crafted javascript:/data: href would XSS an admin viewing it.
+const SAFE_HREF = /^(https?:\/\/|mailto:|tel:|\/|#)/i
+
+function sanitizeNode(node: unknown): unknown {
+  if (!node || typeof node !== 'object') return node
+  const n = node as { marks?: unknown; content?: unknown; [k: string]: unknown }
+  const out: Record<string, unknown> = { ...n }
+  if (Array.isArray(n.marks)) {
+    out.marks = (n.marks as unknown[]).filter((m) => {
+      const mark = m as { type?: string; attrs?: { href?: unknown } }
+      if (mark?.type !== 'link') return true
+      const href = mark?.attrs?.href
+      return typeof href === 'string' && SAFE_HREF.test(href.trim())
+    })
+  }
+  if (Array.isArray(n.content)) {
+    out.content = (n.content as unknown[]).map(sanitizeNode)
+  }
+  return out
+}
+
+function sanitizeFeedback(feedback: unknown): unknown {
+  if (!feedback || typeof feedback !== 'object') return feedback
+  return sanitizeNode(feedback)
+}
+
 interface SessionInfo { isManager: boolean; name: string }
 
 async function resolveSession(): Promise<SessionInfo> {
@@ -71,7 +100,7 @@ export async function PUT(req: NextRequest) {
   const evaluator = process.env.SKIP_AUTH === 'true' ? (body.evaluator || name || 'dev') : name
   if (!evaluator) return NextResponse.json({ error: 'No evaluator identity' }, { status: 400 })
 
-  const feedback = body.feedback ?? null
+  const feedback = sanitizeFeedback(body.feedback ?? null)
   const gameAlike = Array.isArray(body.game_alike) ? body.game_alike : []
 
   const rows = await sql`

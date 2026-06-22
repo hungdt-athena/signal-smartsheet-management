@@ -24,7 +24,7 @@ export function FeedbackView({ feedback, gameAlike }: { feedback: unknown; gameA
             <ul>
               {s.games.map((g, gi) => (
                 <li key={gi}>
-                  {g.app_link ? <a href={g.app_link} target="_blank" rel="noopener">{g.title}</a> : g.title}
+                  {g.app_link ? <a href={g.app_link} target="_blank" rel="noopener noreferrer">{g.title}</a> : g.title}
                 </li>
               ))}
             </ul>

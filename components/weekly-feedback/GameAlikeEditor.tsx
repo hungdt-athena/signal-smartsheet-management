@@ -40,7 +40,7 @@ export function GameAlikeEditor({ value, onChange }: {
               <li key={gi} className="wf-chip">
                 {g.icon_url && <img src={g.icon_url} alt="" width={18} height={18} />}
                 {g.app_link
-                  ? <a href={g.app_link} target="_blank" rel="noopener">{g.title}</a>
+                  ? <a href={g.app_link} target="_blank" rel="noopener noreferrer">{g.title}</a>
                   : <span>{g.title}</span>}
                 {g.manual && <span className="wf-manual" title="Not in DB">·manual</span>}
                 <button type="button" onClick={() => removeGame(i, gi)}>✕</button>
