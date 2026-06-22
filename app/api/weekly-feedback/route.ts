@@ -76,7 +76,7 @@ export async function PUT(req: NextRequest) {
 
   const rows = await sql`
     INSERT INTO weekly_feedback (batch, evaluator, feedback, game_alike, updated_at)
-    VALUES (${batch}, ${evaluator}, ${sql.json(feedback as object)}, ${sql.json(gameAlike)}, NOW())
+    VALUES (${batch}, ${evaluator}, ${JSON.stringify(feedback)}, ${JSON.stringify(gameAlike)}, NOW())
     ON CONFLICT (batch, evaluator)
     DO UPDATE SET feedback = EXCLUDED.feedback, game_alike = EXCLUDED.game_alike, updated_at = NOW()
     RETURNING batch, evaluator, feedback, game_alike, updated_at
