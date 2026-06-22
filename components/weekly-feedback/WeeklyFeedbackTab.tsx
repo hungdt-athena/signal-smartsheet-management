@@ -152,8 +152,9 @@ export function WeeklyFeedbackTab() {
               )}
               {records.map(r => (
                 <tr key={r.batch} onClick={() => openBatch(r.batch)} style={{ cursor: 'pointer' }}>
-                  <td style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{r.batch}</td>
-                  <td colSpan={2}><FeedbackView feedback={r.feedback} gameAlike={r.game_alike} /></td>
+                  <td className="wf-list-week">{r.batch}</td>
+                  <td><FeedbackView feedback={r.feedback} gameAlike={r.game_alike} part="feedback" /></td>
+                  <td><FeedbackView feedback={r.feedback} gameAlike={r.game_alike} part="gamealike" /></td>
                 </tr>
               ))}
             </tbody>

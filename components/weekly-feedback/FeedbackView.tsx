@@ -8,7 +8,13 @@ import { GameAlikeSection } from './types'
 
 const EXTS = [StarterKit, Underline, Link]
 
-export function FeedbackView({ feedback, gameAlike }: { feedback: unknown; gameAlike: GameAlikeSection[] }) {
+export function FeedbackView({ feedback, gameAlike, part = 'both' }: {
+  feedback: unknown
+  gameAlike: GameAlikeSection[]
+  // Which half to render. The sheet-style list view renders Feedback and Game
+  // Alike in separate columns, so it asks for one part per cell.
+  part?: 'feedback' | 'gamealike' | 'both'
+}) {
   const html = useMemo(() => {
     if (!feedback || typeof feedback !== 'object') return ''
     try { return generateHTML(feedback as object, EXTS) } catch { return '' }
@@ -16,8 +22,8 @@ export function FeedbackView({ feedback, gameAlike }: { feedback: unknown; gameA
 
   return (
     <div className="wf-view">
-      <div className="wf-prose" dangerouslySetInnerHTML={{ __html: html }} />
-      <div className="wf-gamealike-view">
+      {part !== 'gamealike' && <div className="wf-prose" dangerouslySetInnerHTML={{ __html: html }} />}
+      {part !== 'feedback' && <div className="wf-gamealike-view">
         {(gameAlike ?? []).map((s, i) => (
           <div key={i} className="wf-section-view">
             {s.name && <strong>{s.name}</strong>}
@@ -30,7 +36,7 @@ export function FeedbackView({ feedback, gameAlike }: { feedback: unknown; gameA
             </ul>
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   )
 }
