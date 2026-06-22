@@ -17,7 +17,11 @@ describe('GET /api/weekly-feedback/batches', () => {
     sqlMock.mockResolvedValue([{ batch: 'W2 Jun, 2026' }, { batch: 'W1 Jun, 2026' }])
     const res = await GET()
     expect(await res.json()).toEqual({ batches: ['W2 Jun, 2026', 'W1 Jun, 2026'] })
+    // Must NOT use SELECT DISTINCT: combined with the aggregate ORDER BY it is a
+    // Postgres 42P10 error ("ORDER BY expressions must appear in select list").
+    // GROUP BY is what dedupes the labels.
     const text = (sqlMock.mock.calls[0][0] as string[]).join(' ')
-    expect(text).toContain('DISTINCT')
+    expect(text).toContain('GROUP BY batch')
+    expect(text).not.toContain('DISTINCT')
   })
 })

@@ -8,10 +8,13 @@ export async function GET() {
   const guard = await requireAuth()
   if (guard) return guard
 
-  // Distinct weekly labels, newest activity first. Ordered by the latest
-  // assignment date seen for each label so the dropdown reads top-down by week.
+  // Distinct weekly labels, newest activity first. GROUP BY already yields one
+  // row per batch; ordered by the latest assignment date per label so the
+  // dropdown reads top-down by week. (No SELECT DISTINCT: combined with an
+  // aggregate ORDER BY, Postgres requires DISTINCT exprs in the select list —
+  // 42P10 — and GROUP BY makes it redundant anyway.)
   const rows = await sql<{ batch: string }[]>`
-    SELECT DISTINCT batch
+    SELECT batch
     FROM game_evaluations
     WHERE batch IS NOT NULL
     GROUP BY batch
