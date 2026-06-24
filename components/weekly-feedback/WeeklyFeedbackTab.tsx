@@ -261,7 +261,7 @@ export function WeeklyFeedbackTab() {
           )}
         </div>
 
-      <div className="card" style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+      <div className="card wf-scroll" style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
         {view === 'week' ? (
           !selectedBatch ? (
             <p className="h-sub" style={{ padding: 8 }}>Select a week to view or edit feedback.</p>
