@@ -41,11 +41,6 @@ export function ImportReviewView() {
 
   const updateSection = (id: number, sid: string, patch: Partial<Section>) =>
     patchSections(id, secs => secs.map(s => s.id === sid ? { ...s, ...patch } : s))
-  const moveSection = (id: number, index: number, dir: -1 | 1) =>
-    patchSections(id, secs => {
-      const j = index + dir; if (j < 0 || j >= secs.length) return secs
-      const next = [...secs]; [next[index], next[j]] = [next[j], next[index]]; return next
-    })
   const addSection = (id: number) => patchSections(id, secs => [...secs, newSection()])
   const removeSection = (id: number, sid: string) => patchSections(id, secs => secs.filter(s => s.id !== sid))
 
@@ -130,10 +125,12 @@ export function ImportReviewView() {
                           key={s.id}
                           section={s}
                           index={i}
-                          total={rec.sections.length}
                           onChange={patch => updateSection(rec.id, s.id, patch)}
-                          onMove={dir => moveSection(rec.id, i, dir)}
                           onRemove={() => removeSection(rec.id, s.id)}
+                          onDuplicate={() => patchSections(rec.id, secs => {
+                            const idx = secs.findIndex(x => x.id === s.id); if (idx < 0) return secs
+                            const next = [...secs]; next.splice(idx + 1, 0, { ...s, id: newSection().id }); return next
+                          })}
                         />
                       ))}
                     </div>

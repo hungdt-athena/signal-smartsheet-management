@@ -3,16 +3,19 @@ import { Section, AlikeBlock, GameAlikeGame } from './types'
 import { FeedbackEditor } from './FeedbackEditor'
 import { GameSearch } from './GameSearch'
 
-// One section = one 70/30 row. Left: a Tiptap feedback editor. Right: one or
-// more named "game alike" groups, each a name + a list of games. Reorder (↑/↓)
-// and remove the whole section live in the row's left rail.
-export function SectionEditor({ section, index, total, onChange, onMove, onRemove }: {
+// One section = one 70/30 row. Left: a Tiptap feedback editor. Right: one or more
+// named "game alike" groups. The left rail carries a drag handle (reorder),
+// section number, collapse, duplicate and remove. Drag-and-drop is wired by the
+// parent: the handle starts the drag, the whole row is the drop target.
+export function SectionEditor({ section, index, onChange, onRemove, onDuplicate, onCollapse, onDragStart, onDrop }: {
   section: Section
   index: number
-  total: number
   onChange: (patch: Partial<Section>) => void
-  onMove: (dir: -1 | 1) => void
   onRemove: () => void
+  onDuplicate?: () => void
+  onCollapse?: () => void
+  onDragStart?: () => void
+  onDrop?: () => void
 }) {
   const alikes = section.alikes
   const setAlikes = (next: AlikeBlock[]) => onChange({ alikes: next })
@@ -24,10 +27,12 @@ export function SectionEditor({ section, index, total, onChange, onMove, onRemov
   const removeGame = (bi: number, gi: number) => patchBlock(bi, { games: alikes[bi].games.filter((_, i) => i !== gi) })
 
   return (
-    <div className="wf-section-row">
+    <div className="wf-section-row" onDragOver={e => e.preventDefault()} onDrop={onDrop}>
       <div className="wf-section-rail">
-        <button type="button" title="Move up" disabled={index === 0} onClick={() => onMove(-1)}>↑</button>
-        <button type="button" title="Move down" disabled={index === total - 1} onClick={() => onMove(1)}>↓</button>
+        {onDragStart && <button type="button" className="wf-drag" title="Drag to reorder" draggable onDragStart={onDragStart}>⠿</button>}
+        <span className="wf-sec-idx">{index + 1}</span>
+        {onCollapse && <button type="button" title="Collapse section" onClick={onCollapse}>–</button>}
+        {onDuplicate && <button type="button" title="Duplicate section" onClick={onDuplicate}>⧉</button>}
         <button type="button" className="wf-section-del" title="Remove section" onClick={onRemove}>✕</button>
       </div>
 
@@ -43,7 +48,7 @@ export function SectionEditor({ section, index, total, onChange, onMove, onRemov
                 className="wf-alike-name"
                 value={block.name}
                 onChange={e => patchBlock(bi, { name: e.target.value })}
-                placeholder="Game Alike"
+                placeholder="Group name (optional)"
               />
               <button type="button" className="wf-alike-del" title="Remove group" onClick={() => removeBlock(bi)}>✕</button>
             </div>

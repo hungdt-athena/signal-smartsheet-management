@@ -1186,12 +1186,12 @@ input:checked + .slider:before {
   border-bottom: 1px solid var(--border-strong);
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: 6;
 }
 .wf-list td { vertical-align: top; padding: 10px 12px; font-size: 13px; line-height: 1.55; }
-/* Columns: Batch | Evaluator | Feedback (flex) | Game Alike (wide). */
-.wf-list th:nth-child(1), .wf-list .wf-list-batch { width: 116px; white-space: nowrap; font-weight: 600; }
-.wf-list th:nth-child(2), .wf-list .wf-list-eval { width: 140px; white-space: nowrap; }
+/* Columns: Evaluator | Feedback (flex) | Game Alike (wide). The week is a
+   full-width band row instead of a rowspanned column. */
+.wf-list th:nth-child(1), .wf-list .wf-list-eval { width: 150px; white-space: nowrap; }
 .wf-list th:last-child, .wf-list td:last-child { width: 440px; }
 /* Row-boundary dividers form a hierarchy: solid+strong between batches and
    between evaluators; faint dashed between sections of the same evaluator.
@@ -1324,3 +1324,48 @@ input:checked + .slider:before {
 .wf-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; }
 .wf-badge-pending { background: #fff3cd; color: #8a6d00; }
 .wf-badge-approved { background: #d4edda; color: #1c6b2c; }
+
+/* ===== Weekly Feedback — Overview/Editor UI enhancements ===== */
+/* Overview toolbar controls (live in the fixed filter-row) */
+.wf-search { flex: 0 1 240px; min-width: 160px; padding: 7px 11px; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+.wf-search:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
+.wf-clear { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); cursor: pointer; }
+.wf-clear:hover { color: var(--text); background: var(--surface-2); }
+.wf-density { display: inline-flex; background: var(--surface-3); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+.wf-density button { padding: 5px 10px; font-size: 12px; font-weight: 600; border: none; background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer; }
+.wf-density button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+.wf-collapse-all { padding: 6px 12px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); cursor: pointer; }
+.wf-collapse-all:hover { color: var(--text); background: var(--surface-2); }
+
+/* Week band row (replaces the rowspanned Batch column) */
+.wf-list .wf-week-row td { background: var(--surface-3); border-bottom: 1px solid var(--border-strong); padding: 7px 12px; cursor: pointer; user-select: none; }
+.wf-list .wf-week-row:hover td { background: color-mix(in srgb, var(--surface-3) 80%, var(--accent) 8%); }
+.wf-week-chev { display: inline-block; width: 16px; color: var(--muted); font-size: 11px; }
+.wf-week-label { font-weight: 700; color: var(--text); margin-right: 10px; }
+.wf-week-sum { font-size: 11.5px; color: var(--faint); font-weight: 500; }
+
+/* Zebra per evaluator block (hover still wins; band rows never get .wf-row-alt) */
+.wf-list tbody tr.wf-row-alt td { background: color-mix(in srgb, var(--surface-2) 45%, transparent); }
+.wf-list tbody tr.wf-row-alt:hover td { background: var(--surface-2); }
+
+/* Compact density */
+.wf-dens-compact td { padding: 5px 10px; font-size: 12px; line-height: 1.42; }
+.wf-dens-compact .wf-week-row td { padding: 4px 12px; }
+.wf-dens-compact th { padding: 5px 10px; }
+
+/* Editor: sticky toolbar with section outline */
+.wf-sticky-bar { position: sticky; top: 0; z-index: 5; background: var(--surface); padding: 8px 0; margin: -4px 0 6px; border-bottom: 1px solid var(--border); }
+.wf-label-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.wf-outline { display: flex; flex-wrap: wrap; gap: 4px; }
+.wf-outline button { width: 22px; height: 22px; font-size: 11px; font-weight: 600; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.wf-outline button:hover { color: var(--text); background: var(--surface-3); border-color: var(--border-strong); }
+
+/* Collapsed section (Editor) */
+.wf-sec-collapsed { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); cursor: pointer; }
+.wf-sec-collapsed:hover { border-color: var(--border-strong); }
+.wf-sec-collapsed-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
+
+/* Section rail: drag handle + index */
+.wf-section-rail .wf-drag { cursor: grab; }
+.wf-section-rail .wf-drag:active { cursor: grabbing; }
+.wf-sec-idx { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 18px; font-size: 11px; font-weight: 700; color: var(--faint); }
