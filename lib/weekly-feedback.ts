@@ -21,6 +21,7 @@ function sanitizeNode(node: unknown): unknown {
       return isSafeHref(mark?.attrs?.href)
     })
   }
+  // gameMention is a node (not a mark) with its own href attr — sanitize it too.
   const typed = n as { type?: string; attrs?: { href?: unknown } }
   if (typed.type === 'gameMention') {
     const attrs = (typed.attrs ?? {}) as Record<string, unknown>
@@ -84,6 +85,9 @@ export function legacyToSections(feedback: unknown, gameAlike: unknown): Section
   if (Array.isArray(gameAlike)) {
     for (const sec of gameAlike) {
       const gs = (sec as { games?: unknown })?.games
+      // Legacy game_alike entries predate the DB-matching pipeline and have no
+      // reliable game_id, so mark them all manual:true rather than trusting a
+      // stored flag that was never populated by a real search.
       if (Array.isArray(gs)) for (const g of gs) games.push({ ...sanitizeGame(g), manual: true })
     }
   }

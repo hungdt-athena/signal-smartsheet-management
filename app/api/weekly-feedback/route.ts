@@ -4,7 +4,6 @@ import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { sanitizeSections, rowToSections } from '@/lib/weekly-feedback'
-import type { Section } from '@/components/weekly-feedback/types'
 
 export const dynamic = 'force-dynamic'
 
