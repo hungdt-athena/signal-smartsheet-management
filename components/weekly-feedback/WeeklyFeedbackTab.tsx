@@ -75,6 +75,8 @@ export function WeeklyFeedbackTab() {
 
   const [historyOpen, setHistoryOpen] = useState(false)
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const [previewSnap, setPreviewSnap] = useState<Snapshot | null>(null) // history preview before restore
+  const [historyVisible, setHistoryVisible] = useState(5) // lazy-scroll page size
 
   const viewingSelf = !isManager || !evaluator || evaluator.toLowerCase() === userName.toLowerCase()
 
@@ -177,6 +179,7 @@ export function WeeklyFeedbackTab() {
   const loadHistory = () => {
     const next = !historyOpen
     setHistoryOpen(next)
+    setPreviewSnap(null); setHistoryVisible(5)
     if (!next) return
     const qs = new URLSearchParams({ batch: selectedBatch })
     if (isManager && evaluator) qs.set('evaluator', evaluator)
@@ -184,7 +187,16 @@ export function WeeklyFeedbackTab() {
   }
   const restore = (snap: Snapshot) => {
     setSections(Array.isArray(snap.sections) ? snap.sections : [])
-    markDirty(); setHistoryOpen(false)
+    markDirty(); setHistoryOpen(false); setPreviewSnap(null)
+  }
+  // Snapshots auto-delete 3 days after saved_at — show the remaining time.
+  const ttlText = (savedAt: string): string => {
+    const ms = new Date(savedAt).getTime() + 3 * 86400_000 - Date.now()
+    if (ms <= 0) return 'expiring now'
+    const h = Math.floor(ms / 3600_000)
+    if (h >= 24) return `deletes in ${Math.floor(h / 24)}d ${h % 24}h`
+    if (h >= 1) return `deletes in ${h}h`
+    return `deletes in ${Math.max(1, Math.floor(ms / 60_000))}m`
   }
 
   // --- Overview grouping: filter by search, group by week, newest week first ---
@@ -290,14 +302,44 @@ export function WeeklyFeedbackTab() {
               </div>
               {historyOpen && (
                 <div className="wf-history">
+                  <p className="wf-history-note">Versions auto-delete 3 days after they're saved. Preview before restoring.</p>
                   {snapshots.length === 0 && <p className="h-sub" style={{ margin: 0 }}>No earlier versions saved yet.</p>}
-                  {snapshots.map(s => (
-                    <div key={s.id} className="wf-history-item">
-                      <span className="wf-history-when">{new Date(s.saved_at).toLocaleString()}</span>
-                      <span className="wf-history-meta">{s.sections?.length || 0} section{(s.sections?.length || 0) === 1 ? '' : 's'}</span>
-                      <button type="button" onClick={() => restore(s)}>Restore</button>
+                  <div
+                    className="wf-history-list"
+                    onScroll={e => {
+                      const el = e.currentTarget
+                      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 8 && historyVisible < snapshots.length) setHistoryVisible(v => v + 5)
+                    }}
+                  >
+                    {snapshots.slice(0, historyVisible).map(s => (
+                      <div key={s.id} className={`wf-history-item${previewSnap?.id === s.id ? ' is-active' : ''}`}>
+                        <span className="wf-history-when">{new Date(s.saved_at).toLocaleString()}</span>
+                        <span className="wf-history-meta">{s.sections?.length || 0} section{(s.sections?.length || 0) === 1 ? '' : 's'}</span>
+                        <span className="wf-history-ttl">{ttlText(s.saved_at)}</span>
+                        <span style={{ flex: 1 }} />
+                        <button type="button" onClick={() => setPreviewSnap(previewSnap?.id === s.id ? null : s)}>
+                          {previewSnap?.id === s.id ? 'Hide' : 'Preview'}
+                        </button>
+                        <button type="button" className="wf-history-restore" onClick={() => restore(s)}>Restore</button>
+                      </div>
+                    ))}
+                    {historyVisible < snapshots.length && (
+                      <p className="wf-history-more">Scroll for {snapshots.length - historyVisible} more…</p>
+                    )}
+                  </div>
+                  {previewSnap && (
+                    <div className="wf-history-preview">
+                      <div className="wf-history-preview-head">
+                        <span>Preview · {new Date(previewSnap.saved_at).toLocaleString()}</span>
+                        <span style={{ flex: 1 }} />
+                        <button type="button" className="wf-save-btn" onClick={() => restore(previewSnap)}>Restore this version</button>
+                        <button type="button" onClick={() => setPreviewSnap(null)}>Close</button>
+                      </div>
+                      <div className="wf-history-preview-body">
+                        <FeedbackView sections={Array.isArray(previewSnap.sections) ? previewSnap.sections : []} />
+                      </div>
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
               <div className="wf-sections">

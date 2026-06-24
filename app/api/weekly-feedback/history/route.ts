@@ -29,6 +29,13 @@ export async function GET(req: NextRequest) {
     : (name || ' __no_evaluator__')
 
   try {
+    // Snapshots auto-expire after 3 days — prune the expired ones for this key
+    // on read so the list (and storage) stays bounded without a separate cron.
+    await sql`
+      DELETE FROM weekly_feedback_history
+      WHERE batch = ${batch} AND lower(evaluator) = lower(${evaluator})
+        AND saved_at < NOW() - INTERVAL '3 days'
+    `
     const rows = await sql`
       SELECT id, sections, saved_at
       FROM weekly_feedback_history
