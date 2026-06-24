@@ -1,4 +1,0 @@
-{
-  "_comment": "OPTIONAL override map. The importer auto-resolves each sheet tab to the canonical evaluator string from game_evaluations by case/space-insensitive match, so you usually need NOTHING here. Copy to config/evaluator-map.json (gitignored) and add an entry ONLY for tabs the dry-run reports under unresolvedTab or ambiguousTab. Format: \"TabName\": \"Exact DB Evaluator String\". Remove this _comment key in your real file.",
-  "SomeTabThatDidNotAutoResolve": "Exact DB Evaluator String"
-}

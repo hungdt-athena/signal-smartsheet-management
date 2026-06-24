@@ -1347,17 +1347,6 @@ input:checked + .slider:before {
 .wf-addgroup { border: 1px dashed var(--border, #ccc); background: none; cursor: pointer; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
 .wf-alike-view-block + .wf-alike-view-block { margin-top: 6px; }
 
-/* --- Weekly Feedback Import review (THROWAWAY) --- */
-.wf-import-eval { margin: 6px 0; font-size: 13px; font-weight: 600; opacity: .85; }
-.wf-import-card { border: 1px solid var(--border, #e3e3e3); border-radius: 8px; margin-bottom: 8px; }
-.wf-import-card.is-approved { opacity: .6; }
-.wf-import-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; }
-.wf-import-batch { font-weight: 600; }
-.wf-import-body { padding: 4px 10px 10px; border-top: 1px solid var(--border, #eee); }
-.wf-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; }
-.wf-badge-pending { background: #fff3cd; color: #8a6d00; }
-.wf-badge-approved { background: #d4edda; color: #1c6b2c; }
-
 /* ===== Weekly Feedback — Overview/Editor UI enhancements ===== */
 /* Overview toolbar controls (live in the fixed filter-row) */
 .wf-search { flex: 0 1 240px; min-width: 160px; padding: 7px 11px; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }

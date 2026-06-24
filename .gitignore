@@ -43,8 +43,6 @@ next-env.d.ts
 /new-ui-ref/
 /.superpowers/
 __tests__/deleted.json
-config/evaluator-map.json
 
-# service-account key (secret — do not commit)
-__tests__/hungdt-35685f4be0dd.json
+# service-account keys (secret — do not commit)
 *.iam.gserviceaccount.json
