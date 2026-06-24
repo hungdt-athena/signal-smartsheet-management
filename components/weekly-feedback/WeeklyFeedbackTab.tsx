@@ -6,7 +6,6 @@ import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { SectionEditor } from './SectionEditor'
 import { FeedbackView, FeedbackCell, AlikeCell } from './FeedbackView'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
-import { ImportReviewView } from './ImportReviewView'
 import { Section, newSection } from './types'
 
 interface WeeklyRecord { batch: string; evaluator: string; sections: Section[]; updated_at: string }
@@ -30,7 +29,6 @@ function recordMatches(r: WeeklyRecord, q: string): boolean {
   return (r.sections || []).some(s => sectionText(s).toLowerCase().includes(q))
 }
 function gameCount(s: Section): number { return (s.alikes || []).reduce((n, b) => n + b.games.length, 0) }
-function manualCount(s: Section): number { return (s.alikes || []).reduce((n, b) => n + b.games.filter(g => g.manual).length, 0) }
 function firstLine(s: Section): string { return docText(s.feedback).trim().split('\n')[0].slice(0, 80) || '(no feedback)' }
 
 export function WeeklyFeedbackTab() {
@@ -39,9 +37,8 @@ export function WeeklyFeedbackTab() {
   const isManager = role === 'admin' || role === 'moderator'
   const userName = session?.user?.name || ''
 
-  // Overview / Editor / Import toggle is local state only — NO url params.
-  // ('import' is the throwaway legacy-sheet review surface, admin/mod only.)
-  const [view, setView] = useState<'list' | 'week' | 'import'>('list')
+  // Overview / Editor toggle is local state only — NO url params.
+  const [view, setView] = useState<'list' | 'week'>('list')
 
   const [batches, setBatches] = useState<string[]>([])
   const [evaluators, setEvaluators] = useState<string[]>([])
@@ -54,7 +51,6 @@ export function WeeklyFeedbackTab() {
   const [listBatch, setListBatch] = useState('')
   const [listEvaluator, setListEvaluator] = useState('')
   const [query, setQuery] = useState('')
-  const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({}) // collapsed weeks (Overview)
   const [collapsedSecs, setCollapsedSecs] = useState<Record<string, boolean>>({}) // collapsed sections (Editor)
 
@@ -193,11 +189,6 @@ export function WeeklyFeedbackTab() {
   }
   groups.forEach(g => g.rows.sort((a, b) => a.evaluator.localeCompare(b.evaluator)))
   groups.sort((a, b) => weekLabelOrder(b.batch) - weekLabelOrder(a.batch) || b.batch.localeCompare(a.batch))
-  const weekSummary = (g: { rows: WeeklyRecord[] }) => {
-    let games = 0, manual = 0
-    for (const r of g.rows) for (const s of (r.sections || [])) { games += gameCount(s); manual += manualCount(s) }
-    return { members: g.rows.length, games, manual }
-  }
 
   const onRowClick = (e: MouseEvent, rec: WeeklyRecord) => {
     const a = (e.target as HTMLElement).closest('a')
@@ -212,7 +203,7 @@ export function WeeklyFeedbackTab() {
     : `${listWho} · ${listBatch || 'all weeks'} · ${visible.length} record${visible.length === 1 ? '' : 's'}`
 
   return (
-    <div className="page" style={{ paddingBottom: 16, height: '100%', minHeight: 0, boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
           <h1 className="h-title">Weekly Feedback</h1>
@@ -221,13 +212,11 @@ export function WeeklyFeedbackTab() {
         <div style={{ display: 'flex', gap: 6 }}>
           <button className={`seg-btn-premium${view === 'list' ? ' active' : ''}`} onClick={() => setView('list')}>Overview</button>
           <button className={`seg-btn-premium${view === 'week' ? ' active' : ''}`} onClick={() => setView('week')}>Editor</button>
-          {isManager && <button className={`seg-btn-premium${view === 'import' ? ' active' : ''}`} onClick={() => setView('import')}>Import</button>}
         </div>
       </div>
 
-      {view !== 'import' && (
-        <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
-          {view === 'list' ? (
+      <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
+        {view === 'list' ? (
             <>
               <div style={{ width: 180 }}>
                 <StyledSelect value={listBatch} onChange={setListBatch} placeholder="All weeks"
@@ -243,10 +232,6 @@ export function WeeklyFeedbackTab() {
                 placeholder="Search feedback or games…" />
               {query && <button type="button" className="wf-clear" onClick={() => setQuery('')} title="Clear search">✕</button>}
               <div style={{ flex: 1 }} />
-              <div className="wf-density">
-                <button type="button" className={density === 'comfortable' ? 'active' : ''} onClick={() => setDensity('comfortable')}>Comfortable</button>
-                <button type="button" className={density === 'compact' ? 'active' : ''} onClick={() => setDensity('compact')}>Compact</button>
-              </div>
               <button type="button" className="wf-collapse-all"
                 onClick={() => setCollapsed(c => { const all = groups.every(g => c[g.batch]); const n: Record<string, boolean> = {}; groups.forEach(g => { n[g.batch] = !all }); return n })}>
                 {groups.length > 0 && groups.every(g => collapsed[g.batch]) ? 'Expand all' : 'Collapse all'}
@@ -267,12 +252,9 @@ export function WeeklyFeedbackTab() {
             </>
           )}
         </div>
-      )}
 
       <div className="card" style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        {view === 'import' ? (
-          <ImportReviewView />
-        ) : view === 'week' ? (
+        {view === 'week' ? (
           !selectedBatch ? (
             <p className="h-sub" style={{ padding: 8 }}>Select a week to view or edit feedback.</p>
           ) : viewingSelf ? (
@@ -335,7 +317,7 @@ export function WeeklyFeedbackTab() {
             <FeedbackView sections={sections} />
           )
         ) : (
-          <table className={`wf-list wf-dens-${density}`} style={{ width: '100%' }}>
+          <table className="wf-list" style={{ width: '100%' }}>
             <thead><tr><th>Evaluator</th><th>Feedback</th><th>Game Alike</th></tr></thead>
             <tbody>
               {groups.length === 0 && (
@@ -343,14 +325,13 @@ export function WeeklyFeedbackTab() {
               )}
               {groups.map(g => {
                 const expanded = q ? true : !collapsed[g.batch]
-                const sm = weekSummary(g)
                 return (
                   <Fragment key={g.batch}>
                     <tr className="wf-week-row" onClick={() => setCollapsed(c => ({ ...c, [g.batch]: !c[g.batch] }))}>
                       <td colSpan={3}>
                         <span className="wf-week-chev">{expanded ? '▾' : '▸'}</span>
                         <span className="wf-week-label">{g.batch}</span>
-                        <span className="wf-week-sum">{sm.members} member{sm.members === 1 ? '' : 's'} · {sm.games} game{sm.games === 1 ? '' : 's'}{sm.manual ? ` · ${sm.manual} manual` : ''}</span>
+                        <span className="wf-week-sum">{g.rows.length} feedback</span>
                       </td>
                     </tr>
                     {expanded && g.rows.map((r, ri) => {

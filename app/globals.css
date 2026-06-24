@@ -1331,9 +1331,6 @@ input:checked + .slider:before {
 .wf-search:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
 .wf-clear { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); cursor: pointer; }
 .wf-clear:hover { color: var(--text); background: var(--surface-2); }
-.wf-density { display: inline-flex; background: var(--surface-3); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
-.wf-density button { padding: 5px 10px; font-size: 12px; font-weight: 600; border: none; background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer; }
-.wf-density button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 .wf-collapse-all { padding: 6px 12px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); cursor: pointer; }
 .wf-collapse-all:hover { color: var(--text); background: var(--surface-2); }
 
@@ -1347,11 +1344,6 @@ input:checked + .slider:before {
 /* Zebra per evaluator block (hover still wins; band rows never get .wf-row-alt) */
 .wf-list tbody tr.wf-row-alt td { background: color-mix(in srgb, var(--surface-2) 45%, transparent); }
 .wf-list tbody tr.wf-row-alt:hover td { background: var(--surface-2); }
-
-/* Compact density */
-.wf-dens-compact td { padding: 5px 10px; font-size: 12px; line-height: 1.42; }
-.wf-dens-compact .wf-week-row td { padding: 4px 12px; }
-.wf-dens-compact th { padding: 5px 10px; }
 
 /* Editor: sticky toolbar with section outline */
 .wf-sticky-bar { position: sticky; top: 0; z-index: 5; background: var(--surface); padding: 8px 0; margin: -4px 0 6px; border-bottom: 1px solid var(--border); }

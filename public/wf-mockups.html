@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Weekly Feedback — evaluator differentiation mockups</title>
+<style>
+  :root{
+    --surface:#fff; --surface-2:#f5f6f8; --surface-3:#eef0f4;
+    --border:#e7e9ee; --border-strong:#d7dae1;
+    --text:#1a1c22; --muted:#59606e; --faint:#99a0ad;
+    --bg:#f7f8fa;
+    --font:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;padding:28px 32px 80px}
+  h1{font-size:22px;font-weight:700;letter-spacing:-.02em;margin:0 0 4px}
+  .lead{color:var(--muted);margin:0 0 26px;font-size:13px}
+  .opt{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 1px 2px rgba(20,24,40,.05);padding:18px;margin-bottom:26px;max-width:1080px}
+  .opt-h{display:flex;align-items:baseline;gap:10px;margin:0 0 4px}
+  .opt-h b{font-size:15px}
+  .opt-h .tag{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#fff;background:var(--text);border-radius:999px;padding:2px 8px}
+  .opt-note{color:var(--muted);font-size:12.5px;margin:0 0 14px}
+
+  table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;table-layout:fixed}
+  th{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);background:var(--surface-2);text-align:left;padding:8px 12px;border-bottom:1px solid var(--border-strong)}
+  td{vertical-align:top;padding:10px 12px;font-size:13px;line-height:1.5;border-bottom:1px dashed color-mix(in srgb,var(--border) 60%,transparent)}
+  th:nth-child(1),td:nth-child(1){width:170px}
+  th:last-child,td:last-child{width:300px}
+  .wk td{background:var(--surface-3);font-weight:700;padding:7px 12px;border-bottom:1px solid var(--border-strong)}
+  .wk .sum{font-weight:500;color:var(--faint);font-size:11.5px;margin-left:10px}
+  .games{display:flex;flex-direction:column;gap:3px}
+  .games a{color:#2455c9;text-decoration:none}
+  .grp{font-weight:700;font-size:12px;margin-top:4px}
+  .solid td{border-bottom:1px solid var(--border-strong)}
+
+  /* evaluator avatar */
+  .av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;font-size:11px;font-weight:700;color:#fff;flex:none}
+  .evname{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--muted)}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .pill{display:inline-flex;align-items:center;gap:7px;padding:3px 10px;border-radius:999px;font-weight:600;font-size:12.5px}
+
+  /* OPTION A — accent left border + avatar */
+  .A td:first-child{border-left:3px solid var(--ev)}
+  .A .evname .av{background:var(--ev)}
+
+  /* OPTION B — full-row tint swimlane */
+  .B td{background:color-mix(in srgb,var(--ev) 7%,var(--surface))}
+  .B .evname{color:var(--ev);font-weight:700}
+  .B .dot{background:var(--ev)}
+
+  /* OPTION C — evaluator sub-header band */
+  .C .evrow td{background:color-mix(in srgb,var(--ev) 10%,var(--surface));border-bottom:none;padding:6px 12px}
+  .C .evrow .pill{background:color-mix(in srgb,var(--ev) 16%,#fff);color:var(--ev)}
+  .C .evrow .pill .dot{background:var(--ev)}
+  .C .datarow td:first-child{border-left:3px solid color-mix(in srgb,var(--ev) 55%,transparent)}
+</style>
+</head>
+<body>
+  <h1>Weekly Feedback — evaluator differentiation</h1>
+  <p class="lead">Same data, three ways to make different evaluators read as distinct blocks. Pick one (or mix). Colors are derived per evaluator name.</p>
+
+  <!-- OPTION A -->
+  <div class="opt">
+    <div class="opt-h"><span class="tag">Option A</span><b>Accent edge + avatar</b></div>
+    <p class="opt-note">A colored left edge runs down each evaluator's rows, with a square initials avatar. Quiet; the table stays white. Best if you want subtle separation without heavy color.</p>
+    <table class="A">
+      <thead><tr><th>Evaluator</th><th>Feedback</th><th>Game Alike</th></tr></thead>
+      <tbody>
+        <tr class="wk"><td colspan="3">▾ W4 Jun, 2026 <span class="sum">4 feedback</span></td></tr>
+        <tr style="--ev:#2f6bed"><td><span class="evname"><span class="av">MT</span>MyTL</span></td>
+          <td>Arrow + match-3 blast vẫn tần suất cao; theme cũ &amp; xấu nhiều.</td>
+          <td class="games"><a>Candy Ball Sort Factory</a><a>Carve Lumber</a></td></tr>
+        <tr class="solid" style="--ev:#2f6bed"><td></td>
+          <td>Mechanic logic nhiều, gameplay cũ, không đổi mới.</td>
+          <td class="games"><a>Jigsaw Craze</a></td></tr>
+        <tr class="solid" style="--ev:#1f9d57"><td><span class="evname"><span class="av">TD</span>ThuDT</span></td>
+          <td>Sort &amp; tile match tăng; art semi-realistic xuất hiện.</td>
+          <td class="games"><span class="grp">Sort:</span><a>Slot Shot!</a><a>Cakeline!</a></td></tr>
+        <tr class="solid" style="--ev:#b9760a"><td><span class="evname"><span class="av">NL</span>NhiLV</span></td>
+          <td>Word association ra theme mới (bubbles).</td>
+          <td class="games"><a>Bubble Match</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- OPTION B -->
+  <div class="opt">
+    <div class="opt-h"><span class="tag">Option B</span><b>Tinted swimlanes</b></div>
+    <p class="opt-note">Each evaluator's whole row band gets a faint wash of their color — the strongest at-a-glance grouping. Reads like colored lanes. Best for fast scanning across many evaluators.</p>
+    <table class="B">
+      <thead><tr><th>Evaluator</th><th>Feedback</th><th>Game Alike</th></tr></thead>
+      <tbody>
+        <tr class="wk"><td colspan="3">▾ W4 Jun, 2026 <span class="sum">4 feedback</span></td></tr>
+        <tr style="--ev:#2f6bed"><td><span class="evname"><span class="dot"></span>MyTL</span></td>
+          <td>Arrow + match-3 blast vẫn tần suất cao; theme cũ &amp; xấu nhiều.</td>
+          <td class="games"><a>Candy Ball Sort Factory</a><a>Carve Lumber</a></td></tr>
+        <tr class="solid" style="--ev:#2f6bed"><td></td>
+          <td>Mechanic logic nhiều, gameplay cũ, không đổi mới.</td>
+          <td class="games"><a>Jigsaw Craze</a></td></tr>
+        <tr class="solid" style="--ev:#1f9d57"><td><span class="evname"><span class="dot"></span>ThuDT</span></td>
+          <td>Sort &amp; tile match tăng; art semi-realistic xuất hiện.</td>
+          <td class="games"><span class="grp">Sort:</span><a>Slot Shot!</a><a>Cakeline!</a></td></tr>
+        <tr class="solid" style="--ev:#b9760a"><td><span class="evname"><span class="dot"></span>NhiLV</span></td>
+          <td>Word association ra theme mới (bubbles).</td>
+          <td class="games"><a>Bubble Match</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- OPTION C -->
+  <div class="opt">
+    <div class="opt-h"><span class="tag">Option C</span><b>Evaluator sub-header band</b></div>
+    <p class="opt-note">Each evaluator gets a small colored header band (name pill + dot) above their feedback, then their rows sit under a colored edge. Most explicit hierarchy: Week → Evaluator → feedback rows.</p>
+    <table class="C">
+      <thead><tr><th>Evaluator</th><th>Feedback</th><th>Game Alike</th></tr></thead>
+      <tbody>
+        <tr class="wk"><td colspan="3">▾ W4 Jun, 2026 <span class="sum">4 feedback</span></td></tr>
+        <tr class="evrow" style="--ev:#2f6bed"><td colspan="3"><span class="pill"><span class="dot"></span>MyTL</span></td></tr>
+        <tr class="datarow" style="--ev:#2f6bed"><td></td>
+          <td>Arrow + match-3 blast vẫn tần suất cao; theme cũ &amp; xấu nhiều.</td>
+          <td class="games"><a>Candy Ball Sort Factory</a><a>Carve Lumber</a></td></tr>
+        <tr class="datarow solid" style="--ev:#2f6bed"><td></td>
+          <td>Mechanic logic nhiều, gameplay cũ, không đổi mới.</td>
+          <td class="games"><a>Jigsaw Craze</a></td></tr>
+        <tr class="evrow" style="--ev:#1f9d57"><td colspan="3"><span class="pill"><span class="dot"></span>ThuDT</span></td></tr>
+        <tr class="datarow solid" style="--ev:#1f9d57"><td></td>
+          <td>Sort &amp; tile match tăng; art semi-realistic xuất hiện.</td>
+          <td class="games"><span class="grp">Sort:</span><a>Slot Shot!</a><a>Cakeline!</a></td></tr>
+        <tr class="evrow" style="--ev:#b9760a"><td colspan="3"><span class="pill"><span class="dot"></span>NhiLV</span></td></tr>
+        <tr class="datarow solid" style="--ev:#b9760a"><td></td>
+          <td>Word association ra theme mới (bubbles).</td>
+          <td class="games"><a>Bubble Match</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
