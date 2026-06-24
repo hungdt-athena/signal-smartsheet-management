@@ -20,6 +20,16 @@ import postgres from 'postgres'
 import { parseStoreLink } from '../lib/game-link'
 import { isValidWeekLabel, parseFeedbackDoc, parseAlikeCell, type RichCell, type TextRun, type RawGame } from '../lib/weekly-feedback-import'
 
+// Convenience: load .env.local (KEY=VALUE) when run outside Next, so DATABASE_URL
+// (and optionally SPREADSHEET_ID / GOOGLE_APPLICATION_CREDENTIALS) come from there.
+// Anything already in the environment (inline / exported) wins.
+try {
+  for (const line of readFileSync('.env.local', 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+  }
+} catch { /* no .env.local — rely on real env */ }
+
 const DRY = process.argv.includes('--dry-run')
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
 const MAP_PATH = process.env.EVALUATOR_MAP || './config/evaluator-map.json'

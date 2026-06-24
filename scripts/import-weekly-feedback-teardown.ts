@@ -5,7 +5,15 @@
 //
 // Run this only after the sync is approved into weekly_feedback and you no longer
 // need to re-pull. The multi-group game-alike model is a real feature — KEEP it.
+import { readFileSync } from 'fs'
 import postgres from 'postgres'
+
+try {
+  for (const line of readFileSync('.env.local', 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+  }
+} catch { /* no .env.local */ }
 
 if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); process.exit(1) }
 const sql = postgres(process.env.DATABASE_URL, { ssl: 'require' })
