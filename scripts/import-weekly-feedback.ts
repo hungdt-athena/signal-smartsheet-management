@@ -31,7 +31,7 @@ try {
 } catch { /* no .env.local — rely on real env */ }
 
 const DRY = process.argv.includes('--dry-run')
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || process.env.GOOGLE_SPREADSHEET_ID
 const MAP_PATH = process.env.EVALUATOR_MAP || './config/evaluator-map.json'
 if (!SPREADSHEET_ID) { console.error('SPREADSHEET_ID is required'); process.exit(1) }
 if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); process.exit(1) }
@@ -62,15 +62,54 @@ function toRichCell(cell: any): RichCell {
   return { text, runs, cellLink }
 }
 
-async function matchGame(g: RawGame) {
-  const parsed = parseStoreLink(g.app_link)
-  if (parsed) {
-    const rows = await sql`
-      SELECT game_id, title, app_link, icon_url FROM game_info
-      WHERE (game_id = ${parsed.storeId} OR app_link ILIKE ${'%' + parsed.storeId + '%'}) AND is_active = true
-      LIMIT 1`
-    if (rows[0]) return { game_id: rows[0].game_id, title: rows[0].title, app_link: rows[0].app_link, icon_url: rows[0].icon_url, manual: false }
+// Games matching is in-memory via GAME_INDEX (keyed by game_id AND by the storeId
+// parsed from app_link) — no per-game DB round trip. The index is built for ONLY
+// the store links that actually appear in the sheet (game_info is huge, so loading
+// the whole table timed out); pass that storeId set in.
+interface GameRow { game_id: string; title: string; app_link: string | null; icon_url: string | null }
+let GAME_INDEX = new Map<string, GameRow>()
+
+async function loadGameIndex(storeIds: string[]) {
+  const idx = new Map<string, GameRow>()
+  if (!storeIds.length) return idx
+  // Match by game_id only (indexed → fast). An `app_link ILIKE ANY(%id%)` fallback
+  // would force a full scan of the huge game_info table per pattern and time out;
+  // store links here use game_id = storeId, so this catches the vast majority.
+  // Misses become manual:true (title + link kept) and are fixable in the review tab.
+  const rows = await sql<GameRow[]>`
+    SELECT game_id, title, app_link, icon_url FROM game_info
+    WHERE is_active = true AND game_id = ANY(${storeIds})`
+  for (const r of rows) {
+    if (r.game_id) idx.set(String(r.game_id), r)
+    const p = r.app_link ? parseStoreLink(r.app_link) : null
+    if (p && !idx.has(p.storeId)) idx.set(p.storeId, r)
   }
+  return idx
+}
+
+// Collect every distinct store-link storeId present in the fetched sheet (cell
+// hyperlinks + text-run links across all tabs), so we only query those games.
+function collectStoreIds(sheets: any[]): string[] {
+  const ids = new Set<string>()
+  for (const sheet of sheets ?? []) {
+    for (const row of sheet.data?.[0]?.rowData ?? []) {
+      for (const cell of row?.values ?? []) {
+        const uris = [cell?.hyperlink, ...((cell?.textFormatRuns ?? []).map((r: any) => r?.format?.link?.uri))]
+        for (const u of uris) { if (!u) continue; const p = parseStoreLink(u); if (p) ids.add(p.storeId) }
+      }
+    }
+  }
+  return Array.from(ids)
+}
+
+function lookupGame(link: string): GameRow | null {
+  const parsed = parseStoreLink(link)
+  return parsed ? (GAME_INDEX.get(parsed.storeId) ?? null) : null
+}
+
+function matchGame(g: RawGame) {
+  const hit = lookupGame(g.app_link)
+  if (hit) return { game_id: hit.game_id, title: hit.title, app_link: hit.app_link, icon_url: hit.icon_url, manual: false }
   return { game_id: null, title: g.title, app_link: g.app_link, icon_url: null, manual: true }
 }
 
@@ -97,39 +136,37 @@ async function loadEvaluatorIndex() {
 }
 
 // Walk a feedback Tiptap doc; upgrade each hyperlinked text node that matches a
-// DB game into a gameMention node, leaving non-matches as plain links.
-async function upgradeFeedbackLinks(doc: any): Promise<{ doc: any; mentions: number }> {
+// DB game (via GAME_INDEX) into a gameMention node, leaving non-matches as plain
+// links. Pure/in-memory — no DB calls.
+function upgradeFeedbackLinks(doc: any): { doc: any; mentions: number } {
   let mentions = 0
-  async function maybeMention(child: any) {
+  function maybeMention(child: any) {
     if (child?.type !== 'text' || !Array.isArray(child.marks)) return null
     const link = child.marks.find((m: any) => m?.type === 'link')?.attrs?.href
     if (!link) return null
-    const parsed = parseStoreLink(link)
-    if (!parsed) return null
-    const rows = await sql`
-      SELECT game_id, title, app_link, icon_url FROM game_info
-      WHERE (game_id = ${parsed.storeId} OR app_link ILIKE ${'%' + parsed.storeId + '%'}) AND is_active = true
-      LIMIT 1`
-    if (!rows[0]) return null
-    return { type: 'gameMention', attrs: { gameId: rows[0].game_id, title: rows[0].title, href: rows[0].app_link, icon: rows[0].icon_url } }
+    const hit = lookupGame(link)
+    if (!hit) return null
+    return { type: 'gameMention', attrs: { gameId: hit.game_id, title: hit.title, href: hit.app_link, icon: hit.icon_url } }
   }
-  async function walk(node: any): Promise<any> {
+  function walk(node: any): any {
     if (!node || typeof node !== 'object') return node
     if (Array.isArray(node.content)) {
       const out: any[] = []
       for (const child of node.content) {
-        const mention = await maybeMention(child)
+        const mention = maybeMention(child)
         if (mention) { out.push(mention); mentions++; continue }
-        out.push(await walk(child))
+        out.push(walk(child))
       }
       return { ...node, content: out }
     }
     return node
   }
-  return { doc: await walk(doc), mentions }
+  return { doc: walk(doc), mentions }
 }
 
 async function main() {
+  const t0 = Date.now(); const ms = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`
+  console.error(`[${ms()}] auth + fetch sheet…`)
   const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] })
   const sheets = google.sheets({ version: 'v4', auth: await auth.getClient() as any })
   const res = await sheets.spreadsheets.get({
@@ -137,8 +174,13 @@ async function main() {
     includeGridData: true,
     fields: 'sheets(properties.title,data.rowData.values(formattedValue,hyperlink,textFormatRuns(startIndex,format(bold,link/uri))))',
   })
+  console.error(`[${ms()}] sheet fetched: ${res.data.sheets?.length ?? 0} tabs`)
 
   const { index, collisions } = await loadEvaluatorIndex()
+  console.error(`[${ms()}] evaluator index: ${index.size}`)
+  const storeIds = collectStoreIds(res.data.sheets ?? [])
+  GAME_INDEX = await loadGameIndex(storeIds)
+  console.error(`[${ms()}] game index: ${GAME_INDEX.size} (from ${storeIds.length} sheet links)`)
   const report = { imported: 0, sections: 0, resolved: {} as Record<string, string>, unresolvedTab: [] as string[], ambiguousTab: [] as string[], skippedLabel: [] as string[], matched: 0, manual: 0, feedbackMentions: 0 }
 
   for (const sheet of res.data.sheets ?? []) {
@@ -180,7 +222,7 @@ async function main() {
 
       // New section when this row carries feedback (or it's the batch's first row).
       if (hasFb || !currentSection) {
-        const { doc, mentions } = await upgradeFeedbackLinks(parseFeedbackDoc(fbCell))
+        const { doc, mentions } = upgradeFeedbackLinks(parseFeedbackDoc(fbCell))
         report.feedbackMentions += mentions
         currentSection = { id: randomUUID(), feedback: doc, alikes: [] }
         groups.get(currentBatch)!.push(currentSection)
@@ -194,7 +236,7 @@ async function main() {
       for (const b of parseAlikeCell(alikeCell)) {
         const games = []
         for (const rg of b.games) {
-          const m = await matchGame(rg)
+          const m = matchGame(rg)
           games.push(m)
           if (m.manual) report.manual++; else report.matched++
         }
@@ -219,6 +261,7 @@ async function main() {
     }
   }
 
+  console.error(`[${ms()}] done processing`)
   console.log(`${DRY ? '[DRY RUN] ' : ''}import report (-> weekly_feedback_import staging):`)
   console.log(JSON.stringify(report, null, 2))
   await sql.end()
