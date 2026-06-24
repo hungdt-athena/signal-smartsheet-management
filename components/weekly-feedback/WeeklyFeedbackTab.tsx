@@ -1,5 +1,5 @@
 'use client'
-import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
@@ -29,6 +29,14 @@ function recordMatches(r: WeeklyRecord, q: string): boolean {
   return (r.sections || []).some(s => sectionText(s).toLowerCase().includes(q))
 }
 function gameCount(s: Section): number { return (s.alikes || []).reduce((n, b) => n + b.games.length, 0) }
+// Deterministic hue (0–359) from the evaluator name — maps onto the full HSL
+// hue wheel (continuous, no fixed palette), so any number of evaluators get
+// spread-out colors that never "run out". Same name → same color everywhere.
+function evalHue(name: string): number {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return (h % 360)
+}
 function firstLine(s: Section): string { return docText(s.feedback).trim().split('\n')[0].slice(0, 80) || '(no feedback)' }
 
 export function WeeklyFeedbackTab() {
@@ -334,14 +342,15 @@ export function WeeklyFeedbackTab() {
                         <span className="wf-week-sum">{g.rows.length} feedback</span>
                       </td>
                     </tr>
-                    {expanded && g.rows.map((r, ri) => {
+                    {expanded && g.rows.map((r) => {
                       const secs: (Section | null)[] = r.sections?.length ? r.sections : [null]
+                      const hue = evalHue(r.evaluator)
                       return secs.map((s, i) => {
                         const no = secs.length > 1 ? i + 1 : null
                         const cls = i === secs.length - 1 ? 'wf-c-solid' : 'wf-c-sec'
                         return (
-                          <tr key={`${g.batch}::${r.evaluator}::${i}`} className={ri % 2 ? 'wf-row-alt' : ''} onClick={e => onRowClick(e, r)} style={{ cursor: 'pointer' }}>
-                            {i === 0 && <td className="wf-list-eval" rowSpan={secs.length}>{r.evaluator}</td>}
+                          <tr key={`${g.batch}::${r.evaluator}::${i}`} className="wf-evrow" onClick={e => onRowClick(e, r)} style={{ cursor: 'pointer', ['--ev-h' as string]: hue } as CSSProperties}>
+                            {i === 0 && <td className="wf-list-eval" rowSpan={secs.length}><span className="wf-evname"><span className="wf-evdot" />{r.evaluator}</span></td>}
                             <td className={cls}><FeedbackCell doc={s?.feedback ?? null} no={no} /></td>
                             <td className={cls}><AlikeCell alikes={s?.alikes} no={no} /></td>
                           </tr>
