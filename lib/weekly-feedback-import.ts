@@ -13,28 +13,47 @@ export interface RichCell { text: string; runs: TextRun[]; cellLink: string | nu
 export interface RawGame { title: string; app_link: string }
 export interface RawBlock { name: string; games: RawGame[] }
 
-function para(text: string) {
-  return text ? { type: 'paragraph', content: [{ type: 'text', text }] } : { type: 'paragraph' }
+function paragraph(nodes: unknown[]) {
+  return nodes.length ? { type: 'paragraph', content: nodes } : { type: 'paragraph' }
 }
 
-// Column B free text → minimal Tiptap doc. "- "/"• " lines become bullet list
-// items (consecutive bullets merge into one list); other non-empty lines become
-// paragraphs. Empty input → null.
-export function parseFeedbackDoc(text: string): unknown | null {
-  const lines = (text || '').replace(/\r\n/g, '\n').split('\n')
+// Inline content for [from,to): consecutive chars sharing a link become one text
+// node with a link mark; runs of unlinked chars become plain text nodes. The
+// script later upgrades link-marked nodes that match a DB game to gameMention.
+function inlineRuns(text: string, runs: TextRun[], from: number, to: number): unknown[] {
+  const out: unknown[] = []
+  let i = from
+  while (i < to) {
+    const link = runAt(runs, i)?.link ?? null
+    let j = i + 1
+    while (j < to && (runAt(runs, j)?.link ?? null) === link) j++
+    const seg = text.slice(i, j)
+    if (seg) out.push(link ? { type: 'text', text: seg, marks: [{ type: 'link', attrs: { href: link } }] } : { type: 'text', text: seg })
+    i = j
+  }
+  return out
+}
+
+// Column B → minimal Tiptap doc. "- "/"• " lines become bullet list items
+// (consecutive bullets merge into one list); other non-empty lines become
+// paragraphs. Hyperlinked spans keep a link mark (see inlineRuns). Empty → null.
+export function parseFeedbackDoc(cell: RichCell): unknown | null {
+  const text = (cell.text || '').replace(/\r\n/g, '\n')
+  const runs = cell.runs ?? []
   const content: unknown[] = []
   let bullets: unknown[] | null = null
   const flush = () => { if (bullets) { content.push({ type: 'bulletList', content: bullets }); bullets = null } }
-  for (const raw of lines) {
-    const line = raw.replace(/\s+$/, '')
-    const m = line.match(/^\s*[-•]\s+(.*)$/)
-    if (m) {
-      const t = m[1].trim()
-      ;(bullets ??= []).push({ type: 'listItem', content: [para(t)] })
-      continue
+  let lineStart = 0
+  for (const line of text.split('\n')) {
+    const lineEnd = lineStart + line.length
+    const m = line.match(/^(\s*[-•]\s+)(.*)$/)
+    if (m && m[2].trim()) {
+      ;(bullets ??= []).push({ type: 'listItem', content: [paragraph(inlineRuns(text, runs, lineStart + m[1].length, lineEnd))] })
+    } else {
+      flush()
+      if (line.trim()) content.push(paragraph(inlineRuns(text, runs, lineStart, lineEnd)))
     }
-    flush()
-    if (line.trim()) content.push(para(line.trim()))
+    lineStart = lineEnd + 1 // + the consumed "\n"
   }
   flush()
   return content.length ? { type: 'doc', content } : null

@@ -12,18 +12,33 @@ describe('isValidWeekLabel', () => {
   })
 })
 
+const plain = (text: string): RichCell => ({ text, runs: [], cellLink: null })
+
 describe('parseFeedbackDoc', () => {
   it('returns null for empty text', () => {
-    expect(parseFeedbackDoc('')).toBeNull()
-    expect(parseFeedbackDoc('   ')).toBeNull()
+    expect(parseFeedbackDoc(plain(''))).toBeNull()
+    expect(parseFeedbackDoc(plain('   '))).toBeNull()
   })
   it('turns "- " lines into a bullet list and plain lines into paragraphs', () => {
-    const doc = parseFeedbackDoc('Intro line\n- first\n- second') as any
+    const doc = parseFeedbackDoc(plain('Intro line\n- first\n- second')) as any
     expect(doc.type).toBe('doc')
     expect(doc.content[0]).toEqual({ type: 'paragraph', content: [{ type: 'text', text: 'Intro line' }] })
     expect(doc.content[1].type).toBe('bulletList')
     expect(doc.content[1].content).toHaveLength(2)
     expect(doc.content[1].content[0]).toEqual({ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }] })
+  })
+  it('keeps a link mark on hyperlinked spans inside a paragraph', () => {
+    // "see Tile Cat here" where "Tile Cat" is a hyperlink
+    const doc = parseFeedbackDoc(cell([
+      ['see ', false, null],
+      ['Tile Cat', false, 'https://x/tilecat'],
+      [' here', false, null],
+    ])) as any
+    expect(doc.content[0]).toEqual({ type: 'paragraph', content: [
+      { type: 'text', text: 'see ' },
+      { type: 'text', text: 'Tile Cat', marks: [{ type: 'link', attrs: { href: 'https://x/tilecat' } }] },
+      { type: 'text', text: ' here' },
+    ] })
   })
 })
 

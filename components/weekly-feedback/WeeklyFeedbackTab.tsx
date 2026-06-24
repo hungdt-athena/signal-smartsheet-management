@@ -5,6 +5,7 @@ import { StyledSelect } from '@/components/StyledSelect'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { SectionEditor } from './SectionEditor'
 import { FeedbackView, FeedbackCell, AlikeCell } from './FeedbackView'
+import { ImportReviewView } from './ImportReviewView'
 import { Section, newSection } from './types'
 
 interface WeeklyRecord { batch: string; evaluator: string; sections: Section[]; updated_at: string }
@@ -16,8 +17,9 @@ export function WeeklyFeedbackTab() {
   const isManager = role === 'admin' || role === 'moderator'
   const userName = session?.user?.name || ''
 
-  // List / Week toggle is local state only — NO url params.
-  const [view, setView] = useState<'list' | 'week'>('list')
+  // List / Week / Import toggle is local state only — NO url params.
+  // ('import' is the throwaway legacy-sheet review surface, admin/mod only.)
+  const [view, setView] = useState<'list' | 'week' | 'import'>('list')
 
   const [batches, setBatches] = useState<string[]>([])
   const [evaluators, setEvaluators] = useState<string[]>([])
@@ -214,9 +216,11 @@ export function WeeklyFeedbackTab() {
         <div style={{ display: 'flex', gap: 6 }}>
           <button className={`seg-btn-premium${view === 'list' ? ' active' : ''}`} onClick={() => setView('list')}>List</button>
           <button className={`seg-btn-premium${view === 'week' ? ' active' : ''}`} onClick={() => setView('week')}>Week</button>
+          {isManager && <button className={`seg-btn-premium${view === 'import' ? ' active' : ''}`} onClick={() => setView('import')}>Import</button>}
         </div>
       </div>
 
+      {view !== 'import' && (
       <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
         {view === 'list' ? (
           <>
@@ -262,9 +266,12 @@ export function WeeklyFeedbackTab() {
           </>
         )}
       </div>
+      )}
 
       <div className="card" style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        {view === 'week' ? (
+        {view === 'import' ? (
+          <ImportReviewView />
+        ) : view === 'week' ? (
           !selectedBatch ? (
             <p className="h-sub" style={{ padding: 8 }}>Select a week to view or edit feedback.</p>
           ) : viewingSelf ? (

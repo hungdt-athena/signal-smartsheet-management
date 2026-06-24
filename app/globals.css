@@ -1313,3 +1313,14 @@ input:checked + .slider:before {
 .wf-alike-del { border: none; background: none; cursor: pointer; color: #b00; line-height: 1; padding: 2px 4px; }
 .wf-addgroup { border: 1px dashed var(--border, #ccc); background: none; cursor: pointer; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
 .wf-alike-view-block + .wf-alike-view-block { margin-top: 6px; }
+
+/* --- Weekly Feedback Import review (THROWAWAY) --- */
+.wf-import-eval { margin: 6px 0; font-size: 13px; font-weight: 600; opacity: .85; }
+.wf-import-card { border: 1px solid var(--border, #e3e3e3); border-radius: 8px; margin-bottom: 8px; }
+.wf-import-card.is-approved { opacity: .6; }
+.wf-import-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; }
+.wf-import-batch { font-weight: 600; }
+.wf-import-body { padding: 4px 10px 10px; border-top: 1px solid var(--border, #eee); }
+.wf-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; }
+.wf-badge-pending { background: #fff3cd; color: #8a6d00; }
+.wf-badge-approved { background: #d4edda; color: #1c6b2c; }

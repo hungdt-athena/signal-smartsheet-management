@@ -1,6 +1,7 @@
-// One-off: import per-member weekly feedback from the Google Sheet into
-// weekly_feedback. App is the source of truth afterward; delete this script once
-// the import is accepted.
+// One-off (THROWAWAY): import per-member weekly feedback from the legacy Google
+// Sheet into the weekly_feedback_import STAGING table. Review + approve happens
+// in the app's Weekly Feedback > Import tab; approving copies into weekly_feedback.
+// Delete this script + the staging table once the sync is done.
 //
 // Each sheet tab is auto-resolved to the canonical evaluator string from
 // game_evaluations via a case/space-insensitive match, so no manual mapping is
@@ -85,6 +86,39 @@ async function loadEvaluatorIndex() {
   return { index, collisions }
 }
 
+// Walk a feedback Tiptap doc; upgrade each hyperlinked text node that matches a
+// DB game into a gameMention node, leaving non-matches as plain links.
+async function upgradeFeedbackLinks(doc: any): Promise<{ doc: any; mentions: number }> {
+  let mentions = 0
+  async function maybeMention(child: any) {
+    if (child?.type !== 'text' || !Array.isArray(child.marks)) return null
+    const link = child.marks.find((m: any) => m?.type === 'link')?.attrs?.href
+    if (!link) return null
+    const parsed = parseStoreLink(link)
+    if (!parsed) return null
+    const rows = await sql`
+      SELECT game_id, title, app_link, icon_url FROM game_info
+      WHERE (game_id = ${parsed.storeId} OR app_link ILIKE ${'%' + parsed.storeId + '%'}) AND is_active = true
+      LIMIT 1`
+    if (!rows[0]) return null
+    return { type: 'gameMention', attrs: { gameId: rows[0].game_id, title: rows[0].title, href: rows[0].app_link, icon: rows[0].icon_url } }
+  }
+  async function walk(node: any): Promise<any> {
+    if (!node || typeof node !== 'object') return node
+    if (Array.isArray(node.content)) {
+      const out: any[] = []
+      for (const child of node.content) {
+        const mention = await maybeMention(child)
+        if (mention) { out.push(mention); mentions++; continue }
+        out.push(await walk(child))
+      }
+      return { ...node, content: out }
+    }
+    return node
+  }
+  return { doc: await walk(doc), mentions }
+}
+
 async function main() {
   const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] })
   const sheets = google.sheets({ version: 'v4', auth: await auth.getClient() as any })
@@ -95,7 +129,7 @@ async function main() {
   })
 
   const { index, collisions } = await loadEvaluatorIndex()
-  const report = { imported: 0, resolved: {} as Record<string, string>, unresolvedTab: [] as string[], ambiguousTab: [] as string[], skippedLabel: [] as string[], matched: 0, manual: 0 }
+  const report = { imported: 0, sections: 0, resolved: {} as Record<string, string>, unresolvedTab: [] as string[], ambiguousTab: [] as string[], skippedLabel: [] as string[], matched: 0, manual: 0, feedbackMentions: 0 }
 
   for (const sheet of res.data.sheets ?? []) {
     const tab = sheet.properties?.title ?? ''
@@ -108,17 +142,31 @@ async function main() {
     const evaluator = explicit ?? index.get(k) ?? null
     if (!evaluator) { report.unresolvedTab.push(tab); continue }
     report.resolved[tab] = evaluator
+
+    // Column A is a merged cell spanning a week's rows: carry the last valid week
+    // label forward. Every content row under it becomes one section, so a week
+    // with several feedback rows yields a multi-section record.
+    const groups = new Map<string, any[]>() // batch -> sections[]
+    let currentBatch: string | null = null
     const rows = sheet.data?.[0]?.rowData ?? []
     for (let r = 1; r < rows.length; r++) { // row 0 is the header
       const cells = rows[r]?.values ?? []
-      const label = (cells[0]?.formattedValue ?? '').trim()
-      if (!label) continue
-      if (!isValidWeekLabel(label)) { report.skippedLabel.push(`${tab}: "${label}"`); continue }
+      const colA = (cells[0]?.formattedValue ?? '').trim()
+      if (colA) {
+        if (isValidWeekLabel(colA)) { currentBatch = colA; if (!groups.has(colA)) groups.set(colA, []) }
+        else { report.skippedLabel.push(`${tab}: "${colA}"`); currentBatch = null; continue } // banner/divider row
+      }
+      if (!currentBatch) continue // orphan row with no week label above it
 
-      const feedback = parseFeedbackDoc(cells[1]?.formattedValue ?? '')
-      const rawBlocks = parseAlikeCell(toRichCell(cells[2]))
+      const fbCell = toRichCell(cells[1])
+      const alikeCell = toRichCell(cells[2])
+      if (!fbCell.text.trim() && !alikeCell.text.trim()) continue // blank row
+
+      const { doc: feedback, mentions } = await upgradeFeedbackLinks(parseFeedbackDoc(fbCell))
+      report.feedbackMentions += mentions
+
       const alikes = []
-      for (const b of rawBlocks) {
+      for (const b of parseAlikeCell(alikeCell)) {
         const games = []
         for (const rg of b.games) {
           const m = await matchGame(rg)
@@ -127,20 +175,26 @@ async function main() {
         }
         alikes.push({ name: b.name, games })
       }
-      const sections = [{ id: randomUUID(), feedback, alikes }]
+      groups.get(currentBatch)!.push({ id: randomUUID(), feedback, alikes })
+      report.sections++
+    }
 
+    // One staging record per (batch, evaluator), pending review. Re-running resets
+    // to pending so a fresh pull is re-reviewed.
+    for (const [batch, sections] of Array.from(groups)) {
+      if (!sections.length) continue
       if (!DRY) {
         await sql`
-          INSERT INTO weekly_feedback (batch, evaluator, sections, updated_at)
-          VALUES (${label}, ${evaluator}, ${sql.json(sections as any)}, NOW())
+          INSERT INTO weekly_feedback_import (batch, evaluator, sections, status, source_tab, updated_at)
+          VALUES (${batch}, ${evaluator}, ${sql.json(sections as any)}, 'pending', ${tab}, NOW())
           ON CONFLICT (batch, evaluator)
-          DO UPDATE SET sections = EXCLUDED.sections, updated_at = NOW()`
+          DO UPDATE SET sections = EXCLUDED.sections, status = 'pending', source_tab = EXCLUDED.source_tab, updated_at = NOW()`
       }
       report.imported++
     }
   }
 
-  console.log(`${DRY ? '[DRY RUN] ' : ''}import report:`)
+  console.log(`${DRY ? '[DRY RUN] ' : ''}import report (-> weekly_feedback_import staging):`)
   console.log(JSON.stringify(report, null, 2))
   await sql.end()
 }
