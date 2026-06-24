@@ -16,23 +16,28 @@ function docToHtml(doc: unknown): string {
   try { return generateHTML(doc as object, EXTS) } catch { return '' }
 }
 
-function AlikeView({ alike }: { alike: AlikeBlock }) {
-  if (!alike?.games?.length && !alike?.name) return null
+function AlikeView({ alikes }: { alikes: AlikeBlock[] }) {
+  const blocks = (alikes || []).filter(b => b?.name || b?.games?.length)
+  if (!blocks.length) return null
   return (
     <div className="wf-alike-view">
-      {alike.name && <strong className="wf-alike-view-name">{alike.name}</strong>}
-      {!!alike?.games?.length && (
-        <ul>
-          {alike.games.map((g, i) => (
-            <li key={i}>
-              {g.icon_url && <img src={g.icon_url} alt="" width={16} height={16} />}
-              {g.app_link
-                ? <a href={g.app_link} target="_blank" rel="noopener noreferrer">{g.title}</a>
-                : <span>{g.title}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
+      {blocks.map((b, bi) => (
+        <div key={bi} className="wf-alike-view-block">
+          {b.name && <strong className="wf-alike-view-name">{b.name}</strong>}
+          {!!b.games?.length && (
+            <ul>
+              {b.games.map((g, i) => (
+                <li key={i}>
+                  {g.icon_url && <img src={g.icon_url} alt="" width={16} height={16} />}
+                  {g.app_link
+                    ? <a href={g.app_link} target="_blank" rel="noopener noreferrer">{g.title}</a>
+                    : <span>{g.title}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
@@ -52,8 +57,8 @@ export function FeedbackCell({ doc, no }: { doc: unknown; no: number | null }) {
   )
 }
 
-export function AlikeCell({ alike, no }: { alike: AlikeBlock | undefined; no: number | null }) {
-  const body = alike ? <AlikeView alike={alike} /> : null
+export function AlikeCell({ alikes, no }: { alikes: AlikeBlock[] | undefined; no: number | null }) {
+  const body = alikes?.length ? <AlikeView alikes={alikes} /> : null
   return (
     <div className="wf-cell">
       {no != null && <span className="wf-sec-no">{no}</span>}
@@ -73,7 +78,7 @@ export function FeedbackView({ sections }: { sections: Section[] }) {
           <div className="wf-section-feedback">
             {(() => { const html = docToHtml(s.feedback); return html ? <div className="wf-prose" dangerouslySetInnerHTML={{ __html: html }} /> : null })()}
           </div>
-          <div className="wf-section-alike"><AlikeView alike={s.alike} /></div>
+          <div className="wf-section-alike"><AlikeView alikes={s.alikes} /></div>
         </div>
       ))}
     </div>

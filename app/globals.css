@@ -1306,3 +1306,10 @@ input:checked + .slider:before {
 .wf-linkbar input:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
 .wf-linkbar button { padding: 5px 10px; font-size: 12.5px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); cursor: pointer; }
 .wf-linkbar button:hover { background: var(--surface-2); }
+.wf-alike-block { margin-bottom: 10px; }
+.wf-alike-block + .wf-alike-block { border-top: 1px dashed var(--border, #e3e3e3); padding-top: 8px; }
+.wf-alike-head { display: flex; align-items: center; gap: 6px; }
+.wf-alike-head .wf-alike-name { flex: 1; }
+.wf-alike-del { border: none; background: none; cursor: pointer; color: #b00; line-height: 1; padding: 2px 4px; }
+.wf-addgroup { border: 1px dashed var(--border, #ccc); background: none; cursor: pointer; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+.wf-alike-view-block + .wf-alike-view-block { margin-top: 6px; }

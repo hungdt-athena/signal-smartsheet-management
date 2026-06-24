@@ -1,11 +1,11 @@
 'use client'
-import { Section, GameAlikeGame } from './types'
+import { Section, AlikeBlock, GameAlikeGame } from './types'
 import { FeedbackEditor } from './FeedbackEditor'
 import { GameSearch } from './GameSearch'
 
-// One section = one 70/30 row. Left: a Tiptap feedback editor. Right: a named
-// "game alike" block — a section name plus a list of games, each with an
-// optional note. Reorder (↑/↓) and remove live in the row's left rail.
+// One section = one 70/30 row. Left: a Tiptap feedback editor. Right: one or
+// more named "game alike" groups, each a name + a list of games. Reorder (↑/↓)
+// and remove the whole section live in the row's left rail.
 export function SectionEditor({ section, index, total, onChange, onMove, onRemove }: {
   section: Section
   index: number
@@ -14,10 +14,14 @@ export function SectionEditor({ section, index, total, onChange, onMove, onRemov
   onMove: (dir: -1 | 1) => void
   onRemove: () => void
 }) {
-  const alike = section.alike
-  const setAlike = (patch: Partial<Section['alike']>) => onChange({ alike: { ...alike, ...patch } })
-  const addGame = (g: GameAlikeGame) => setAlike({ games: [...alike.games, g] })
-  const removeGame = (gi: number) => setAlike({ games: alike.games.filter((_, i) => i !== gi) })
+  const alikes = section.alikes
+  const setAlikes = (next: AlikeBlock[]) => onChange({ alikes: next })
+  const patchBlock = (bi: number, patch: Partial<AlikeBlock>) =>
+    setAlikes(alikes.map((b, i) => (i === bi ? { ...b, ...patch } : b)))
+  const addBlock = () => setAlikes([...alikes, { name: '', games: [] }])
+  const removeBlock = (bi: number) => setAlikes(alikes.filter((_, i) => i !== bi))
+  const addGame = (bi: number, g: GameAlikeGame) => patchBlock(bi, { games: [...alikes[bi].games, g] })
+  const removeGame = (bi: number, gi: number) => patchBlock(bi, { games: alikes[bi].games.filter((_, i) => i !== gi) })
 
   return (
     <div className="wf-section-row">
@@ -32,25 +36,33 @@ export function SectionEditor({ section, index, total, onChange, onMove, onRemov
       </div>
 
       <div className="wf-section-alike">
-        <input
-          className="wf-alike-name"
-          value={alike.name}
-          onChange={e => setAlike({ name: e.target.value })}
-          placeholder="Game Alike"
-        />
-        <ul className="wf-chips">
-          {alike.games.map((g, gi) => (
-            <li key={gi} className="wf-chip">
-              {g.icon_url && <img src={g.icon_url} alt="" width={18} height={18} />}
-              {g.app_link
-                ? <a href={g.app_link} target="_blank" rel="noopener noreferrer">{g.title}</a>
-                : <span>{g.title}</span>}
-              {g.manual && <span className="wf-manual" title="Not in DB">·manual</span>}
-              <button type="button" title="Remove game" onClick={() => removeGame(gi)}>✕</button>
-            </li>
-          ))}
-        </ul>
-        <GameSearch onPick={addGame} />
+        {alikes.map((block, bi) => (
+          <div key={bi} className="wf-alike-block">
+            <div className="wf-alike-head">
+              <input
+                className="wf-alike-name"
+                value={block.name}
+                onChange={e => patchBlock(bi, { name: e.target.value })}
+                placeholder="Game Alike"
+              />
+              <button type="button" className="wf-alike-del" title="Remove group" onClick={() => removeBlock(bi)}>✕</button>
+            </div>
+            <ul className="wf-chips">
+              {block.games.map((g, gi) => (
+                <li key={gi} className="wf-chip">
+                  {g.icon_url && <img src={g.icon_url} alt="" width={18} height={18} />}
+                  {g.app_link
+                    ? <a href={g.app_link} target="_blank" rel="noopener noreferrer">{g.title}</a>
+                    : <span>{g.title}</span>}
+                  {g.manual && <span className="wf-manual" title="Not in DB">·manual</span>}
+                  <button type="button" title="Remove game" onClick={() => removeGame(bi, gi)}>✕</button>
+                </li>
+              ))}
+            </ul>
+            <GameSearch onPick={g => addGame(bi, g)} />
+          </div>
+        ))}
+        <button type="button" className="wf-addgroup" onClick={addBlock}>+ Add group</button>
       </div>
     </div>
   )

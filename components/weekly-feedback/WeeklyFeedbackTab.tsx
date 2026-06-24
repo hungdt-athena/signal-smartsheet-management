@@ -321,7 +321,7 @@ export function WeeklyFeedbackTab() {
                     {row.batchSpan != null && <td className="wf-list-batch" rowSpan={row.batchSpan}>{batch}</td>}
                     {row.evalSpan != null && <td className="wf-list-eval" rowSpan={row.evalSpan}>{row.rec.evaluator}</td>}
                     <td className={cls}><FeedbackCell doc={row.section?.feedback ?? null} no={no} /></td>
-                    <td className={cls}><AlikeCell alike={row.section?.alike} no={no} /></td>
+                    <td className={cls}><AlikeCell alikes={row.section?.alikes} no={no} /></td>
                   </tr>
                 )
               })}
