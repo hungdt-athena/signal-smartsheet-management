@@ -7,7 +7,9 @@
     "build": "node scripts/stamp-version.mjs && next build",
     "start": "next start -p ${PORT:-3000}",
     "lint": "next lint",
-    "test": "jest"
+    "test": "jest",
+    "import-feedback": "npx tsx scripts/import-weekly-feedback.ts",
+    "import-feedback:teardown": "npx tsx scripts/import-weekly-feedback-teardown.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
