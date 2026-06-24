@@ -302,7 +302,7 @@ export function WeeklyFeedbackTab() {
               </div>
               {historyOpen && (
                 <div className="wf-history">
-                  <p className="wf-history-note">Versions auto-delete 3 days after they're saved. Preview before restoring.</p>
+                  <p className="wf-history-note">Versions auto-delete 3 days after being saved. Preview before restoring.</p>
                   {snapshots.length === 0 && <p className="h-sub" style={{ margin: 0 }}>No earlier versions saved yet.</p>}
                   <div
                     className="wf-history-list"
