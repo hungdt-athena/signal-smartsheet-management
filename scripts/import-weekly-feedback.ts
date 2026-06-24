@@ -143,29 +143,44 @@ async function main() {
     if (!evaluator) { report.unresolvedTab.push(tab); continue }
     report.resolved[tab] = evaluator
 
-    // Column A is a merged cell spanning a week's rows: carry the last valid week
-    // label forward. Every content row under it becomes one section, so a week
-    // with several feedback rows yields a multi-section record.
+    // Column A (week label) AND column B (feedback) are merged cells spanning
+    // several rows; the API returns the value only on the top row, blanks below.
+    //   • Carry the last valid week label forward → one record per (batch, evaluator).
+    //   • A row WITH feedback starts a new SECTION. Rows below it with empty
+    //     feedback are continuations: their game-alike links append to that
+    //     section. So a week with N feedback blocks yields N sections, each
+    //     gathering the games from all the rows its feedback spans.
     const groups = new Map<string, any[]>() // batch -> sections[]
     let currentBatch: string | null = null
+    let currentSection: { id: string; feedback: unknown; alikes: any[] } | null = null
     const rows = sheet.data?.[0]?.rowData ?? []
     for (let r = 1; r < rows.length; r++) { // row 0 is the header
       const cells = rows[r]?.values ?? []
       const colA = (cells[0]?.formattedValue ?? '').trim()
       if (colA) {
-        if (isValidWeekLabel(colA)) { currentBatch = colA; if (!groups.has(colA)) groups.set(colA, []) }
-        else { report.skippedLabel.push(`${tab}: "${colA}"`); currentBatch = null; continue } // banner/divider row
+        if (isValidWeekLabel(colA)) { currentBatch = colA; if (!groups.has(colA)) groups.set(colA, []); currentSection = null }
+        else { report.skippedLabel.push(`${tab}: "${colA}"`); currentBatch = null; currentSection = null; continue } // banner/divider
       }
       if (!currentBatch) continue // orphan row with no week label above it
 
       const fbCell = toRichCell(cells[1])
       const alikeCell = toRichCell(cells[2])
-      if (!fbCell.text.trim() && !alikeCell.text.trim()) continue // blank row
+      const hasFb = !!fbCell.text.trim()
+      if (!hasFb && !alikeCell.text.trim()) continue // fully blank row
 
-      const { doc: feedback, mentions } = await upgradeFeedbackLinks(parseFeedbackDoc(fbCell))
-      report.feedbackMentions += mentions
+      // New section when this row carries feedback (or it's the batch's first row).
+      if (hasFb || !currentSection) {
+        const { doc, mentions } = await upgradeFeedbackLinks(parseFeedbackDoc(fbCell))
+        report.feedbackMentions += mentions
+        currentSection = { id: randomUUID(), feedback: doc, alikes: [] }
+        groups.get(currentBatch)!.push(currentSection)
+        report.sections++
+      }
+      const sec = currentSection!
 
-      const alikes = []
+      // Append this row's game-alike blocks. Merge an unnamed (flat) block into a
+      // trailing unnamed block so per-row links collapse into one group; named
+      // (bold-header) blocks stay separate.
       for (const b of parseAlikeCell(alikeCell)) {
         const games = []
         for (const rg of b.games) {
@@ -173,10 +188,10 @@ async function main() {
           games.push(m)
           if (m.manual) report.manual++; else report.matched++
         }
-        alikes.push({ name: b.name, games })
+        const last = sec.alikes[sec.alikes.length - 1]
+        if (!b.name && last && !last.name) last.games.push(...games)
+        else sec.alikes.push({ name: b.name, games })
       }
-      groups.get(currentBatch)!.push({ id: randomUUID(), feedback, alikes })
-      report.sections++
     }
 
     // One staging record per (batch, evaluator), pending review. Re-running resets
