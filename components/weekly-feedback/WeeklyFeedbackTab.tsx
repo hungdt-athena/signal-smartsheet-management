@@ -66,6 +66,7 @@ export function WeeklyFeedbackTab() {
   const [records, setRecords] = useState<WeeklyRecord[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [autoSave, setAutoSave] = useState(true)
   const dirtyRef = useRef(false)
   const dragFrom = useRef<number | null>(null)
   // When we open a week straight from a list row we already hold its sections —
@@ -133,10 +134,10 @@ export function WeeklyFeedbackTab() {
   const markDirty = () => { setDirty(true); dirtyRef.current = true }
 
   useEffect(() => {
-    if (!dirty || !viewingSelf || !selectedBatch) return
+    if (!autoSave || !dirty || !viewingSelf || !selectedBatch) return
     const t = setTimeout(() => { void save() }, 1500)
     return () => clearTimeout(t)
-  }, [dirty, viewingSelf, selectedBatch, save])
+  }, [autoSave, dirty, viewingSelf, selectedBatch, save])
 
   // --- Section mutations (Editor) ---
   const updateSection = (id: string, patch: Partial<Section>) => {
@@ -280,6 +281,10 @@ export function WeeklyFeedbackTab() {
                 </div>
                 <div className="wf-label-actions">
                   <span className="wf-savestate">{saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'All changes saved'}</span>
+                  <button type="button" className={`wf-autosave${autoSave ? ' on' : ''}`} onClick={() => setAutoSave(v => !v)} title="Toggle auto-save (off = save manually)">
+                    <span className="wf-autosave-dot" />Auto-save {autoSave ? 'On' : 'Off'}
+                  </button>
+                  <button type="button" className="wf-save-btn" disabled={saving || !dirty} onClick={() => save()}>{saving ? 'Saving…' : 'Save'}</button>
                   <button type="button" className="wf-history-btn" onClick={loadHistory}>History</button>
                 </div>
               </div>

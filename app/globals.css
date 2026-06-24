@@ -995,6 +995,27 @@ input:checked + .slider:before {
 }
 .wf-history-btn:hover { color: var(--text); background: var(--surface-2); border-color: var(--border-strong); }
 
+/* Auto-save toggle + manual Save (Editor toolbar) */
+.wf-autosave {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; font-size: 12px; font-weight: 600;
+  color: var(--muted); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  transition: all 0.15s ease;
+}
+.wf-autosave:hover { border-color: var(--border-strong); }
+.wf-autosave-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.wf-autosave.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 35%, var(--border)); background: var(--good-weak); }
+.wf-autosave.on .wf-autosave-dot { background: var(--good); }
+.wf-save-btn {
+  padding: 3px 12px; font-size: 12px; font-weight: 600;
+  color: var(--accent-contrast); background: var(--accent);
+  border: 1px solid var(--accent); border-radius: 6px; cursor: pointer;
+  transition: all 0.15s ease;
+}
+.wf-save-btn:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
+.wf-save-btn:disabled { opacity: 0.45; cursor: default; }
+
 /* History panel: recent auto-saved versions with one-click restore. */
 .wf-history {
   display: flex; flex-direction: column; gap: 2px;
