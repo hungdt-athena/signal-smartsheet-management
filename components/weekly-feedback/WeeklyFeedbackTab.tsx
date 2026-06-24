@@ -5,6 +5,7 @@ import { StyledSelect } from '@/components/StyledSelect'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { SectionEditor } from './SectionEditor'
 import { FeedbackView, FeedbackCell, AlikeCell } from './FeedbackView'
+import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { ImportReviewView } from './ImportReviewView'
 import { Section, newSection } from './types'
 
@@ -32,7 +33,6 @@ export function WeeklyFeedbackTab() {
   // evaluator ('' = all evaluators, managers only; non-managers are locked to self).
   const [listBatch, setListBatch] = useState('')
   const [listEvaluator, setListEvaluator] = useState('')
-  const listBatchInit = useRef(false)
 
   const [sections, setSections] = useState<Section[]>([])
   const [records, setRecords] = useState<WeeklyRecord[]>([])
@@ -52,8 +52,8 @@ export function WeeklyFeedbackTab() {
   // picked their own name. Only then do we offer the editors + Save.
   const viewingSelf = !isManager || !evaluator || evaluator.toLowerCase() === userName.toLowerCase()
 
-  // One-shot load of batches (+ evaluators for managers). Default the list-view
-  // batch filter to the current (newest) batch the first time batches arrive.
+  // One-shot load of batches (+ evaluators for managers). List-view batch filter
+  // defaults to '' (All weeks); batches arrive already sorted newest → oldest.
   useEffect(() => {
     fetch('/api/weekly-feedback/batches')
       .then(r => r.json())
@@ -61,7 +61,6 @@ export function WeeklyFeedbackTab() {
         const bs: string[] = d.batches || []
         setBatches(bs)
         if (isManager) setEvaluators(Array.isArray(d.evaluators) ? d.evaluators : [])
-        if (!listBatchInit.current && bs.length) { listBatchInit.current = true; setListBatch(bs[0]) }
       })
       .catch(() => { setBatches([]); setEvaluators([]) })
   }, [isManager])
@@ -158,7 +157,8 @@ export function WeeklyFeedbackTab() {
   }
 
   // Group list rows by batch so the Batch cell can span its evaluators (rowspan).
-  // Map preserves first-seen order; evaluators sorted within each batch.
+  // Groups are ordered newest week → oldest by their "W<n> <Month>, <Year>" label;
+  // evaluators are sorted within each batch.
   const groups: { batch: string; rows: WeeklyRecord[] }[] = []
   const groupIdx = new Map<string, number>()
   for (const r of records) {
@@ -166,6 +166,7 @@ export function WeeklyFeedbackTab() {
     groups[groupIdx.get(r.batch)!].rows.push(r)
   }
   groups.forEach(g => g.rows.sort((a, b) => a.evaluator.localeCompare(b.evaluator)))
+  groups.sort((a, b) => weekLabelOrder(b.batch) - weekLabelOrder(a.batch) || b.batch.localeCompare(a.batch))
 
   // Flatten to one display row PER SECTION so feedback ↔ game-alike align by row.
   // Batch cell spans all sections of its group; Evaluator cell spans its sections.

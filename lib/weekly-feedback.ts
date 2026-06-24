@@ -1,5 +1,16 @@
 import type { Section, AlikeBlock, GameAlikeGame } from '@/components/weekly-feedback/types'
 
+// Sortable key for a "W<week> <Month>, <Year>" batch label (e.g. "W4 Jun, 2026").
+// Higher = more recent, so sort descending for newest-first. Unparseable labels
+// return -1 (sort to the end). Pure — safe to use on client and server.
+const MONTHS: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 }
+export function weekLabelOrder(label: string): number {
+  const m = (label || '').trim().match(/^W(\d+)\s+([A-Za-z]+),\s*(\d{4})$/i)
+  if (!m) return -1
+  const mon = MONTHS[m[2].slice(0, 3).toLowerCase()] ?? 0
+  return parseInt(m[3], 10) * 10000 + mon * 100 + parseInt(m[1], 10)
+}
+
 // Tiptap's Link extension only sanitizes hrefs at editor-input time, not when
 // generateHTML serializes stored JSON. Feedback can be written via the API
 // directly, so strip link marks with unsafe href protocols before persisting —

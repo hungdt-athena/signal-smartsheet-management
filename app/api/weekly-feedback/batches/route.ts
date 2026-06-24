@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { weekLabelOrder } from '@/lib/weekly-feedback'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,29 +9,21 @@ export async function GET() {
   const guard = await requireAuth()
   if (guard) return guard
 
-  // Distinct weekly labels, newest activity first. GROUP BY already yields one
-  // row per batch; ordered by the latest assignment date per label so the
-  // dropdown reads top-down by week. (No SELECT DISTINCT: combined with an
-  // aggregate ORDER BY, Postgres requires DISTINCT exprs in the select list —
-  // 42P10 — and GROUP BY makes it redundant anyway.)
-  const rows = await sql<{ batch: string }[]>`
-    SELECT batch
-    FROM game_evaluations
-    WHERE batch IS NOT NULL
-    GROUP BY batch
-    ORDER BY MAX(COALESCE(assigned_date, imported_at::date)) DESC NULLS LAST
+  // Batches + evaluators come from weekly_feedback itself (not game_evaluations),
+  // so the dropdowns reflect exactly the weeks/people that HAVE feedback —
+  // including ones imported from the legacy sheet that never appear in
+  // game_evaluations. Batches are sorted newest week → oldest by their
+  // "W<n> <Month>, <Year>" label.
+  const batchRows = await sql<{ batch: string }[]>`
+    SELECT DISTINCT batch FROM weekly_feedback WHERE batch IS NOT NULL
+  `
+  const batches = batchRows
+    .map(r => r.batch)
+    .sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a) || b.localeCompare(a))
+
+  const evalRows = await sql<{ evaluator: string }[]>`
+    SELECT DISTINCT evaluator FROM weekly_feedback WHERE evaluator IS NOT NULL ORDER BY evaluator
   `
 
-  // Distinct evaluator names across ALL categories — union of initial/final
-  // evaluator columns. Powers the admin/moderator picker in the Weekly Feedback
-  // tab (avoids the n8n-webhook /api/evaluators, which 500s).
-  const evalRows = await sql<{ name: string }[]>`
-    SELECT DISTINCT name FROM (
-      SELECT initial_evaluator AS name FROM game_evaluations WHERE initial_evaluator IS NOT NULL
-      UNION
-      SELECT final_evaluator   AS name FROM game_evaluations WHERE final_evaluator   IS NOT NULL
-    ) e ORDER BY name
-  `
-
-  return NextResponse.json({ batches: rows.map(r => r.batch), evaluators: evalRows.map(r => r.name) })
+  return NextResponse.json({ batches, evaluators: evalRows.map(r => r.evaluator) })
 }
