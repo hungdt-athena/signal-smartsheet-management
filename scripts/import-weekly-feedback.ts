@@ -2,7 +2,12 @@
 // weekly_feedback. App is the source of truth afterward; delete this script once
 // the import is accepted.
 //
-// Run (dry run first):
+// Each sheet tab is auto-resolved to the canonical evaluator string from
+// game_evaluations via a case/space-insensitive match, so no manual mapping is
+// needed for tabs that match. config/evaluator-map.json is OPTIONAL and only
+// used to override tabs the dry-run reports under unresolvedTab / ambiguousTab.
+//
+// Run (dry run first — review the report's `resolved` map before writing):
 //   GOOGLE_APPLICATION_CREDENTIALS=./sa.json \
 //   SPREADSHEET_ID=<id> DATABASE_URL=<url> \
 //   npx tsx scripts/import-weekly-feedback.ts --dry-run
@@ -20,8 +25,17 @@ const MAP_PATH = process.env.EVALUATOR_MAP || './config/evaluator-map.json'
 if (!SPREADSHEET_ID) { console.error('SPREADSHEET_ID is required'); process.exit(1) }
 if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); process.exit(1) }
 
-const evaluatorMap: Record<string, string> = JSON.parse(readFileSync(MAP_PATH, 'utf8'))
+// Optional explicit overrides (tab -> exact DB evaluator string). The script
+// auto-resolves each tab to the canonical evaluator by normalized match against
+// the real evaluator list, so this file is only needed for tabs that don't
+// auto-resolve (or that collide). A missing file is fine.
+let overrideMap: Record<string, string> = {}
+try { overrideMap = JSON.parse(readFileSync(MAP_PATH, 'utf8')) } catch { /* no overrides */ }
+
 const sql = postgres(process.env.DATABASE_URL, { ssl: 'require' })
+
+// Case/space-insensitive key so a tab like "HuyDD" matches a stored "Huy DD".
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
 
 // Google CellData → RichCell. Google omits startIndex on the first run; ensure a
 // run starting at 0 exists so runAt() covers the whole string.
@@ -49,6 +63,28 @@ async function matchGame(g: RawGame) {
   return { game_id: null, title: g.title, app_link: g.app_link, icon_url: null, manual: true }
 }
 
+// The canonical evaluator strings the app uses everywhere else come from
+// game_evaluations (same source as the Weekly Feedback manager picker). Build a
+// normalized-key -> canonical-string index so a tab resolves to the EXACT stored
+// string regardless of case/spacing. Keys that map to two different canonical
+// strings are flagged as collisions (must be disambiguated via the override map).
+async function loadEvaluatorIndex() {
+  const rows = await sql<{ name: string }[]>`
+    SELECT DISTINCT name FROM (
+      SELECT initial_evaluator AS name FROM game_evaluations WHERE initial_evaluator IS NOT NULL
+      UNION
+      SELECT final_evaluator   AS name FROM game_evaluations WHERE final_evaluator   IS NOT NULL
+    ) e`
+  const index = new Map<string, string>()
+  const collisions = new Set<string>()
+  for (const { name } of rows) {
+    const k = norm(name)
+    if (index.has(k) && index.get(k) !== name) collisions.add(k)
+    else if (!index.has(k)) index.set(k, name)
+  }
+  return { index, collisions }
+}
+
 async function main() {
   const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] })
   const sheets = google.sheets({ version: 'v4', auth: await auth.getClient() as any })
@@ -58,12 +94,20 @@ async function main() {
     fields: 'sheets(properties.title,data.rowData.values(formattedValue,hyperlink,textFormatRuns(startIndex,format(bold,link/uri))))',
   })
 
-  const report = { imported: 0, skippedTab: [] as string[], skippedLabel: [] as string[], matched: 0, manual: 0 }
+  const { index, collisions } = await loadEvaluatorIndex()
+  const report = { imported: 0, resolved: {} as Record<string, string>, unresolvedTab: [] as string[], ambiguousTab: [] as string[], skippedLabel: [] as string[], matched: 0, manual: 0 }
 
   for (const sheet of res.data.sheets ?? []) {
     const tab = sheet.properties?.title ?? ''
-    const evaluator = evaluatorMap[tab]
-    if (!evaluator || evaluator.startsWith('REPLACE_')) { report.skippedTab.push(tab); continue }
+    // Resolve tab -> canonical evaluator: explicit override wins, else normalized
+    // auto-match against the real evaluator list. Never guess on a miss.
+    const override = overrideMap[tab]
+    const explicit = override && !override.startsWith('REPLACE_') ? override : null
+    const k = norm(tab)
+    if (!explicit && collisions.has(k)) { report.ambiguousTab.push(tab); continue }
+    const evaluator = explicit ?? index.get(k) ?? null
+    if (!evaluator) { report.unresolvedTab.push(tab); continue }
+    report.resolved[tab] = evaluator
     const rows = sheet.data?.[0]?.rowData ?? []
     for (let r = 1; r < rows.length; r++) { // row 0 is the header
       const cells = rows[r]?.values ?? []

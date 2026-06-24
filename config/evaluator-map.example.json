@@ -1,12 +1,4 @@
 {
-  "HuyDD": "REPLACE_WITH_DB_NAME",
-  "KietCD": "REPLACE_WITH_DB_NAME",
-  "MyDV": "REPLACE_WITH_DB_NAME",
-  "MiTT": "REPLACE_WITH_DB_NAME",
-  "GabrielTran": "REPLACE_WITH_DB_NAME",
-  "MyTL": "REPLACE_WITH_DB_NAME",
-  "ThuDT": "REPLACE_WITH_DB_NAME",
-  "NhiLV": "REPLACE_WITH_DB_NAME",
-  "NgocTT": "REPLACE_WITH_DB_NAME",
-  "TriD": "REPLACE_WITH_DB_NAME"
+  "_comment": "OPTIONAL override map. The importer auto-resolves each sheet tab to the canonical evaluator string from game_evaluations by case/space-insensitive match, so you usually need NOTHING here. Copy to config/evaluator-map.json (gitignored) and add an entry ONLY for tabs the dry-run reports under unresolvedTab or ambiguousTab. Format: \"TabName\": \"Exact DB Evaluator String\". Remove this _comment key in your real file.",
+  "SomeTabThatDidNotAutoResolve": "Exact DB Evaluator String"
 }
