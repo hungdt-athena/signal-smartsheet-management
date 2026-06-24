@@ -1,6 +1,20 @@
 export interface GameHit { game_id: string; title: string; app_link: string | null; icon_url: string | null }
 export interface GameAlikeGame { game_id: string | null; title: string; app_link: string | null; icon_url: string | null; manual: boolean }
-export interface GameAlikeSection { name: string | null; games: GameAlikeGame[] }
+
+// A week is an ordered list of sections. Each section is one 70/30 row: a Tiptap
+// feedback doc on the left, and a named "game alike" block (name + games) on the right.
+export interface AlikeBlock { name: string; games: GameAlikeGame[] }
+export interface Section { id: string; feedback: unknown; alike: AlikeBlock }
+
+export const hitToGame = (h: GameHit): GameAlikeGame => ({ ...h, manual: false })
+
+// Stable id for a fresh section. crypto.randomUUID is available in every browser
+// we target and on the Node server, so it works on both sides of the wire.
+export const newSection = (): Section => ({
+  id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `s_${Date.now()}_${Math.round(Math.random() * 1e6)}`,
+  feedback: null,
+  alike: { name: '', games: [] },
+})
 
 export async function searchGames(opts: { q?: string; link?: string }): Promise<GameHit[]> {
   const params = new URLSearchParams()

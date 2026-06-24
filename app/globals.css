@@ -982,6 +982,44 @@ input:checked + .slider:before {
 .wf-label-row { display: flex; align-items: baseline; justify-content: space-between; margin-top: 2px; }
 .wf-label-row .wf-label { margin-top: 0; }
 .wf-savestate { font-size: 11.5px; color: var(--faint); }
+.wf-label-actions { display: flex; align-items: center; gap: 10px; }
+.wf-history-btn {
+  padding: 3px 10px;
+  font-size: 12px; font-weight: 600;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.wf-history-btn:hover { color: var(--text); background: var(--surface-2); border-color: var(--border-strong); }
+
+/* History panel: recent auto-saved versions with one-click restore. */
+.wf-history {
+  display: flex; flex-direction: column; gap: 2px;
+  margin: 0 0 12px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  max-height: 220px; overflow: auto;
+}
+.wf-history-item { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 6px; font-size: 12.5px; }
+.wf-history-item:hover { background: var(--surface); }
+.wf-history-when { color: var(--text); font-weight: 500; }
+.wf-history-meta { color: var(--faint); font-size: 11.5px; }
+.wf-history-item button {
+  margin-left: auto;
+  padding: 3px 12px;
+  font-size: 12px; font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--accent-weak);
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.wf-history-item button:hover { background: color-mix(in srgb, var(--accent-weak) 70%, var(--accent) 12%); }
 
 /* Editor toolbar: small ghost/segmented buttons consistent with the app. */
 .wf-editor { display: flex; flex-direction: column; gap: 6px; }
@@ -1130,10 +1168,12 @@ input:checked + .slider:before {
 .wf-hits li button:hover { background: var(--surface-2); }
 .wf-hits li button img { border-radius: 5px; }
 
-/* List view table — styled like a spreadsheet: full cell gridlines, tinted
-   sticky header, fixed Week / Game Alike columns, Feedback flexes. */
-.wf-list { table-layout: fixed; border: 1px solid var(--border); }
-.wf-list th, .wf-list td { border: 1px solid var(--border); }
+/* List view table — spreadsheet-like. border-collapse:separate (not collapse)
+   so the sticky header stays above rowspanned cells in Chrome; gridlines are
+   drawn per-cell (right = columns, bottom = rows) to avoid doubling. */
+.wf-list { table-layout: fixed; border: 1px solid var(--border); border-collapse: separate; border-spacing: 0; }
+.wf-list th, .wf-list td { border-right: 1px solid var(--border); }
+.wf-list th:last-child, .wf-list td:last-child { border-right: none; }
 .wf-list th {
   text-align: left;
   font-size: 11.5px;
@@ -1143,19 +1183,112 @@ input:checked + .slider:before {
   color: var(--muted);
   background: var(--surface-2);
   padding: 8px 12px;
+  border-bottom: 1px solid var(--border-strong);
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 3;
 }
 .wf-list td { vertical-align: top; padding: 10px 12px; font-size: 13px; line-height: 1.55; }
-.wf-list th:first-child, .wf-list .wf-list-week { width: 132px; white-space: nowrap; font-weight: 600; }
-.wf-list th:last-child, .wf-list td:last-child { width: 300px; }
+/* Columns: Batch | Evaluator | Feedback (flex) | Game Alike (wide). */
+.wf-list th:nth-child(1), .wf-list .wf-list-batch { width: 116px; white-space: nowrap; font-weight: 600; }
+.wf-list th:nth-child(2), .wf-list .wf-list-eval { width: 140px; white-space: nowrap; }
+.wf-list th:last-child, .wf-list td:last-child { width: 440px; }
+/* Row-boundary dividers form a hierarchy: solid+strong between batches and
+   between evaluators; faint dashed between sections of the same evaluator.
+   The rowspanned Batch/Evaluator cells end exactly on their own boundary, so
+   their solid bottom border only draws there. */
+.wf-list .wf-list-batch { vertical-align: top; background: var(--surface-2); color: var(--text); border-bottom: 1px solid var(--border-strong); }
+.wf-list .wf-list-eval { vertical-align: top; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border-strong); }
+.wf-list td.wf-c-solid { border-bottom: 1px solid var(--border-strong); }
+.wf-list td.wf-c-sec { border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent); }
 .wf-list tbody tr:hover { background: var(--surface-2); }
 .wf-list .wf-view { display: flex; flex-direction: column; gap: 8px; }
 .wf-list .wf-prose a { word-break: break-word; }
+/* List cells render plain text — strip the editor box (border/min-height/bg). */
+.wf-list .wf-cell .wf-prose { min-height: 0; border: none; padding: 0; background: transparent; box-shadow: none; border-radius: 0; }
+
+/* One section per list row — feedback ↔ game-alike align by row border. The
+   number badge labels the section (only shown when a record has >1). */
+.wf-cell { display: flex; gap: 8px; align-items: flex-start; }
+.wf-cell-body { flex: 1; min-width: 0; }
+.wf-sec-no {
+  flex: none;
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  color: var(--muted);
+  background: var(--surface-3);
+  border-radius: 999px;
+}
+.wf-faint { color: var(--faint); }
 .wf-gamealike-view { display: flex; flex-direction: column; gap: 6px; }
 .wf-gamealike-view ul { margin: 2px 0; padding-left: 18px; }
 .wf-section-view strong { font-size: 12.5px; }
+
+/* ===== Multi-section editor: each section is one 70/30 row ===== */
+.wf-sections { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 10px; }
+.wf-section-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--surface-2);
+}
+.wf-section-feedback { flex: 7 1 0; min-width: 0; }
+.wf-section-alike {
+  flex: 3 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+}
+
+/* Left rail: reorder + remove, stacked. */
+.wf-section-rail { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.wf-section-rail button {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.wf-section-rail button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); border-color: var(--border-strong); }
+.wf-section-rail button:disabled { opacity: 0.35; cursor: default; }
+.wf-section-rail .wf-section-del:hover { color: var(--danger, #e5484d); border-color: var(--danger, #e5484d); }
+
+/* Game-alike panel (right 30%). */
+.wf-alike-name {
+  padding: 5px 9px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+.wf-alike-name:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
+
+/* Read-only section rows (manager viewing another evaluator). */
+.wf-section-row-view { background: transparent; }
+.wf-alike-view { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.wf-alike-view-name { font-size: 12.5px; }
+.wf-alike-view ul { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.wf-alike-view li { display: flex; align-items: center; gap: 5px; }
+.wf-alike-view li img { border-radius: 4px; flex: none; }
+
+@media (max-width: 820px) {
+  .wf-section-row { flex-direction: column; }
+  .wf-section-alike { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 10px; }
+  .wf-section-rail { flex-direction: row; }
+}
 
 /* ===== Game mention chip (inline atom node) ===== */
 .wf-mention { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; margin: 0 1px; border-radius: 999px; background: var(--accent-weak); border: 1px solid var(--accent-border); color: var(--accent-strong); text-decoration: none; font-size: 12.5px; font-weight: 500; white-space: nowrap; vertical-align: baseline; cursor: pointer; }

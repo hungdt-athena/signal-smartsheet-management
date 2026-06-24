@@ -608,7 +608,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   useEffect(() => {
     if (!autoSave || !needsSave || saving || !canEdit) return
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
-    autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 800)
+    autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 1500)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSave, needsSave, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots])
