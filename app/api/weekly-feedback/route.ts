@@ -3,101 +3,10 @@ import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
+import { sanitizeSections, rowToSections } from '@/lib/weekly-feedback'
+import type { Section } from '@/components/weekly-feedback/types'
 
 export const dynamic = 'force-dynamic'
-
-// Tiptap's Link extension only sanitizes hrefs at editor-input time, not when
-// generateHTML serializes stored JSON. Feedback can be written via the API
-// directly, so strip link marks with unsafe href protocols before persisting —
-// otherwise a crafted javascript:/data: href would XSS an admin viewing it.
-const SAFE_HREF = /^(https?:\/\/|mailto:|tel:|\/|#)/i
-
-function isSafeHref(href: unknown): boolean {
-  return typeof href === 'string' && SAFE_HREF.test(href.trim())
-}
-
-function sanitizeNode(node: unknown): unknown {
-  if (!node || typeof node !== 'object') return node
-  const n = node as { marks?: unknown; content?: unknown; [k: string]: unknown }
-  const out: Record<string, unknown> = { ...n }
-  if (Array.isArray(n.marks)) {
-    out.marks = (n.marks as unknown[]).filter((m) => {
-      const mark = m as { type?: string; attrs?: { href?: unknown } }
-      if (mark?.type !== 'link') return true
-      return isSafeHref(mark?.attrs?.href)
-    })
-  }
-  // gameMention is a node (not a mark) with an href attribute — sanitize it too.
-  const typed = n as { type?: string; attrs?: { href?: unknown } }
-  if (typed.type === 'gameMention') {
-    const attrs = (typed.attrs ?? {}) as Record<string, unknown>
-    out.attrs = { ...attrs, href: isSafeHref(attrs.href) ? attrs.href : null }
-  }
-  if (Array.isArray(n.content)) {
-    out.content = (n.content as unknown[]).map(sanitizeNode)
-  }
-  return out
-}
-
-// A section's feedback is a Tiptap document; sanitize its link marks the same way.
-function sanitizeDoc(doc: unknown): unknown {
-  if (!doc || typeof doc !== 'object') return doc
-  return sanitizeNode(doc)
-}
-
-interface GameAlikeGame { game_id: string | null; title: string; app_link: string | null; icon_url: string | null; manual: boolean }
-interface Section { id: string; feedback: unknown; alike: { name: string; games: GameAlikeGame[] } }
-
-function sanitizeGame(g: unknown): GameAlikeGame {
-  const x = (g ?? {}) as Record<string, unknown>
-  return {
-    game_id: typeof x.game_id === 'string' ? x.game_id : null,
-    title: typeof x.title === 'string' ? x.title : '',
-    // app_link is rendered as <a href> in the read-only view — same XSS surface.
-    app_link: isSafeHref(x.app_link) ? (x.app_link as string) : null,
-    icon_url: isSafeHref(x.icon_url) ? (x.icon_url as string) : null,
-    manual: !!x.manual,
-  }
-}
-
-function sanitizeSections(input: unknown): Section[] {
-  if (!Array.isArray(input)) return []
-  return input.map((s, i) => {
-    const x = (s ?? {}) as Record<string, unknown>
-    const alike = (x.alike ?? {}) as Record<string, unknown>
-    return {
-      id: typeof x.id === 'string' && x.id ? x.id : `s_${i}`,
-      feedback: sanitizeDoc(x.feedback ?? null),
-      alike: {
-        name: typeof alike.name === 'string' ? alike.name : '',
-        games: Array.isArray(alike.games) ? alike.games.map(sanitizeGame) : [],
-      },
-    }
-  })
-}
-
-// Pre-018 rows store `feedback` (Tiptap doc) + `game_alike` (either an old
-// structured [{name,games}] array or a Tiptap doc) in separate columns. Fold
-// them into a single section so old records keep rendering after the migration.
-function legacyToSections(feedback: unknown, gameAlike: unknown): Section[] {
-  const games: GameAlikeGame[] = []
-  if (Array.isArray(gameAlike)) {
-    for (const sec of gameAlike) {
-      const gs = (sec as { games?: unknown })?.games
-      if (Array.isArray(gs)) for (const g of gs) games.push(sanitizeGame(g))
-    }
-  }
-  // If game_alike was free-text (a Tiptap doc), surface it as feedback rather
-  // than dropping it; structured games above take priority for the games list.
-  const fb = feedback ?? (!Array.isArray(gameAlike) ? (gameAlike ?? null) : null)
-  if (!fb && !games.length) return []
-  return [{ id: 'legacy', feedback: fb ?? null, alike: { name: '', games } }]
-}
-
-function rowToSections(row: { sections?: unknown; feedback?: unknown; game_alike?: unknown }): Section[] {
-  if (Array.isArray(row.sections)) return row.sections as Section[]
-  return legacyToSections(row.feedback, row.game_alike)
-}
 
 interface SessionInfo { isManager: boolean; name: string }
 
