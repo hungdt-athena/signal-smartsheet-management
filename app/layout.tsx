@@ -16,7 +16,7 @@ const ibmPlexMono = IBM_Plex_Mono({
   variable: '--font-ibm-plex-mono',
 })
 
-export const metadata: Metadata = { title: 'Signal — Playtest Management' }
+export const metadata: Metadata = { title: 'Signal - Playtest Management' }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
