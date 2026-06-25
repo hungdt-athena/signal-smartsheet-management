@@ -60,6 +60,13 @@ function sanitizeGame(g: unknown): GameAlikeGame {
   }
 }
 
+// Flat-list variant for the evaluation "Game Alike" field (no named groups).
+// Reuses sanitizeGame's per-field XSS guard; drops entries with no title.
+export function sanitizeAlikeGames(input: unknown): GameAlikeGame[] {
+  if (!Array.isArray(input)) return []
+  return input.map(sanitizeGame).filter((g) => g.title.trim().length > 0)
+}
+
 function sanitizeAlike(raw: unknown): AlikeBlock {
   const a = (raw ?? {}) as Record<string, unknown>
   return {

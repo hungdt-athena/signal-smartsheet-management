@@ -1,4 +1,4 @@
-import { sanitizeSections, legacyToSections, rowToSections, isSafeHref } from '@/lib/weekly-feedback'
+import { sanitizeSections, legacyToSections, rowToSections, isSafeHref, sanitizeAlikeGames } from '@/lib/weekly-feedback'
 
 describe('lib/weekly-feedback', () => {
   it('folds a legacy single `alike` object into `alikes[]`', () => {
@@ -34,5 +34,21 @@ describe('lib/weekly-feedback', () => {
   it('rowToSections prefers sections and folds legacy alike on read', () => {
     expect(rowToSections({ sections: [{ id: 's', feedback: null, alike: { name: 'N', games: [] } }] })[0].alikes).toEqual([{ name: 'N', games: [] }])
     expect(rowToSections({ feedback: null, game_alike: [{ games: [] }] })).toEqual([])
+  })
+
+  it('sanitizeAlikeGames keeps safe games, drops blanks and unsafe links', () => {
+    expect(sanitizeAlikeGames([
+      { game_id: 'g1', title: 'Candy', app_link: 'https://a', icon_url: 'https://i', manual: false },
+      { title: '   ', app_link: 'https://b', manual: true },
+      { title: 'Bad', app_link: 'javascript:alert(1)', manual: true },
+    ])).toEqual([
+      { game_id: 'g1', title: 'Candy', app_link: 'https://a', icon_url: 'https://i', manual: false },
+      { game_id: null, title: 'Bad', app_link: null, icon_url: null, manual: true },
+    ])
+  })
+
+  it('sanitizeAlikeGames returns [] for non-arrays', () => {
+    expect(sanitizeAlikeGames(null)).toEqual([])
+    expect(sanitizeAlikeGames({})).toEqual([])
   })
 })
