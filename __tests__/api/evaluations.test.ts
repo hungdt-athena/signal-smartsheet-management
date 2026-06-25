@@ -112,6 +112,14 @@ describe('GET /api/evaluations', () => {
     expect(q).not.toContain("metadata->'categories'")
   })
 
+  it('list query selects game_alike and final_note', async () => {
+    setupSql({ months: [{ year: 2026, month: 6 }] })
+    await get('category=puzzle&month=auto&page=1')
+    const q = allQueries()
+    expect(q).toContain('ge.game_alike')
+    expect(q).toContain('ge.final_note')
+  })
+
   it('explicit month filter uses a make_date range, not EXTRACT', async () => {
     setupSql({ months: [{ year: 2026, month: 6 }] })
     await get('category=puzzle&year=2026&month=3&page=1')

@@ -29,7 +29,8 @@ export async function GET(
     const rows = await sql`
       SELECT ge.id, ge.game_id, ge.category_group, ge.genre_1, ge.genre_2,
         ge.initial_evaluator, ge.final_evaluator, ge.assigned_date,
-        ge.evaluate_date, ge.initial_note, ge.initial_conclusion, ge.final_conclusion, ge.batch,
+        ge.evaluate_date, ge.initial_note, ge.final_note, ge.game_alike,
+        ge.initial_conclusion, ge.final_conclusion, ge.batch,
         ge.record_assignee, ge.record_assign_date,
         ge.record_5min_assignee, ge.record_5min_date,
         ge.record_5min_drive, ge.record_5min_drive_date,
