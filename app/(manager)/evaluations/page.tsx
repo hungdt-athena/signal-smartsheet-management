@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useSession } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
@@ -180,19 +180,65 @@ function NoteHover({ text, maxWidth = 240 }: { text: string; maxWidth?: number }
   )
 }
 
+// Floating editor anchored under a table cell. Portaled to <body> so it is
+// never clipped by the scrolling table; closes on outside click, scroll
+// (outside itself), or resize. Flips above the cell when space is tight.
+function CellPopover({ anchor, onClose, width = 200, children }: {
+  anchor: DOMRect
+  onClose: () => void
+  width?: number
+  children: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const inside = (t: EventTarget | null) => !!ref.current?.contains(t as Node)
+    const onDoc = (e: MouseEvent) => { if (!inside(e.target)) onClose() }
+    const onScroll = (e: Event) => { if (!inside(e.target)) onClose() }
+    document.addEventListener('mousedown', onDoc)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onClose)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onClose)
+    }
+  }, [onClose])
+
+  const spaceBelow = window.innerHeight - anchor.bottom
+  const flipUp = spaceBelow < 240 && anchor.top > spaceBelow
+  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - width - 12))
+  return createPortal(
+    <div
+      ref={ref}
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'fixed', left, width, zIndex: 3000,
+        top: flipUp ? undefined : anchor.bottom + 5,
+        bottom: flipUp ? window.innerHeight - anchor.top + 5 : undefined,
+        background: 'var(--surface)', border: '1px solid var(--border-strong)',
+        borderRadius: 9, boxShadow: 'var(--shadow-md)',
+      }}
+    >
+      {children}
+    </div>,
+    document.body
+  )
+}
+
+const CHECK_PATH = 'M20 6L9 17l-5-5'
+
 function FinalConclusionCell({ item, isManager, options, onSaved }: {
   item: ShortListItem
   isManager: boolean
   options: string[]
   onSaved: (id: number, value: string) => void
 }) {
-  const [editing, setEditing] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [anchor, setAnchor] = useState<DOMRect | null>(null)
   const val = item.final_conclusion
 
-  const save = async (v: string) => {
-    if (!v || v === val) { setEditing(false); return }
-    setSaving(true)
+  const pick = async (v: string) => {
+    setAnchor(null)
+    if (!v || v === val) return
     try {
       const res = await fetch('/api/evaluations', {
         method: 'PATCH',
@@ -201,42 +247,38 @@ function FinalConclusionCell({ item, isManager, options, onSaved }: {
       })
       if (res.ok) onSaved(item.id, v)
     } catch { /* ignore */ }
-    setSaving(false)
-    setEditing(false)
-  }
-
-  // Native select used while editing — it reliably fires onBlur so the cell
-  // never gets stuck in edit mode. Display state shows the colored badge.
-  if (editing && isManager) {
-    return (
-      <select
-        autoFocus
-        className="input"
-        style={{ fontSize: 11, padding: '3px 6px', minWidth: 130 }}
-        defaultValue={val || ''}
-        onChange={e => save(e.target.value)}
-        onBlur={() => setEditing(false)}
-        onClick={e => e.stopPropagation()}
-        disabled={saving}
-      >
-        <option value="">— select —</option>
-        {options.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>
-    )
   }
 
   return (
-    <span
-      onClick={e => { if (isManager) { e.stopPropagation(); setEditing(true) } }}
-      title={isManager ? 'Click to set final conclusion' : undefined}
-      style={{ cursor: isManager ? 'pointer' : 'default', display: 'inline-flex' }}
-    >
-      {val
-        ? <FinalConclusionBadge value={val} />
-        : isManager
-          ? <span style={ADD_PILL}>+ Set</span>
-          : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
-    </span>
+    <>
+      <span
+        onClick={e => { if (isManager) { e.stopPropagation(); setAnchor(e.currentTarget.getBoundingClientRect()) } }}
+        title={isManager ? 'Click to set final conclusion' : undefined}
+        style={{ cursor: isManager ? 'pointer' : 'default', display: 'inline-flex' }}
+      >
+        {val
+          ? <FinalConclusionBadge value={val} />
+          : isManager
+            ? <span style={ADD_PILL}>+ Set</span>
+            : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
+      </span>
+      {anchor && (
+        <CellPopover anchor={anchor} onClose={() => setAnchor(null)} width={220}>
+          <div style={{ padding: 4, maxHeight: 280, overflowY: 'auto' }}>
+            {options.map(c => (
+              <div key={c} className={'ssel-opt' + (c === val ? ' sel' : '')} onClick={() => pick(c)}>
+                <span>{c}</span>
+                {c === val && (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d={CHECK_PATH} />
+                  </svg>
+                )}
+              </div>
+            ))}
+          </div>
+        </CellPopover>
+      )}
+    </>
   )
 }
 
@@ -330,15 +372,20 @@ function FinalNoteCell({ item, isManager, onSaved }: {
   isManager: boolean
   onSaved: (id: number, value: string | null) => void
 }) {
-  const [editing, setEditing] = useState(false)
+  const [anchor, setAnchor] = useState<DOMRect | null>(null)
   const [val, setVal] = useState(item.final_note || '')
   const [saving, setSaving] = useState(false)
 
-  const cancel = () => { setVal(item.final_note || ''); setEditing(false) }
+  const openEdit = (e: ReactMouseEvent) => {
+    e.stopPropagation()
+    setVal(item.final_note || '')
+    setAnchor(e.currentTarget.getBoundingClientRect())
+  }
+  const close = () => setAnchor(null)
 
   const save = async () => {
     const v = val.trim()
-    if (v === (item.final_note || '')) { setEditing(false); return }
+    if (v === (item.final_note || '')) { close(); return }
     setSaving(true)
     try {
       const res = await fetch('/api/evaluations', {
@@ -349,40 +396,46 @@ function FinalNoteCell({ item, isManager, onSaved }: {
       if (res.ok) onSaved(item.id, v || null)
     } catch { /* ignore */ }
     setSaving(false)
-    setEditing(false)
-  }
-
-  if (editing && isManager) {
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 4 }} onClick={e => e.stopPropagation()}>
-        <textarea
-          autoFocus
-          className="input"
-          rows={2}
-          style={{ fontSize: 11, padding: '3px 6px', width: 170, resize: 'vertical' }}
-          placeholder="Final note…"
-          value={val}
-          onChange={e => setVal(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save(); if (e.key === 'Escape') cancel() }}
-          disabled={saving}
-        />
-        <button className="btn btn-primary btn-sm" style={{ padding: '3px 7px', fontSize: 11 }} onClick={save} disabled={saving} title="Save (⌘/Ctrl+Enter)">✓</button>
-        <button className="btn btn-ghost btn-sm" style={{ padding: '3px 6px', fontSize: 11 }} onClick={cancel} disabled={saving} title="Cancel">✕</button>
-      </span>
-    )
+    close()
   }
 
   return (
-    <span
-      onClick={e => { if (isManager) { e.stopPropagation(); setVal(item.final_note || ''); setEditing(true) } }}
-      style={{ display: 'inline-flex', alignItems: 'center', maxWidth: 240, cursor: isManager ? 'pointer' : 'default' }}
-    >
-      {item.final_note
-        ? <NoteHover text={item.final_note} maxWidth={220} />
-        : isManager
-          ? <span style={ADD_PILL}>+ Add note</span>
-          : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
-    </span>
+    <>
+      <span
+        onClick={isManager ? openEdit : undefined}
+        style={{ display: 'inline-flex', alignItems: 'center', maxWidth: 240, cursor: isManager ? 'pointer' : 'default' }}
+      >
+        {item.final_note
+          ? <NoteHover text={item.final_note} maxWidth={220} />
+          : isManager
+            ? <span style={ADD_PILL}>+ Add note</span>
+            : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
+      </span>
+      {anchor && (
+        <CellPopover anchor={anchor} onClose={close} width={300}>
+          <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <textarea
+              autoFocus
+              className="input"
+              rows={4}
+              style={{ fontSize: 13, resize: 'vertical', width: '100%', minHeight: 86, lineHeight: 1.5 }}
+              placeholder="Final note…"
+              value={val}
+              onChange={e => setVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save(); if (e.key === 'Escape') close() }}
+              disabled={saving}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 10.5, color: 'var(--faint)' }}>⌘/Ctrl+Enter to save</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-ghost btn-sm" onClick={close} disabled={saving}>Cancel</button>
+                <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>Save</button>
+              </div>
+            </div>
+          </div>
+        </CellPopover>
+      )}
+    </>
   )
 }
 
