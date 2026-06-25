@@ -740,9 +740,9 @@ function ShortListEvalTab() {
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 230 }}>
                       {item.icon_url ? (
-                        <img src={item.icon_url} alt="" width={30} height={30} style={{ borderRadius: 7, flexShrink: 0 }} />
+                        <img src={item.icon_url} alt="" width={44} height={44} style={{ borderRadius: 10, flexShrink: 0 }} />
                       ) : (
-                        <div style={{ width: 30, height: 30, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
+                        <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--surface-3)', flexShrink: 0 }} />
                       )}
                       <div style={{ minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center' }}>
