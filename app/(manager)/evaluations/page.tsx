@@ -59,6 +59,10 @@ const CONCLUSION_OPTIONS = [
   'Need Direction', 'List_Idea',
 ]
 
+// Sentinel for the Short List "Final conclusion" filter meaning "not yet
+// decided" (final_conclusion IS NULL). Kept in sync with the server check.
+const FINAL_CONCLUSION_NONE = '(none)'
+
 // Final Conclusion is the moderator's triage verdict (distinct from the
 // evaluator's initial_conclusion). Options are managed from the Config tab
 // (see useConfig); these are just the badge colors keyed by value.
@@ -519,6 +523,7 @@ function ShortListEvalTab() {
   const [filterCategory, setFilterCategory] = useState('puzzle')
   const [filterConclusions, setFilterConclusions] = useState<string[]>(['List_Idea'])
   const [availableConclusions, setAvailableConclusions] = useState<string[]>(CONCLUSION_OPTIONS)
+  const [filterFinalConclusions, setFilterFinalConclusions] = useState<string[]>([])
   const [filterEvaluator, setFilterEvaluator] = useState('')
   const [filterBatch, setFilterBatch] = useState('')
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
@@ -527,6 +532,9 @@ function ShortListEvalTab() {
   // Default to newest-first so the most recently evaluated games surface on top.
   const [sortAsc, setSortAsc] = useState(false)
   const fetchSeqRef = useRef(0)
+  // Once the server reports the team's current batch, default the batch filter to
+  // it — but only the first time, so a later manual "All batches" choice sticks.
+  const batchDefaultedRef = useRef(false)
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
@@ -536,6 +544,7 @@ function ShortListEvalTab() {
       const params = new URLSearchParams({ category: filterCategory, limit: '500' })
       params.set('sort', sortAsc ? 'asc' : 'desc')
       if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
+      if (filterFinalConclusions.length > 0) params.set('final_conclusions', filterFinalConclusions.join(','))
       // Evaluators are locked to their own rows; managers may filter freely.
       if (!isManager) {
         if (userName) params.set('evaluator', userName)
@@ -554,7 +563,13 @@ function ShortListEvalTab() {
       setTotal(json.total || 0)
       if (json.available_months) df.setAvailableMonths(json.available_months)
       if (json.available_evaluators) setAvailableEvaluators(json.available_evaluators)
-      if (json.current_batch !== undefined) setCurrentBatch(json.current_batch)
+      if (json.current_batch !== undefined) {
+        setCurrentBatch(json.current_batch)
+        if (!batchDefaultedRef.current) {
+          batchDefaultedRef.current = true
+          if (json.current_batch) setFilterBatch(json.current_batch)
+        }
+      }
       if (df.autoMonth && json.applied_month !== undefined) {
         const ap = json.applied_month as YearMonth | null
         df.suppressFetchRef.current = true
@@ -567,7 +582,7 @@ function ShortListEvalTab() {
       }
     } catch { /* ignore */ }
     setLoading(false)
-  }, [filterCategory, filterConclusions, filterEvaluator, filterBatch, df.value, df.autoMonth, sortAsc, isManager, userName])
+  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, filterBatch, df.value, df.autoMonth, sortAsc, isManager, userName])
 
   useEffect(() => {
     if (df.suppressFetchRef.current) { df.suppressFetchRef.current = false; return }
@@ -684,6 +699,18 @@ function ShortListEvalTab() {
             onChange={setFilterConclusions}
             placeholder="Conclusions"
             options={availableConclusions.map(c => ({ value: c, label: c }))}
+          />
+        </div>
+
+        <div style={{ width: 200 }}>
+          <MultiSelect
+            value={filterFinalConclusions}
+            onChange={setFilterFinalConclusions}
+            placeholder="Final conclusions"
+            options={[
+              { value: FINAL_CONCLUSION_NONE, label: '— Not set —' },
+              ...finalConclusionOptions.map(c => ({ value: c, label: c })),
+            ]}
           />
         </div>
 
