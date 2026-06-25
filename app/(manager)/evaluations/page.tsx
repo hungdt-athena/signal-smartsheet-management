@@ -647,10 +647,10 @@ function ShortListEvalTab() {
                 <th style={{ width: 36 }}>#</th>
                 <th style={{ width: 230 }}>Game</th>
                 <th style={{ width: 110 }}>Link</th>
-                <th style={{ width: 150 }}>Final Conclusion</th>
                 <th style={{ width: 90 }}>Demo Video</th>
-                <th>Initial Note</th>
-                <th>Final Note</th>
+                <th style={{ width: 220 }}>Initial Note</th>
+                <th style={{ width: 150 }}>Final Conclusion</th>
+                <th style={{ width: 220 }}>Final Note</th>
                 <th>Game Alike</th>
               </tr>
             </thead>
@@ -660,7 +660,7 @@ function ShortListEvalTab() {
               )}
               {loading && Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>{Array.from({ length: 8 }).map((__, c) => (
-                  <td key={c}><span className="skeleton" style={{ width: [30, 200, 70, 110, 60, 160, 140, 140][c] || 80, height: 14 }} /></td>
+                  <td key={c}><span className="skeleton" style={{ width: [30, 200, 70, 60, 200, 110, 200, 140][c] || 80, height: 14 }} /></td>
                 ))}</tr>
               ))}
               {data.map((item, idx) => (
@@ -684,7 +684,7 @@ function ShortListEvalTab() {
                             <span className="pill" style={{ padding: '1px 6px', fontSize: 9, fontWeight: 700, background: 'var(--accent-weak)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}>{item.batch}</span>
                           )}
                           {item.initial_evaluator && (
-                            <span style={{ fontSize: 10.5, color: 'var(--faint)', fontWeight: 600 }}>{item.initial_evaluator}</span>
+                            <span className="pill muted" style={{ padding: '1px 7px', fontSize: 9.5, fontWeight: 700 }}>{item.initial_evaluator}</span>
                           )}
                         </div>
                         {item.publisher_name && (
@@ -716,12 +716,6 @@ function ShortListEvalTab() {
                     </span>
                   </td>
                   <td onClick={e => e.stopPropagation()}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      <FinalConclusionCell item={item} isManager={isManager} options={finalConclusionOptions} onSaved={handleFinalConclusionSaved} />
-                      <CopyBtn text={item.final_conclusion} />
-                    </span>
-                  </td>
-                  <td onClick={e => e.stopPropagation()}>
                     <DemoVideoCell item={item} onSaved={handleDriveLinkSaved} />
                   </td>
                   <td>
@@ -731,6 +725,12 @@ function ShortListEvalTab() {
                         <CopyBtn text={item.initial_note} />
                       </span>
                     ) : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
+                  </td>
+                  <td onClick={e => e.stopPropagation()}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <FinalConclusionCell item={item} isManager={isManager} options={finalConclusionOptions} onSaved={handleFinalConclusionSaved} />
+                      <CopyBtn text={item.final_conclusion} />
+                    </span>
                   </td>
                   <td onClick={e => e.stopPropagation()}>
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
