@@ -2,6 +2,7 @@
 import { Section, AlikeBlock, GameAlikeGame } from './types'
 import { FeedbackEditor } from './FeedbackEditor'
 import { GameSearch } from './GameSearch'
+import { PlatformIcon } from './PlatformIcon'
 
 // One section = one 70/30 row. Left: a Tiptap feedback editor. Right: one or more
 // named "game alike" groups. The left rail carries a drag handle (reorder),
@@ -48,9 +49,9 @@ export function SectionEditor({ section, index, onChange, onRemove, onDuplicate,
                 className="wf-alike-name"
                 value={block.name}
                 onChange={e => patchBlock(bi, { name: e.target.value })}
-                placeholder="Group name (optional)"
+                placeholder="Game alike group name (optional)"
               />
-              <button type="button" className="wf-alike-del" title="Remove group" onClick={() => removeBlock(bi)}>✕</button>
+              <button type="button" className="wf-alike-del" title="Remove game alike group" onClick={() => removeBlock(bi)}>✕</button>
             </div>
             <ul className="wf-chips">
               {block.games.map((g, gi) => (
@@ -59,6 +60,7 @@ export function SectionEditor({ section, index, onChange, onRemove, onDuplicate,
                   {g.app_link
                     ? <a href={g.app_link} target="_blank" rel="noopener noreferrer">{g.title}</a>
                     : <span>{g.title}</span>}
+                  <PlatformIcon link={g.app_link} />
                   {g.manual && <span className="wf-manual" title="Not in DB">·manual</span>}
                   <button type="button" title="Remove game" onClick={() => removeGame(bi, gi)}>✕</button>
                 </li>
@@ -67,7 +69,7 @@ export function SectionEditor({ section, index, onChange, onRemove, onDuplicate,
             <GameSearch onPick={g => addGame(bi, g)} />
           </div>
         ))}
-        <button type="button" className="wf-addgroup" onClick={addBlock}>+ Add group</button>
+        <button type="button" className="wf-addgroup" onClick={addBlock}>+ Add game alike group</button>
       </div>
     </div>
   )

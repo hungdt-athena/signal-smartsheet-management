@@ -38,6 +38,43 @@ function evalHue(name: string): number {
   return (h % 360)
 }
 function firstLine(s: Section): string { return docText(s.feedback).trim().split('\n')[0].slice(0, 80) || '(no feedback)' }
+// A section/record is "empty" when there's no feedback text AND no game-alike
+// (a named block or any game). Such records are hidden in the Overview (treated
+// as if they don't exist) and mark a batch card as not-yet-written in the Editor.
+function isEmptySection(s: Section): boolean {
+  const hasText = docText(s.feedback).trim() !== ''
+  const hasAlike = (s.alikes || []).some(b => (b?.name?.trim() ?? '') !== '' || (b?.games?.length ?? 0) > 0)
+  return !hasText && !hasAlike
+}
+function isEmptyRecord(r: WeeklyRecord): boolean {
+  const secs = r.sections || []
+  return secs.length === 0 || secs.every(isEmptySection)
+}
+const MONTH_ABBR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// Parse a "W<week> <Month>, <Year>" label into its parts, for the year→month→week
+// grouping of the Editor's batch cards. Returns null for unparseable labels.
+function parseBatch(label: string): { year: number; week: number; monthAbbr: string } | null {
+  const m = (label || '').trim().match(/^W(\d+)\s+([A-Za-z]+),\s*(\d{4})$/i)
+  if (!m) return null
+  const idx = MONTH_ABBR.findIndex(x => x.toLowerCase() === m[2].slice(0, 3).toLowerCase())
+  return { week: parseInt(m[1], 10), monthAbbr: idx > 0 ? MONTH_ABBR[idx] : m[2], year: parseInt(m[3], 10) }
+}
+// Group already-sorted (newest→oldest) batch labels into year → month → weeks.
+// Unparseable labels collect under `other`. Insertion order preserves the sort.
+function groupByCalendar(labels: string[]) {
+  const years: { year: number; months: { label: string; batches: string[] }[] }[] = []
+  const other: string[] = []
+  for (const b of labels) {
+    const p = parseBatch(b)
+    if (!p) { other.push(b); continue }
+    let yg = years.find(y => y.year === p.year)
+    if (!yg) { yg = { year: p.year, months: [] }; years.push(yg) }
+    let mg = yg.months.find(m => m.label === p.monthAbbr)
+    if (!mg) { mg = { label: p.monthAbbr, batches: [] }; yg.months.push(mg) }
+    mg.batches.push(b)
+  }
+  return { years, other }
+}
 
 export function WeeklyFeedbackTab() {
   const { data: session } = useSession()
@@ -48,8 +85,10 @@ export function WeeklyFeedbackTab() {
   // Overview / Editor toggle is local state only — NO url params.
   const [view, setView] = useState<'list' | 'week'>('list')
 
-  const [batches, setBatches] = useState<string[]>([])
+  const [batches, setBatches] = useState<string[]>([])      // weeks that HAVE feedback (Overview filter)
+  const [allBatches, setAllBatches] = useState<string[]>([]) // full universe (Editor cards + week picker)
   const [evaluators, setEvaluators] = useState<string[]>([])
+  const [filledBatches, setFilledBatches] = useState<Set<string>>(new Set()) // batches the editor's evaluator has non-empty feedback for
 
   // Editor picks (managers can view another evaluator's week).
   const [evaluator, setEvaluator] = useState('') // '' = my own
@@ -85,10 +124,27 @@ export function WeeklyFeedbackTab() {
       .then(r => r.json())
       .then(d => {
         setBatches(d.batches || [])
+        setAllBatches(d.allBatches || d.batches || [])
         if (isManager) setEvaluators(Array.isArray(d.evaluators) ? d.evaluators : [])
       })
-      .catch(() => { setBatches([]); setEvaluators([]) })
+      .catch(() => { setBatches([]); setAllBatches([]); setEvaluators([]) })
   }, [isManager])
+
+  // Editor landing: which batches the editor's evaluator already has non-empty
+  // feedback for — drives the card bold (filled) vs faint "add…" (empty) styling.
+  useEffect(() => {
+    // Only on the landing (no week selected). Refetches each time the picker is
+    // cleared back to cards, so a just-saved batch flips from faint to bold.
+    if (view !== 'week' || selectedBatch) return
+    const qs = new URLSearchParams({ list: '1' })
+    // Scope to the editor's evaluator: a chosen evaluator (manager), else self.
+    const who = (isManager && evaluator) ? evaluator : userName
+    if (who) qs.set('evaluator', who)
+    fetch(`/api/weekly-feedback?${qs}`).then(r => r.json()).then(d => {
+      const recs: WeeklyRecord[] = d.records || []
+      setFilledBatches(new Set(recs.filter(r => !isEmptyRecord(r)).map(r => r.batch)))
+    }).catch(() => setFilledBatches(new Set()))
+  }, [view, selectedBatch, evaluator, isManager, userName])
 
   // Editor: load the record for the selected batch — unless seeded from a row.
   useEffect(() => {
@@ -169,7 +225,9 @@ export function WeeklyFeedbackTab() {
   const openRecord = (rec: WeeklyRecord) => {
     const who = isManager && rec.evaluator.toLowerCase() !== userName.toLowerCase() ? rec.evaluator : ''
     preseeded.current = `${rec.batch}::${who}`
-    setSections(Array.isArray(rec.sections) ? rec.sections : [])
+    const secs = Array.isArray(rec.sections) ? rec.sections : []
+    // Opening own empty week (a "Tap to add" row) seeds a blank section to type into.
+    setSections(secs.length ? secs : (who === '' ? [newSection()] : []))
     setSelectedBatch(rec.batch)
     if (isManager) setEvaluator(who)
     setCollapsedSecs({}); setDirty(false); dirtyRef.current = false; setHistoryOpen(false)
@@ -201,7 +259,15 @@ export function WeeklyFeedbackTab() {
 
   // --- Overview grouping: filter by search, group by week, newest week first ---
   const q = query.trim().toLowerCase()
-  const visible = q ? records.filter(r => recordMatches(r, q)) : records
+  // Overview shows the user their own weeks only when scoped to themselves:
+  // non-managers always are; a manager is when they pick their own name.
+  const overviewPersonal = !isManager || (!!listEvaluator && listEvaluator.toLowerCase() === userName.toLowerCase())
+  // Real feedback = non-empty records (counted, searchable). Empty records are
+  // normally hidden; in the personal view they surface (no search) as a single
+  // "Tap to add feedback" row so the user sees weeks still to fill — uncounted.
+  const real = records.filter(r => !isEmptyRecord(r) && (!q || recordMatches(r, q)))
+  const empties = overviewPersonal && !q ? records.filter(isEmptyRecord) : []
+  const visible = [...real, ...empties]
   const groups: { batch: string; rows: WeeklyRecord[] }[] = []
   const groupIdx = new Map<string, number>()
   for (const r of visible) {
@@ -221,7 +287,7 @@ export function WeeklyFeedbackTab() {
   const listWho = isManager ? (listEvaluator || 'All evaluators') : (userName || 'my own')
   const sub = view === 'week'
     ? `${who}${selectedBatch ? ` · ${selectedBatch}` : ''}`
-    : `${listWho} · ${listBatch || 'all weeks'} · ${visible.length} record${visible.length === 1 ? '' : 's'}`
+    : `${listWho} · ${listBatch || 'all weeks'} · ${real.length} record${real.length === 1 ? '' : 's'}`
 
   return (
     <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -232,7 +298,7 @@ export function WeeklyFeedbackTab() {
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           <button className={`seg-btn-premium${view === 'list' ? ' active' : ''}`} onClick={() => setView('list')}>Overview</button>
-          <button className={`seg-btn-premium${view === 'week' ? ' active' : ''}`} onClick={() => setView('week')}>Editor</button>
+          <button className={`seg-btn-premium${view === 'week' ? ' active' : ''}`} onClick={() => { setSelectedBatch(''); setView('week') }}>Editor</button>
         </div>
       </div>
 
@@ -268,7 +334,7 @@ export function WeeklyFeedbackTab() {
               )}
               <div style={{ width: 200 }}>
                 <StyledSelect value={selectedBatch} onChange={setSelectedBatch} placeholder="Select a week…"
-                  options={batches.map(b => ({ value: b, label: b }))} />
+                  options={allBatches.map(b => ({ value: b, label: b }))} />
               </div>
             </>
           )}
@@ -277,7 +343,47 @@ export function WeeklyFeedbackTab() {
       <div className="card wf-scroll" style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
         {view === 'week' ? (
           !selectedBatch ? (
-            <p className="h-sub" style={{ padding: 8 }}>Select a week to view or edit feedback.</p>
+            allBatches.length === 0 ? (
+              <p className="h-sub" style={{ padding: 8 }}>No weeks yet. Batches appear here once games are assigned to a week.</p>
+            ) : (() => {
+              const renderCard = (b: string) => {
+                const filled = filledBatches.has(b)
+                const wk = b.match(/^W(\d+)/)?.[1]
+                // Pin each card to its week column (W1→col1 … W4→col4) so weeks
+                // line up across months even when a month is missing some weeks.
+                const style = wk ? { gridColumn: Number(wk) } : undefined
+                return (
+                  <button type="button" key={b} style={style} className={`wf-card${filled ? '' : ' is-empty'}`} onClick={() => setSelectedBatch(b)}>
+                    <span className="wf-card-batch">{wk ? `W${wk}` : b}</span>
+                    <span className="wf-card-meta">{filled ? 'View / edit' : 'add…'}</span>
+                  </button>
+                )
+              }
+              const { years, other } = groupByCalendar(allBatches)
+              return (
+                <div className="wf-cal">
+                  {years.map(y => (
+                    <div className="wf-cal-year" key={y.year}>
+                      <h3 className="wf-cal-year-h">{y.year}</h3>
+                      {y.months.map(m => (
+                        <div className="wf-cal-month" key={m.label}>
+                          <span className="wf-cal-month-h">{m.label}</span>
+                          <div className="wf-cal-weeks">
+                            {[...m.batches].sort((a, b) => (parseBatch(a)?.week ?? 0) - (parseBatch(b)?.week ?? 0)).map(renderCard)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  {other.length > 0 && (
+                    <div className="wf-cal-year">
+                      <h3 className="wf-cal-year-h">Other</h3>
+                      <div className="wf-cal-month"><div className="wf-cal-weeks">{other.map(renderCard)}</div></div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()
           ) : viewingSelf ? (
             <>
               <div className="wf-label-row wf-sticky-bar">
@@ -386,12 +492,21 @@ export function WeeklyFeedbackTab() {
                       <td colSpan={3}>
                         <span className="wf-week-chev">{expanded ? '▾' : '▸'}</span>
                         <span className="wf-week-label">{g.batch}</span>
-                        <span className="wf-week-sum">{g.rows.length} feedback</span>
+                        <span className="wf-week-sum">{g.rows.filter(r => !isEmptyRecord(r)).length} feedback</span>
                       </td>
                     </tr>
                     {expanded && g.rows.map((r) => {
-                      const secs: (Section | null)[] = r.sections?.length ? r.sections : [null]
                       const hue = evalHue(r.evaluator)
+                      // Personal-view placeholder for a week with no feedback yet.
+                      if (isEmptyRecord(r)) {
+                        return (
+                          <tr key={`${g.batch}::${r.evaluator}::add`} className="wf-evrow wf-evrow-add" onClick={e => onRowClick(e, r)} style={{ cursor: 'pointer', ['--ev-h' as string]: hue } as CSSProperties}>
+                            <td className="wf-list-eval"><span className="wf-evname"><span className="wf-evdot" />{r.evaluator}</span></td>
+                            <td className="wf-c-solid" colSpan={2}><span className="wf-addrow">+ Tap to add feedback</span></td>
+                          </tr>
+                        )
+                      }
+                      const secs: (Section | null)[] = r.sections?.length ? r.sections : [null]
                       return secs.map((s, i) => {
                         const no = secs.length > 1 ? i + 1 : null
                         const cls = i === secs.length - 1 ? 'wf-c-solid' : 'wf-c-sec'

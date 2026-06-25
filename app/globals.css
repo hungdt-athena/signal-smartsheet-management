@@ -1168,6 +1168,59 @@ input:checked + .slider:before {
 }
 .wf-addsection:hover, .wf-addmanual:hover { background: color-mix(in srgb, var(--accent-weak) 70%, var(--accent) 12%); }
 
+/* Editor landing: batch cards grouped year → month → week. Filled = bold/solid,
+   empty = faint dashed "add…" prompt. Ordered newest → oldest. */
+.wf-cal { display: flex; flex-direction: column; gap: 20px; padding: 4px; }
+.wf-cal-year-h {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+}
+.wf-cal-month {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 3px 0;
+}
+.wf-cal-month-h {
+  flex: none;
+  width: 40px;
+  padding-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+/* Four equal columns (W1→W4) that fill the row's full width, so cards stay
+   uniform AND span the container regardless of how many weeks a month has. */
+.wf-cal-weeks { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.wf-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 10px 12px;
+  text-align: center;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, transform .06s;
+  /* Has feedback = filled accent highlight. */
+  border: 1px solid var(--accent-border);
+  background: var(--accent-weak);
+}
+.wf-card:hover { background: color-mix(in srgb, var(--accent-weak) 62%, var(--accent) 16%); }
+.wf-card:active { transform: translateY(1px); }
+.wf-card-batch { font-size: 14px; font-weight: 700; color: var(--accent-strong); }
+.wf-card-meta { font-size: 11.5px; font-weight: 600; color: var(--accent-strong); }
+/* No feedback yet = faint dashed "add…" prompt. */
+.wf-card.is-empty { background: var(--surface); border: 1px dashed var(--border); }
+.wf-card.is-empty:hover { background: var(--surface-2); border-color: var(--accent-border); }
+.wf-card.is-empty .wf-card-batch { font-weight: 600; color: var(--muted); }
+.wf-card.is-empty .wf-card-meta { color: var(--faint); }
+
 /* Game search input + results popover. */
 .wf-gamesearch input {
   width: 100%;
@@ -1180,26 +1233,64 @@ input:checked + .slider:before {
 .wf-gamesearch input:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
 .wf-hint { font-size: 11.5px; color: var(--faint); margin-left: 6px; }
 .wf-hits {
-  list-style: none; margin: 4px 0 0; padding: 4px;
+  list-style: none; margin: 5px 0 0; padding: 5px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 9px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
-  max-height: 240px; overflow: auto;
+  max-height: 340px; overflow: auto;
 }
 .wf-hits li button {
-  display: flex; gap: 8px; align-items: center;
+  display: flex; gap: 11px; align-items: center;
   width: 100%; text-align: left;
-  padding: 6px 8px;
-  font-size: 13px;
+  padding: 9px 11px;
+  font-size: 14px;
   color: var(--text);
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   cursor: pointer;
 }
 .wf-hits li button:hover { background: var(--surface-2); }
-.wf-hits li button img { border-radius: 5px; }
+.wf-hits li button img { width: 30px; height: 30px; border-radius: 7px; }
+.wf-hit-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Store badge (App Store / Google Play) shown beside a game. */
+.wf-plat { flex: none; vertical-align: middle; }
+.wf-chip .wf-plat, .wf-alike-view .wf-plat { margin-left: 1px; }
+
+/* Inline "add as a link" form shown when a search returns nothing. */
+.wf-manual-form {
+  margin-top: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--accent-weak);
+}
+.wf-manual-form-title { font-size: 11.5px; font-weight: 700; color: var(--accent-strong); text-transform: uppercase; letter-spacing: .4px; }
+.wf-manual-form input {
+  width: 100%;
+  padding: 6px 9px;
+  font-size: 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.wf-manual-form input:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
+.wf-manual-form-actions { display: flex; gap: 6px; }
+.wf-manual-add, .wf-manual-cancel {
+  padding: 5px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.wf-manual-add { color: #fff; background: var(--accent); border: 1px solid var(--accent); }
+.wf-manual-add:disabled { opacity: .5; cursor: not-allowed; }
+.wf-manual-cancel { color: var(--muted); background: var(--surface); border: 1px solid var(--border-strong); }
 
 /* List view table — spreadsheet-like. border-collapse:separate (not collapse)
    so the sticky header stays above rowspanned cells in Chrome; gridlines are
@@ -1311,11 +1402,26 @@ input:checked + .slider:before {
 
 /* Read-only section rows (manager viewing another evaluator). */
 .wf-section-row-view { background: transparent; }
-.wf-alike-view { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
-.wf-alike-view-name { font-size: 12.5px; }
-.wf-alike-view ul { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.wf-alike-view li { display: flex; align-items: center; gap: 5px; }
-.wf-alike-view li img { border-radius: 4px; flex: none; }
+.wf-alike-view { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+/* Each group is its own subtle card so multiple groups in one section read as distinct. */
+.wf-alike-view-block { padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.wf-alike-view-name { display: block; margin-bottom: 4px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
+/* Each game-alike entry is a badge; with a link it reads as clickable. */
+.wf-alike-games { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+.wf-alike-game {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 100%;
+  padding: 4px 9px 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-decoration: none;
+}
+.wf-alike-game img { width: 18px; height: 18px; border-radius: 5px; flex: none; }
+.wf-alike-game-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-alike-game.is-link { cursor: pointer; border-color: var(--accent-border); background: var(--accent-weak); color: var(--accent-strong); transition: background .12s, border-color .12s; }
+.wf-alike-game.is-link:hover { background: color-mix(in srgb, var(--accent-weak) 62%, var(--accent) 16%); border-color: var(--accent); }
 
 @media (max-width: 820px) {
   .wf-section-row { flex-direction: column; }
@@ -1328,24 +1434,38 @@ input:checked + .slider:before {
 .wf-mention:hover { background: color-mix(in srgb, var(--accent-weak) 70%, var(--accent) 14%); }
 
 /* ===== @ suggestion popup ===== */
-.wf-mention-popup { position: fixed; z-index: 1000; min-width: 240px; max-height: 280px; overflow: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--shadow-sm); padding: 4px; }
-.wf-mention-item { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; padding: 6px 8px; border: none; background: transparent; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text); }
+.wf-mention-popup { position: fixed; z-index: 1000; min-width: 300px; max-height: 340px; overflow: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 9px; box-shadow: var(--shadow-sm); padding: 5px; }
+.wf-mention-item { display: flex; gap: 11px; align-items: center; width: 100%; text-align: left; padding: 9px 11px; border: none; background: transparent; border-radius: 7px; cursor: pointer; font-size: 14px; color: var(--text); }
 .wf-mention-item.is-sel, .wf-mention-item:hover { background: var(--surface-2); }
-.wf-mention-item img { border-radius: 5px; flex: none; }
+.wf-mention-item img { width: 30px; height: 30px; border-radius: 7px; flex: none; }
+.wf-mention-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ===== Inline link bar ===== */
-.wf-linkbar { display: flex; gap: 6px; align-items: center; }
-.wf-linkbar input { flex: 1; padding: 5px 9px; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
-.wf-linkbar input:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
-.wf-linkbar button { padding: 5px 10px; font-size: 12.5px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); cursor: pointer; }
-.wf-linkbar button:hover { background: var(--surface-2); }
-.wf-alike-block { margin-bottom: 10px; }
-.wf-alike-block + .wf-alike-block { border-top: 1px dashed var(--border, #e3e3e3); padding-top: 8px; }
+/* Docs-style floating link popover, anchored under the text selection. */
+.wf-linkpop {
+  position: fixed; z-index: 1100;
+  display: flex; flex-direction: column; gap: 6px;
+  width: 320px; max-width: calc(100vw - 16px);
+  padding: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md, var(--shadow-sm));
+}
+.wf-linkpop-row { display: flex; gap: 6px; align-items: center; }
+.wf-linkpop input { flex: 1; min-width: 0; padding: 6px 9px; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.wf-linkpop input:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
+.wf-linkpop button { flex: none; padding: 6px 11px; font-size: 12.5px; font-weight: 600; border-radius: 6px; cursor: pointer; }
+.wf-linkpop-apply { color: #fff; background: var(--accent); border: 1px solid var(--accent); }
+.wf-linkpop-remove { color: var(--muted); background: var(--surface); border: 1px solid var(--border-strong); }
+.wf-linkpop-remove:hover { background: var(--surface-2); }
+/* Each game-alike group is a light card so two groups in one section are distinct. */
+.wf-alike-block { padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.wf-alike-block + .wf-alike-block { margin-top: 8px; }
 .wf-alike-head { display: flex; align-items: center; gap: 6px; }
 .wf-alike-head .wf-alike-name { flex: 1; }
 .wf-alike-del { border: none; background: none; cursor: pointer; color: #b00; line-height: 1; padding: 2px 4px; }
 .wf-addgroup { border: 1px dashed var(--border, #ccc); background: none; cursor: pointer; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
-.wf-alike-view-block + .wf-alike-view-block { margin-top: 6px; }
 
 /* ===== Weekly Feedback — Overview/Editor UI enhancements ===== */
 /* Overview toolbar controls (live in the fixed filter-row) */
@@ -1370,6 +1490,10 @@ input:checked + .slider:before {
 .wf-list tbody tr.wf-evrow:hover td { background: hsl(var(--ev-h, 220) 52% 92.5%); }
 .wf-evname { display: inline-flex; align-items: center; gap: 7px; color: hsl(var(--ev-h, 220) 44% 33%); font-weight: 600; }
 .wf-evdot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: hsl(var(--ev-h, 220) 58% 47%); }
+/* Personal-view placeholder row: a week with no feedback yet — invites a tap. */
+.wf-addrow { color: var(--accent-strong); font-size: 12.5px; font-weight: 600; }
+.wf-list tbody tr.wf-evrow-add td { background: var(--surface-2); }
+.wf-list tbody tr.wf-evrow-add:hover td { background: var(--accent-weak); }
 
 /* Scroll container: no top padding so a sticky thead / toolbar with top:0 pins
    flush to the visual top (padding-top would leave a strip where rows show

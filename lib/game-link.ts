@@ -24,3 +24,23 @@ export function parseStoreLink(input: string): ParsedStoreLink | null {
 
   return null
 }
+
+// Normalise a user-typed link into a form that survives href sanitisation
+// (isSafeHref). A bare domain like "google.com" gets an https:// scheme so it
+// isn't stripped on save; explicit schemes, protocol-relative, root-relative
+// and anchor links are left untouched. Empty in → empty out.
+export function normalizeUrl(input: string): string {
+  const s = (input || '').trim()
+  if (!s) return s
+  if (/^(https?:\/\/|mailto:|tel:|\/\/|\/|#)/i.test(s)) return s
+  return 'https://' + s
+}
+
+// Lighter than parseStoreLink: just identifies the store a link points at (no
+// id extraction), for showing a platform icon next to a game. Null if neither.
+export function platformFromLink(link: string | null | undefined): StorePlatform | null {
+  if (!link) return null
+  if (/apps\.apple\.com/i.test(link)) return 'ios'
+  if (/play\.google\.com/i.test(link)) return 'android'
+  return null
+}

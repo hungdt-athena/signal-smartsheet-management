@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
 import { GameMention } from './GameMention'
+import { PlatformIcon } from './PlatformIcon'
 import { Section, AlikeBlock } from './types'
 
 const EXTS = [StarterKit, Underline, Link, GameMention]
@@ -25,16 +26,20 @@ function AlikeView({ alikes }: { alikes: AlikeBlock[] }) {
         <div key={bi} className="wf-alike-view-block">
           {b.name && <strong className="wf-alike-view-name">{b.name}</strong>}
           {!!b.games?.length && (
-            <ul>
-              {b.games.map((g, i) => (
-                <li key={i}>
-                  {g.icon_url && <img src={g.icon_url} alt="" width={16} height={16} />}
-                  {g.app_link
-                    ? <a href={g.app_link} target="_blank" rel="noopener noreferrer">{g.title}</a>
-                    : <span>{g.title}</span>}
-                </li>
-              ))}
-            </ul>
+            <div className="wf-alike-games">
+              {b.games.map((g, i) => {
+                const inner = (
+                  <>
+                    {g.icon_url && <img src={g.icon_url} alt="" width={18} height={18} />}
+                    <span className="wf-alike-game-title">{g.title}</span>
+                    <PlatformIcon link={g.app_link} />
+                  </>
+                )
+                return g.app_link
+                  ? <a key={i} className="wf-alike-game is-link" href={g.app_link} target="_blank" rel="noopener noreferrer">{inner}</a>
+                  : <span key={i} className="wf-alike-game">{inner}</span>
+              })}
+            </div>
           )}
         </div>
       ))}
