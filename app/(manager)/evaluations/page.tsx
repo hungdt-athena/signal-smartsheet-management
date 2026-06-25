@@ -1,5 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
+import type { CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { useSession } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import { StyledSelect } from '@/components/StyledSelect'
@@ -142,6 +144,42 @@ interface ShortListItem {
   category_group: string
 }
 
+// Dashed accent pill for empty editable cells ("+ Set" / "+ Add note").
+const ADD_PILL: CSSProperties = {
+  fontSize: 11, fontWeight: 600, color: 'var(--accent)', border: '1px dashed var(--accent-border)',
+  borderRadius: 999, padding: '2px 9px', background: 'var(--accent-weak)', whiteSpace: 'nowrap', cursor: 'pointer',
+}
+
+// Truncated note text with a large floating preview on hover. The preview is
+// portaled to <body> so the scrolling table container never clips it.
+function NoteHover({ text, maxWidth = 240 }: { text: string; maxWidth?: number }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 6, left: Math.min(r.left, window.innerWidth - 380) })
+  }
+  return (
+    <span
+      ref={ref}
+      onMouseEnter={show}
+      onMouseLeave={() => setPos(null)}
+      style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth, cursor: 'inherit' }}
+    >
+      {text}
+      {pos && createPortal(
+        <div style={{
+          position: 'fixed', top: pos.top, left: pos.left, zIndex: 1000, maxWidth: 360,
+          background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)',
+          borderRadius: 10, boxShadow: '0 10px 30px rgba(0,0,0,0.20)', padding: '10px 13px',
+          fontSize: 13.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>{text}</div>,
+        document.body
+      )}
+    </span>
+  )
+}
+
 function FinalConclusionCell({ item, isManager, options, onSaved }: {
   item: ShortListItem
   isManager: boolean
@@ -195,7 +233,9 @@ function FinalConclusionCell({ item, isManager, options, onSaved }: {
     >
       {val
         ? <FinalConclusionBadge value={val} />
-        : <span style={{ fontSize: 12, color: isManager ? 'var(--accent)' : 'var(--faint)', fontWeight: isManager ? 600 : 400 }}>{isManager ? '+ set' : '—'}</span>}
+        : isManager
+          ? <span style={ADD_PILL}>+ Set</span>
+          : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
     </span>
   )
 }
@@ -335,12 +375,13 @@ function FinalNoteCell({ item, isManager, onSaved }: {
   return (
     <span
       onClick={e => { if (isManager) { e.stopPropagation(); setVal(item.final_note || ''); setEditing(true) } }}
-      title={isManager ? 'Click to edit final note' : (item.final_note || undefined)}
-      style={{ display: 'inline-flex', alignItems: 'center', maxWidth: 220, cursor: isManager ? 'pointer' : (item.final_note ? 'help' : 'default') }}
+      style={{ display: 'inline-flex', alignItems: 'center', maxWidth: 240, cursor: isManager ? 'pointer' : 'default' }}
     >
       {item.final_note
-        ? <span style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.final_note}</span>
-        : <span style={{ fontSize: 12, color: isManager ? 'var(--accent)' : 'var(--faint)', fontWeight: isManager ? 600 : 400 }}>{isManager ? '+ add' : '—'}</span>}
+        ? <NoteHover text={item.final_note} maxWidth={220} />
+        : isManager
+          ? <span style={ADD_PILL}>+ Add note</span>
+          : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
     </span>
   )
 }
@@ -551,7 +592,7 @@ function ShortListEvalTab() {
             <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
               <tr>
                 <th style={{ width: 36 }}>#</th>
-                <th>Game</th>
+                <th style={{ width: 230 }}>Game</th>
                 <th style={{ width: 110 }}>Link</th>
                 <th style={{ width: 150 }}>Final Conclusion</th>
                 <th style={{ width: 90 }}>Demo Video</th>
@@ -574,7 +615,7 @@ function ShortListEvalTab() {
                   onClick={() => setDetailGameId(item.game_id)}>
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 200 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 180 }}>
                       {item.icon_url ? (
                         <img src={item.icon_url} alt="" width={30} height={30} style={{ borderRadius: 7, flexShrink: 0 }} />
                       ) : (
@@ -589,19 +630,13 @@ function ShortListEvalTab() {
                           {item.batch && (
                             <span className="pill" style={{ padding: '1px 6px', fontSize: 9, fontWeight: 700, background: 'var(--accent-weak)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}>{item.batch}</span>
                           )}
-                          {[item.genre_1, item.genre_2].filter(Boolean).map(g => (
-                            <span key={g} className="pill tag" style={{ padding: '1px 5px', fontSize: 9 }}>{g}</span>
-                          ))}
-                          {item.initial_conclusion
-                            ? <span className={`badge ${CONCLUSION_COLORS[item.initial_conclusion] || 'neutral'}`} style={{ fontSize: 9 }}>{item.initial_conclusion}</span>
-                            : <span className="badge idle" style={{ fontSize: 9 }}>Pending</span>}
                           {item.initial_evaluator && (
                             <span style={{ fontSize: 10.5, color: 'var(--faint)', fontWeight: 600 }}>{item.initial_evaluator}</span>
                           )}
                         </div>
                         {item.publisher_name && (
                           <div style={{ display: 'flex', alignItems: 'center', marginTop: 2 }}>
-                            <span style={{ fontSize: 11, color: 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}
+                            <span style={{ fontSize: 11, color: 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 190 }}
                               title={item.publisher_name}>
                               {item.publisher_name}
                             </span>
@@ -637,13 +672,12 @@ function ShortListEvalTab() {
                     <DemoVideoCell item={item} onSaved={handleDriveLinkSaved} />
                   </td>
                   <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', maxWidth: 260 }}>
-                      <span title={item.initial_note || undefined}
-                        style={{ fontSize: 12, color: item.initial_note ? 'var(--text)' : 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: item.initial_note ? 'help' : undefined }}>
-                        {item.initial_note || '—'}
+                    {item.initial_note ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', maxWidth: 260 }}>
+                        <NoteHover text={item.initial_note} maxWidth={240} />
+                        <CopyBtn text={item.initial_note} />
                       </span>
-                      <CopyBtn text={item.initial_note} />
-                    </span>
+                    ) : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
                   </td>
                   <td onClick={e => e.stopPropagation()}>
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
