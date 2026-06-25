@@ -14,6 +14,8 @@ import { AssignSetup } from '@/components/AssignSetup'
 import { WeeklyFeedbackTab } from '@/components/weekly-feedback/WeeklyFeedbackTab'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
+import { GameAlikeChips } from '@/components/GameAlikeField'
+import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 
 interface Evaluation {
   id: number
@@ -128,6 +130,8 @@ interface ShortListItem {
   genre_2: string | null
   initial_evaluator: string | null
   initial_note: string | null
+  final_note: string | null
+  game_alike: GameAlikeGame[] | null
   initial_conclusion: string | null
   final_conclusion: string | null
   batch: string | null
@@ -279,6 +283,68 @@ function DemoVideoCell({ item, onSaved }: {
   )
 }
 
+// Manager-only inline Final Note. Click to reveal a textarea; save via PATCH
+// final_note. Non-managers see the text read-only (no edit affordance).
+function FinalNoteCell({ item, isManager, onSaved }: {
+  item: ShortListItem
+  isManager: boolean
+  onSaved: (id: number, value: string | null) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState(item.final_note || '')
+  const [saving, setSaving] = useState(false)
+
+  const cancel = () => { setVal(item.final_note || ''); setEditing(false) }
+
+  const save = async () => {
+    const v = val.trim()
+    if (v === (item.final_note || '')) { setEditing(false); return }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/evaluations', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, final_note: v || null }),
+      })
+      if (res.ok) onSaved(item.id, v || null)
+    } catch { /* ignore */ }
+    setSaving(false)
+    setEditing(false)
+  }
+
+  if (editing && isManager) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 4 }} onClick={e => e.stopPropagation()}>
+        <textarea
+          autoFocus
+          className="input"
+          rows={2}
+          style={{ fontSize: 11, padding: '3px 6px', width: 170, resize: 'vertical' }}
+          placeholder="Final note…"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save(); if (e.key === 'Escape') cancel() }}
+          disabled={saving}
+        />
+        <button className="btn btn-primary btn-sm" style={{ padding: '3px 7px', fontSize: 11 }} onClick={save} disabled={saving} title="Save (⌘/Ctrl+Enter)">✓</button>
+        <button className="btn btn-ghost btn-sm" style={{ padding: '3px 6px', fontSize: 11 }} onClick={cancel} disabled={saving} title="Cancel">✕</button>
+      </span>
+    )
+  }
+
+  return (
+    <span
+      onClick={e => { if (isManager) { e.stopPropagation(); setVal(item.final_note || ''); setEditing(true) } }}
+      title={isManager ? 'Click to edit final note' : (item.final_note || undefined)}
+      style={{ display: 'inline-flex', alignItems: 'center', maxWidth: 220, cursor: isManager ? 'pointer' : (item.final_note ? 'help' : 'default') }}
+    >
+      {item.final_note
+        ? <span style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.final_note}</span>
+        : <span style={{ fontSize: 12, color: isManager ? 'var(--accent)' : 'var(--faint)', fontWeight: isManager ? 600 : 400 }}>{isManager ? '+ add' : '—'}</span>}
+    </span>
+  )
+}
+
 function ShortListEvalTab() {
   const { data: session } = useSession()
   const role = session?.user?.role
@@ -354,6 +420,10 @@ function ShortListEvalTab() {
 
   const handleDriveLinkSaved = (id: number, value: string | null) => {
     setData(prev => prev.map(d => d.id === id ? { ...d, drive_link: value } : d))
+  }
+
+  const handleFinalNoteSaved = (id: number, value: string | null) => {
+    setData(prev => prev.map(d => d.id === id ? { ...d, final_note: value } : d))
   }
 
   // Batch filter options follow the month in the picker (UI-generated W1-W4).
@@ -485,9 +555,9 @@ function ShortListEvalTab() {
                 <th style={{ width: 110 }}>Link</th>
                 <th style={{ width: 150 }}>Final Conclusion</th>
                 <th style={{ width: 90 }}>Demo Video</th>
-                <th>Note</th>
-                <th style={{ width: 96 }}>Assigned</th>
-                <th style={{ width: 96 }}>Evaluated</th>
+                <th>Initial Note</th>
+                <th>Final Note</th>
+                <th>Game Alike</th>
               </tr>
             </thead>
             <tbody>
@@ -496,7 +566,7 @@ function ShortListEvalTab() {
               )}
               {loading && Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>{Array.from({ length: 8 }).map((__, c) => (
-                  <td key={c}><span className="skeleton" style={{ width: [30, 200, 70, 110, 60, 160, 80, 80][c] || 80, height: 14 }} /></td>
+                  <td key={c}><span className="skeleton" style={{ width: [30, 200, 70, 110, 60, 160, 140, 140][c] || 80, height: 14 }} /></td>
                 ))}</tr>
               ))}
               {data.map((item, idx) => (
@@ -575,11 +645,14 @@ function ShortListEvalTab() {
                       <CopyBtn text={item.initial_note} />
                     </span>
                   </td>
-                  <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap', color: 'var(--faint)' }}>
-                    {fmtDate(item.assigned_date)}
+                  <td onClick={e => e.stopPropagation()}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <FinalNoteCell item={item} isManager={isManager} onSaved={handleFinalNoteSaved} />
+                      <CopyBtn text={item.final_note} />
+                    </span>
                   </td>
-                  <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap', color: 'var(--faint)' }}>
-                    {fmtDate(item.evaluate_date)}
+                  <td>
+                    <GameAlikeChips value={item.game_alike} />
                   </td>
                 </tr>
               ))}

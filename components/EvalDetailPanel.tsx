@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom'
 import { StyledSelect } from '@/components/StyledSelect'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
+import { GameAlikeField } from '@/components/GameAlikeField'
+import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
 
 export interface EvalDetail {
@@ -17,6 +19,8 @@ export interface EvalDetail {
   assigned_date: string | null
   evaluate_date: string | null
   initial_note: string | null
+  final_note: string | null
+  game_alike: GameAlikeGame[] | null
   initial_conclusion: string | null
   final_conclusion: string | null
   batch: string | null
@@ -360,6 +364,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const [toast, setToast] = useState<{ msg: string; err?: boolean } | null>(null)
 
   const [note, setNote] = useState('')
+  const [finalNote, setFinalNote] = useState('')
+  const [gameAlike, setGameAlike] = useState<GameAlikeGame[]>([])
   const [conclusion, setConclusion] = useState('')
   const [batch, setBatch] = useState('')
   const [driveLink, setDriveLink] = useState('')
@@ -418,6 +424,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const applyData = useCallback((data: EvalDetail) => {
     setEv(data)
     setNote(data.initial_note || '')
+    setFinalNote(data.final_note || '')
+    setGameAlike(Array.isArray(data.game_alike) ? data.game_alike : [])
     const c = data.initial_conclusion || ''
     setConclusion(c)
     setDeadLink(c === 'Link_dead')
@@ -516,13 +524,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const isManager = role === 'admin' || role === 'moderator'
   // Evaluation content (conclusion/note/drive) — admin or the assigned evaluator.
   const canEditEval = !readOnly && (isAdmin || ev?.initial_evaluator === userName)
+  // Final Note is a manager-only field (admin or moderator).
+  const canEditFinalNote = !readOnly && isManager
   // Recording drive links — admin or the assigned recorder for that duration.
   const canEdit5 = !readOnly && (isAdmin || ev?.record_5min_assignee === userName)
   const canEdit20 = !readOnly && (isAdmin || ev?.record_20min_assignee === userName)
   // Re-assigning recorders is a manager action (admin or moderator), enabled per-context.
   const canEditAssignee = !readOnly && isManager && !!canAssignRecords
   // Any editable surface → show the save button.
-  const canEdit = canEditEval || canEdit5 || canEdit20 || canEditAssignee
+  const canEdit = canEditEval || canEdit5 || canEdit20 || canEditAssignee || canEditFinalNote
   // The eval editor's Save button also flushes staged screenshots, so staged
   // shots count as unsaved work for it (the card hides its own button then).
   const needsSave = dirty || (canEditEval && stagedShots > 0)
@@ -561,7 +571,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
           if (effBatch && effBatch !== (ev.batch || '')) body.batch = effBatch
         }
         body.drive_link = driveLink
+        body.game_alike = gameAlike
       }
+      if (canEditFinalNote) body.final_note = finalNote
       if (canEdit5 && drive5 && drive5 !== ev.record_5min_drive) body.record_5min_drive = drive5
       if (canEdit20 && drive20 && drive20 !== ev.record_20min_drive) body.record_20min_drive = drive20
       if (canEditAssignee && rec5Assignee && rec5Assignee !== (ev.record_5min_assignee || '')) body.record_5min_assignee = rec5Assignee
@@ -961,7 +973,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
               <div className="field">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span className="label">Note</span>
+                  <span className="label">Initial Note</span>
                   {canEditEval && note && <ClearBtn onClick={() => clearField('note')} />}
                 </div>
                 <textarea
@@ -971,6 +983,27 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   onChange={e => { setNote(e.target.value); setDirty(true) }}
                   placeholder="Evaluation note..."
                   disabled={!canEditEval}
+                  style={{ resize: 'vertical', fontSize: 13 }}
+                />
+              </div>
+
+              <div className="field">
+                <span className="label">Game Alike</span>
+                <GameAlikeField value={gameAlike} onChange={g => { setGameAlike(g); setDirty(true) }} disabled={!canEditEval} />
+              </div>
+
+              <div className="field">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span className="label">Final Note</span>
+                  {canEditFinalNote && finalNote && <ClearBtn onClick={() => { setFinalNote(''); setDirty(true) }} />}
+                </div>
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={finalNote}
+                  onChange={e => { setFinalNote(e.target.value); setDirty(true) }}
+                  placeholder={canEditFinalNote ? 'Final note (managers only)…' : 'Final note (managers only)'}
+                  disabled={!canEditFinalNote}
                   style={{ resize: 'vertical', fontSize: 13 }}
                 />
               </div>
