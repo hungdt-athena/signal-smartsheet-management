@@ -16,7 +16,7 @@ import { AssignSetup } from '@/components/AssignSetup'
 import { WeeklyFeedbackTab } from '@/components/weekly-feedback/WeeklyFeedbackTab'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
-import { GameAlikeChips } from '@/components/GameAlikeField'
+import { GameAlikeChips, GameAlikeField } from '@/components/GameAlikeField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 
 interface Evaluation {
@@ -439,6 +439,72 @@ function FinalNoteCell({ item, isManager, onSaved }: {
   )
 }
 
+// Inline "Game Alike" editor for the Short List. Display is read-only chips;
+// editable for the row owner or a manager. Clicking opens a popover with the
+// full GameAlikeField (search + chips); the current chips persist when it
+// closes (outside click / Done) so nothing is lost without an explicit save.
+function GameAlikeCell({ item, canEdit, onSaved }: {
+  item: ShortListItem
+  canEdit: boolean
+  onSaved: (id: number, value: GameAlikeGame[]) => void
+}) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null)
+  const [draft, setDraft] = useState<GameAlikeGame[]>(item.game_alike || [])
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const games = item.game_alike || []
+
+  const open = (e: ReactMouseEvent) => {
+    e.stopPropagation()
+    setDraft(item.game_alike || [])
+    setAnchor(e.currentTarget.getBoundingClientRect())
+  }
+
+  const commit = useCallback(() => {
+    setAnchor(null)
+    const next = draftRef.current
+    if (JSON.stringify(next) === JSON.stringify(item.game_alike || [])) return
+    fetch('/api/evaluations', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: item.id, game_alike: next }),
+    }).then(res => { if (res.ok) onSaved(item.id, next) }).catch(() => { /* ignore */ })
+  }, [item.id, item.game_alike, onSaved])
+
+  return (
+    <>
+      <span
+        onClick={canEdit ? open : undefined}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: canEdit ? 'pointer' : 'default', maxWidth: '100%' }}
+      >
+        {games.length
+          ? <GameAlikeChips value={games} />
+          : canEdit
+            ? <span style={ADD_PILL}>+ Add</span>
+            : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
+        {canEdit && games.length > 0 && (
+          <button type="button" className="cell-copy" title="Edit game alike" onClick={open} style={{ flexShrink: 0 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+          </button>
+        )}
+      </span>
+      {anchor && (
+        <CellPopover anchor={anchor} onClose={commit} width={340}>
+          <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Game Alike</span>
+            <GameAlikeField value={draft} onChange={setDraft} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-primary btn-sm" onClick={commit}>Done</button>
+            </div>
+          </div>
+        </CellPopover>
+      )}
+    </>
+  )
+}
+
 function ShortListEvalTab() {
   const { data: session } = useSession()
   const role = session?.user?.role
@@ -518,6 +584,10 @@ function ShortListEvalTab() {
 
   const handleFinalNoteSaved = (id: number, value: string | null) => {
     setData(prev => prev.map(d => d.id === id ? { ...d, final_note: value } : d))
+  }
+
+  const handleGameAlikeSaved = (id: number, value: GameAlikeGame[]) => {
+    setData(prev => prev.map(d => d.id === id ? { ...d, game_alike: value } : d))
   }
 
   // Batch filter options follow the month in the picker (UI-generated W1-W4).
@@ -645,7 +715,7 @@ function ShortListEvalTab() {
             <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
               <tr>
                 <th style={{ width: 36 }}>#</th>
-                <th style={{ width: 230 }}>Game</th>
+                <th style={{ width: 280 }}>Game</th>
                 <th style={{ width: 110 }}>Link</th>
                 <th style={{ width: 90 }}>Demo Video</th>
                 <th style={{ width: 220 }}>Initial Note</th>
@@ -660,7 +730,7 @@ function ShortListEvalTab() {
               )}
               {loading && Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>{Array.from({ length: 8 }).map((__, c) => (
-                  <td key={c}><span className="skeleton" style={{ width: [30, 200, 70, 60, 200, 110, 200, 140][c] || 80, height: 14 }} /></td>
+                  <td key={c}><span className="skeleton" style={{ width: [30, 240, 70, 60, 200, 110, 200, 140][c] || 80, height: 14 }} /></td>
                 ))}</tr>
               ))}
               {data.map((item, idx) => (
@@ -668,7 +738,7 @@ function ShortListEvalTab() {
                   onClick={() => setDetailGameId(item.game_id)}>
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 180 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 230 }}>
                       {item.icon_url ? (
                         <img src={item.icon_url} alt="" width={30} height={30} style={{ borderRadius: 7, flexShrink: 0 }} />
                       ) : (
@@ -689,7 +759,7 @@ function ShortListEvalTab() {
                         </div>
                         {item.publisher_name && (
                           <div style={{ display: 'flex', alignItems: 'center', marginTop: 2 }}>
-                            <span style={{ fontSize: 11, color: 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 190 }}
+                            <span style={{ fontSize: 11, color: 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 230 }}
                               title={item.publisher_name}>
                               {item.publisher_name}
                             </span>
@@ -738,8 +808,12 @@ function ShortListEvalTab() {
                       <CopyBtn text={item.final_note} />
                     </span>
                   </td>
-                  <td>
-                    <GameAlikeChips value={item.game_alike} />
+                  <td onClick={e => e.stopPropagation()}>
+                    <GameAlikeCell
+                      item={item}
+                      canEdit={isManager || (!!item.initial_evaluator && item.initial_evaluator.toLowerCase() === userName.toLowerCase())}
+                      onSaved={handleGameAlikeSaved}
+                    />
                   </td>
                 </tr>
               ))}
