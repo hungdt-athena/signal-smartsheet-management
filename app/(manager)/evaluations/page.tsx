@@ -568,9 +568,12 @@ function ShortListEvalTab() {
         setCurrentBatch(json.current_batch)
         if (!batchDefaultedRef.current) {
           batchDefaultedRef.current = true
-          if (json.current_batch) {
+          // Pre-select the team's current batch, but fall back to the most recent
+          // batch with games (server-resolved default_batch) when current is empty.
+          const def = json.default_batch !== undefined ? json.default_batch : json.current_batch
+          if (def) {
             willDefaultBatch = true
-            setFilterBatch(json.current_batch)
+            setFilterBatch(def)
           }
         }
       }
@@ -616,6 +619,9 @@ function ShortListEvalTab() {
   // Batch filter options follow the month in the picker (UI-generated W1-W4).
   const filterYM = valueToYearMonth(df.value)
   const batchOptions = filterYM ? weekBatches(filterYM.year, filterYM.month) : []
+  // A fallback-defaulted batch (or any batch outside the picker's month) may not be
+  // in the generated W1-W4 list — surface it so the dropdown reflects the selection.
+  if (filterBatch && !batchOptions.includes(filterBatch)) batchOptions.unshift(filterBatch)
 
   // Manager control: set the team's current batch. Offer this + next calendar
   // month's weeks so W4→W1-next-month rollover (after the 28th) is one click.
