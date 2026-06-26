@@ -149,3 +149,55 @@ new statuses), `SkeletonRows`, `DriveBtnSmall`. Router: `tab=record_video` →
 - **Title matching** may miss due to sheet drift; normalization may need tuning.
   Non-fatal (just shows `recording` instead of `recorded`).
 - **Migration ordering**: do not push/deploy until 021 is applied.
+
+---
+
+## Addendum (2026-06-26): manual bucket overrides — drag, add, remove
+
+Bucket is no longer purely derived from final_conclusion; users can move games
+between containers, add other games, and remove games from the list.
+
+### Data model — migration `022_record_bucket.sql`
+```sql
+ALTER TABLE game_evaluations ADD COLUMN IF NOT EXISTS record_bucket TEXT;
+-- '5min' | '20min' = manual bucket override; 'none' = removed from list;
+-- NULL = auto by final_conclusion (Insight→5min, Priority IV→20min)
+```
+
+### Bucket / membership resolution (server + client agree)
+```
+record_bucket = '5min'  → 5min container (in list)
+record_bucket = '20min' → 20min container (in list)
+record_bucket = 'none'  → excluded
+record_bucket = NULL     → Insight→5min, Priority IV→20min, else excluded
+```
+Server WHERE (Record tab, within batch+category):
+```sql
+AND (
+  ge.record_bucket IN ('5min','20min')
+  OR (ge.record_bucket IS NULL AND ge.final_conclusion IN ('Insight','Priority IV'))
+)
+```
+
+### API
+- GET `/api/evaluations`: add `record_bucket` to SELECT; new param `record_view=1`
+  applies the membership clause above (ignores `final_conclusions` in that mode).
+  Record tab switches from `final_conclusions=Priority IV,Insight` to `record_view=1`.
+- POST `/api/evaluations/record-bucket` (new), admin/moderator:
+  `{ id, bucket: '5min'|'20min'|'none' }`.
+  - `'none'`: set record_bucket='none', clear BOTH assignees + record_confirmed_at.
+  - `'5min'|'20min'`: set record_bucket; **carry the current recorder** into the
+    target duration column, clear the other; keep record_confirmed_at.
+  - Resolves the current effective bucket/assignee from the row before writing.
+
+### UI (RecordTab)
+- **Drag & drop** (manager only): rows `draggable`; each container is a drop
+  target. Drop into the other container → POST record-bucket → optimistic move
+  (update record_bucket + swap assignee field client-side). Same-container drop = no-op.
+- **Add**: a "+ Add" button per container opens a picker listing current
+  batch+category games NOT already in the list (fetch `/api/evaluations?category
+  &batch&limit=500`, exclude shown ids, search box). Select → record-bucket with
+  that container's bucket → refetch.
+- **Remove**: per-row × (manager) → inline styled confirm ("Remove from list?
+  clears the recorder") → record-bucket `'none'` → optimistic remove. No window.confirm.
+- Split uses effective bucket: `record_bucket ∈ {5min,20min} ? it : (final_conclusion==='Priority IV'?'20min':'5min')`.
