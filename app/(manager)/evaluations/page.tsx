@@ -563,16 +563,24 @@ function ShortListEvalTab() {
       setTotal(json.total || 0)
       if (json.available_months) df.setAvailableMonths(json.available_months)
       if (json.available_evaluators) setAvailableEvaluators(json.available_evaluators)
+      let willDefaultBatch = false
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
         if (!batchDefaultedRef.current) {
           batchDefaultedRef.current = true
-          if (json.current_batch) setFilterBatch(json.current_batch)
+          if (json.current_batch) {
+            willDefaultBatch = true
+            setFilterBatch(json.current_batch)
+          }
         }
       }
       if (df.autoMonth && json.applied_month !== undefined) {
         const ap = json.applied_month as YearMonth | null
-        df.suppressFetchRef.current = true
+        // Suppress the redundant refetch after resolving month=auto — but NOT when
+        // we're also defaulting the batch filter this render. React batches both
+        // state updates into one fetchData recreation, so a blanket suppress would
+        // swallow the batch-narrowed refetch and leave the full List_Idea showing.
+        if (!willDefaultBatch) df.suppressFetchRef.current = true
         df.setAutoMonth(false)
         df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
