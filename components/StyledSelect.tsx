@@ -74,7 +74,7 @@ export function StyledSelect({ value, onChange, options, placeholder = 'Select',
       </button>
       {open && pos && createPortal(
         <div ref={menuRef} className="ssel-menu"
-          style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}>
+          style={{ position: 'fixed', top: pos.top ?? 'auto', bottom: pos.bottom ?? 'auto', left: pos.left, right: 'auto', width: pos.width, maxHeight: pos.maxHeight }}>
           {options.map(opt => (
             <div key={opt.value}
               className={'ssel-opt' + (opt.value === value ? ' sel' : '')}
