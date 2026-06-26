@@ -11,7 +11,7 @@ interface Assignment {
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await requireRole(['admin'])
+  const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
 
   try {
@@ -46,7 +46,11 @@ export async function POST(req: NextRequest) {
           record_20min_date = CASE
             WHEN ${has20} AND ${r20}::text IS NULL THEN NULL
             WHEN ${has20} AND ${r20}::text IS NOT NULL AND record_20min_assignee IS NULL THEN NOW()
-            ELSE record_20min_date END
+            ELSE record_20min_date END,
+          record_confirmed_at = CASE
+            WHEN (${has5} AND ${r5} IS DISTINCT FROM record_5min_assignee)
+              OR (${has20} AND ${r20} IS DISTINCT FROM record_20min_assignee)
+            THEN NULL ELSE record_confirmed_at END
         WHERE id = ${a.id}
       `
       updated += result.count

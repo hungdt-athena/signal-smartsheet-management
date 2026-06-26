@@ -3,11 +3,10 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
-import { MultiSelect } from '@/components/MultiSelect'
-import { DateFilter, dateFilterParams, monthToValue } from '@/components/DateFilter'
+import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth } from '@/components/DateFilter'
 import type { YearMonth } from '@/components/DateFilter'
 import { useDateFilter } from '@/hooks/useDateFilter'
-import EvalDetailPanel from '@/components/EvalDetailPanel'
+import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 
 interface YtbRow {
   row_index: number
@@ -753,7 +752,9 @@ interface ShortListItem {
   final_evaluator: string | null
   initial_note: string | null
   initial_conclusion: string | null
+  final_conclusion: string | null
   drive_link: string | null
+  record_confirmed_at: string | null
   record_5min_assignee: string | null
   record_5min_drive: string | null
   record_20min_assignee: string | null
@@ -762,236 +763,8 @@ interface ShortListItem {
   genre_2: string | null
   publisher_name: string | null
   category_group: string
+  batch: string | null
   app_link: string | null
-}
-
-const SL_CONCLUSION_COLORS: Record<string, string> = {
-  'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
-  'Good': 'success', 'Conclusion': 'success',
-  'List_Idea': 'success', 'Priority I': 'success', 'Priority II': 'success',
-  'Priority III: Watchlist for next phase': 'running',
-  'Priority IV: Idea': 'running', 'Watchlist for next milestone': 'running',
-  'Need deeper testing': 'running', 'Wait for PlayTest': 'running',
-  'Check Market Data': 'running', 'Need Direction': 'running',
-}
-
-const CONCLUSION_OPTIONS = [
-  'Bypass', 'Conclusion', 'Good', 'Link_dead', 'M_ByPass', 'Need deeper testing', 'Skip',
-  'Wait for PlayTest', 'Priority IV: Idea', 'Priority III: Watchlist for next phase',
-  'Check Market Data', 'Watchlist for next milestone', 'Priority II', 'Priority I',
-  'Need Direction', 'List_Idea',
-]
-
-function DriveBtnSmall({ href }: { href: string }) {
-  return (
-    <a href={href} target="_blank" rel="noopener" onClick={e => e.stopPropagation()} className="drive-btn">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <polygon points="23 7 16 12 23 17 23 7" />
-        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-      </svg>
-    </a>
-  )
-}
-
-// ── Assign Record Modal ──────────────────────────────────────────────────────
-
-function AssignRecordModal({ games, onClose, onSaved, mode = 'assign' }: {
-  games: ShortListItem[]
-  onClose: () => void
-  onSaved: () => void
-  mode?: 'assign' | 'review'
-}) {
-  const isReview = mode === 'review'
-  const original = useMemo(() => {
-    const m: Record<number, { r5: string; r20: string }> = {}
-    for (const g of games) m[g.id] = {
-      r5: isReview ? (g.record_5min_assignee || '') : '',
-      r20: isReview ? (g.record_20min_assignee || '') : '',
-    }
-    return m
-  }, [games, isReview])
-  const [rows, setRows] = useState(games)
-  const [assignments, setAssignments] = useState<Record<number, { r5: string; r20: string }>>(original)
-  const [recorders, setRecorders] = useState<string[]>([])
-  const [saving, setSaving] = useState(false)
-  const [search, setSearch] = useState('')
-
-  useEffect(() => {
-    fetch('/api/team/recorders').then(r => r.ok ? r.json() : []).then(setRecorders).catch(() => {})
-  }, [])
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return rows
-    const q = search.toLowerCase()
-    return rows.filter(r => r.title.toLowerCase().includes(q))
-  }, [rows, search])
-
-  function setAssign(id: number, field: 'r5' | 'r20', value: string) {
-    setAssignments(prev => ({
-      ...prev,
-      [id]: { ...prev[id] || { r5: '', r20: '' }, [field]: value },
-    }))
-  }
-
-  function removeRow(id: number) {
-    setRows(prev => prev.filter(r => r.id !== id))
-    setAssignments(prev => { const n = { ...prev }; delete n[id]; return n })
-  }
-
-  function bulkAssign(field: 'r5' | 'r20', value: string) {
-    setAssignments(prev => {
-      const next = { ...prev }
-      for (const game of filtered) {
-        next[game.id] = { ...next[game.id] || { r5: '', r20: '' }, [field]: value }
-      }
-      return next
-    })
-  }
-
-  // Rows whose selection differs from the original state (incl. clearing to '').
-  const changed = useMemo(() => Object.entries(assignments).filter(([id, v]) => {
-    const o = original[Number(id)] || { r5: '', r20: '' }
-    return v.r5 !== o.r5 || v.r20 !== o.r20
-  }), [assignments, original])
-
-  async function save() {
-    const batch = changed.map(([id, v]) => {
-      const o = original[Number(id)] || { r5: '', r20: '' }
-      const entry: Record<string, unknown> = { id: Number(id) }
-      // Send only the durations that changed; empty selection clears the assignee.
-      if (v.r5 !== o.r5) entry.record_5min_assignee = v.r5 || null
-      if (v.r20 !== o.r20) entry.record_20min_assignee = v.r20 || null
-      return entry
-    })
-    if (batch.length === 0) return
-    setSaving(true)
-    try {
-      const res = await fetch('/api/evaluations/assign-records', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments: batch }),
-      })
-      if (res.ok) { onSaved(); onClose() }
-    } catch { /* ignore */ }
-    setSaving(false)
-  }
-
-  const assignCount = changed.length
-  const recOpts = [{ value: '', label: '—' }, ...recorders.map(r => ({ value: r, label: r }))]
-
-  return (
-    <div className="eval-modal-backdrop" onClick={onClose}>
-      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{ padding: '24px 28px 24px', maxWidth: 1100, width: '95vw' }}>
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <div>
-            <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{isReview ? 'Review Recorders' : 'Assign Recorders'}</h2>
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
-              {rows.length} {isReview ? 'assigned' : 'unassigned'} game{rows.length !== 1 ? 's' : ''}
-              {assignCount > 0 && <> · <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{assignCount} changed</span></>}
-            </p>
-          </div>
-          <button className="btn btn-sm btn-ghost" onClick={onClose} style={{ fontSize: 18, padding: '2px 8px' }}>x</button>
-        </div>
-
-        {/* Toolbar */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
-          <div className="search-wrap">
-            <span className="search-icon-abs">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-              </svg>
-            </span>
-            <input className="search-input" placeholder="Filter games..." style={{ width: 180 }}
-              value={search} onChange={e => setSearch(e.target.value)} />
-          </div>
-          {recorders.length > 0 && (
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)' }}>
-              <span style={{ fontWeight: 600 }}>Bulk assign all visible:</span>
-              <div style={{ width: 120 }}>
-                <StyledSelect value="" onChange={v => { if (v) bulkAssign('r5', v) }}
-                  placeholder="5 min →" options={recOpts} style={{ fontSize: 11 }} />
-              </div>
-              <div style={{ width: 120 }}>
-                <StyledSelect value="" onChange={v => { if (v) bulkAssign('r20', v) }}
-                  placeholder="20 min →" options={recOpts} style={{ fontSize: 11 }} />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div style={{ maxHeight: 'calc(80vh - 180px)', overflowY: 'auto' }}>
-          {filtered.length === 0 ? (
-            <p className="empty">{search ? 'No games match your search' : isReview ? 'No assigned games' : 'No unassigned games'}</p>
-          ) : (
-            <table className="tbl" style={{ fontSize: 12.5 }}>
-              <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
-                <tr>
-                  <th style={{ width: 36 }}>#</th>
-                  <th>Game</th>
-                  <th style={{ width: 60 }}>OS</th>
-                  <th style={{ width: 180 }}>5 min Recorder</th>
-                  <th style={{ width: 180 }}>20 min Recorder</th>
-                  <th style={{ width: 40 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((game, idx) => {
-                  const a = assignments[game.id] || { r5: '', r20: '' }
-                  const hasAssign = a.r5 || a.r20
-                  return (
-                    <tr key={game.id} className="tbl-row-premium"
-                      style={hasAssign ? { background: 'var(--accent-weak)' } : undefined}>
-                      <td className="num" style={{ color: 'var(--faint)', fontSize: 11 }}>{idx + 1}</td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {game.icon_url ? (
-                            <img src={game.icon_url} alt="" width={26} height={26} style={{ borderRadius: 6, flexShrink: 0 }} />
-                          ) : (
-                            <div style={{ width: 26, height: 26, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
-                          )}
-                          <span className="cell-name" style={{ fontSize: 12.5 }}>{game.title}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>{game.os?.toUpperCase()}</span>
-                      </td>
-                      <td>
-                        <StyledSelect value={a.r5} onChange={v => setAssign(game.id, 'r5', v)}
-                          placeholder="—" options={recOpts} style={{ fontSize: 12 }} />
-                      </td>
-                      <td>
-                        <StyledSelect value={a.r20} onChange={v => setAssign(game.id, 'r20', v)}
-                          placeholder="—" options={recOpts} style={{ fontSize: 12 }} />
-                      </td>
-                      <td>
-                        <button className="btn btn-sm btn-ghost" onClick={() => removeRow(game.id)}
-                          style={{ color: 'var(--bad)', padding: '2px 6px', fontSize: 13 }}>x</button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          <span style={{ fontSize: 11, color: 'var(--faint)' }}>
-            {filtered.length} game{filtered.length !== 1 ? 's' : ''} shown
-          </span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-sm" onClick={onClose}>Cancel</button>
-            <button className="btn btn-sm btn-primary" onClick={save}
-              disabled={saving || assignCount === 0}>
-              {saving ? 'Saving...' : `Save ${assignCount} assignment${assignCount !== 1 ? 's' : ''}`}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 // ── Extract Chat Text Modal ──────────────────────────────────────────────────
@@ -1143,138 +916,302 @@ function SkeletonRows({ cols, rows = 5 }: { cols: number; rows?: number }) {
   )
 }
 
-// ── Recording Status Cell ───────────────────────────────────────────────────
+// ── Record status helpers ────────────────────────────────────────────────────
 
-function RecordingCell({ assignee, drive }: { assignee: string | null; drive: string | null }) {
-  if (!assignee) return <span className="rec-status none">—</span>
-  if (drive) return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span className="rec-status done">&#10003; {assignee}</span>
-      <DriveBtnSmall href={drive} />
-    </div>
-  )
-  return <span className="rec-status pending">&#9711; {assignee}</span>
+type RecordStatus = 'pending' | 'draft' | 'recording' | 'recorded'
+
+function normalizeTitle(s: string): string {
+  // NFD decomposes accented chars into base + combining marks; the range
+  // U+0300–U+036F is the Combining Diacritical Marks block. Using the explicit
+  // range avoids the \p{Diacritic} property escape, which needs the `u` flag /
+  // an es6+ tsc target (this project's tsconfig has no `target`).
+  return (s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ')
 }
 
-// ── Short List Tab ───────────────────────────────────────────────────────────
+function recordStatus(item: ShortListItem, ytMap: Map<string, string>): { status: RecordStatus; youtubeId?: string } {
+  const bucket = item.final_conclusion === 'Priority IV' ? '20min' : '5min'
+  const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
+  const yt = ytMap.get(normalizeTitle(item.title))
+  if (yt) return { status: 'recorded', youtubeId: yt }
+  if (!assignee) return { status: 'pending' }
+  if (item.record_confirmed_at) return { status: 'recording' }
+  return { status: 'draft' }
+}
 
-function ShortListTab() {
+// Maps to globals.css badge classes. No blue badge class exists, so `recording`
+// gets an inline blue override; `running` is the project's amber badge → draft.
+const RECORD_STATUS_STYLES: Record<RecordStatus, { cls: string; label: string; style?: React.CSSProperties }> = {
+  pending:   { cls: 'idle',    label: 'Pending' },
+  draft:     { cls: 'running', label: 'Draft' },
+  recording: { cls: 'neutral', label: 'Recording', style: { background: 'var(--accent-weak)', color: 'var(--accent-strong)' } },
+  recorded:  { cls: 'success', label: 'Recorded' },
+}
+
+function RecordStatusBadge({ status, youtubeId }: { status: RecordStatus; youtubeId?: string }) {
+  const s = RECORD_STATUS_STYLES[status]
+  if (status === 'recorded' && youtubeId) {
+    return (
+      <a
+        href={`https://www.youtube.com/watch?v=${youtubeId}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={e => e.stopPropagation()}
+        className={`badge ${s.cls}`}
+        style={{ textDecoration: 'none', ...s.style }}
+      >
+        ▶ {s.label}
+      </a>
+    )
+  }
+  return <span className={`badge ${s.cls}`} style={s.style}>{s.label}</span>
+}
+
+// ── Record Table ─────────────────────────────────────────────────────────────
+
+function RecordTable({ label, items, loading, isManager, recorders, onAssign, ytMap, onClickGame }: {
+  label: string
+  items: ShortListItem[]
+  loading: boolean
+  isManager: boolean
+  recorders: string[]
+  onAssign: (item: ShortListItem, name: string) => void
+  ytMap: Map<string, string>
+  onClickGame: (gameId: string) => void
+}) {
+  const recOpts = [{ value: '', label: '—' }, ...recorders.map(r => ({ value: r, label: r }))]
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <span className="card-label">{label}</span>
+        <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 600 }}>{items.length} game{items.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+        <table className="tbl">
+          <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
+            <tr>
+              <th style={{ width: 36 }}>#</th>
+              <th>Game</th>
+              <th style={{ width: 160 }}>Recorder</th>
+              <th style={{ width: 130 }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 && !loading && (
+              <tr><td colSpan={4} className="empty">No games</td></tr>
+            )}
+            {loading && <SkeletonRows cols={4} />}
+            {items.map((item, idx) => {
+              const bucket = item.final_conclusion === 'Priority IV' ? '20min' : '5min'
+              const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
+              const { status, youtubeId } = recordStatus(item, ytMap)
+              return (
+                <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
+                  onClick={() => onClickGame(item.game_id)}>
+                  <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 160 }}>
+                      {item.icon_url ? (
+                        <img src={item.icon_url} alt="" width={28} height={28} style={{ borderRadius: 6, flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td onClick={isManager ? e => e.stopPropagation() : undefined}>
+                    {isManager ? (
+                      <StyledSelect
+                        value={assignee || ''}
+                        onChange={v => onAssign(item, v)}
+                        placeholder="—"
+                        options={recOpts}
+                        style={{ fontSize: 12 }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: 12.5, color: assignee ? 'var(--text)' : 'var(--faint)' }}>{assignee || '—'}</span>
+                    )}
+                  </td>
+                  <td>
+                    <RecordStatusBadge status={status} youtubeId={youtubeId} />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Record Tab ───────────────────────────────────────────────────────────────
+
+function RecordTab() {
   const { data: session } = useSession()
   const userName = session?.user?.name || ''
   const role = session?.user?.role
+  const isManager = role === 'admin' || role === 'moderator'
 
   const [data, setData] = useState<ShortListItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [filterCategory, setFilterCategory] = useState('puzzle')
-  const [filterConclusions, setFilterConclusions] = useState<string[]>(['List_Idea'])
-  const [availableConclusions, setAvailableConclusions] = useState<string[]>(CONCLUSION_OPTIONS)
-  const [filterAssignment, setFilterAssignment] = useState('')
-  // Videos workflow keys off assignment timing → default basis = assigned.
-  // First load sends month=auto; server resolves current month or latest with data.
+  const [filterBatch, setFilterBatch] = useState('')
+  const [currentBatch, setCurrentBatch] = useState<string | null>(null)
+  const [filterStatus, setFilterStatus] = useState<'' | RecordStatus>('')
+  const [recorders, setRecorders] = useState<string[]>([])
+  const [ytMap, setYtMap] = useState<Map<string, string>>(new Map())
+  const [detailGameId, setDetailGameId] = useState<string | null>(null)
+  const [showExtract, setShowExtract] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+
+  // Record tab keys off when games were assigned to record.
   const df = useDateFilter('assigned')
   const fetchSeqRef = useRef(0)
-  const [showAssignModal, setShowAssignModal] = useState(false)
-  const [showReviewModal, setShowReviewModal] = useState(false)
-  const [showExtractModal, setShowExtractModal] = useState(false)
-  const [detailGameId, setDetailGameId] = useState<string | null>(null)
+  // Default the batch filter to the team's current batch once (later manual
+  // "All batches" choices stick).
+  const batchDefaultedRef = useRef(false)
 
   const fetchData = useCallback(async () => {
     const seq = ++fetchSeqRef.current
     setLoading(true)
     try {
       const params = new URLSearchParams({ category: filterCategory, limit: '500' })
-      if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
-      if (filterAssignment) params.set('assignment_status', filterAssignment)
+      params.set('final_conclusions', 'Priority IV,Insight')
+      if (filterBatch) params.set('batch', filterBatch)
+      if (!isManager && userName) params.set('recorder', userName)
       for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
       const res = await fetch(`/api/evaluations?${params}`)
       const json = await res.json()
-      if (seq !== fetchSeqRef.current) return // stale response; a newer fetch owns the state
+      if (seq !== fetchSeqRef.current) return
       setData(json.data || [])
       setTotal(json.total || 0)
       if (json.available_months) df.setAvailableMonths(json.available_months)
+      let willDefaultBatch = false
+      if (json.current_batch !== undefined) {
+        setCurrentBatch(json.current_batch)
+        if (!batchDefaultedRef.current) {
+          batchDefaultedRef.current = true
+          if (json.current_batch) {
+            willDefaultBatch = true
+            setFilterBatch(json.current_batch)
+          }
+        }
+      }
       if (df.autoMonth && json.applied_month !== undefined) {
-        // Lock in the server-resolved month: the picker shows it and all
-        // later fetches use explicit params instead of re-resolving auto.
         const ap = json.applied_month as YearMonth | null
-        df.suppressFetchRef.current = true
+        if (!willDefaultBatch) df.suppressFetchRef.current = true
         df.setAutoMonth(false)
         df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
-      if (json.available_conclusions?.length) {
-        // keep currently-selected values visible even if filtered out by scope
-        const merged = Array.from(new Set([...json.available_conclusions, ...filterConclusions]))
-        setAvailableConclusions(CONCLUSION_OPTIONS.filter(c => merged.includes(c)).concat(merged.filter(c => !CONCLUSION_OPTIONS.includes(c))))
-      }
     } catch { /* ignore */ }
     setLoading(false)
-  }, [filterCategory, filterConclusions, filterAssignment, df.value, df.autoMonth])
+  }, [filterCategory, filterBatch, df.value, df.autoMonth, isManager, userName])
 
   useEffect(() => {
-    if (df.suppressFetchRef.current) {
-      df.suppressFetchRef.current = false
-      return
-    }
+    if (df.suppressFetchRef.current) { df.suppressFetchRef.current = false; return }
     fetchData()
   }, [fetchData])
 
-  const unassigned = useMemo(() =>
-    data.filter(d => !d.record_5min_assignee && !d.record_20min_assignee),
-    [data]
-  )
+  // Recorder options + YouTube uploaded map fetched once on mount.
+  useEffect(() => {
+    fetch('/api/team/recorders').then(r => r.ok ? r.json() : []).then(setRecorders).catch(() => {})
+    fetch('/api/sheets/ytb-uploaded', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: YtbRow[]) => {
+        const m = new Map<string, string>()
+        for (const row of rows) {
+          if (!row.gameTitle) continue
+          const key = normalizeTitle(row.gameTitle)
+          // Prefer rows that actually have a youtubeId.
+          if (row.youtubeId && (!m.has(key) || !m.get(key))) m.set(key, row.youtubeId)
+          else if (!m.has(key)) m.set(key, row.youtubeId || '')
+        }
+        // Drop entries that never resolved to a real id.
+        for (const [k, v] of Array.from(m.entries())) if (!v) m.delete(k)
+        setYtMap(m)
+      })
+      .catch(() => {})
+  }, [])
 
-  const assigned = useMemo(() =>
+  // Optimistically assign a recorder to a game's bucket and drop it to draft.
+  const assignRecorder = useCallback(async (item: ShortListItem, name: string) => {
+    const bucket = item.final_conclusion === 'Priority IV' ? '20min' : '5min'
+    const field = bucket === '20min' ? 'record_20min_assignee' : 'record_5min_assignee'
+    setData(prev => prev.map(d => d.id === item.id
+      ? { ...d, [field]: name || null, record_confirmed_at: null }
+      : d))
+    try {
+      await fetch('/api/evaluations/assign-records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments: [{ id: item.id, [field]: name || null }] }),
+      })
+    } catch { /* ignore — optimistic state already applied */ }
+  }, [])
+
+  // Split into the two buckets by final_conclusion, then apply the status filter.
+  const list5 = useMemo(() => data.filter(d => d.final_conclusion === 'Insight'), [data])
+  const list20 = useMemo(() => data.filter(d => d.final_conclusion === 'Priority IV'), [data])
+
+  const filterByStatus = useCallback((list: ShortListItem[]) => {
+    if (!filterStatus) return list
+    return list.filter(d => recordStatus(d, ytMap).status === filterStatus)
+  }, [filterStatus, ytMap])
+
+  const shown5 = useMemo(() => filterByStatus(list5), [filterByStatus, list5])
+  const shown20 = useMemo(() => filterByStatus(list20), [filterByStatus, list20])
+
+  // Visible draft rows are the targets of Confirm Assign.
+  const visibleDraftIds = useMemo(() => {
+    return [...shown5, ...shown20]
+      .filter(d => recordStatus(d, ytMap).status === 'draft')
+      .map(d => d.id)
+  }, [shown5, shown20, ytMap])
+
+  // Games that have a recorder — fed to the Extract Chat modal.
+  const assignedGames = useMemo(() =>
     data.filter(d => d.record_5min_assignee || d.record_20min_assignee),
     [data]
   )
 
-  const withDrive = useMemo(() =>
-    data.filter(d => d.record_5min_drive || d.record_20min_drive),
-    [data]
-  )
+  const confirmAssign = useCallback(async () => {
+    if (visibleDraftIds.length === 0) return
+    setConfirming(true)
+    try {
+      await fetch('/api/evaluations/confirm-records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: visibleDraftIds }),
+      })
+      await fetchData()
+    } catch { /* ignore */ }
+    setConfirming(false)
+  }, [visibleDraftIds, fetchData])
 
-  function clickStat(filter: string) {
-    setFilterAssignment(prev => prev === filter ? '' : filter)
-  }
+  // Batch filter options follow the month in the picker (UI-generated W1-W4).
+  const filterYM = valueToYearMonth(df.value)
+  const batchOptions = filterYM ? weekBatches(filterYM.year, filterYM.month) : []
+  if (currentBatch && !batchOptions.includes(currentBatch)) batchOptions.unshift(currentBatch)
+  if (filterBatch && !batchOptions.includes(filterBatch)) batchOptions.unshift(filterBatch)
+
+  const totalShown = shown5.length + shown20.length
 
   return (
     <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
-          <h1 className="h-title">Videos</h1>
-          <p className="h-sub">{total} games · Short List · {filterCategory}</p>
+          <h1 className="h-title">Record</h1>
+          <p className="h-sub">{total} games · {filterBatch || 'all batches'} · {filterCategory}{!isManager && userName ? ` · ${userName}` : ''}</p>
         </div>
       </div>
-
-      {/* Stats summary */}
-      {!loading && data.length > 0 && (
-        <div className="stats-row-compact">
-          <div className={`stat-card-compact${filterAssignment === '' ? ' active-filter' : ''}`}
-            onClick={() => clickStat('')}>
-            <span className="scc-label">Total</span>
-            <span className="scc-num">{data.length}</span>
-            <span className="scc-sub">games loaded</span>
-          </div>
-          <div className={`stat-card-compact${filterAssignment === 'assigned' ? ' active-filter' : ''}`}
-            onClick={() => clickStat('assigned')}>
-            <span className="scc-label">Assigned</span>
-            <span className="scc-num">{assigned.length}</span>
-            <span className="scc-sub">{data.length > 0 ? Math.round(assigned.length / data.length * 100) : 0}% of total</span>
-          </div>
-          <div className={`stat-card-compact${filterAssignment === 'unassigned' ? ' active-filter' : ''}`}
-            onClick={() => clickStat('unassigned')}
-            style={unassigned.length > 0 ? { borderColor: 'var(--warn)', background: 'var(--warn-weak)' } : undefined}>
-            <span className="scc-label">Unassigned</span>
-            <span className="scc-num" style={unassigned.length > 0 ? { color: 'var(--warn)' } : undefined}>{unassigned.length}</span>
-            <span className="scc-sub">need assignment</span>
-          </div>
-          <div className="stat-card-compact" style={{ cursor: 'default' }}>
-            <span className="scc-label">With Drive</span>
-            <span className="scc-num">{withDrive.length}</span>
-            <span className="scc-sub">recordings uploaded</span>
-          </div>
-        </div>
-      )}
 
       <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
         <DateFilter value={df.value}
@@ -1293,386 +1230,22 @@ function ShortListTab() {
           />
         </div>
 
-        <div style={{ width: 200 }}>
-          <MultiSelect
-            value={filterConclusions}
-            onChange={setFilterConclusions}
-            placeholder="Conclusions"
-            options={availableConclusions.map(c => ({ value: c, label: c }))}
-          />
-        </div>
-
-        <div className="seg-wrapper">
-          {[
-            { value: '', label: 'All' },
-            { value: 'unassigned', label: 'Unassigned' },
-            { value: 'assigned', label: 'Assigned' },
-          ].map(s => (
-            <button key={s.value}
-              className={`seg-btn-premium${filterAssignment === s.value ? ' active' : ''}`}
-              onClick={() => setFilterAssignment(s.value)}>
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="sync" style={{ fontSize: 12.5, fontWeight: 600 }}>
-            {loading ? 'Loading...' : `${total} results`}
-          </span>
-          <button className="btn btn-sm" onClick={() => setShowReviewModal(true)} disabled={assigned.length === 0}>
-            Review Assign
-            {assigned.length > 0 && <span className="badge-count">{assigned.length}</span>}
-          </button>
-          <button className="btn btn-sm" onClick={() => setShowExtractModal(true)} disabled={assigned.length === 0}>
-            Extract Chat
-          </button>
-          <button className="btn btn-sm btn-primary" onClick={() => setShowAssignModal(true)}>
-            Assign Record
-            {unassigned.length > 0 && <span className="badge-count">{unassigned.length}</span>}
-          </button>
-        </div>
-      </div>
-
-      <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-          <table className="tbl">
-            <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
-              <tr>
-                <th style={{ width: 36 }}>#</th>
-                <th>Game</th>
-                <th>Note</th>
-                <th>Conclusion</th>
-                <th style={{ width: 90 }}>Drive Demo</th>
-                <th style={{ width: 140 }}>5 min</th>
-                <th style={{ width: 140 }}>20 min</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.length === 0 && !loading && (
-                <tr><td colSpan={7} className="empty">No games found</td></tr>
-              )}
-              {loading && <SkeletonRows cols={7} />}
-              {data.map((item, idx) => (
-                <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
-                  onClick={() => setDetailGameId(item.game_id)}>
-                  <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
-                  <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 200 }}>
-                      {item.icon_url ? (
-                        <img src={item.icon_url} alt="" width={28} height={28} style={{ borderRadius: 6, flexShrink: 0 }} />
-                      ) : (
-                        <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
-                      )}
-                      <div style={{ minWidth: 0 }}>
-                        <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
-                        <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-                          <span className="pill muted" style={{ padding: '1px 5px', fontSize: 9 }}>{item.os?.toUpperCase()}</span>
-                          {[item.genre_1, item.genre_2].filter(Boolean).map(g => (
-                            <span key={g} className="pill tag" style={{ padding: '1px 5px', fontSize: 9 }}>{g}</span>
-                          ))}
-                          {item.initial_evaluator && (
-                            <span style={{ fontSize: 10.5, color: 'var(--faint)', fontWeight: 600 }}>{item.initial_evaluator}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <div title={item.initial_note || undefined}
-                      style={{ fontSize: 12, color: item.initial_note ? 'var(--text)' : 'var(--faint)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: item.initial_note ? 'help' : undefined }}>
-                      {item.initial_note || '—'}
-                    </div>
-                  </td>
-                  <td>
-                    {item.initial_conclusion
-                      ? <span className={`badge ${SL_CONCLUSION_COLORS[item.initial_conclusion] || 'neutral'}`}>{item.initial_conclusion}</span>
-                      : <span className="badge idle">Pending</span>}
-                  </td>
-                  <td>
-                    {item.drive_link
-                      ? <DriveBtnSmall href={item.drive_link} />
-                      : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
-                  </td>
-                  <td>
-                    <RecordingCell assignee={item.record_5min_assignee} drive={item.record_5min_drive} />
-                  </td>
-                  <td>
-                    <RecordingCell assignee={item.record_20min_assignee} drive={item.record_20min_drive} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {showAssignModal && (
-        <AssignRecordModal
-          games={unassigned}
-          onClose={() => setShowAssignModal(false)}
-          onSaved={fetchData}
-        />
-      )}
-
-      {showReviewModal && (
-        <AssignRecordModal
-          games={assigned}
-          mode="review"
-          onClose={() => setShowReviewModal(false)}
-          onSaved={fetchData}
-        />
-      )}
-
-      {showExtractModal && (
-        <ExtractChatModal
-          games={assigned}
-          onClose={() => setShowExtractModal(false)}
-        />
-      )}
-
-      {detailGameId && (
-        <div className="eval-modal-backdrop" onClick={() => setDetailGameId(null)}>
-          <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-            style={{ padding: '20px 24px 24px' }}>
-            <EvalDetailPanel
-              initialGameId={detailGameId}
-              gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
-              role={role}
-              userName={userName}
-              canAssignRecords
-              onClose={() => setDetailGameId(null)}
-              onNavigate={setDetailGameId}
-              onSaved={fetchData}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Record Video Table ───────────────────────────────────────────────────────
-
-function RecordTable({ label, items, loading, onClickGame }: {
-  label: string
-  items: { item: ShortListItem; assignee: string | null; drive: string | null }[]
-  loading: boolean
-  onClickGame: (gameId: string) => void
-}) {
-  return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-        <span className="card-label">{label}</span>
-        <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 600 }}>{items.length} game{items.length !== 1 ? 's' : ''}</span>
-      </div>
-      <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-        <table className="tbl">
-          <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
-            <tr>
-              <th style={{ width: 36 }}>#</th>
-              <th>Game</th>
-              <th>Category</th>
-              <th style={{ width: 200 }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.length === 0 && !loading && (
-              <tr><td colSpan={4} className="empty">No recordings</td></tr>
-            )}
-            {loading && <SkeletonRows cols={4} />}
-            {items.map(({ item, assignee, drive }, idx) => (
-              <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
-                onClick={() => onClickGame(item.game_id)}>
-                <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 160 }}>
-                    {item.icon_url ? (
-                      <img src={item.icon_url} alt="" width={28} height={28} style={{ borderRadius: 6, flexShrink: 0 }} />
-                    ) : (
-                      <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
-                    )}
-                    <div style={{ minWidth: 0 }}>
-                      <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
-                    </div>
-                  </div>
-                </td>
-                <td>
-                  <span className="pill muted" style={{ fontSize: 10, padding: '1px 6px' }}>{item.category_group}</span>
-                </td>
-                <td>
-                  <RecordingCell assignee={assignee} drive={drive} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-// ── Record Video Tab ─────────────────────────────────────────────────────────
-
-function RecordVideoTab() {
-  const { data: session } = useSession()
-  const userName = session?.user?.name || ''
-  const role = session?.user?.role
-
-  const [data, setData] = useState<ShortListItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [filterCategory, setFilterCategory] = useState('')
-  const [filterType, setFilterType] = useState<'all' | '5min' | '20min'>('all')
-  const [filterStatus, setFilterStatus] = useState<'' | 'pending' | 'done'>('')
-  const [search, setSearch] = useState('')
-  const [detailGameId, setDetailGameId] = useState<string | null>(null)
-
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const categories = filterCategory ? [filterCategory] : ['puzzle', 'arcade', 'simulation']
-      const results = await Promise.all(
-        categories.map(cat => {
-          const params = new URLSearchParams({ category: cat, limit: '500', has_recording: 'true' })
-          if (role !== 'admin' && role !== 'moderator' && userName) params.set('recorder', userName)
-          return fetch(`/api/evaluations?${params}`).then(r => r.json())
-        })
-      )
-      const all = results.flatMap(r => r.data || [])
-      setData(all)
-    } catch { /* ignore */ }
-    setLoading(false)
-  }, [filterCategory, userName, role])
-
-  useEffect(() => { fetchData() }, [fetchData])
-
-  const baseFiltered = useMemo(() => {
-    let list = data
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(d => d.title.toLowerCase().includes(q))
-    }
-    return list
-  }, [data, search])
-
-  const stats = useMemo(() => {
-    let r5 = 0, r20 = 0, done5 = 0, done20 = 0
-    for (const d of data) {
-      if (d.record_5min_assignee) { r5++; if (d.record_5min_drive) done5++ }
-      if (d.record_20min_assignee) { r20++; if (d.record_20min_drive) done20++ }
-    }
-    return { total: data.length, r5, r20, done5, done20, done: done5 + done20, pending: (r5 - done5) + (r20 - done20) }
-  }, [data])
-
-  const list5 = useMemo(() => {
-    return baseFiltered
-      .filter(d => d.record_5min_assignee)
-      .filter(d => {
-        if (filterStatus === 'done') return !!d.record_5min_drive
-        if (filterStatus === 'pending') return !d.record_5min_drive
-        return true
-      })
-      .map(item => ({ item, assignee: item.record_5min_assignee, drive: item.record_5min_drive }))
-  }, [baseFiltered, filterStatus])
-
-  const list20 = useMemo(() => {
-    return baseFiltered
-      .filter(d => d.record_20min_assignee)
-      .filter(d => {
-        if (filterStatus === 'done') return !!d.record_20min_drive
-        if (filterStatus === 'pending') return !d.record_20min_drive
-        return true
-      })
-      .map(item => ({ item, assignee: item.record_20min_assignee, drive: item.record_20min_drive }))
-  }, [baseFiltered, filterStatus])
-
-  const show5 = filterType === 'all' || filterType === '5min'
-  const show20 = filterType === 'all' || filterType === '20min'
-  const totalShown = (show5 ? list5.length : 0) + (show20 ? list20.length : 0)
-
-  return (
-    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div className="page-head" style={{ marginBottom: 10 }}>
-        <div>
-          <h1 className="h-title">Videos</h1>
-          <p className="h-sub">{data.length} games · Record Video{role !== 'admin' && role !== 'moderator' && userName ? ` · ${userName}` : ''}</p>
-        </div>
-      </div>
-
-      {/* User context banner */}
-      {!loading && data.length > 0 && (
-        <div className="user-context-banner">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-              {role !== 'admin' && role !== 'moderator' && userName
-                ? <>Hi {userName.split(' ')[0]}! You have <strong>{stats.pending}</strong> recording{stats.pending !== 1 ? 's' : ''} to submit.</>
-                : <>{stats.total} games with recording assignments</>}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 20 }}>
-            <div className="banner-stat">
-              <div className="banner-stat-num" style={{ color: 'var(--text)' }}>{stats.r5}</div>
-              <div className="banner-stat-label">5 min</div>
-            </div>
-            <div className="banner-stat">
-              <div className="banner-stat-num" style={{ color: 'var(--text)' }}>{stats.r20}</div>
-              <div className="banner-stat-label">20 min</div>
-            </div>
-            <div className="banner-stat">
-              <div className="banner-stat-num" style={{ color: 'var(--good)' }}>{stats.done}</div>
-              <div className="banner-stat-label">Done</div>
-            </div>
-            <div className="banner-stat">
-              <div className="banner-stat-num" style={{ color: stats.pending > 0 ? 'var(--warn)' : 'var(--faint)' }}>{stats.pending}</div>
-              <div className="banner-stat-label">Pending</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
-        <div className="search-wrap">
-          <span className="search-icon-abs">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-            </svg>
-          </span>
-          <input className="search-input" placeholder="Search games..."
-            value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
         <div style={{ width: 160 }}>
           <StyledSelect
-            value={filterCategory}
-            onChange={setFilterCategory}
-            placeholder="All categories"
-            options={[
-              { value: '', label: 'All categories' },
-              { value: 'puzzle', label: 'Puzzle' },
-              { value: 'arcade', label: 'Arcade' },
-              { value: 'simulation', label: 'Simulation' },
-            ]}
+            value={filterBatch}
+            onChange={setFilterBatch}
+            placeholder="All batches"
+            options={[{ value: '', label: 'All batches' }, ...batchOptions.map(b => ({ value: b, label: b }))]}
           />
-        </div>
-
-        <div className="seg-wrapper">
-          {([
-            { value: 'all', label: 'All' },
-            { value: '5min', label: '5 min' },
-            { value: '20min', label: '20 min' },
-          ] as const).map(s => (
-            <button key={s.value}
-              className={`seg-btn-premium${filterType === s.value ? ' active' : ''}`}
-              onClick={() => setFilterType(s.value)}>
-              {s.label}
-            </button>
-          ))}
         </div>
 
         <div className="seg-wrapper">
           {([
             { value: '', label: 'All' },
             { value: 'pending', label: 'Pending' },
-            { value: 'done', label: 'Done' },
+            { value: 'draft', label: 'Draft' },
+            { value: 'recording', label: 'Recording' },
+            { value: 'recorded', label: 'Recorded' },
           ] as const).map(s => (
             <button key={s.value}
               className={`seg-btn-premium${filterStatus === s.value ? ' active' : ''}`}
@@ -1682,16 +1255,41 @@ function RecordVideoTab() {
           ))}
         </div>
 
-        <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>
-          {loading ? 'Loading...' : `${totalShown} results`}
-        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="sync" style={{ fontSize: 12.5, fontWeight: 600 }}>
+            {loading ? 'Loading...' : `${totalShown} results`}
+          </span>
+          {isManager && (
+            <>
+              <button className="btn btn-sm btn-primary" onClick={confirmAssign}
+                disabled={confirming || visibleDraftIds.length === 0}>
+                {confirming ? 'Confirming...' : 'Confirm Assign'}
+                {visibleDraftIds.length > 0 && <span className="badge-count">{visibleDraftIds.length}</span>}
+              </button>
+              <button className="btn btn-sm" onClick={() => setShowExtract(true)} disabled={assignedGames.length === 0}>
+                Extract Chat
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Split tables */}
+      {/* Split tables: 5 MIN (Insight) and 20 MIN (Priority IV) */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16, overflow: 'hidden' }}>
-        {show5 && <RecordTable label="5 MIN" items={list5} loading={loading} onClickGame={setDetailGameId} />}
-        {show20 && <RecordTable label="20 MIN" items={list20} loading={loading} onClickGame={setDetailGameId} />}
+        <RecordTable label="5 MIN" items={shown5} loading={loading}
+          isManager={isManager} recorders={recorders} onAssign={assignRecorder}
+          ytMap={ytMap} onClickGame={setDetailGameId} />
+        <RecordTable label="20 MIN" items={shown20} loading={loading}
+          isManager={isManager} recorders={recorders} onAssign={assignRecorder}
+          ytMap={ytMap} onClickGame={setDetailGameId} />
       </div>
+
+      {showExtract && (
+        <ExtractChatModal
+          games={assignedGames}
+          onClose={() => setShowExtract(false)}
+        />
+      )}
 
       {detailGameId && (
         <div className="eval-modal-backdrop" onClick={() => setDetailGameId(null)}>
@@ -1705,7 +1303,7 @@ function RecordVideoTab() {
               readOnly
               onClose={() => setDetailGameId(null)}
               onNavigate={setDetailGameId}
-              onSaved={() => {}}
+              onSaved={fetchData}
             />
           </div>
         </div>
@@ -1729,7 +1327,6 @@ function VideosPageInner() {
   const searchParams = useSearchParams()
   const tab = searchParams.get('tab') || 'youtube'
 
-  if (tab === 'short_list') return <ShortListTab />
-  if (tab === 'record_video') return <RecordVideoTab />
+  if (tab === 'record_video') return <RecordTab />
   return <YouTubeTab />
 }
