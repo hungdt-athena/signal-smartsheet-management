@@ -759,6 +759,7 @@ interface ShortListItem {
   record_5min_drive: string | null
   record_20min_assignee: string | null
   record_20min_drive: string | null
+  record_bucket: string | null
   genre_1: string | null
   genre_2: string | null
   publisher_name: string | null
@@ -933,8 +934,16 @@ function normalizeTitle(s: string): string {
     .replace(/\s+/g, ' ')
 }
 
+// Effective bucket: a manual record_bucket override ('5min'/'20min') wins,
+// otherwise fall back to deriving it from final_conclusion.
+function effectiveBucket(item: ShortListItem): '5min' | '20min' {
+  return item.record_bucket === '5min' || item.record_bucket === '20min'
+    ? item.record_bucket
+    : (item.final_conclusion === 'Priority IV' ? '20min' : '5min')
+}
+
 function recordStatus(item: ShortListItem, ytMap: Map<string, string>): { status: RecordStatus; youtubeId?: string } {
-  const bucket = item.final_conclusion === 'Priority IV' ? '20min' : '5min'
+  const bucket = effectiveBucket(item)
   const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
   const yt = ytMap.get(normalizeTitle(item.title))
   if (yt) return { status: 'recorded', youtubeId: yt }
@@ -973,7 +982,11 @@ function RecordStatusBadge({ status, youtubeId }: { status: RecordStatus; youtub
 
 // ── Record Table ─────────────────────────────────────────────────────────────
 
-function RecordTable({ label, items, loading, isManager, recorders, onAssign, ytMap, onClickGame }: {
+function RecordTable({
+  label, items, loading, isManager, recorders, onAssign, ytMap, onClickGame,
+  dragOver, onHeaderAdd, onRowDragStart, confirmRemoveId,
+  onRemoveRequest, onConfirmRemove, onCancelRemove,
+}: {
   label: string
   items: ShortListItem[]
   loading: boolean
@@ -982,13 +995,33 @@ function RecordTable({ label, items, loading, isManager, recorders, onAssign, yt
   onAssign: (item: ShortListItem, name: string) => void
   ytMap: Map<string, string>
   onClickGame: (gameId: string) => void
+  dragOver: boolean
+  onHeaderAdd?: () => void
+  onRowDragStart?: (e: React.DragEvent, item: ShortListItem) => void
+  confirmRemoveId: number | null
+  onRemoveRequest?: (id: number) => void
+  onConfirmRemove?: (id: number) => void
+  onCancelRemove?: () => void
 }) {
   const recOpts = [{ value: '', label: '—' }, ...recorders.map(r => ({ value: r, label: r }))]
+  const cols = isManager ? 5 : 4
   return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    <div className="card"
+      style={{
+        padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+        border: dragOver ? '2px solid var(--accent-strong)' : undefined,
+        background: dragOver ? 'var(--accent-weak)' : undefined,
+        transition: 'background .1s, border-color .1s',
+      }}>
       <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
         <span className="card-label">{label}</span>
-        <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 600 }}>{items.length} game{items.length !== 1 ? 's' : ''}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 600 }}>{items.length} game{items.length !== 1 ? 's' : ''}</span>
+          {isManager && onHeaderAdd && (
+            <button className="btn btn-sm btn-ghost" onClick={onHeaderAdd}
+              style={{ fontSize: 11, padding: '2px 8px' }}>+ Add</button>
+          )}
+        </div>
       </div>
       <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         <table className="tbl">
@@ -998,19 +1031,24 @@ function RecordTable({ label, items, loading, isManager, recorders, onAssign, yt
               <th>Game</th>
               <th style={{ width: 160 }}>Recorder</th>
               <th style={{ width: 130 }}>Status</th>
+              {isManager && <th style={{ width: 36 }}></th>}
             </tr>
           </thead>
           <tbody>
             {items.length === 0 && !loading && (
-              <tr><td colSpan={4} className="empty">No games</td></tr>
+              <tr><td colSpan={cols} className="empty">No games</td></tr>
             )}
-            {loading && <SkeletonRows cols={4} />}
+            {loading && <SkeletonRows cols={cols} />}
             {items.map((item, idx) => {
-              const bucket = item.final_conclusion === 'Priority IV' ? '20min' : '5min'
-              const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
+              const eb = effectiveBucket(item)
+              const assignee = eb === '20min' ? item.record_20min_assignee : item.record_5min_assignee
               const { status, youtubeId } = recordStatus(item, ytMap)
+              const confirming = confirmRemoveId === item.id
               return (
-                <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
+                <tr key={item.id} className="tbl-row-premium"
+                  style={{ cursor: isManager ? 'grab' : 'pointer' }}
+                  draggable={isManager}
+                  onDragStart={isManager && onRowDragStart ? e => onRowDragStart(e, item) : undefined}
                   onClick={() => onClickGame(item.game_id)}>
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
                   <td>
@@ -1025,27 +1063,147 @@ function RecordTable({ label, items, loading, isManager, recorders, onAssign, yt
                       </div>
                     </div>
                   </td>
-                  <td onClick={isManager ? e => e.stopPropagation() : undefined}>
-                    {isManager ? (
-                      <StyledSelect
-                        value={assignee || ''}
-                        onChange={v => onAssign(item, v)}
-                        placeholder="—"
-                        options={recOpts}
-                        style={{ fontSize: 12 }}
-                      />
-                    ) : (
-                      <span style={{ fontSize: 12.5, color: assignee ? 'var(--text)' : 'var(--faint)' }}>{assignee || '—'}</span>
-                    )}
-                  </td>
-                  <td>
-                    <RecordStatusBadge status={status} youtubeId={youtubeId} />
-                  </td>
+                  {confirming ? (
+                    <td colSpan={isManager ? 3 : 2} onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Remove from list? (clears recorder)</span>
+                        <button className="btn btn-sm btn-danger" onClick={() => onConfirmRemove && onConfirmRemove(item.id)}
+                          style={{ fontSize: 11, padding: '2px 10px' }}>Remove</button>
+                        <button className="btn btn-sm btn-ghost" onClick={() => onCancelRemove && onCancelRemove()}
+                          style={{ fontSize: 11, padding: '2px 8px' }}>Cancel</button>
+                      </div>
+                    </td>
+                  ) : (
+                    <>
+                      <td onClick={isManager ? e => e.stopPropagation() : undefined}>
+                        {isManager ? (
+                          <StyledSelect
+                            value={assignee || ''}
+                            onChange={v => onAssign(item, v)}
+                            placeholder="—"
+                            options={recOpts}
+                            style={{ fontSize: 12 }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: 12.5, color: assignee ? 'var(--text)' : 'var(--faint)' }}>{assignee || '—'}</span>
+                        )}
+                      </td>
+                      <td>
+                        <RecordStatusBadge status={status} youtubeId={youtubeId} />
+                      </td>
+                      {isManager && (
+                        <td onClick={e => e.stopPropagation()} style={{ textAlign: 'center' }}>
+                          <button className="btn btn-sm btn-ghost" title="Remove from list"
+                            onClick={() => onRemoveRequest && onRemoveRequest(item.id)}
+                            style={{ fontSize: 14, padding: '0 6px', color: 'var(--faint)', lineHeight: 1 }}>×</button>
+                        </td>
+                      )}
+                    </>
+                  )}
                 </tr>
               )
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Add Game Modal ───────────────────────────────────────────────────────────
+
+function AddGameModal({ category, batch, excludeIds, targetBucket, onAdded, onClose }: {
+  category: string
+  batch: string
+  excludeIds: Set<number>
+  targetBucket: '5min' | '20min'
+  onAdded: () => void
+  onClose: () => void
+}) {
+  const [games, setGames] = useState<ShortListItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [query, setQuery] = useState('')
+  const [adding, setAdding] = useState<number | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams({ category, limit: '500' })
+    if (batch) params.set('batch', batch)
+    fetch(`/api/evaluations?${params}`)
+      .then(r => r.ok ? r.json() : { data: [] })
+      .then(json => setGames((json.data || []) as ShortListItem[]))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [category, batch])
+
+  const candidates = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return games
+      .filter(g => !excludeIds.has(g.id))
+      .filter(g => !q || (g.title || '').toLowerCase().includes(q))
+  }, [games, excludeIds, query])
+
+  async function add(g: ShortListItem) {
+    setAdding(g.id)
+    try {
+      await fetch('/api/evaluations/record-bucket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: g.id, bucket: targetBucket }),
+      })
+    } catch { /* ignore */ }
+    onAdded()
+    onClose()
+  }
+
+  return (
+    <div className="eval-modal-backdrop" onClick={onClose}>
+      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
+        style={{ padding: '22px 24px 22px', maxWidth: 520, width: '92vw' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div>
+            <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Add game to {targetBucket === '20min' ? '20 MIN' : '5 MIN'}</h2>
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>{batch || 'all batches'} · {category}</p>
+          </div>
+          <button className="btn btn-sm btn-ghost" onClick={onClose} style={{ fontSize: 18, padding: '2px 8px' }}>x</button>
+        </div>
+
+        <input
+          autoFocus
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search games..."
+          style={{
+            width: '100%', boxSizing: 'border-box', marginBottom: 12,
+            padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)',
+            background: 'var(--surface-2)', color: 'var(--text)', fontSize: 13,
+          }}
+        />
+
+        <div style={{ maxHeight: 'calc(70vh - 180px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+          {loading ? (
+            <p className="empty">Loading...</p>
+          ) : candidates.length === 0 ? (
+            <p className="empty">No games found</p>
+          ) : candidates.map(g => (
+            <button key={g.id}
+              onClick={() => add(g)}
+              disabled={adding !== null}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                padding: '8px 12px', borderBottom: '1px solid var(--border)',
+                background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
+                color: 'var(--text)', opacity: adding !== null && adding !== g.id ? 0.5 : 1,
+              }}>
+              {g.icon_url ? (
+                <img src={g.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
+              ) : (
+                <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
+              )}
+              <span className="cell-name" style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
+              {adding === g.id && <span style={{ fontSize: 11, color: 'var(--faint)' }}>Adding...</span>}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -1071,6 +1229,11 @@ function RecordTab() {
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
   const [showExtract, setShowExtract] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  // Manual bucket override: drag/drop, add-game modal, inline remove-confirm.
+  const [dragOverBucket, setDragOverBucket] = useState<'5min' | '20min' | null>(null)
+  const [addBucket, setAddBucket] = useState<'5min' | '20min' | null>(null)
+  const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null)
+  const dragRef = useRef<{ id: number; from: '5min' | '20min' } | null>(null)
 
   // Record tab keys off when games were assigned to record.
   const df = useDateFilter('assigned')
@@ -1084,7 +1247,7 @@ function RecordTab() {
     setLoading(true)
     try {
       const params = new URLSearchParams({ category: filterCategory, limit: '500' })
-      params.set('final_conclusions', 'Priority IV,Insight')
+      params.set('record_view', '1')
       if (filterBatch) params.set('batch', filterBatch)
       if (!isManager && userName) params.set('recorder', userName)
       for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
@@ -1143,7 +1306,7 @@ function RecordTab() {
 
   // Optimistically assign a recorder to a game's bucket and drop it to draft.
   const assignRecorder = useCallback(async (item: ShortListItem, name: string) => {
-    const bucket = item.final_conclusion === 'Priority IV' ? '20min' : '5min'
+    const bucket = effectiveBucket(item)
     const field = bucket === '20min' ? 'record_20min_assignee' : 'record_5min_assignee'
     setData(prev => prev.map(d => d.id === item.id
       ? { ...d, [field]: name || null, record_confirmed_at: null }
@@ -1157,9 +1320,65 @@ function RecordTab() {
     } catch { /* ignore — optimistic state already applied */ }
   }, [])
 
-  // Split into the two buckets by final_conclusion, then apply the status filter.
-  const list5 = useMemo(() => data.filter(d => d.final_conclusion === 'Insight'), [data])
-  const list20 = useMemo(() => data.filter(d => d.final_conclusion === 'Priority IV'), [data])
+  // Move a game to another bucket. Optimistic: set record_bucket and carry the
+  // current effective recorder into the target duration column, clear the other.
+  const moveBucket = useCallback(async (id: number, bucket: '5min' | '20min') => {
+    setData(prev => prev.map(d => {
+      if (d.id !== id) return d
+      const cur = effectiveBucket(d)
+      const oldAssignee = cur === '20min' ? d.record_20min_assignee : d.record_5min_assignee
+      return {
+        ...d,
+        record_bucket: bucket,
+        record_5min_assignee: bucket === '5min' ? oldAssignee : null,
+        record_20min_assignee: bucket === '20min' ? oldAssignee : null,
+      }
+    }))
+    try {
+      const res = await fetch('/api/evaluations/record-bucket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, bucket }),
+      })
+      if (!res.ok) await fetchData()
+    } catch { await fetchData() }
+  }, [fetchData])
+
+  // Remove a game from the record list ('none'). Optimistic: drop the row.
+  const removeGame = useCallback(async (id: number) => {
+    setConfirmRemoveId(null)
+    setData(prev => prev.filter(d => d.id !== id))
+    try {
+      const res = await fetch('/api/evaluations/record-bucket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, bucket: 'none' }),
+      })
+      if (!res.ok) await fetchData()
+    } catch { await fetchData() }
+  }, [fetchData])
+
+  // Drag start: remember the dragged game + its source bucket.
+  const handleRowDragStart = useCallback((e: React.DragEvent, item: ShortListItem) => {
+    const from = effectiveBucket(item)
+    dragRef.current = { id: item.id, from }
+    e.dataTransfer.setData('text/plain', String(item.id))
+    e.dataTransfer.effectAllowed = 'move'
+  }, [])
+
+  // Drop into a container: move iff the target bucket differs from the source.
+  const handleDrop = useCallback((target: '5min' | '20min') => {
+    setDragOverBucket(null)
+    const dragged = dragRef.current
+    dragRef.current = null
+    if (!dragged) return
+    if (dragged.from === target) return
+    moveBucket(dragged.id, target)
+  }, [moveBucket])
+
+  // Split into the two buckets by effective bucket, then apply the status filter.
+  const list5 = useMemo(() => data.filter(d => effectiveBucket(d) === '5min'), [data])
+  const list20 = useMemo(() => data.filter(d => effectiveBucket(d) === '20min'), [data])
 
   const filterByStatus = useCallback((list: ShortListItem[]) => {
     if (!filterStatus) return list
@@ -1274,20 +1493,55 @@ function RecordTab() {
         </div>
       </div>
 
-      {/* Split tables: 5 MIN (Insight) and 20 MIN (Priority IV) */}
+      {/* Split tables: 5 MIN and 20 MIN (effective bucket) */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16, overflow: 'hidden' }}>
-        <RecordTable label="5 MIN" items={shown5} loading={loading}
-          isManager={isManager} recorders={recorders} onAssign={assignRecorder}
-          ytMap={ytMap} onClickGame={setDetailGameId} />
-        <RecordTable label="20 MIN" items={shown20} loading={loading}
-          isManager={isManager} recorders={recorders} onAssign={assignRecorder}
-          ytMap={ytMap} onClickGame={setDetailGameId} />
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}
+          onDragOver={isManager ? (e => { e.preventDefault(); if (dragOverBucket !== '5min') setDragOverBucket('5min') }) : undefined}
+          onDragLeave={isManager ? (e => { if (e.currentTarget === e.target) setDragOverBucket(null) }) : undefined}
+          onDrop={isManager ? (e => { e.preventDefault(); handleDrop('5min') }) : undefined}>
+          <RecordTable label="5 MIN" items={shown5} loading={loading}
+            isManager={isManager} recorders={recorders} onAssign={assignRecorder}
+            ytMap={ytMap} onClickGame={setDetailGameId}
+            dragOver={dragOverBucket === '5min'}
+            onHeaderAdd={() => setAddBucket('5min')}
+            onRowDragStart={handleRowDragStart}
+            confirmRemoveId={confirmRemoveId}
+            onRemoveRequest={setConfirmRemoveId}
+            onConfirmRemove={removeGame}
+            onCancelRemove={() => setConfirmRemoveId(null)} />
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}
+          onDragOver={isManager ? (e => { e.preventDefault(); if (dragOverBucket !== '20min') setDragOverBucket('20min') }) : undefined}
+          onDragLeave={isManager ? (e => { if (e.currentTarget === e.target) setDragOverBucket(null) }) : undefined}
+          onDrop={isManager ? (e => { e.preventDefault(); handleDrop('20min') }) : undefined}>
+          <RecordTable label="20 MIN" items={shown20} loading={loading}
+            isManager={isManager} recorders={recorders} onAssign={assignRecorder}
+            ytMap={ytMap} onClickGame={setDetailGameId}
+            dragOver={dragOverBucket === '20min'}
+            onHeaderAdd={() => setAddBucket('20min')}
+            onRowDragStart={handleRowDragStart}
+            confirmRemoveId={confirmRemoveId}
+            onRemoveRequest={setConfirmRemoveId}
+            onConfirmRemove={removeGame}
+            onCancelRemove={() => setConfirmRemoveId(null)} />
+        </div>
       </div>
 
       {showExtract && (
         <ExtractChatModal
           games={assignedGames}
           onClose={() => setShowExtract(false)}
+        />
+      )}
+
+      {addBucket && (
+        <AddGameModal
+          category={filterCategory}
+          batch={filterBatch}
+          excludeIds={new Set(data.map(d => d.id))}
+          targetBucket={addBucket}
+          onAdded={fetchData}
+          onClose={() => setAddBucket(null)}
         />
       )}
 
