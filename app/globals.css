@@ -995,6 +995,21 @@ input:checked + .slider:before {
 }
 .wf-history-btn:hover { color: var(--text); background: var(--surface-2); border-color: var(--border-strong); }
 
+/* Back-to-grid nav, shown in the Editor filter row once a week is open. */
+.wf-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px; font-weight: 600;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.wf-back:hover { color: var(--text); background: var(--surface-2); border-color: var(--border-strong); }
+.wf-back span { font-size: 15px; line-height: 1; }
+
 /* Auto-save toggle + manual Save (Editor toolbar) */
 .wf-autosave {
   display: inline-flex; align-items: center; gap: 6px;

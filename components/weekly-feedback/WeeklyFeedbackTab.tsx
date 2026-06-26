@@ -326,6 +326,13 @@ export function WeeklyFeedbackTab() {
             </>
           ) : (
             <>
+              {selectedBatch && (
+                <button type="button" className="wf-back"
+                  onClick={() => { if (dirtyRef.current && viewingSelf) void save(); setSelectedBatch('') }}
+                  title="Back to all weeks">
+                  <span aria-hidden="true">←</span> All weeks
+                </button>
+              )}
               {isManager && (
                 <div style={{ width: 200 }}>
                   <StyledSelect value={evaluator} onChange={setEvaluator} placeholder="My own"
