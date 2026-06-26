@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { StyledSelect } from '@/components/StyledSelect'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
+import { buildYtMap, ytLookup } from '@/lib/ytb-match'
 import { GameAlikeField } from '@/components/GameAlikeField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
@@ -231,19 +232,20 @@ function SaveStatus({ dirty }: { dirty: boolean }) {
   )
 }
 
-function ProgressTracker({ ev }: { ev: EvalDetail }) {
+function ProgressTracker({ ev, yt5, yt20 }: { ev: EvalDetail; yt5?: string; yt20?: string }) {
   const recAssignees = Array.from(new Set([ev.record_5min_assignee, ev.record_20min_assignee].filter(Boolean)))
-  const recDrives = !!(ev.record_5min_drive || ev.record_20min_drive)
-  // "Video Uploaded" tracks the 5/20-min report videos only — the demo drive link
-  // (ev.drive_link) belongs to the evaluation step, not this recording pipeline.
+  // "Video Uploaded" tracks the 5/20-min report videos, which are now always
+  // YouTube uploads (the demo drive link, ev.drive_link, belongs to the
+  // evaluation step). Completed when a matching YouTube upload exists.
+  const ytId = yt5 || yt20
   const steps: {
-    label: string; completed: boolean; date?: string | null; assignee?: string | null; sub?: string | null
+    label: string; completed: boolean; date?: string | null; assignee?: string | null; sub?: string | null; href?: string | null
   }[] = [
     { label: 'Assigned Playtest', completed: !!ev.initial_evaluator, date: ev.assigned_date, assignee: ev.initial_evaluator },
     { label: 'Evaluated', completed: !!ev.evaluate_date, date: ev.evaluate_date },
     { label: 'Final Conclusion', completed: !!ev.final_conclusion, sub: ev.final_conclusion },
     { label: 'Assigned Record Video', completed: recAssignees.length > 0, date: ev.record_5min_date || ev.record_20min_date, assignee: recAssignees.join(', ') || null },
-    { label: 'Video Uploaded', completed: recDrives, date: ev.record_5min_drive_date || ev.record_20min_drive_date }
+    { label: 'Video Uploaded', completed: !!ytId, href: ytId ? `https://www.youtube.com/watch?v=${ytId}` : null }
   ]
 
   return (
@@ -305,9 +307,17 @@ function ProgressTracker({ ev }: { ev: EvalDetail }) {
 
               {/* Step info */}
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: 12, fontWeight: isCurrent || isCompleted ? 600 : 500, color: isCurrent ? 'var(--text)' : isCompleted ? 'var(--muted)' : 'var(--faint)' }}>
-                  {step.label}
-                </span>
+                {step.href && isCompleted ? (
+                  <a href={step.href} target="_blank" rel="noopener noreferrer" title="Open on YouTube"
+                    className="yt-link"
+                    style={{ fontSize: 12, fontWeight: 600, color: 'var(--good)', textDecoration: 'none' }}>
+                    ▶ {step.label}
+                  </a>
+                ) : (
+                  <span style={{ fontSize: 12, fontWeight: isCurrent || isCompleted ? 600 : 500, color: isCurrent ? 'var(--text)' : isCompleted ? 'var(--muted)' : 'var(--faint)' }}>
+                    {step.label}
+                  </span>
+                )}
                 {step.assignee && (
                   <span style={{ fontSize: 11, fontWeight: 600, color: isCompleted ? 'var(--text)' : 'var(--muted)', marginTop: 1 }}>
                     👤 {step.assignee}
@@ -356,7 +366,22 @@ interface Props {
   onClose?: () => void
 }
 
+// Fetches the `ytb_uploaded` sheet once and builds the duration-aware
+// title→youtubeId map (shared logic with the Record grid). The Record cards and
+// the "Video Uploaded" milestone derive "recorded" live from this.
+function useYtbUploads(): Map<string, string> {
+  const [map, setMap] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    fetch('/api/sheets/ytb-uploaded', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: Array<{ gameTitle: string; youtubeId: string; duration: string }>) => setMap(buildYtMap(rows)))
+      .catch(() => {})
+  }, [])
+  return map
+}
+
 export default function EvalDetailPanel({ initialGameId, gameList, role, userName, readOnly, canAssignRecords, hideRecordSections, onNavigate, onSaved, onClose }: Props) {
+  const ytMap = useYtbUploads()
   const [currentGameId, setCurrentGameId] = useState(initialGameId)
   const [ev, setEv] = useState<EvalDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -529,6 +554,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // Recording drive links — admin or the assigned recorder for that duration.
   const canEdit5 = !readOnly && (isAdmin || ev?.record_5min_assignee === userName)
   const canEdit20 = !readOnly && (isAdmin || ev?.record_20min_assignee === userName)
+  // 5/20-min recordings are always YouTube uploads, matched live (title + duration).
+  const yt5 = ev ? ytLookup(ytMap, ev.title, '5min') : undefined
+  const yt20 = ev ? ytLookup(ytMap, ev.title, '20min') : undefined
   // Re-assigning recorders is a manager action (admin or moderator), enabled per-context.
   const canEditAssignee = !readOnly && isManager && !!canAssignRecords
   // Any editable surface → show the save button.
@@ -722,7 +750,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       </div>
 
       {/* Progress Tracker */}
-      <ProgressTracker ev={ev} />
+      <ProgressTracker ev={ev} yt5={yt5} yt20={yt20} />
 
       {/* Main layout: 2 columns */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'start' }}>
@@ -1063,10 +1091,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 5 min</span>
-                {ev.record_5min_drive
-                  ? <span className="badge success" style={{ fontSize: 10 }}>Done</span>
+                {yt5
+                  ? <a className="badge success yt-link" href={`https://www.youtube.com/watch?v=${yt5}`} target="_blank" rel="noopener noreferrer" title="Open on YouTube" style={{ fontSize: 10, textDecoration: 'none' }}>▶ Recorded</a>
                   : ev.record_5min_assignee
-                    ? <span className="badge running" style={{ fontSize: 10 }}>Pending</span>
+                    ? <span className="badge running" style={{ fontSize: 10 }}>Recording</span>
                     : <span className="badge idle" style={{ fontSize: 10 }}>Unassigned</span>}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1085,14 +1113,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 </div>
                 {rec5Assignee && <FileNameField name={recFileName(ev.title, rec5Assignee, 5)} />}
                 <div className="field" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-                  <span className="label">Drive Link</span>
-                  <input className="input" type="url" value={drive5}
-                    onChange={e => { setDrive5(e.target.value); setDirty(true) }}
-                    placeholder="https://drive.google.com/..."
-                    disabled={!canEdit5} />
-                  {ev.record_5min_drive_date && (
-                    <span style={{ fontSize: 11, color: 'var(--faint)' }}>Uploaded: {fmtDateTime(ev.record_5min_drive_date)}</span>
-                  )}
+                  <span className="label">YouTube Link</span>
+                  {yt5
+                    ? <a className="yt-link" href={`https://www.youtube.com/watch?v=${yt5}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--accent)' }}>▶ youtu.be/{yt5}</a>
+                    : <span style={{ fontSize: 13, color: 'var(--faint)' }}>Not uploaded yet</span>}
                 </div>
               </div>
             </div>
@@ -1103,10 +1127,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 20 min</span>
-                {ev.record_20min_drive
-                  ? <span className="badge success" style={{ fontSize: 10 }}>Done</span>
+                {yt20
+                  ? <a className="badge success yt-link" href={`https://www.youtube.com/watch?v=${yt20}`} target="_blank" rel="noopener noreferrer" title="Open on YouTube" style={{ fontSize: 10, textDecoration: 'none' }}>▶ Recorded</a>
                   : ev.record_20min_assignee
-                    ? <span className="badge running" style={{ fontSize: 10 }}>Pending</span>
+                    ? <span className="badge running" style={{ fontSize: 10 }}>Recording</span>
                     : <span className="badge idle" style={{ fontSize: 10 }}>Unassigned</span>}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1125,14 +1149,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 </div>
                 {rec20Assignee && <FileNameField name={recFileName(ev.title, rec20Assignee, 20)} />}
                 <div className="field" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-                  <span className="label">Drive Link</span>
-                  <input className="input" type="url" value={drive20}
-                    onChange={e => { setDrive20(e.target.value); setDirty(true) }}
-                    placeholder="https://drive.google.com/..."
-                    disabled={!canEdit20} />
-                  {ev.record_20min_drive_date && (
-                    <span style={{ fontSize: 11, color: 'var(--faint)' }}>Uploaded: {fmtDateTime(ev.record_20min_drive_date)}</span>
-                  )}
+                  <span className="label">YouTube Link</span>
+                  {yt20
+                    ? <a className="yt-link" href={`https://www.youtube.com/watch?v=${yt20}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--accent)' }}>▶ youtu.be/{yt20}</a>
+                    : <span style={{ fontSize: 13, color: 'var(--faint)' }}>Not uploaded yet</span>}
                 </div>
               </div>
             </div>
