@@ -942,6 +942,29 @@ function effectiveBucket(item: ShortListItem): '5min' | '20min' {
     : (item.final_conclusion === 'Priority IV' ? '20min' : '5min')
 }
 
+// The recorder currently assigned to a game (the assignee of its bucket).
+function recorderOf(item: ShortListItem): string {
+  return (effectiveBucket(item) === '20min' ? item.record_20min_assignee : item.record_5min_assignee) || ''
+}
+
+function osLabel(os: string | null): string {
+  const o = (os || '').toLowerCase()
+  if (o === 'ios') return 'iOS'
+  if (o === 'android') return 'Android'
+  return os ? os.toUpperCase() : '—'
+}
+
+// Badge colors for the few final conclusions surfaced here; others fall back.
+const FINAL_CONC_STYLES: Record<string, { bg: string; color: string }> = {
+  'Priority IV': { bg: '#0f766e', color: '#ffffff' },
+  'Insight':     { bg: '#15803d', color: '#ffffff' },
+  'Priority V':  { bg: '#ede9fe', color: '#6d28d9' },
+  'Bypass':      { bg: '#d23b3b', color: '#ffffff' },
+  'Theme/Art':   { bg: '#dbeafe', color: '#2563eb' },
+  'Watch List':  { bg: '#dcfce7', color: '#16a34a' },
+  'Not Found':   { bg: '#374151', color: '#e5e7eb' },
+}
+
 function recordStatus(item: ShortListItem, ytMap: Map<string, string>): { status: RecordStatus; youtubeId?: string } {
   const bucket = effectiveBucket(item)
   const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
@@ -1059,7 +1082,29 @@ function RecordTable({
                         <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
                       )}
                       <div style={{ minWidth: 0 }}>
+                        {/* Row 1: title */}
                         <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
+                        {/* Row 2: evaluator · initial conclusion · final conclusion */}
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 3 }}>
+                          {item.initial_evaluator && (
+                            <span style={{ fontSize: 10.5, color: 'var(--faint)', fontWeight: 600 }}>{item.initial_evaluator}</span>
+                          )}
+                          {item.initial_conclusion && (
+                            <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>{item.initial_conclusion}</span>
+                          )}
+                          {item.final_conclusion && (() => {
+                            const fc = FINAL_CONC_STYLES[item.final_conclusion] || { bg: 'var(--surface-3)', color: 'var(--muted)' }
+                            return (
+                              <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: fc.bg, color: fc.color, whiteSpace: 'nowrap' }}>
+                                {item.final_conclusion}
+                              </span>
+                            )
+                          })()}
+                        </div>
+                        {/* Row 3: platform */}
+                        <div style={{ marginTop: 3 }}>
+                          <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>{osLabel(item.os)}</span>
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -1224,6 +1269,9 @@ function RecordTab() {
   const [filterBatch, setFilterBatch] = useState('')
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
   const [filterStatus, setFilterStatus] = useState<'' | RecordStatus>('')
+  // Cluster games by recorder within each container (same person adjacent),
+  // matching how Extract Chat groups them. Default on; toggle back to date order.
+  const [groupByRecorder, setGroupByRecorder] = useState(true)
   const [recorders, setRecorders] = useState<string[]>([])
   const [ytMap, setYtMap] = useState<Map<string, string>>(new Map())
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
@@ -1262,9 +1310,12 @@ function RecordTab() {
         setCurrentBatch(json.current_batch)
         if (!batchDefaultedRef.current) {
           batchDefaultedRef.current = true
-          if (json.current_batch) {
+          // Pre-select the team's current batch, but fall back to the most recent
+          // batch with games (server-resolved default_batch) when current is empty.
+          const def = json.default_batch !== undefined ? json.default_batch : json.current_batch
+          if (def) {
             willDefaultBatch = true
-            setFilterBatch(json.current_batch)
+            setFilterBatch(def)
           }
         }
       }
@@ -1385,8 +1436,20 @@ function RecordTab() {
     return list.filter(d => recordStatus(d, ytMap).status === filterStatus)
   }, [filterStatus, ytMap])
 
-  const shown5 = useMemo(() => filterByStatus(list5), [filterByStatus, list5])
-  const shown20 = useMemo(() => filterByStatus(list20), [filterByStatus, list20])
+  // Group adjacent by recorder (unassigned last). Stable sort keeps the
+  // server's date order within each recorder group.
+  const arrange = useCallback((list: ShortListItem[]) => {
+    const filtered = filterByStatus(list)
+    if (!groupByRecorder) return filtered
+    return [...filtered].sort((a, b) => {
+      const ra = recorderOf(a).toLowerCase() || '￿'
+      const rb = recorderOf(b).toLowerCase() || '￿'
+      return ra < rb ? -1 : ra > rb ? 1 : 0
+    })
+  }, [filterByStatus, groupByRecorder])
+
+  const shown5 = useMemo(() => arrange(list5), [arrange, list5])
+  const shown20 = useMemo(() => arrange(list20), [arrange, list20])
 
   // Visible draft rows are the targets of Confirm Assign.
   const visibleDraftIds = useMemo(() => {
@@ -1473,6 +1536,14 @@ function RecordTab() {
             </button>
           ))}
         </div>
+
+        <button
+          className={`btn btn-sm${groupByRecorder ? ' btn-primary' : ''}`}
+          title={groupByRecorder ? 'Grouped by recorder — click for date order' : 'Date order — click to group by recorder'}
+          onClick={() => setGroupByRecorder(v => !v)}
+          style={{ whiteSpace: 'nowrap' }}>
+          {groupByRecorder ? '☰ Grouped' : '☰ Group by recorder'}
+        </button>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="sync" style={{ fontSize: 12.5, fontWeight: 600 }}>
