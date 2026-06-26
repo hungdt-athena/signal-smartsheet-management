@@ -6,6 +6,7 @@ import { StyledSelect } from '@/components/StyledSelect'
 import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth } from '@/components/DateFilter'
 import type { YearMonth } from '@/components/DateFilter'
 import { useDateFilter } from '@/hooks/useDateFilter'
+import { normalizeTitle, buildYtMap, ytLookup } from '@/lib/ytb-match'
 import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 
 interface YtbRow {
@@ -921,18 +922,8 @@ function SkeletonRows({ cols, rows = 5 }: { cols: number; rows?: number }) {
 
 type RecordStatus = 'pending' | 'draft' | 'recording' | 'recorded'
 
-function normalizeTitle(s: string): string {
-  // NFD decomposes accented chars into base + combining marks; the range
-  // U+0300–U+036F is the Combining Diacritical Marks block. Using the explicit
-  // range avoids the \p{Diacritic} property escape, which needs the `u` flag /
-  // an es6+ tsc target (this project's tsconfig has no `target`).
-  return (s || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ' ')
-}
+// normalizeTitle, buildYtMap, ytLookup live in '@/lib/ytb-match' (shared with
+// the detail panel) so the grid and panel match titles identically.
 
 // Effective bucket: a manual record_bucket override ('5min'/'20min') wins,
 // otherwise fall back to deriving it from final_conclusion.
@@ -968,7 +959,7 @@ const FINAL_CONC_STYLES: Record<string, { bg: string; color: string }> = {
 function recordStatus(item: ShortListItem, ytMap: Map<string, string>): { status: RecordStatus; youtubeId?: string } {
   const bucket = effectiveBucket(item)
   const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
-  const yt = ytMap.get(normalizeTitle(item.title))
+  const yt = ytLookup(ytMap, item.title, bucket)
   if (yt) return { status: 'recorded', youtubeId: yt }
   if (!assignee) return { status: 'pending' }
   if (item.record_confirmed_at) return { status: 'recording' }
@@ -993,8 +984,9 @@ function RecordStatusBadge({ status, youtubeId }: { status: RecordStatus; youtub
         target="_blank"
         rel="noopener noreferrer"
         onClick={e => e.stopPropagation()}
-        className={`badge ${s.cls}`}
-        style={{ textDecoration: 'none', ...s.style }}
+        title="Open on YouTube"
+        className={`badge ${s.cls} yt-link`}
+        style={{ textDecoration: 'none', cursor: 'pointer', ...s.style }}
       >
         ▶ {s.label}
       </a>
@@ -1339,19 +1331,7 @@ function RecordTab() {
     fetch('/api/team/recorders').then(r => r.ok ? r.json() : []).then(setRecorders).catch(() => {})
     fetch('/api/sheets/ytb-uploaded', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : [])
-      .then((rows: YtbRow[]) => {
-        const m = new Map<string, string>()
-        for (const row of rows) {
-          if (!row.gameTitle) continue
-          const key = normalizeTitle(row.gameTitle)
-          // Prefer rows that actually have a youtubeId.
-          if (row.youtubeId && (!m.has(key) || !m.get(key))) m.set(key, row.youtubeId)
-          else if (!m.has(key)) m.set(key, row.youtubeId || '')
-        }
-        // Drop entries that never resolved to a real id.
-        for (const [k, v] of Array.from(m.entries())) if (!v) m.delete(k)
-        setYtMap(m)
-      })
+      .then((rows: YtbRow[]) => setYtMap(buildYtMap(rows)))
       .catch(() => {})
   }, [])
 

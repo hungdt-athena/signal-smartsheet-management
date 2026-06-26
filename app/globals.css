@@ -278,6 +278,10 @@ body {
 .badge.idle    { background: var(--surface-3); color: var(--faint); }
 .badge.neutral { background: var(--surface-3); color: var(--muted); }
 
+/* Clickable YouTube link/badge affordance (Record tab). */
+.yt-link { cursor: pointer; }
+.yt-link:hover { text-decoration: underline !important; }
+
 .bdot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: sig-pulse 1.4s infinite; }
 
 .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 99px; }
