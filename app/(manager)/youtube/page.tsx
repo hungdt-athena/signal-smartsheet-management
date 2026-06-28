@@ -7,6 +7,7 @@ import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth } from '@/
 import type { YearMonth } from '@/components/DateFilter'
 import { useDateFilter } from '@/hooks/useDateFilter'
 import { normalizeTitle, buildYtMap, ytLookup } from '@/lib/ytb-match'
+import { LockIcon, UserIcon } from '@/components/icons'
 import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 
 interface YtbRow {
@@ -1126,7 +1127,7 @@ function RecordTable({
                           />
                         ) : (
                           <span style={{ fontSize: 12.5, color: assignee ? 'var(--text)' : 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            {assignLocked && '🔒'}{assignee || '—'}
+                            {assignLocked && <LockIcon />}{assignee || '—'}
                           </span>
                         )}
                       </td>
@@ -1639,7 +1640,7 @@ function RecordTab() {
                 }}>
                   <span style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
                   <span className="badge idle" style={{ fontSize: 10 }}>{effectiveBucket(g) === '20min' ? '20 MIN' : '5 MIN'}</span>
-                  <span style={{ fontSize: 11.5, color: 'var(--muted)', flexShrink: 0 }}>👤 {recorderOf(g) || '—'}</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--muted)', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon />{recorderOf(g) || '—'}</span>
                 </div>
               ))}
             </div>

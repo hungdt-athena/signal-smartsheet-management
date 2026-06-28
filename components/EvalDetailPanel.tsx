@@ -1,10 +1,11 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { StyledSelect } from '@/components/StyledSelect'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { buildYtMap, ytLookup } from '@/lib/ytb-match'
+import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
@@ -103,7 +104,7 @@ export async function fetchEvalByGameId(gameId: string): Promise<EvalDetail | nu
   } catch { return null }
 }
 
-function InfoField({ label, value, copyValue }: { label: string; value: string | null | undefined; copyValue?: string }) {
+function InfoField({ label, value, copyValue, icon }: { label: string; value: string | null | undefined; copyValue?: string; icon?: ReactNode }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     if (!copyValue) return
@@ -117,6 +118,7 @@ function InfoField({ label, value, copyValue }: { label: string; value: string |
     <div>
       <div className="label" style={{ marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 5 }}>
+        {icon}
         <span>{value || '—'}</span>
         {copyValue && (
           <button onClick={copy} title={`Copy ${label}`}
@@ -320,8 +322,8 @@ function ProgressTracker({ ev, yt5, yt20 }: { ev: EvalDetail; yt5?: string; yt20
                   </span>
                 )}
                 {step.assignee && (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: isCompleted ? 'var(--text)' : 'var(--muted)', marginTop: 1 }}>
-                    👤 {step.assignee}
+                  <span style={{ fontSize: 11, fontWeight: 600, color: isCompleted ? 'var(--text)' : 'var(--muted)', marginTop: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <UserIcon />{step.assignee}
                   </span>
                 )}
                 {step.sub && (
@@ -1110,7 +1112,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                         placeholder="—" options={recOpts} />
                     </div>
                   ) : (
-                    <InfoField label="Assignee" value={recordConfirmed && ev.record_5min_assignee ? `🔒 ${ev.record_5min_assignee}` : ev.record_5min_assignee} />
+                    <InfoField label="Assignee" value={ev.record_5min_assignee} icon={recordConfirmed && ev.record_5min_assignee ? <LockIcon /> : undefined} />
                   )}
                   <InfoField label="Assigned" value={fmtDate(ev.record_5min_date)} />
                 </div>
@@ -1146,7 +1148,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                         placeholder="—" options={recOpts} />
                     </div>
                   ) : (
-                    <InfoField label="Assignee" value={recordConfirmed && ev.record_20min_assignee ? `🔒 ${ev.record_20min_assignee}` : ev.record_20min_assignee} />
+                    <InfoField label="Assignee" value={ev.record_20min_assignee} icon={recordConfirmed && ev.record_20min_assignee ? <LockIcon /> : undefined} />
                   )}
                   <InfoField label="Assigned" value={fmtDate(ev.record_20min_date)} />
                 </div>
