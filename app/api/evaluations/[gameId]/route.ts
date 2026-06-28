@@ -38,7 +38,7 @@ export async function GET(
         ge.record_20min_drive, ge.record_20min_drive_date,
         ge.record_confirmed_at,
         ge.drive_link, ge.drive_date, ge.youtube_link,
-        ge.imported_at, ge.updated_at,
+        ge.imported_at, ge.updated_at, ge.updated_by,
         gi.title, gi.os, gi.app_link, gi.icon_url,
         COALESCE(gi.initial_release, gi.temp_release)::text AS release_date,
         gi.metadata->'screenshot_urls' AS screenshot_urls,

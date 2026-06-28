@@ -45,6 +45,7 @@ export interface EvalDetail {
   youtube_link: string | null
   imported_at: string
   updated_at: string
+  updated_by: string | null
   title: string
   os: string
   app_link: string
@@ -817,8 +818,6 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                   <span style={{ wordBreak: 'break-all' }}>{ev.game_id}</span>
                   <TitleCopyButton title={ev.game_id} />
-                  <span>·</span>
-                  <span style={{ textTransform: 'capitalize' }}>{ev.category_group}</span>
                 </div>
                 {ev.subtitle && <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 5 }}>{ev.subtitle}</div>}
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
@@ -834,7 +833,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             {/* Info grid with QR */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '10px 10px' }}>
               <InfoField label="Publisher" value={ev.publisher_name} copyValue={ev.publisher_name || ''} />
-              <InfoField label="Evaluator" value={ev.initial_evaluator} />
+              <InfoField label="Assigned" value={fmtDate(ev.assigned_date)} />
               {ev.app_link ? (
                 <div 
                   onClick={() => qrDataUrl && setExpandedImg(qrDataUrl)}
@@ -854,9 +853,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                     transition: 'all 0.2s'
                   }}>
                   {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="QR Link" width={120} height={120} style={{ borderRadius: 8 }} />
+                    <img src={qrDataUrl} alt="QR Link" width={150} height={150} style={{ borderRadius: 8 }} />
                   ) : (
-                    <div style={{ width: 120, height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: 150, height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <span className="spin" style={{ display: 'inline-block', width: 16, height: 16 }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" strokeWidth="2">
                           <path d="M21 12a9 9 0 1 1-6.219-8.56" />
@@ -869,10 +868,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   </span>
                 </div>
               ) : <div />}
-              <InfoField label="Genre" value={[ev.genre_1, ev.genre_2].filter(Boolean).join(' / ') || '—'} />
-              <InfoField label="Assigned" value={fmtDate(ev.assigned_date)} />
               <InfoField label="Release Date" value={fmtDate(ev.release_date)} copyValue={ev.release_date ? fmtDate(ev.release_date) : ''} />
-              <InfoField label="Evaluated" value={fmtDateTime(ev.evaluate_date)} />
+              <InfoField label="Initial Evaluated" value={fmtDateTime(ev.evaluate_date)} />
+              <InfoField label="Initial Evaluator" value={ev.initial_evaluator} />
+              <InfoField label="Final Evaluated" value={ev.final_conclusion_date ? `${fmtDateTime(ev.final_conclusion_date)}${ev.final_evaluator ? ` · ${ev.final_evaluator}` : ''}` : '—'} />
             </div>
 
           </div>
@@ -1256,7 +1255,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 <span>Imported</span><span>{fmtDateTime(ev.imported_at)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--faint)' }}>
-                <span>Updated</span><span>{fmtDateTime(ev.updated_at)}</span>
+                <span>Updated</span>
+                <span>{fmtDateTime(ev.updated_at)}{ev.updated_by ? ` · by ${ev.updated_by}` : ''}</span>
               </div>
             </div>
           </div>
