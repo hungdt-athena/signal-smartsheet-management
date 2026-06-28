@@ -5,6 +5,7 @@ import { StyledSelect } from '@/components/StyledSelect'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
+import { useConfig } from '@/hooks/useConfig'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
@@ -394,6 +395,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
   const [note, setNote] = useState('')
   const [finalNote, setFinalNote] = useState('')
+  const [finalConclusion, setFinalConclusion] = useState('')
   const [gameAlike, setGameAlike] = useState<GameAlikeGame[]>([])
   const [conclusion, setConclusion] = useState('')
   const [batch, setBatch] = useState('')
@@ -454,6 +456,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     setEv(data)
     setNote(data.initial_note || '')
     setFinalNote(data.final_note || '')
+    setFinalConclusion(data.final_conclusion || '')
     setGameAlike(Array.isArray(data.game_alike) ? data.game_alike : [])
     const c = data.initial_conclusion || ''
     setConclusion(c)
@@ -567,6 +570,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const ytUploadedAt = m5?.time || m20?.time || null
   // Once confirmed, the recorder is locked — no reassigning.
   const recordConfirmed = !!ev?.record_confirmed_at
+  // Final conclusion options (managed from the Config tab).
+  const { final_conclusion: finalConclusionOptions } = useConfig()
   // Re-assigning recorders is a manager action (admin or moderator), enabled per-context.
   const canEditAssignee = !readOnly && isManager && !!canAssignRecords
   // Any editable surface → show the save button.
@@ -612,6 +617,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
         body.game_alike = gameAlike
       }
       if (canEditFinalNote) body.final_note = finalNote
+      if (canEditFinalNote && finalConclusion !== (ev.final_conclusion || '')) body.final_conclusion = finalConclusion
       if (canEdit5 && drive5 && drive5 !== ev.record_5min_drive) body.record_5min_drive = drive5
       if (canEdit20 && drive20 && drive20 !== ev.record_20min_drive) body.record_20min_drive = drive20
       if (canEditAssignee && rec5Assignee && rec5Assignee !== (ev.record_5min_assignee || '')) body.record_5min_assignee = rec5Assignee
@@ -661,7 +667,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 1500)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSave, needsSave, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots])
+  }, [autoSave, needsSave, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots])
 
   const clearField = (f: 'note' | 'conclusion' | 'drive') => {
     if (!canEditEval) return
@@ -916,7 +922,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="card" style={{ margin: 0 }}>
             <div className="card-head">
-              <span className="card-label">Evaluation</span>
+              <span className="card-label">Initial Evaluation</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
                 {canEditEval && (
                   <button onClick={clearAll}
@@ -1032,22 +1038,6 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
               <div className="field">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span className="label">Final Note</span>
-                  {canEditFinalNote && finalNote && <ClearBtn onClick={() => { setFinalNote(''); setDirty(true) }} />}
-                </div>
-                <textarea
-                  className="input"
-                  rows={3}
-                  value={finalNote}
-                  onChange={e => { setFinalNote(e.target.value); setDirty(true) }}
-                  placeholder={canEditFinalNote ? 'Final note (managers only)…' : 'Final note (managers only)'}
-                  disabled={!canEditFinalNote}
-                  style={{ resize: 'vertical', fontSize: 13 }}
-                />
-              </div>
-
-              <div className="field">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span className="label">Demo Video (Drive)</span>
                   {canEditEval && driveLink && <ClearBtn onClick={() => clearField('drive')} />}
                 </div>
@@ -1095,6 +1085,70 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               )}
             </div>
           </div>
+
+          {/* Final Conclusion — manager-only decision + note */}
+          {(canEditFinalNote || ev.final_conclusion || ev.final_note) && (
+            <div className="card" style={{ margin: 0 }}>
+              <div className="card-head">
+                <span className="card-label">Final Conclusion</span>
+                {canEditFinalNote && <SaveStatus dirty={needsSave} />}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div className="field">
+                  <span className="label">Final Conclusion</span>
+                  {canEditFinalNote ? (
+                    <StyledSelect
+                      value={finalConclusion}
+                      onChange={v => { setFinalConclusion(v); setDirty(true) }}
+                      placeholder="Select final conclusion..."
+                      options={(() => {
+                        const opts = [...finalConclusionOptions]
+                        if (finalConclusion && !opts.includes(finalConclusion)) opts.unshift(finalConclusion)
+                        return [{ value: '', label: '— Not set —' }, ...opts.map(c => ({ value: c, label: c }))]
+                      })()}
+                    />
+                  ) : (
+                    <span style={{ fontSize: 13, fontWeight: 600, color: ev.final_conclusion ? 'var(--text)' : 'var(--faint)' }}>
+                      {ev.final_conclusion || '—'}
+                    </span>
+                  )}
+                </div>
+
+                <div className="field">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="label">Final Note</span>
+                    {canEditFinalNote && finalNote && <ClearBtn onClick={() => { setFinalNote(''); setDirty(true) }} />}
+                  </div>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    value={finalNote}
+                    onChange={e => { setFinalNote(e.target.value); setDirty(true) }}
+                    placeholder={canEditFinalNote ? 'Final note (managers only)…' : 'Final note (managers only)'}
+                    disabled={!canEditFinalNote}
+                    style={{ resize: 'vertical', fontSize: 13 }}
+                  />
+                </div>
+
+                {canEditFinalNote && (
+                  <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave}
+                    style={{
+                      width: '100%', justifyContent: 'center', gap: 6,
+                      ...(needsSave ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
+                    }}>
+                    {saving ? 'Saving...' : needsSave ? (autoSave ? 'Save now' : 'Save Final Conclusion') : (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        {autoSave ? 'Auto-save on — saved' : 'Saved — no changes'}
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Record Video — 5 min */}
           {!hideRecordSections && (ev.record_5min_assignee || canEditAssignee) && (
