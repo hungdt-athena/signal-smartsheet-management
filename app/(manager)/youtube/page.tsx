@@ -1616,7 +1616,6 @@ function RecordTab() {
               gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
               role={role}
               userName={userName}
-              readOnly
               onClose={() => setDetailGameId(null)}
               onNavigate={setDetailGameId}
               onSaved={fetchData}
