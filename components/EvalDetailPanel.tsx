@@ -36,6 +36,7 @@ export interface EvalDetail {
   record_20min_date: string | null
   record_20min_drive: string | null
   record_20min_drive_date: string | null
+  record_confirmed_at: string | null
   drive_link: string | null
   drive_date: string | null
   youtube_link: string | null
@@ -557,6 +558,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // 5/20-min recordings are always YouTube uploads, matched live (title + duration).
   const yt5 = ev ? ytLookup(ytMap, ev.title, '5min') : undefined
   const yt20 = ev ? ytLookup(ytMap, ev.title, '20min') : undefined
+  // Once confirmed, the recorder is locked — no reassigning.
+  const recordConfirmed = !!ev?.record_confirmed_at
   // Re-assigning recorders is a manager action (admin or moderator), enabled per-context.
   const canEditAssignee = !readOnly && isManager && !!canAssignRecords
   // Any editable surface → show the save button.
@@ -1099,7 +1102,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  {canEditAssignee ? (
+                  {canEditAssignee && !recordConfirmed ? (
                     <div className="field">
                       <span className="label">Assignee</span>
                       <StyledSelect value={rec5Assignee}
@@ -1107,7 +1110,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                         placeholder="—" options={recOpts} />
                     </div>
                   ) : (
-                    <InfoField label="Assignee" value={ev.record_5min_assignee} />
+                    <InfoField label="Assignee" value={recordConfirmed && ev.record_5min_assignee ? `🔒 ${ev.record_5min_assignee}` : ev.record_5min_assignee} />
                   )}
                   <InfoField label="Assigned" value={fmtDate(ev.record_5min_date)} />
                 </div>
@@ -1135,7 +1138,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  {canEditAssignee ? (
+                  {canEditAssignee && !recordConfirmed ? (
                     <div className="field">
                       <span className="label">Assignee</span>
                       <StyledSelect value={rec20Assignee}
@@ -1143,7 +1146,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                         placeholder="—" options={recOpts} />
                     </div>
                   ) : (
-                    <InfoField label="Assignee" value={ev.record_20min_assignee} />
+                    <InfoField label="Assignee" value={recordConfirmed && ev.record_20min_assignee ? `🔒 ${ev.record_20min_assignee}` : ev.record_20min_assignee} />
                   )}
                   <InfoField label="Assigned" value={fmtDate(ev.record_20min_date)} />
                 </div>

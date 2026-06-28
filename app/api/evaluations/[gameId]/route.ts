@@ -36,6 +36,7 @@ export async function GET(
         ge.record_5min_drive, ge.record_5min_drive_date,
         ge.record_20min_assignee, ge.record_20min_date,
         ge.record_20min_drive, ge.record_20min_drive_date,
+        ge.record_confirmed_at,
         ge.drive_link, ge.drive_date, ge.youtube_link,
         ge.imported_at, ge.updated_at,
         gi.title, gi.os, gi.app_link, gi.icon_url,

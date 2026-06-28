@@ -1058,6 +1058,9 @@ function RecordTable({
               const eb = effectiveBucket(item)
               const assignee = eb === '20min' ? item.record_20min_assignee : item.record_5min_assignee
               const { status, youtubeId } = recordStatus(item, ytMap)
+              // Once confirmed (recording) — or already recorded — the recorder
+              // is locked; no reassigning.
+              const assignLocked = status === 'recording' || status === 'recorded'
               const confirming = confirmRemoveId === item.id
               return (
                 <tr key={item.id} className="tbl-row-premium"
@@ -1112,8 +1115,8 @@ function RecordTable({
                     </td>
                   ) : (
                     <>
-                      <td onClick={isManager ? e => e.stopPropagation() : undefined}>
-                        {isManager ? (
+                      <td onClick={isManager && !assignLocked ? e => e.stopPropagation() : undefined}>
+                        {isManager && !assignLocked ? (
                           <StyledSelect
                             value={assignee || ''}
                             onChange={v => onAssign(item, v)}
@@ -1122,7 +1125,9 @@ function RecordTable({
                             style={{ fontSize: 12 }}
                           />
                         ) : (
-                          <span style={{ fontSize: 12.5, color: assignee ? 'var(--text)' : 'var(--faint)' }}>{assignee || '—'}</span>
+                          <span style={{ fontSize: 12.5, color: assignee ? 'var(--text)' : 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            {assignLocked && '🔒'}{assignee || '—'}
+                          </span>
                         )}
                       </td>
                       <td>
