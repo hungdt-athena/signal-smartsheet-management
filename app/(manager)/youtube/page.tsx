@@ -1136,9 +1136,13 @@ function RecordTable({
                       </td>
                       {isManager && (
                         <td onClick={e => e.stopPropagation()} style={{ textAlign: 'center' }}>
-                          <button className="btn btn-sm btn-ghost" title="Remove from list"
-                            onClick={() => onRemoveRequest && onRemoveRequest(item.id)}
-                            style={{ fontSize: 14, padding: '0 6px', color: 'var(--faint)', lineHeight: 1 }}>×</button>
+                          {status === 'recorded' ? (
+                            <span title="Recorded — cannot remove" style={{ color: 'var(--faint)', display: 'inline-flex' }}><LockIcon /></span>
+                          ) : (
+                            <button className="btn btn-sm btn-ghost" title="Remove from list"
+                              onClick={() => onRemoveRequest && onRemoveRequest(item.id)}
+                              style={{ fontSize: 14, padding: '0 6px', color: 'var(--faint)', lineHeight: 1 }}>×</button>
+                          )}
                         </td>
                       )}
                     </>

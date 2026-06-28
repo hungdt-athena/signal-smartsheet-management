@@ -558,13 +558,16 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const canEditEval = !readOnly && (isAdmin || ev?.initial_evaluator === userName)
   // Final Note + Final Conclusion are manager-only fields (admin or moderator).
   const canEditFinalNote = !readOnly && isManager
-  // Progress-bar lock: a stage is read-only once the NEXT stage has begun.
-  // Final conclusion decided → the initial evaluation is locked. A recorder
-  // assigned → the final conclusion is locked. (Mirrors the progress tracker.)
+  // Game Alike is editable by the evaluator OR a manager, in any stage.
+  const canEditGameAlike = canEditEval || canEditFinalNote
+  // Progress-stage locks freeze only the *conclusion decisions* — notes, game
+  // alike and demo link stay editable per their base permission.
+  //   final conclusion set → Initial Conclusion frozen (clear it to unlock)
+  //   recorder assigned     → Final Conclusion frozen (remove/reassign in Record tab)
   const initialLocked = !!ev?.final_conclusion
   const finalLocked = !!(ev?.record_5min_assignee || ev?.record_20min_assignee)
-  const canEditInitial = canEditEval && !initialLocked
-  const canEditFinal = canEditFinalNote && !finalLocked
+  const canEditInitialConc = canEditEval && !initialLocked
+  const canEditFinalConc = canEditFinalNote && !finalLocked
   // Recording drive links — admin or the assigned recorder for that duration.
   const canEdit5 = !readOnly && (isAdmin || ev?.record_5min_assignee === userName)
   const canEdit20 = !readOnly && (isAdmin || ev?.record_20min_assignee === userName)
@@ -585,7 +588,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const canEdit = canEditEval || canEdit5 || canEdit20 || canEditAssignee || canEditFinalNote
   // The eval editor's Save button also flushes staged screenshots, so staged
   // shots count as unsaved work for it (the card hides its own button then).
-  const needsSave = dirty || (canEditInitial && stagedShots > 0)
+  const needsSave = dirty || (canEditEval && stagedShots > 0)
 
   useEffect(() => {
     if (!canEditAssignee) return
@@ -610,21 +613,25 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       // the new screenshot URLs from the server.
       if (canEditEval) await screenshotRef.current?.flush()
       const body: Record<string, unknown> = { id: ev.id }
-      if (canEditInitial) {
+      if (canEditEval) {
         // Always send these so an emptied field clears the column (see PATCH handler).
         body.initial_note = note
-        body.initial_conclusion = conclusion
-        // Batch only applies to List_Idea games. Managers pick freely; evaluators
-        // are forced into the team's current batch (set by a manager).
-        if (conclusion === 'List_Idea') {
-          const effBatch = isManager ? batch : (ev.current_batch || '')
-          if (effBatch && effBatch !== (ev.batch || '')) body.batch = effBatch
-        }
         body.drive_link = driveLink
-        body.game_alike = gameAlike
+        // Initial Conclusion (+ batch) freezes once a final conclusion exists.
+        if (canEditInitialConc) {
+          body.initial_conclusion = conclusion
+          // Batch only applies to List_Idea games. Managers pick freely; evaluators
+          // are forced into the team's current batch (set by a manager).
+          if (conclusion === 'List_Idea') {
+            const effBatch = isManager ? batch : (ev.current_batch || '')
+            if (effBatch && effBatch !== (ev.batch || '')) body.batch = effBatch
+          }
+        }
       }
-      if (canEditFinal) body.final_note = finalNote
-      if (canEditFinal && finalConclusion !== (ev.final_conclusion || '')) body.final_conclusion = finalConclusion
+      // Game Alike: evaluator or manager, never frozen by a stage lock.
+      if (canEditGameAlike) body.game_alike = gameAlike
+      if (canEditFinalNote) body.final_note = finalNote
+      if (canEditFinalConc && finalConclusion !== (ev.final_conclusion || '')) body.final_conclusion = finalConclusion
       if (canEdit5 && drive5 && drive5 !== ev.record_5min_drive) body.record_5min_drive = drive5
       if (canEdit20 && drive20 && drive20 !== ev.record_20min_drive) body.record_20min_drive = drive20
       if (canEditAssignee && rec5Assignee && rec5Assignee !== (ev.record_5min_assignee || '')) body.record_5min_assignee = rec5Assignee
@@ -677,7 +684,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   }, [autoSave, needsSave, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots])
 
   const clearField = (f: 'note' | 'conclusion' | 'drive') => {
-    if (!canEditInitial) return
+    if (!canEditEval) return
     if (f === 'note') setNote('')
     else if (f === 'conclusion') { setConclusion(''); setDeadLink(false) }
     else if (f === 'drive') setDriveLink('')
@@ -685,7 +692,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   }
 
   const clearAll = () => {
-    if (!canEditInitial) return
+    if (!canEditInitialConc) return
     if (!confirmClearAll) {
       setConfirmClearAll(true)
       setTimeout(() => setConfirmClearAll(false), 3000)
@@ -906,7 +913,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               onChange={updateManualShots}
               onExpand={setExpandedImg}
               onToast={showToast}
-              deferSave={canEditInitial}
+              deferSave={canEditEval}
               onStagedChange={setStagedShots}
             />
           )}
@@ -931,7 +938,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             <div className="card-head">
               <span className="card-label">Initial Evaluation</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
-                {canEditInitial && (
+                {canEditInitialConc && (
                   <button onClick={clearAll}
                     title="Clear all evaluation fields"
                     style={{
@@ -947,7 +954,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {canEditInitial && (
+              {canEditInitialConc && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--border)', marginBottom: 4 }}>
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <span style={{ fontWeight: 600, fontSize: 13, color: deadLink ? 'var(--bad)' : 'var(--text)' }}>
@@ -965,7 +972,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               <div className="field">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span className="label">Initial Conclusion</span>
-                  {canEditInitial && conclusion && !deadLink && <ClearBtn onClick={() => clearField('conclusion')} />}
+                  {canEditInitialConc && conclusion && !deadLink && <ClearBtn onClick={() => clearField('conclusion')} />}
                 </div>
                 <StyledSelect
                   value={conclusion}
@@ -983,7 +990,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                     if (conclusion && conclusion !== 'Link_dead' && !opts.includes(conclusion)) opts.unshift(conclusion)
                     return opts.map(c => ({ value: c, label: c }))
                   })()}
-                  disabled={!canEditInitial || deadLink}
+                  disabled={!canEditInitialConc || deadLink}
                 />
               </div>
 
@@ -1007,7 +1014,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                         if (batch && !merged.includes(batch)) merged.unshift(batch)
                         return [{ value: '', label: '— none —' }, ...merged.map(b => ({ value: b, label: b }))]
                       })()}
-                      disabled={!canEditInitial}
+                      disabled={!canEditInitialConc}
                     />
                   ) : ev.current_batch ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--accent-weak)', border: '1px solid var(--accent-border)', borderRadius: 8 }}>
@@ -1025,7 +1032,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               <div className="field">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span className="label">Initial Note</span>
-                  {canEditInitial && note && <ClearBtn onClick={() => clearField('note')} />}
+                  {canEditEval && note && <ClearBtn onClick={() => clearField('note')} />}
                 </div>
                 <textarea
                   className="input"
@@ -1033,20 +1040,20 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   value={note}
                   onChange={e => { setNote(e.target.value); setDirty(true) }}
                   placeholder="Evaluation note..."
-                  disabled={!canEditInitial}
+                  disabled={!canEditEval}
                   style={{ resize: 'vertical', fontSize: 13 }}
                 />
               </div>
 
               <div className="field">
                 <span className="label">Game Alike</span>
-                <GameAlikeField value={gameAlike} onChange={g => { setGameAlike(g); setDirty(true) }} disabled={!canEditInitial} />
+                <GameAlikeField value={gameAlike} onChange={g => { setGameAlike(g); setDirty(true) }} disabled={!canEditGameAlike} />
               </div>
 
               <div className="field">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span className="label">Demo Video (Drive)</span>
-                  {canEditInitial && driveLink && <ClearBtn onClick={() => clearField('drive')} />}
+                  {canEditEval && driveLink && <ClearBtn onClick={() => clearField('drive')} />}
                 </div>
                 <input
                   className="input"
@@ -1054,7 +1061,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   value={driveLink}
                   onChange={e => { setDriveLink(e.target.value); setDirty(true) }}
                   placeholder="https://drive.google.com/..."
-                  disabled={!canEditInitial}
+                  disabled={!canEditEval}
                 />
                 {ev.drive_link && (
                   <a href={ev.drive_link} target="_blank" rel="noopener"
@@ -1074,7 +1081,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 </div>
               )}
 
-              {canEditInitial && (
+              {canEditGameAlike && (
                 <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave}
                   style={{
                     width: '100%', justifyContent: 'center', marginTop: 2, gap: 6,
@@ -1098,7 +1105,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Final Conclusion</span>
-                {canEditFinal && <SaveStatus dirty={needsSave} />}
+                {canEditFinalNote && <SaveStatus dirty={needsSave} />}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div className="field">
@@ -1112,27 +1119,27 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                       if (finalConclusion && !opts.includes(finalConclusion)) opts.unshift(finalConclusion)
                       return [{ value: '', label: '— Not set —' }, ...opts.map(c => ({ value: c, label: c }))]
                     })()}
-                    disabled={!canEditFinal}
+                    disabled={!canEditFinalConc}
                   />
                 </div>
 
                 <div className="field">
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span className="label">Final Note</span>
-                    {canEditFinal && finalNote && <ClearBtn onClick={() => { setFinalNote(''); setDirty(true) }} />}
+                    {canEditFinalNote && finalNote && <ClearBtn onClick={() => { setFinalNote(''); setDirty(true) }} />}
                   </div>
                   <textarea
                     className="input"
                     rows={3}
                     value={finalNote}
                     onChange={e => { setFinalNote(e.target.value); setDirty(true) }}
-                    placeholder={canEditFinal ? 'Final note (managers only)…' : 'Final note (managers only)'}
-                    disabled={!canEditFinal}
+                    placeholder={canEditFinalNote ? 'Final note (managers only)…' : 'Final note (managers only)'}
+                    disabled={!canEditFinalNote}
                     style={{ resize: 'vertical', fontSize: 13 }}
                   />
                 </div>
 
-                {canEditFinal && (
+                {canEditFinalNote && (
                   <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave}
                     style={{
                       width: '100%', justifyContent: 'center', gap: 6,
