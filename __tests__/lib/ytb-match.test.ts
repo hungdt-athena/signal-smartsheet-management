@@ -16,16 +16,16 @@ describe('lib/ytb-match', () => {
     expect(durationBucket('garbage')).toBe('5min')
   })
 
-  it('buildYtMap keys by title+bucket and prefers rows with an id', () => {
+  it('buildYtMap keys by title+bucket, prefers rows with an id, carries time', () => {
     const map = buildYtMap([
-      { gameTitle: 'A', youtubeId: '', duration: '5mins' },
-      { gameTitle: 'A', youtubeId: 'abc', duration: '5mins' },
-      { gameTitle: 'A', youtubeId: 'xyz', duration: '20mins' },
-      { gameTitle: '', youtubeId: 'skip', duration: '5mins' },
+      { gameTitle: 'A', youtubeId: '', duration: '5mins', time: '' },
+      { gameTitle: 'A', youtubeId: 'abc', duration: '5mins', time: '2026-06-26T10:00:00Z' },
+      { gameTitle: 'A', youtubeId: 'xyz', duration: '20mins', time: '2026-06-27T11:00:00Z' },
+      { gameTitle: '', youtubeId: 'skip', duration: '5mins', time: '' },
     ])
-    expect(ytLookup(map, 'a', '5min')).toBe('abc')
-    expect(ytLookup(map, 'A', '20min')).toBe('xyz')
-    expect(ytLookup(map, 'A', '5min')).toBe('abc')
+    expect(ytLookup(map, 'a', '5min')).toEqual({ id: 'abc', time: '2026-06-26T10:00:00Z' })
+    expect(ytLookup(map, 'A', '20min')).toEqual({ id: 'xyz', time: '2026-06-27T11:00:00Z' })
+    expect(ytLookup(map, 'A', '5min')?.id).toBe('abc')
     // empty-title row never lands a key
     expect(map.has(ytKey('', '5min'))).toBe(false)
     // unrelated lookup misses
@@ -33,8 +33,8 @@ describe('lib/ytb-match', () => {
   })
 
   it('a 20-min upload does not satisfy a 5-min lookup', () => {
-    const map = buildYtMap([{ gameTitle: 'Solo', youtubeId: 'v20', duration: '20mins' }])
-    expect(ytLookup(map, 'Solo', '20min')).toBe('v20')
+    const map = buildYtMap([{ gameTitle: 'Solo', youtubeId: 'v20', duration: '20mins', time: '' }])
+    expect(ytLookup(map, 'Solo', '20min')?.id).toBe('v20')
     expect(ytLookup(map, 'Solo', '5min')).toBeUndefined()
   })
 })

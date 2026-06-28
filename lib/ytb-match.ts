@@ -10,6 +10,13 @@ export interface YtbMatchRow {
   gameTitle: string
   youtubeId: string
   duration: string
+  time: string
+}
+
+// A resolved match: the YouTube id plus when the file was uploaded (sheet `time`).
+export interface YtMatch {
+  id: string
+  time: string
 }
 
 export function normalizeTitle(s: string): string {
@@ -36,20 +43,20 @@ export function ytKey(title: string, bucket: Bucket): string {
   return `${normalizeTitle(title)}|${bucket}`
 }
 
-export function buildYtMap(rows: YtbMatchRow[]): Map<string, string> {
-  const m = new Map<string, string>()
+export function buildYtMap(rows: YtbMatchRow[]): Map<string, YtMatch> {
+  const m = new Map<string, YtMatch>()
   for (const row of rows) {
     if (!row.gameTitle) continue
     const key = ytKey(row.gameTitle, durationBucket(row.duration))
     // Prefer rows that actually have a youtubeId.
-    if (row.youtubeId && (!m.has(key) || !m.get(key))) m.set(key, row.youtubeId)
-    else if (!m.has(key)) m.set(key, row.youtubeId || '')
+    if (row.youtubeId && (!m.has(key) || !m.get(key)!.id)) m.set(key, { id: row.youtubeId, time: row.time || '' })
+    else if (!m.has(key)) m.set(key, { id: row.youtubeId || '', time: row.time || '' })
   }
   // Drop entries that never resolved to a real id.
-  for (const [k, v] of Array.from(m.entries())) if (!v) m.delete(k)
+  for (const [k, v] of Array.from(m.entries())) if (!v.id) m.delete(k)
   return m
 }
 
-export function ytLookup(map: Map<string, string>, title: string, bucket: Bucket): string | undefined {
+export function ytLookup(map: Map<string, YtMatch>, title: string, bucket: Bucket): YtMatch | undefined {
   return map.get(ytKey(title, bucket))
 }

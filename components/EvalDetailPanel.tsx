@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { StyledSelect } from '@/components/StyledSelect'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
-import { buildYtMap, ytLookup } from '@/lib/ytb-match'
+import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
@@ -38,6 +38,7 @@ export interface EvalDetail {
   record_20min_drive: string | null
   record_20min_drive_date: string | null
   record_confirmed_at: string | null
+  final_conclusion_date: string | null
   drive_link: string | null
   drive_date: string | null
   youtube_link: string | null
@@ -235,7 +236,7 @@ function SaveStatus({ dirty }: { dirty: boolean }) {
   )
 }
 
-function ProgressTracker({ ev, yt5, yt20 }: { ev: EvalDetail; yt5?: string; yt20?: string }) {
+function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: string; yt20?: string; uploadedAt?: string | null }) {
   const recAssignees = Array.from(new Set([ev.record_5min_assignee, ev.record_20min_assignee].filter(Boolean)))
   // "Video Uploaded" tracks the 5/20-min report videos, which are now always
   // YouTube uploads (the demo drive link, ev.drive_link, belongs to the
@@ -246,9 +247,9 @@ function ProgressTracker({ ev, yt5, yt20 }: { ev: EvalDetail; yt5?: string; yt20
   }[] = [
     { label: 'Assigned Playtest', completed: !!ev.initial_evaluator, date: ev.assigned_date, assignee: ev.initial_evaluator },
     { label: 'Evaluated', completed: !!ev.evaluate_date, date: ev.evaluate_date },
-    { label: 'Final Conclusion', completed: !!ev.final_conclusion, sub: ev.final_conclusion },
+    { label: 'Final Conclusion', completed: !!ev.final_conclusion, sub: ev.final_conclusion, date: ev.final_conclusion_date },
     { label: 'Assigned Record Video', completed: recAssignees.length > 0, date: ev.record_5min_date || ev.record_20min_date, assignee: recAssignees.join(', ') || null },
-    { label: 'Video Uploaded', completed: !!ytId, href: ytId ? `https://www.youtube.com/watch?v=${ytId}` : null }
+    { label: 'Video Uploaded', completed: !!ytId, href: ytId ? `https://www.youtube.com/watch?v=${ytId}` : null, date: uploadedAt }
   ]
 
   return (
@@ -372,12 +373,12 @@ interface Props {
 // Fetches the `ytb_uploaded` sheet once and builds the duration-aware
 // title→youtubeId map (shared logic with the Record grid). The Record cards and
 // the "Video Uploaded" milestone derive "recorded" live from this.
-function useYtbUploads(): Map<string, string> {
-  const [map, setMap] = useState<Map<string, string>>(new Map())
+function useYtbUploads(): Map<string, YtMatch> {
+  const [map, setMap] = useState<Map<string, YtMatch>>(new Map())
   useEffect(() => {
     fetch('/api/sheets/ytb-uploaded', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : [])
-      .then((rows: Array<{ gameTitle: string; youtubeId: string; duration: string }>) => setMap(buildYtMap(rows)))
+      .then((rows: Array<{ gameTitle: string; youtubeId: string; duration: string; time: string }>) => setMap(buildYtMap(rows)))
       .catch(() => {})
   }, [])
   return map
@@ -558,8 +559,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const canEdit5 = !readOnly && (isAdmin || ev?.record_5min_assignee === userName)
   const canEdit20 = !readOnly && (isAdmin || ev?.record_20min_assignee === userName)
   // 5/20-min recordings are always YouTube uploads, matched live (title + duration).
-  const yt5 = ev ? ytLookup(ytMap, ev.title, '5min') : undefined
-  const yt20 = ev ? ytLookup(ytMap, ev.title, '20min') : undefined
+  const m5 = ev ? ytLookup(ytMap, ev.title, '5min') : undefined
+  const m20 = ev ? ytLookup(ytMap, ev.title, '20min') : undefined
+  const yt5 = m5?.id
+  const yt20 = m20?.id
+  // When the recording was uploaded (sheet `time`), for the "Video Uploaded" step.
+  const ytUploadedAt = m5?.time || m20?.time || null
   // Once confirmed, the recorder is locked — no reassigning.
   const recordConfirmed = !!ev?.record_confirmed_at
   // Re-assigning recorders is a manager action (admin or moderator), enabled per-context.
@@ -755,7 +760,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       </div>
 
       {/* Progress Tracker */}
-      <ProgressTracker ev={ev} yt5={yt5} yt20={yt20} />
+      <ProgressTracker ev={ev} yt5={yt5} yt20={yt20} uploadedAt={ytUploadedAt} />
 
       {/* Main layout: 2 columns */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'start' }}>

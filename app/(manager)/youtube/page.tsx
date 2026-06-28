@@ -6,7 +6,7 @@ import { StyledSelect } from '@/components/StyledSelect'
 import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth } from '@/components/DateFilter'
 import type { YearMonth } from '@/components/DateFilter'
 import { useDateFilter } from '@/hooks/useDateFilter'
-import { normalizeTitle, buildYtMap, ytLookup } from '@/lib/ytb-match'
+import { normalizeTitle, buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { LockIcon, UserIcon } from '@/components/icons'
 import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 
@@ -957,11 +957,11 @@ const FINAL_CONC_STYLES: Record<string, { bg: string; color: string }> = {
   'Not Found':   { bg: '#374151', color: '#e5e7eb' },
 }
 
-function recordStatus(item: ShortListItem, ytMap: Map<string, string>): { status: RecordStatus; youtubeId?: string } {
+function recordStatus(item: ShortListItem, ytMap: Map<string, YtMatch>): { status: RecordStatus; youtubeId?: string } {
   const bucket = effectiveBucket(item)
   const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
   const yt = ytLookup(ytMap, item.title, bucket)
-  if (yt) return { status: 'recorded', youtubeId: yt }
+  if (yt) return { status: 'recorded', youtubeId: yt.id }
   if (!assignee) return { status: 'pending' }
   if (item.record_confirmed_at) return { status: 'recording' }
   return { status: 'draft' }
@@ -1009,7 +1009,7 @@ function RecordTable({
   isManager: boolean
   recorders: string[]
   onAssign: (item: ShortListItem, name: string) => void
-  ytMap: Map<string, string>
+  ytMap: Map<string, YtMatch>
   onClickGame: (gameId: string) => void
   dragOver: boolean
   onHeaderAdd?: () => void
@@ -1271,7 +1271,7 @@ function RecordTab() {
   // matching how Extract Chat groups them. Default on; toggle back to date order.
   const [groupByRecorder, setGroupByRecorder] = useState(true)
   const [recorders, setRecorders] = useState<string[]>([])
-  const [ytMap, setYtMap] = useState<Map<string, string>>(new Map())
+  const [ytMap, setYtMap] = useState<Map<string, YtMatch>>(new Map())
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
   const [showExtract, setShowExtract] = useState(false)
   const [confirming, setConfirming] = useState(false)
