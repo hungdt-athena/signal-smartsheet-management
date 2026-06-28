@@ -793,8 +793,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
       {/* Main layout: 2 columns */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'stretch' }}>
-        {/* Left column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Left column — absolutely filled so its height tracks the right
+            column (it doesn't grow the grid row); the Description scrolls
+            within whatever vertical space is left. */}
+        <div style={{ position: 'relative', minHeight: 0 }}>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'hidden' }}>
           {/* Game card */}
           <div className="card" style={{ margin: 0 }}>
             <div className="card-head">
@@ -927,7 +930,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
           {/* Description */}
           {ev.description && (
-            <div className="card" style={{ margin: 0, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 300 }}>
+            <div className="card" style={{ margin: 0, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div className="card-head">
                 <span className="card-label">Description</span>
               </div>
@@ -937,6 +940,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               />
             </div>
           )}
+        </div>
         </div>
 
         {/* Right: Evaluation form */}
