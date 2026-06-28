@@ -1269,6 +1269,7 @@ function RecordTab() {
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
   const [showExtract, setShowExtract] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
   // Manual bucket override: drag/drop, add-game modal, inline remove-confirm.
   const [dragOverBucket, setDragOverBucket] = useState<'5min' | '20min' | null>(null)
   const [addBucket, setAddBucket] = useState<'5min' | '20min' | null>(null)
@@ -1432,11 +1433,10 @@ function RecordTab() {
   const shown20 = useMemo(() => arrange(list20), [arrange, list20])
 
   // Visible draft rows are the targets of Confirm Assign.
-  const visibleDraftIds = useMemo(() => {
-    return [...shown5, ...shown20]
-      .filter(d => recordStatus(d, ytMap).status === 'draft')
-      .map(d => d.id)
+  const visibleDraftGames = useMemo(() => {
+    return [...shown5, ...shown20].filter(d => recordStatus(d, ytMap).status === 'draft')
   }, [shown5, shown20, ytMap])
+  const visibleDraftIds = useMemo(() => visibleDraftGames.map(d => d.id), [visibleDraftGames])
 
   // Games that have a recorder — fed to the Extract Chat modal.
   const assignedGames = useMemo(() =>
@@ -1456,6 +1456,7 @@ function RecordTab() {
       await fetchData()
     } catch { /* ignore */ }
     setConfirming(false)
+    setShowConfirm(false)
   }, [visibleDraftIds, fetchData])
 
   // Batch filter options follow the month in the picker (UI-generated W1-W4).
@@ -1531,7 +1532,7 @@ function RecordTab() {
           </span>
           {isManager && (
             <>
-              <button className="btn btn-sm btn-primary" onClick={confirmAssign}
+              <button className="btn btn-sm btn-primary" onClick={() => setShowConfirm(true)}
                 disabled={confirming || visibleDraftIds.length === 0}>
                 {confirming ? 'Confirming...' : 'Confirm Assign'}
                 {visibleDraftIds.length > 0 && <span className="badge-count">{visibleDraftIds.length}</span>}
@@ -1610,6 +1611,40 @@ function RecordTab() {
               onNavigate={setDetailGameId}
               onSaved={fetchData}
             />
+          </div>
+        </div>
+      )}
+
+      {showConfirm && (
+        <div className="eval-modal-backdrop" onClick={() => !confirming && setShowConfirm(false)}>
+          <div className="eval-modal-container" onClick={e => e.stopPropagation()}
+            style={{ padding: '22px 24px 22px', maxWidth: 480, width: '92vw' }}>
+            <div style={{ marginBottom: 14 }}>
+              <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Confirm Assign</h2>
+              <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '4px 0 0' }}>
+                {visibleDraftGames.length} game{visibleDraftGames.length === 1 ? '' : 's'} · Draft → Recording
+              </p>
+            </div>
+
+            <div style={{ maxHeight: 'calc(70vh - 200px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+              {visibleDraftGames.map(g => (
+                <div key={g.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                  borderBottom: '1px solid var(--border)',
+                }}>
+                  <span style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
+                  <span className="badge idle" style={{ fontSize: 10 }}>{effectiveBucket(g) === '20min' ? '20 MIN' : '5 MIN'}</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--muted)', flexShrink: 0 }}>👤 {recorderOf(g) || '—'}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button className="btn btn-sm" onClick={() => setShowConfirm(false)} disabled={confirming}>Cancel</button>
+              <button className="btn btn-sm btn-primary" onClick={confirmAssign} disabled={confirming || visibleDraftGames.length === 0}>
+                {confirming ? 'Confirming...' : `Confirm ${visibleDraftGames.length}`}
+              </button>
+            </div>
           </div>
         </div>
       )}
