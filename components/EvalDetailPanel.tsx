@@ -861,9 +861,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                     transition: 'all 0.2s'
                   }}>
                   {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="QR Link" width={150} height={150} style={{ borderRadius: 8 }} />
+                    <img src={qrDataUrl} alt="QR Link" width={180} height={180} style={{ borderRadius: 8 }} />
                   ) : (
-                    <div style={{ width: 150, height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: 180, height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <span className="spin" style={{ display: 'inline-block', width: 16, height: 16 }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" strokeWidth="2">
                           <path d="M21 12a9 9 0 1 1-6.219-8.56" />
