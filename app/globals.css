@@ -339,6 +339,9 @@ body {
   font-size: 13px; cursor: pointer; transition: border-color .14s;
 }
 .ssel-btn:hover { border-color: var(--accent-border); }
+.ssel-btn:disabled { background: var(--surface-2); color: var(--muted); cursor: default; }
+.ssel-btn:disabled:hover { border-color: var(--border-strong); }
+.ssel-btn:disabled .chev { opacity: 0.4; }
 .ssel-btn > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ssel-btn[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
 .ssel-btn .chev { color: var(--faint); transition: transform .15s; flex-shrink: 0; }
