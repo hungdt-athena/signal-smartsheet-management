@@ -6,5 +6,6 @@ ALTER TABLE game_evaluations
   ADD COLUMN IF NOT EXISTS final_conclusion_date TIMESTAMPTZ;
 
 UPDATE game_evaluations
-  SET final_conclusion_date = '2026-06-26 12:00:00+07'
+  SET final_conclusion_date = '2026-06-26 12:00:00+07',
+      final_evaluator = 'VinhTD'
   WHERE final_conclusion IS NOT NULL;

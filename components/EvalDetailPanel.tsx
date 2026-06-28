@@ -6,6 +6,7 @@ import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/component
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { useConfig } from '@/hooks/useConfig'
+import { prettyConclusion } from '@/lib/buckets'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
@@ -354,7 +355,7 @@ function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: 
                     color: isCompleted ? 'var(--good)' : 'var(--muted)',
                     background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 5,
                   }}>
-                    {step.connector}
+                    {prettyConclusion(step.connector)}
                   </span>
                 )}
               </div>
@@ -994,7 +995,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   options={(() => {
                     const opts = [...INITIAL_CONCLUSION_OPTIONS]
                     if (conclusion && conclusion !== 'Link_dead' && !opts.includes(conclusion)) opts.unshift(conclusion)
-                    return opts.map(c => ({ value: c, label: c }))
+                    return opts.map(c => ({ value: c, label: prettyConclusion(c) }))
                   })()}
                   disabled={!canEditInitialConc || deadLink}
                 />

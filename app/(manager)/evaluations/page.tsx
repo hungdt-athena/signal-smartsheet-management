@@ -14,7 +14,7 @@ import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 import { QuickStatsModal } from '@/components/QuickStatsModal'
 import { AssignSetup } from '@/components/AssignSetup'
 import { WeeklyFeedbackTab } from '@/components/weekly-feedback/WeeklyFeedbackTab'
-import { BUCKETS, type Bucket } from '@/lib/buckets'
+import { BUCKETS, prettyConclusion, type Bucket } from '@/lib/buckets'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
 import { GameAlikeChips, GameAlikeField } from '@/components/GameAlikeField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
@@ -712,7 +712,7 @@ function ShortListEvalTab() {
             value={filterConclusions}
             onChange={setFilterConclusions}
             placeholder="Conclusions"
-            options={availableConclusions.map(c => ({ value: c, label: c }))}
+            options={availableConclusions.map(c => ({ value: c, label: prettyConclusion(c) }))}
           />
         </div>
 
@@ -886,7 +886,7 @@ function ShortListEvalTab() {
 
 function conclusionBadge(c: string | null) {
   if (!c) return <span className="badge idle">Pending</span>
-  return <span className={`badge ${CONCLUSION_COLORS[c] || 'neutral'}`}>{c}</span>
+  return <span className={`badge ${CONCLUSION_COLORS[c] || 'neutral'}`}>{prettyConclusion(c)}</span>
 }
 
 function fmtDate(d: string | null) {
@@ -1192,7 +1192,7 @@ function EvaluationsPageInner() {
             value={filterConclusion}
             onChange={setFilterConclusion}
             placeholder="All conclusions"
-            options={[{ value: '', label: 'All conclusions' }, ...conclusionOptions.map(c => ({ value: c, label: c }))]}
+            options={[{ value: '', label: 'All conclusions' }, ...conclusionOptions.map(c => ({ value: c, label: prettyConclusion(c) }))]}
           />
         </div>
 

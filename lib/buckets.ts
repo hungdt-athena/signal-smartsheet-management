@@ -12,6 +12,16 @@ export function isWeight(v: unknown): v is Weight {
   return typeof v === 'number' && (WEIGHTS as readonly number[]).includes(v)
 }
 
+/**
+ * Display label for a conclusion value. 'List_Idea' is a logic-critical stored
+ * value (drives batch bucketing), so it stays underscored everywhere in code/DB
+ * but reads as "List Idea" in the UI.
+ */
+export function prettyConclusion(v: string | null | undefined): string {
+  if (!v) return '—'
+  return v === 'List_Idea' ? 'List Idea' : v
+}
+
 /** Normalize a category multi-select value to storage form: 'All' or 'a,b,c'. */
 export function normalizeCategory(v: unknown): string {
   const parts = Array.isArray(v)

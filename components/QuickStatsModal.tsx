@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import type { YearMonth } from '@/components/DateFilter'
+import { prettyConclusion } from '@/lib/buckets'
 
 interface EvaluatorStats {
   evaluator: string
@@ -168,7 +169,7 @@ export function QuickStatsModal({ category, month, onClose }: {
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
                   {conclusionEntries.map(([c, n]) => (
                     <span key={c} className={`badge ${CONCLUSION_COLORS[c] || 'neutral'}`} style={{ fontSize: 10.5 }}>
-                      {c} · {n}
+                      {prettyConclusion(c)} · {n}
                     </span>
                   ))}
                   {r.drive_links > 0 && (
