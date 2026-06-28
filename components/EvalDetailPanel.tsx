@@ -244,13 +244,15 @@ function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: 
   // YouTube uploads (the demo drive link, ev.drive_link, belongs to the
   // evaluation step). Completed when a matching YouTube upload exists.
   const ytId = yt5 || yt20
+  // `connector` is a label drawn on the line AFTER this step — the conclusion
+  // that drove the transition (initial → final, final → recording).
   const steps: {
-    label: string; completed: boolean; date?: string | null; assignee?: string | null; sub?: string | null; href?: string | null
+    label: string; completed: boolean; date?: string | null; assignee?: string | null; connector?: string | null; href?: string | null
   }[] = [
-    { label: 'Assigned Playtest', completed: !!ev.initial_evaluator, date: ev.assigned_date, assignee: ev.initial_evaluator },
-    { label: 'Evaluated', completed: !!ev.evaluate_date, date: ev.evaluate_date },
-    { label: 'Final Conclusion', completed: !!ev.final_conclusion, sub: ev.final_conclusion, date: ev.final_conclusion_date },
-    { label: 'Assigned Record Video', completed: recAssignees.length > 0, date: ev.record_5min_date || ev.record_20min_date, assignee: recAssignees.join(', ') || null },
+    { label: 'Playtest Assigned', completed: !!ev.initial_evaluator, date: ev.assigned_date, assignee: ev.initial_evaluator },
+    { label: 'Initial Evaluation', completed: !!ev.evaluate_date, date: ev.evaluate_date, connector: ev.initial_conclusion },
+    { label: 'Final Evaluation', completed: !!ev.final_conclusion, date: ev.final_conclusion_date, assignee: ev.final_evaluator, connector: ev.final_conclusion },
+    { label: 'Recording Assigned', completed: recAssignees.length > 0, date: ev.record_5min_date || ev.record_20min_date, assignee: recAssignees.join(', ') || null },
     { label: 'Video Uploaded', completed: !!ytId, href: ytId ? `https://www.youtube.com/watch?v=${ytId}` : null, date: uploadedAt }
   ]
 
@@ -329,28 +331,33 @@ function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: 
                     <UserIcon />{step.assignee}
                   </span>
                 )}
-                {step.sub && (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: isCompleted ? 'var(--text)' : 'var(--muted)', marginTop: 1 }}>
-                    {step.sub}
-                  </span>
-                )}
                 {step.date && (
-                  <span style={{ fontSize: 10, color: 'var(--faint)', marginTop: step.assignee || step.sub ? 1 : 2 }}>
+                  <span style={{ fontSize: 10, color: 'var(--faint)', marginTop: step.assignee ? 1 : 2 }}>
                     {fmtDate(step.date)}
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Connecting line */}
+            {/* Connecting line — carries the transition's conclusion as a chip */}
             {idx < steps.length - 1 && (
-              <div style={{
-                flex: 1,
-                height: 2,
-                background: isCompleted && steps[idx + 1].completed ? 'var(--good)' : isCompleted ? 'var(--accent-border)' : 'var(--track)',
-                margin: '0 12px',
-                minWidth: 16
-              }} />
+              <div style={{ flex: 1, margin: '0 12px', minWidth: 24, position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <div style={{
+                  flex: 1,
+                  height: 2,
+                  background: isCompleted && steps[idx + 1].completed ? 'var(--good)' : isCompleted ? 'var(--accent-border)' : 'var(--track)',
+                }} />
+                {step.connector && (
+                  <span style={{
+                    position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+                    fontSize: 9.5, fontWeight: 700, letterSpacing: '0.3px', whiteSpace: 'nowrap',
+                    color: isCompleted ? 'var(--good)' : 'var(--muted)',
+                    background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 5,
+                  }}>
+                    {step.connector}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         )
