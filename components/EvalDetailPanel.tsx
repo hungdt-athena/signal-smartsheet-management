@@ -792,7 +792,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       <ProgressTracker ev={ev} yt5={yt5} yt20={yt20} uploadedAt={ytUploadedAt} />
 
       {/* Main layout: 2 columns */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'stretch' }}>
         {/* Left column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Game card */}
@@ -927,12 +927,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
           {/* Description */}
           {ev.description && (
-            <div className="card" style={{ margin: 0 }}>
+            <div className="card" style={{ margin: 0, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 300 }}>
               <div className="card-head">
                 <span className="card-label">Description</span>
               </div>
               <div
-                style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)', maxHeight: 300, overflowY: 'auto' }}
+                style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)', flex: 1, minHeight: 0, overflowY: 'auto' }}
                 dangerouslySetInnerHTML={{ __html: ev.description }}
               />
             </div>
