@@ -6,7 +6,8 @@ import { StyledSelect } from '@/components/StyledSelect'
 import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth } from '@/components/DateFilter'
 import type { YearMonth } from '@/components/DateFilter'
 import { useDateFilter } from '@/hooks/useDateFilter'
-import { normalizeTitle, buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
+import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
+import { prettyConclusion } from '@/lib/buckets'
 import { LockIcon, UserIcon } from '@/components/icons'
 import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 
@@ -1086,7 +1087,7 @@ function RecordTable({
                             <span style={{ fontSize: 10.5, color: 'var(--faint)', fontWeight: 600 }}>{item.initial_evaluator}</span>
                           )}
                           {item.initial_conclusion && (
-                            <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>{item.initial_conclusion}</span>
+                            <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>{prettyConclusion(item.initial_conclusion)}</span>
                           )}
                           {item.final_conclusion && (() => {
                             const fc = FINAL_CONC_STYLES[item.final_conclusion] || { bg: 'var(--surface-3)', color: 'var(--muted)' }
