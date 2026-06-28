@@ -877,8 +877,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 </div>
               ) : <div />}
               <InfoField label="Release Date" value={fmtDate(ev.release_date)} copyValue={ev.release_date ? fmtDate(ev.release_date) : ''} />
-              <InfoField label="Initial Evaluated" value={fmtDateTime(ev.evaluate_date)} />
-              <InfoField label="Initial Evaluator" value={ev.initial_evaluator} />
+              <InfoField label="Initial Evaluated" value={ev.evaluate_date ? `${fmtDateTime(ev.evaluate_date)}${ev.initial_evaluator ? ` · ${ev.initial_evaluator}` : ''}` : '—'} />
+              <InfoField label="Genre" value={[ev.genre_1, ev.genre_2].filter(Boolean).join(' / ') || '—'} />
               <InfoField label="Final Evaluated" value={ev.final_conclusion_date ? `${fmtDateTime(ev.final_conclusion_date)}${ev.final_evaluator ? ` · ${ev.final_evaluator}` : ''}` : '—'} />
             </div>
 
