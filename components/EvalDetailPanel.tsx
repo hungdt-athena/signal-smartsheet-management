@@ -793,11 +793,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
       {/* Main layout: 2 columns */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'stretch' }}>
-        {/* Left column — absolutely filled so its height tracks the right
-            column (it doesn't grow the grid row); the Description scrolls
-            within whatever vertical space is left. */}
-        <div style={{ position: 'relative', minHeight: 0 }}>
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'hidden' }}>
+        {/* Left column — normal flow so the grid row is max(own content, right
+            column). Right column tall → the Description card fills the leftover
+            height and scrolls inside; right column short → the row grows so the
+            full Description is always shown (never clipped). */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
           {/* Game card */}
           <div className="card" style={{ margin: 0 }}>
             <div className="card-head">
@@ -930,7 +930,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
           {/* Description */}
           {ev.description && (
-            <div className="card" style={{ margin: 0, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div className="card" style={{ margin: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div className="card-head">
                 <span className="card-label">Description</span>
               </div>
@@ -940,7 +940,6 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               />
             </div>
           )}
-        </div>
         </div>
 
         {/* Right: Evaluation form */}
@@ -1111,12 +1110,18 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             </div>
           </div>
 
-          {/* Final Conclusion — manager-only decision + note */}
-          {(canEditFinalNote || ev.final_conclusion || ev.final_note) && (
-            <div className="card" style={{ margin: 0 }}>
+          {/* Final Conclusion — always shown so the layout matches across roles;
+              the decision + note are editable by managers only, read-only otherwise. */}
+          <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Final Conclusion</span>
-                {canEditFinalNote && <SaveStatus dirty={needsSave} />}
+                {canEditFinalNote ? (
+                  <SaveStatus dirty={needsSave} />
+                ) : (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--faint)' }}>
+                    <LockIcon /> Manager only
+                  </span>
+                )}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div className="field">
@@ -1167,8 +1172,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   </button>
                 )}
               </div>
-            </div>
-          )}
+          </div>
 
           {/* Record Video — 5 min */}
           {!hideRecordSections && (ev.record_5min_assignee || canEditAssignee) && (
