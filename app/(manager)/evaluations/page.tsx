@@ -11,8 +11,8 @@ import type { YearMonth } from '@/components/DateFilter'
 import { useDateFilter } from '@/hooks/useDateFilter'
 import { useConfig } from '@/hooks/useConfig'
 import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
+import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { QuickStatsModal } from '@/components/QuickStatsModal'
-import { AssignSetup } from '@/components/AssignSetup'
 import { WeeklyFeedbackTab } from '@/components/weekly-feedback/WeeklyFeedbackTab'
 import { BUCKETS, prettyConclusion, type Bucket } from '@/lib/buckets'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
@@ -528,8 +528,11 @@ function ShortListEvalTab() {
   const [filterEvaluator, setFilterEvaluator] = useState('')
   const [filterBatch, setFilterBatch] = useState('')
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
-  // Short List groups by when games were evaluated → default basis = evaluated.
-  const df = useDateFilter('evaluated')
+  const [availableBatches, setAvailableBatches] = useState<string[]>([])
+  // Short List is organised by batch, so the date filter defaults to all-time
+  // (evaluated basis) rather than the current month — the month would fight the
+  // batch slicing and hide games evaluated in other months of the same batch.
+  const df = useDateFilter('evaluated', false)
   // Default to newest-first so the most recently evaluated games surface on top.
   const [sortAsc, setSortAsc] = useState(false)
   const fetchSeqRef = useRef(0)
@@ -564,6 +567,7 @@ function ShortListEvalTab() {
       setTotal(json.total || 0)
       if (json.available_months) df.setAvailableMonths(json.available_months)
       if (json.available_evaluators) setAvailableEvaluators(json.available_evaluators)
+      if (json.available_batches) setAvailableBatches(json.available_batches)
       let willDefaultBatch = false
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
@@ -617,11 +621,12 @@ function ShortListEvalTab() {
     setData(prev => prev.map(d => d.id === id ? { ...d, game_alike: value } : d))
   }
 
-  // Batch filter options follow the month in the picker (UI-generated W1-W4).
-  const filterYM = valueToYearMonth(df.value)
-  const batchOptions = filterYM ? weekBatches(filterYM.year, filterYM.month) : []
-  // A fallback-defaulted batch (or any batch outside the picker's month) may not be
-  // in the generated W1-W4 list — surface it so the dropdown reflects the selection.
+  // Batch options come from the batches actually present (server-provided,
+  // date-range-independent) so all-time batches are selectable regardless of the
+  // month picker. Newest-first via the batch label order.
+  const batchOptions = [...availableBatches].sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a))
+  // A fallback-defaulted batch may not be in the present-batch list yet (e.g. a
+  // fresh week with no games) — surface it so the dropdown reflects the selection.
   if (filterBatch && !batchOptions.includes(filterBatch)) batchOptions.unshift(filterBatch)
 
   // Manager control: set the team's current batch. Offer this + next calendar
@@ -913,7 +918,6 @@ export default function EvaluationsPage() {
 function EvaluationsRouter() {
   const searchParams = useSearchParams()
   const category = searchParams.get('cat') || 'puzzle'
-  if (category === 'assign_setup') return <AssignSetup />
   if (category === 'weekly_feedback') return <WeeklyFeedbackTab />
   return category === 'short_list' ? <ShortListEvalTab /> : <EvaluationsPageInner />
 }
@@ -978,7 +982,13 @@ function EvaluationsPageInner() {
       if (filterConclusion) params.set('conclusion', filterConclusion)
       if (filterStatus) params.set('status', filterStatus)
       params.set('sort', sortAsc ? 'asc' : 'desc')
-      for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
+      // Pending is always shown all-time on the assigned basis: a game awaiting
+      // evaluation may have been assigned in any earlier month, so the date picker
+      // must not narrow it. (Picker is hidden in this mode — see below.)
+      const dateParams = filterStatus === 'pending'
+        ? { date_basis: 'assigned' as const }
+        : dateFilterParams(df.value, df.autoMonth)
+      for (const [k, v] of Object.entries(dateParams)) params.set(k, v)
       const res = await fetch(`/api/evaluations?${params}`)
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return // stale response; a newer fetch owns the state
@@ -1029,15 +1039,6 @@ function EvaluationsPageInner() {
     return () => observer.disconnect()
   }, [hasMore, loading, loadingMore, fetchPage])
 
-  // Pending games have no evaluated date — force the date filter onto the
-  // 'assigned' basis so the (now-hidden) evaluated toggle can't leave a stale
-  // date_basis=evaluated on the query.
-  useEffect(() => {
-    if (filterStatus === 'pending' && df.value.basis === 'evaluated') {
-      df.setValue(v => ({ ...v, basis: 'assigned' }))
-    }
-  }, [filterStatus, df.value.basis])
-
   const filtered = useMemo(() => {
     if (!search.trim()) return data
     const q = search.toLowerCase()
@@ -1077,7 +1078,7 @@ function EvaluationsPageInner() {
           <h1 className="h-title">Evaluations</h1>
           <p className="h-sub">
             {total} games · {category}
-            {df.value.from ? ` · ${valueLabel(df.value)}` : ''}
+            {filterStatus === 'pending' ? ' · All time' : df.value.from ? ` · ${valueLabel(df.value)}` : ''}
             {role !== 'admin' && role !== 'moderator' && userName ? ` · ${userName}` : ''}
           </p>
         </div>
@@ -1142,11 +1143,22 @@ function EvaluationsPageInner() {
             value={search} onChange={e => setSearch(e.target.value)} />
         </div>
 
-        <DateFilter
-          value={df.value}
-          onChange={v => { df.setAutoMonth(false); df.setValue(v) }}
-          hideEvaluated={filterStatus === 'pending'}
-        />
+        {/* Pending is locked to all-time assigned (see fetchPage), so the date
+            picker would be inert — hide it and show the fixed scope instead. */}
+        {filterStatus === 'pending' ? (
+          <span className="btn btn-sm" style={{ cursor: 'default', gap: 6, minWidth: 200, justifyContent: 'flex-start', opacity: 0.7 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+            <span style={{ color: 'var(--muted)' }}>Assigned</span>{' · All time'}
+          </span>
+        ) : (
+          <DateFilter
+            value={df.value}
+            onChange={v => { df.setAutoMonth(false); df.setValue(v) }}
+          />
+        )}
 
         <div className="seg-wrapper">
           {[
