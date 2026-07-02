@@ -41,12 +41,22 @@ export async function POST(req: NextRequest) {
   if (!CATEGORIES.includes(category)) {
     return NextResponse.json({ error: `category must be one of ${CATEGORIES.join(', ')}` }, { status: 400 })
   }
-  const cats = (body.categories || []).map(c => String(c).trim().toLowerCase()).filter(Boolean)
-  if (cats.length === 0) {
-    return NextResponse.json({ error: 'categories list required' }, { status: 400 })
-  }
+  // Genres to match against game_info.metadata->'categories'. Callers may pass an
+  // explicit `categories` override; otherwise derive them from category_mappings so
+  // n8n only needs to send {category} (the DB owns the genre→bucket split now).
+  let cats = (body.categories || []).map(c => String(c).trim().toLowerCase()).filter(Boolean)
 
   try {
+    if (cats.length === 0) {
+      const mapped = await sql<{ genre: string }[]>`
+        SELECT genre FROM category_mappings
+        WHERE active = TRUE AND category_group = ${category}
+      `
+      cats = mapped.map(m => m.genre.trim().toLowerCase()).filter(Boolean)
+    }
+    if (cats.length === 0) {
+      return NextResponse.json({ error: `no genres mapped for category '${category}'` }, { status: 400 })
+    }
     let rows: { game_id: string }[]
 
     if (body.dryRun) {

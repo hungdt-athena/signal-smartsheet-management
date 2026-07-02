@@ -64,7 +64,7 @@ describe('POST /api/cron/assign-evaluators', () => {
         { name: 'A', game_platform: 'all', weight: 100 },
         { name: 'B', game_platform: 'all', weight: 100 },
       ],
-      games: [{ id: 1, os: 'ios' }, { id: 2, os: 'android' }, { id: 3, os: 'ios' }, { id: 4, os: 'ios' }],
+      games: [{ id: 1, game_id: 'g1', os: 'ios' }, { id: 2, game_id: 'g2', os: 'android' }, { id: 3, game_id: 'g3', os: 'ios' }, { id: 4, game_id: 'g4', os: 'ios' }],
     })
     const res = await post({ category: 'puzzle' })
     const json = await res.json()
@@ -73,6 +73,7 @@ describe('POST /api/cron/assign-evaluators', () => {
     const q = sqlMock.mock.calls.map(c => (Array.isArray(c[0]) ? c[0].join(' ') : '')).join('\n')
     expect(q).toContain('UPDATE game_evaluations')
     expect(q).toContain('assigned_date')
+    expect(q).toContain('INSERT INTO assignment_history')
   })
 
   it('rejects a null body with 400', async () => {
