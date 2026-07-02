@@ -2,10 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { requireManager } from '@/lib/auth-guard'
-import { sql } from '@/lib/db'
 import { isBucket } from '@/lib/buckets'
-import { selectPendingGames, loadRoster, commitAssignment, distribute } from '@/lib/reassign-core'
-import { writeAssignmentHistory } from '@/lib/assignment-history'
+import { selectPendingGames, loadRoster, distribute } from '@/lib/reassign-core'
+import { sourceBreakdowns, perEvaluatorPlatform, insertOperationRun, type DistSnapshot } from '@/lib/operation-runs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -13,12 +12,13 @@ export const maxDuration = 60
 // Handover, DB-native (replaces the n8n "Handover" / "handover-puzzle" flows that
 // mutated Smartsheet). When an evaluator goes on leave for a date window, their
 // still-pending games assigned within that window are redistributed to everyone
-// currently available in the bucket. The leave window is recorded in
-// handover_requests; the hourly availability cron flips today_available by date.
+// currently available in the bucket.
 //
-//   dryRun: true  → preview: candidate_count + would-be per-evaluator split.
-//   dryRun: false → commit: game_evaluations reassigned, handover_requests row
-//                   inserted, one assignment_history row per evaluator (action='handover').
+// This route no longer commits. It is now the SUBMIT step of an approval workflow:
+//   dryRun: true  → live preview (candidate pool + would-be distribution). No writes.
+//   dryRun: false → create a PENDING operation_runs request + snapshot. Still NO game
+//                   changes — a manager approves it via /api/operations/handover/resolve,
+//                   which recomputes and actually redistributes.
 
 interface Body {
   evaluator_name?: string
@@ -57,51 +57,42 @@ export async function POST(req: NextRequest) {
     const candidates = await selectPendingGames({
       category, from, startDate: body.start_date, endDate: body.end_date,
     })
+    const { by_platform, by_date } = sourceBreakdowns(candidates)
 
     // Everyone currently available in this bucket, minus the person leaving.
     const roster = await loadRoster({ category, onlyAvailable: true })
+    const { assignment, perEvaluator } = candidates.length
+      ? distribute(candidates, roster, from)
+      : { assignment: new Map<number, string>(), perEvaluator: {} as Record<string, number> }
+    const per_evaluator_platform = perEvaluatorPlatform(candidates, assignment)
 
-    if (candidates.length === 0) {
-      return NextResponse.json({ ok: true, dryRun, category, from, candidate_count: 0, assigned: 0, per_evaluator: {} })
+    const snapshot: DistSnapshot = {
+      candidate_count: candidates.length,
+      assignable: assignment.size,
+      unassignable: candidates.length - assignment.size,
+      per_evaluator: perEvaluator,
+      per_evaluator_platform,
+      by_platform, by_date,
+      dryRun: true,
     }
-
-    const { assignment, perEvaluator } = distribute(candidates, roster, from)
 
     if (dryRun) {
-      return NextResponse.json({
-        ok: true, dryRun: true, category, from,
-        start_date: body.start_date, end_date: body.end_date,
-        candidate_count: candidates.length,
-        assignable: assignment.size,
-        unassignable: candidates.length - assignment.size,
-        per_evaluator: perEvaluator,
-      })
+      return NextResponse.json({ ok: true, category, from, start_date: body.start_date, end_date: body.end_date, ...snapshot })
     }
 
-    const idToGameId = new Map(candidates.map(c => [c.id, c.game_id]))
-    const perEvaluatorGameIds = await commitAssignment(assignment, idToGameId)
-
-    await sql`
-      INSERT INTO handover_requests (request_date, evaluator_name, start_date, end_date, sheet_type, status)
-      VALUES (NOW(), ${from}, ${body.start_date}, ${body.end_date}, ${category}, 'done')
-    `
-
+    // Submit: persist a pending request. No game_evaluations / handover_requests /
+    // assignment_history writes here — those happen on approve.
     const session = await getServerSession(authOptions)
-    await writeAssignmentHistory({
-      category,
-      action: 'handover',
-      perEvaluator: perEvaluatorGameIds,
-      fromEvaluator: from,
-      createdBy: session?.user?.email ?? 'manual',
+    const runId = await insertOperationRun({
+      kind: 'handover', category, fromEvaluator: from, status: 'pending',
+      params: { start_date: body.start_date, end_date: body.end_date },
+      snapshot, gameCount: assignment.size,
+      submittedBy: session?.user?.email ?? 'manual',
     })
 
     return NextResponse.json({
-      ok: true, dryRun: false, category, from,
-      start_date: body.start_date, end_date: body.end_date,
-      candidate_count: candidates.length,
-      assigned: assignment.size,
-      unassignable: candidates.length - assignment.size,
-      per_evaluator: perEvaluator,
+      ok: true, submitted: true, run_id: runId, status: 'pending',
+      category, from, start_date: body.start_date, end_date: body.end_date, ...snapshot,
     })
   } catch (err) {
     if (err instanceof Error && err.message === 'evaluator list empty') {

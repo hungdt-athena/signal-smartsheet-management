@@ -32,18 +32,16 @@ interface NavChild { href: string; label: string; roles?: string[]; external?: b
 interface NavItem { href: string; label: string; icon: keyof typeof ICONS; adminOnly?: boolean; roles?: string[]; external?: boolean; children?: NavChild[] }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/smartsheet',      label: 'Smartsheet',  icon: 'table',  adminOnly: true, children: [
-    { href: '/dashboard',       label: 'Dashboard' },
-    { href: '/operations',      label: 'Operations' },
-    { href: '/team',            label: 'Team' },
-    { href: '/handover-puzzle', label: 'Handover' },
+  { href: '/team-ops',        label: 'Team Operations', icon: 'users', adminOnly: true, children: [
+    { href: '/team-ops?tab=assign',   label: 'Assign' },
+    { href: '/team-ops?tab=reassign', label: 'Reassign' },
+    { href: '/team-ops?tab=handover', label: 'Handover' },
   ]},
   // Arcade/Simulation hidden from non-admins while still in development.
   { href: '/evaluations',     label: 'Evaluations', icon: 'clipboard', children: [
     { href: '/evaluations?cat=evaluate', label: 'Evaluate' },
     { href: '/evaluations?cat=short_list', label: 'Short List' },
     { href: '/evaluations?cat=weekly_feedback', label: 'Weekly Feedback' },
-    { href: '/evaluations?cat=assign_setup', label: 'Assign Setup', roles: ['admin', 'moderator'] },
   ]},
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },

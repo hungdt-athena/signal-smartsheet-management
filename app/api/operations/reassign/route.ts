@@ -5,6 +5,7 @@ import { requireManager } from '@/lib/auth-guard'
 import { isBucket } from '@/lib/buckets'
 import { selectPendingGames, loadRoster, commitAssignment, distribute } from '@/lib/reassign-core'
 import { writeAssignmentHistory } from '@/lib/assignment-history'
+import { sourceBreakdowns, perEvaluatorPlatform, insertOperationRun } from '@/lib/operation-runs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -24,6 +25,7 @@ interface Body {
   category?: string
   sheet_type?: string // alias for category, kept for the existing UI
   selected_evaluators?: string[]
+  evaluator_weights?: Record<string, number> // per-run weight override (does NOT touch the roster)
   start_date?: string
   end_date?: string
   count?: number
@@ -75,26 +77,35 @@ export async function POST(req: NextRequest) {
       count,
     })
 
-    // Preview with no targets chosen yet: just report how many games would move.
+    // Breakdowns of the candidate pool (the games that would move), for the live
+    // preview: split by platform and by the day each game was originally assigned.
+    const { by_platform: byPlatform, by_date: byDate } = sourceBreakdowns(candidates)
+
+    // Preview with no targets chosen yet: report the candidate pool + breakdowns.
     if (dryRun && selected.length === 0) {
-      return NextResponse.json({ ok: true, dryRun: true, category, from, candidate_count: candidates.length, per_evaluator: {} })
+      return NextResponse.json({ ok: true, dryRun: true, category, from, candidate_count: candidates.length, per_evaluator: {}, by_platform: byPlatform, by_date: byDate })
     }
 
     if (candidates.length === 0) {
-      return NextResponse.json({ ok: true, dryRun, category, from, candidate_count: 0, assigned: 0, per_evaluator: {} })
+      return NextResponse.json({ ok: true, dryRun, category, from, candidate_count: 0, assigned: 0, per_evaluator: {}, by_platform: byPlatform, by_date: byDate })
     }
 
     // Enrich chosen targets with roster platform/weight (default all/100 if a picked
     // name isn't registered in this bucket's roster).
     const roster = await loadRoster({ category, names: selected })
     const rosterByName = new Map(roster.map(r => [r.name, r]))
+    const weightOverride = body.evaluator_weights ?? {}
     const targets = selected.map(name => ({
       name,
       game_platform: rosterByName.get(name)?.game_platform ?? 'all',
-      weight: rosterByName.get(name)?.weight ?? 100,
+      // UI weight override wins over the roster weight for this run only.
+      weight: Number(weightOverride[name]) > 0 ? Number(weightOverride[name]) : (rosterByName.get(name)?.weight ?? 100),
     }))
 
     const { assignment, perEvaluator } = distribute(candidates, targets, from)
+
+    // Per-evaluator platform split of the resulting distribution.
+    const perEvalPlatform = perEvaluatorPlatform(candidates, assignment)
 
     if (dryRun) {
       return NextResponse.json({
@@ -103,6 +114,8 @@ export async function POST(req: NextRequest) {
         assignable: assignment.size,
         unassignable: candidates.length - assignment.size,
         per_evaluator: perEvaluator,
+        per_evaluator_platform: perEvalPlatform,
+        by_platform: byPlatform, by_date: byDate,
       })
     }
 
@@ -110,12 +123,36 @@ export async function POST(req: NextRequest) {
     const perEvaluatorGameIds = await commitAssignment(assignment, idToGameId)
 
     const session = await getServerSession(authOptions)
+    const createdBy = session?.user?.email ?? 'manual'
     await writeAssignmentHistory({
       category,
       action: 'reassign',
       perEvaluator: perEvaluatorGameIds,
       fromEvaluator: from,
-      createdBy: session?.user?.email ?? 'manual',
+      createdBy,
+    })
+
+    // Record the operation as one committed run (with its full snapshot for Details).
+    const snapshot = {
+      candidate_count: candidates.length,
+      assigned: assignment.size,
+      unassignable: candidates.length - assignment.size,
+      per_evaluator: perEvaluator,
+      per_evaluator_platform: perEvalPlatform,
+      by_platform: byPlatform, by_date: byDate,
+      dryRun: false,
+    }
+    await insertOperationRun({
+      kind: 'reassign', category, fromEvaluator: from, status: 'committed',
+      params: {
+        mode: hasRange && count ? 'range+quantity' : hasRange ? 'range' : 'quantity',
+        start_date: hasRange ? body.start_date : null,
+        end_date: hasRange ? body.end_date : null,
+        count: count ?? null,
+        selected_evaluators: selected,
+        evaluator_weights: body.evaluator_weights ?? {},
+      },
+      snapshot, gameCount: assignment.size, submittedBy: createdBy,
     })
 
     return NextResponse.json({
@@ -124,6 +161,8 @@ export async function POST(req: NextRequest) {
       assigned: assignment.size,
       unassignable: candidates.length - assignment.size,
       per_evaluator: perEvaluator,
+      per_evaluator_platform: perEvalPlatform,
+      by_platform: byPlatform, by_date: byDate,
     })
   } catch (err) {
     if (err instanceof Error && err.message === 'evaluator list empty') {

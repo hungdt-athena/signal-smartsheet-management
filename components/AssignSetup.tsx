@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { MultiSelect } from '@/components/MultiSelect'
 import { useCategoryMappings } from '@/hooks/useCategoryMappings'
-import { BUCKETS, WEIGHTS, type Bucket } from '@/lib/buckets'
+import { WEIGHTS, type Bucket } from '@/lib/buckets'
 
 interface RosterRow {
   id: number; name: string; today_available: boolean
@@ -12,13 +12,13 @@ interface RosterRow {
 }
 type ListType = 'initial' | 'final'
 
-const BUCKET_LABELS: Record<Bucket, string> = { puzzle: 'Puzzle', arcade: 'Arcade', simulation: 'Simulation' }
 const WEIGHT_OPTS = WEIGHTS.map(w => ({ value: String(w), label: String(w) }))
 const PLATFORM_OPTS = [{ value: 'all', label: 'all' }, { value: 'ios', label: 'ios' }, { value: 'android', label: 'android' }]
 const AVAIL_OPTS = [{ value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }]
 
-export function AssignSetup() {
-  const [bucket, setBucket] = useState<Bucket>('puzzle')
+// Per-bucket evaluator roster editor. The active bucket is controlled by the
+// parent (the Assign tab's segmented switcher) so roster + history stay in sync.
+export function AssignSetup({ bucket }: { bucket: Bucket }) {
   const { data: catData } = useCategoryMappings()
   const [initial, setInitial] = useState<RosterRow[]>([])
   const [final, setFinal] = useState<RosterRow[]>([])
@@ -62,20 +62,12 @@ export function AssignSetup() {
   }
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1 className="h-title">Assign Setup</h1>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <span className="card-label">Roster</span>
         <button className="btn btn-sm" onClick={refresh} disabled={loading}>
           <span className={loading ? 'spin' : ''}>↻</span>{loading ? '...' : 'Refresh'}
         </button>
-      </div>
-
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-        {BUCKETS.map(b => (
-          <button key={b} className={`seg-btn-premium${bucket === b ? ' active' : ''}`} onClick={() => setBucket(b)}>
-            {BUCKET_LABELS[b]}
-          </button>
-        ))}
       </div>
 
       {error && <p className="msg-err" style={{ marginBottom: 8 }}>{error}</p>}

@@ -11,6 +11,7 @@ export interface Candidate {
   id: number // game_evaluations.id
   game_id: string // game_info.game_id (for history / tracing)
   os: string | null
+  assigned_date: string | null // YYYY-MM-DD (for the reassign preview day breakdown)
 }
 
 export interface RosterRow {
@@ -35,7 +36,7 @@ export async function selectPendingGames(opts: {
       : sql``
   const limit = opts.count && opts.count > 0 ? sql`LIMIT ${opts.count}` : sql``
   return (await sql`
-    SELECT ge.id, ge.game_id, gi.os
+    SELECT ge.id, ge.game_id, gi.os, ge.assigned_date::text AS assigned_date
     FROM game_evaluations ge
     JOIN game_info gi ON ge.game_id = gi.game_id
     WHERE ge.category_group = ${opts.category}
