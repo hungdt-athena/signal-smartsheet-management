@@ -64,13 +64,15 @@ export interface EvalDetail {
 
 export interface EvalListItem { game_id: string; title: string }
 
-// The Initial Conclusion an evaluator picks is just two outcomes: Bypass (drop) or
-// List_Idea (keep → buckets into a weekly batch). Link_dead is set via the dead-link
-// toggle, not this dropdown. Legacy sheet values still display (merged in below).
-const INITIAL_CONCLUSION_OPTIONS = ['Bypass', 'List_Idea']
+// The Initial Conclusion an evaluator picks: Bypass (drop), List_Idea (keep →
+// buckets into a weekly batch), or Playtest & Bypass (playtest first, then drop).
+// Link_dead is set via the dead-link toggle, not this dropdown. Legacy sheet
+// values still display (merged in below).
+const INITIAL_CONCLUSION_OPTIONS = ['Bypass', 'List_Idea', 'Playtest & Bypass']
 
 const CONCLUSION_COLORS: Record<string, string> = {
   'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
+  'Playtest & Bypass': 'error',
   'Good': 'success', 'Conclusion': 'success',
   'List_Idea': 'success', 'Priority I': 'success', 'Priority II': 'success',
   'Priority III: Watchlist for next phase': 'running',
@@ -375,6 +377,9 @@ interface Props {
   readOnly?: boolean
   canAssignRecords?: boolean
   hideRecordSections?: boolean
+  /** Show the Final Conclusion card. Only the Short List (moderator triage)
+   *  surfaces it; the Evaluate panel and other views hide it. */
+  showFinalConclusion?: boolean
   onNavigate?: (gameId: string) => void
   onSaved?: (ev: EvalDetail) => void
   onClose?: () => void
@@ -394,7 +399,7 @@ function useYtbUploads(): Map<string, YtMatch> {
   return map
 }
 
-export default function EvalDetailPanel({ initialGameId, gameList, role, userName, readOnly, canAssignRecords, hideRecordSections, onNavigate, onSaved, onClose }: Props) {
+export default function EvalDetailPanel({ initialGameId, gameList, role, userName, readOnly, canAssignRecords, hideRecordSections, showFinalConclusion, onNavigate, onSaved, onClose }: Props) {
   const ytMap = useYtbUploads()
   const [currentGameId, setCurrentGameId] = useState(initialGameId)
   const [ev, setEv] = useState<EvalDetail | null>(null)
@@ -1110,8 +1115,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             </div>
           </div>
 
-          {/* Final Conclusion — always shown so the layout matches across roles;
-              the decision + note are editable by managers only, read-only otherwise. */}
+          {/* Final Conclusion — only surfaced in the Short List (moderator triage);
+              hidden in the Evaluate panel and other views. Editable by managers
+              only, read-only otherwise. */}
+          {showFinalConclusion && (
           <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Final Conclusion</span>
@@ -1173,6 +1180,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 )}
               </div>
           </div>
+          )}
 
           {/* Record Video — 5 min */}
           {!hideRecordSections && (ev.record_5min_assignee || canEditAssignee) && (

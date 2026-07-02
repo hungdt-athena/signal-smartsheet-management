@@ -17,6 +17,7 @@ const PLATFORM_LABELS: Record<string, string> = { ios: 'iOS', android: 'Android'
 
 const CONCLUSION_COLORS: Record<string, string> = {
   'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
+  'Playtest & Bypass': 'error',
   'Good': 'success', 'Conclusion': 'success',
   'List_Idea': 'success', 'Priority I': 'success', 'Priority II': 'success',
   'Priority III: Watchlist for next phase': 'running',

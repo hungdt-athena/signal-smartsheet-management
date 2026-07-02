@@ -44,6 +44,7 @@ interface Evaluation {
 
 const CONCLUSION_COLORS: Record<string, string> = {
   'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
+  'Playtest & Bypass': 'error',
   'Good': 'success', 'Conclusion': 'success',
   'List_Idea': 'success', 'Priority I': 'success', 'Priority II': 'success',
   'Priority III: Watchlist for next phase': 'running',
@@ -56,7 +57,7 @@ const CONCLUSION_OPTIONS = [
   'Bypass', 'Conclusion', 'Good', 'Link_dead', 'M_ByPass', 'Need deeper testing', 'Skip',
   'Wait for PlayTest', 'Priority IV: Idea', 'Priority III: Watchlist for next phase',
   'Check Market Data', 'Watchlist for next milestone', 'Priority II', 'Priority I',
-  'Need Direction', 'List_Idea',
+  'Need Direction', 'List_Idea', 'Playtest & Bypass',
 ]
 
 // Sentinel for the Short List "Final conclusion" filter meaning "not yet
@@ -873,6 +874,7 @@ function ShortListEvalTab() {
               role={role}
               userName={userName}
               hideRecordSections
+              showFinalConclusion
               onClose={() => setDetailGameId(null)}
               onNavigate={setDetailGameId}
               onSaved={fetchData}

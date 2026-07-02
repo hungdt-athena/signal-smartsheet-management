@@ -22,7 +22,7 @@ export const CONFIG_DEFAULTS: Record<ConfigField, string[]> = {
     'Bypass', 'Conclusion', 'Good', 'Link_dead', 'M_ByPass', 'Need deeper testing', 'Skip',
     'Wait for PlayTest', 'Priority IV: Idea', 'Priority III: Watchlist for next phase',
     'Check Market Data', 'Watchlist for next milestone', 'Priority II', 'Priority I',
-    'Need Direction', 'List_Idea',
+    'Need Direction', 'List_Idea', 'Playtest & Bypass',
   ],
   final_conclusion: [
     'Priority V', 'Priority IV', 'Bypass', 'Theme/Art', 'Insight', 'Watch List', 'Not Found',
