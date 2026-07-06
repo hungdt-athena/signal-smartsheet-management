@@ -3,13 +3,11 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
-import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth } from '@/components/DateFilter'
-import type { YearMonth } from '@/components/DateFilter'
-import { useDateFilter } from '@/hooks/useDateFilter'
 import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { prettyConclusion } from '@/lib/buckets'
 import { LockIcon, UserIcon } from '@/components/icons'
-import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
+import EvalDetailPanel from '@/components/EvalDetailPanel'
+import { weekLabelOrder } from '@/lib/weekly-feedback'
 
 interface YtbRow {
   row_index: number
@@ -1286,9 +1284,8 @@ function RecordTab() {
   const [addBucket, setAddBucket] = useState<'5min' | '20min' | null>(null)
   const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null)
   const dragRef = useRef<{ id: number; from: '5min' | '20min' } | null>(null)
+  const [availableBatches, setAvailableBatches] = useState<string[]>([])
 
-  // Record tab keys off when games were assigned to record.
-  const df = useDateFilter('assigned')
   const fetchSeqRef = useRef(0)
   // Default the batch filter to the team's current batch once (later manual
   // "All batches" choices stick).
@@ -1302,14 +1299,12 @@ function RecordTab() {
       params.set('record_view', '1')
       if (filterBatch) params.set('batch', filterBatch)
       if (!isManager && userName) params.set('recorder', userName)
-      for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
       const res = await fetch(`/api/evaluations?${params}`)
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return
       setData(json.data || [])
       setTotal(json.total || 0)
-      if (json.available_months) df.setAvailableMonths(json.available_months)
-      let willDefaultBatch = false
+      if (json.available_batches) setAvailableBatches(json.available_batches)
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
         if (!batchDefaultedRef.current) {
@@ -1317,24 +1312,14 @@ function RecordTab() {
           // Pre-select the team's current batch, but fall back to the most recent
           // batch with games (server-resolved default_batch) when current is empty.
           const def = json.default_batch !== undefined ? json.default_batch : json.current_batch
-          if (def) {
-            willDefaultBatch = true
-            setFilterBatch(def)
-          }
+          if (def) setFilterBatch(def)
         }
-      }
-      if (df.autoMonth && json.applied_month !== undefined) {
-        const ap = json.applied_month as YearMonth | null
-        if (!willDefaultBatch) df.suppressFetchRef.current = true
-        df.setAutoMonth(false)
-        df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
     } catch { /* ignore */ }
     setLoading(false)
-  }, [filterCategory, filterBatch, df.value, df.autoMonth, isManager, userName])
+  }, [filterCategory, filterBatch, isManager, userName])
 
   useEffect(() => {
-    if (df.suppressFetchRef.current) { df.suppressFetchRef.current = false; return }
     fetchData()
   }, [fetchData])
 
@@ -1470,9 +1455,9 @@ function RecordTab() {
     setShowConfirm(false)
   }, [visibleDraftIds, fetchData])
 
-  // Batch filter options follow the month in the picker (UI-generated W1-W4).
-  const filterYM = valueToYearMonth(df.value)
-  const batchOptions = filterYM ? weekBatches(filterYM.year, filterYM.month) : []
+  // Batch filter options come straight from the server (all batches with games
+  // in this view), newest first.
+  const batchOptions = [...availableBatches].sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a))
   if (currentBatch && !batchOptions.includes(currentBatch)) batchOptions.unshift(currentBatch)
   if (filterBatch && !batchOptions.includes(filterBatch)) batchOptions.unshift(filterBatch)
 
@@ -1488,9 +1473,6 @@ function RecordTab() {
       </div>
 
       <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
-        <DateFilter value={df.value}
-          onChange={v => { df.setAutoMonth(false); df.setValue(v) }} />
-
         <div style={{ width: 140 }}>
           <StyledSelect
             value={filterCategory}
