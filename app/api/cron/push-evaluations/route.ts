@@ -64,10 +64,16 @@ export async function POST(req: NextRequest) {
       rows = await sql<{ game_id: string }[]>`
         SELECT gi.game_id
         FROM game_info gi
-        WHERE COALESCE(gi.initial_release, gi.temp_release)
-                BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
-                    AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-          AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%')
+        WHERE (
+                COALESCE(gi.initial_release, gi.temp_release)
+                  BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
+                      AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                OR gi.created_date
+                  BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
+                      AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+              )
+          AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
+               OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
           AND gi.app_link IS NOT NULL
           AND gi.is_active = TRUE
           AND EXISTS (
@@ -88,10 +94,16 @@ export async function POST(req: NextRequest) {
         INSERT INTO game_evaluations (game_id, category_group)
         SELECT gi.game_id, ${category}
         FROM game_info gi
-        WHERE COALESCE(gi.initial_release, gi.temp_release)
-                BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
-                    AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-          AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%')
+        WHERE (
+                COALESCE(gi.initial_release, gi.temp_release)
+                  BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
+                      AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                OR gi.created_date
+                  BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
+                      AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+              )
+          AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
+               OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
           AND gi.app_link IS NOT NULL
           AND gi.is_active = TRUE
           AND EXISTS (

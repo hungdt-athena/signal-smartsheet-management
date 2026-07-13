@@ -8,8 +8,8 @@ export const maxDuration = 60
 // Manual game split (DB-side) — parity test against the Smartsheet push/split flow.
 //
 // Ports the exact eligibility/split logic from [unified]-database-to-smartsheet:
-//   - COALESCE(initial_release, temp_release) within the last N days (default 30)
-//   - type IS NULL OR type ILIKE '%sync%'
+//   - release (COALESCE initial_release, temp_release) OR created_date within the last N days (default 30)
+//   - type IS NULL OR type ILIKE any of: %sync%, %top-pub-scraper%, %apkcombo-scraper%, %appagg-scraper%
 //   - app_link IS NOT NULL AND is_active = true
 //   - metadata->'categories' overlaps the bucket's genre list
 //   - a game may land in MULTIPLE buckets (each bucket matched independently — no
@@ -73,9 +73,14 @@ async function computeEligible(pairs: Pair[], windowDays: number): Promise<Eligi
       CROSS JOIN LATERAL jsonb_array_elements_text(gi.metadata -> 'categories') AS cat(name)
       JOIN mapping m ON m.genre = lower(cat.name)
       WHERE jsonb_typeof(gi.metadata -> 'categories') = 'array'
-        AND COALESCE(gi.initial_release, gi.temp_release)
-              BETWEEN (CURRENT_DATE - (${windowDays} || ' days')::interval) AND CURRENT_DATE
-        AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%')
+        AND (
+          COALESCE(gi.initial_release, gi.temp_release)
+                BETWEEN (CURRENT_DATE - (${windowDays} || ' days')::interval) AND CURRENT_DATE
+          OR gi.created_date
+                BETWEEN (CURRENT_DATE - (${windowDays} || ' days')::interval) AND CURRENT_DATE
+        )
+        AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
+             OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
         AND gi.app_link IS NOT NULL
         AND gi.is_active = true
     )
