@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireManager } from '@/lib/auth-guard'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
@@ -11,11 +13,18 @@ export const dynamic = 'force-dynamic'
 //   GET /api/admin/assignment-history?evaluator=Nam&category=puzzle&from=2026-06-01&to=2026-06-30
 
 export async function GET(req: NextRequest) {
-  const guard = await requireManager()
+  // Open to evaluators, but an evaluator only ever sees their own history —
+  // the server forces the evaluator filter to their name, ignoring the query.
+  const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
 
+  const session = await getServerSession(authOptions)
+  const isEvaluator = session?.user?.role === 'evaluator'
+
   const p = req.nextUrl.searchParams
-  const evaluator = p.get('evaluator')?.trim() || null
+  const evaluator = isEvaluator
+    ? (session?.user?.name || '__no_such_evaluator__')
+    : (p.get('evaluator')?.trim() || null)
   const fromEvaluator = p.get('from_evaluator')?.trim() || null
   const category = p.get('category')?.trim().toLowerCase() || null
   const action = p.get('action')?.trim().toLowerCase() || null

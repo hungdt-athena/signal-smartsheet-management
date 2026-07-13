@@ -18,7 +18,10 @@ const AVAIL_OPTS = [{ value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }
 
 // Per-bucket evaluator roster editor. The active bucket is controlled by the
 // parent (the Assign tab's segmented switcher) so roster + history stay in sync.
-export function AssignSetup({ bucket }: { bucket: Bucket }) {
+// Evaluators get a read-only view scoped to their own row and no Final list.
+export function AssignSetup({ bucket, isEvaluator = false, userName = '' }: {
+  bucket: Bucket; isEvaluator?: boolean; userName?: string
+}) {
   const { data: catData } = useCategoryMappings()
   const [initial, setInitial] = useState<RosterRow[]>([])
   const [final, setFinal] = useState<RosterRow[]>([])
@@ -26,6 +29,12 @@ export function AssignSetup({ bucket }: { bucket: Bucket }) {
   const [error, setError] = useState<string | null>(null)
 
   const genres = catData[bucket] ?? []
+
+  // Evaluators only ever see their own Initial-list row.
+  const initialRows = useMemo(
+    () => (isEvaluator ? initial.filter(r => r.name.toLowerCase() === userName.toLowerCase()) : initial),
+    [isEvaluator, initial, userName],
+  )
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null)
@@ -62,26 +71,28 @@ export function AssignSetup({ bucket }: { bucket: Bucket }) {
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+    <div className="assign-setup">
+      <div className="roster-head">
         <span className="card-label">Roster</span>
         <button className="btn btn-sm" onClick={refresh} disabled={loading}>
           <span className={loading ? 'spin' : ''}>↻</span>{loading ? '...' : 'Refresh'}
         </button>
       </div>
 
-      {error && <p className="msg-err" style={{ marginBottom: 8 }}>{error}</p>}
+      {error && <p className="msg-err">{error}</p>}
 
-      <RosterTable title="Initial Evaluator" rows={initial} genres={genres}
+      <RosterTable title="Initial Evaluator" rows={initialRows} genres={genres} scroll readOnly={isEvaluator}
         onPatch={patch} onRemove={remove} onAdd={p => add('initial', p)} />
-      <RosterTable title="Final Evaluator" rows={final} genres={genres}
-        onPatch={patch} onRemove={remove} onAdd={p => add('final', p)} />
+      {!isEvaluator && (
+        <RosterTable title="Final Evaluator" rows={final} genres={genres}
+          onPatch={patch} onRemove={remove} onAdd={p => add('final', p)} />
+      )}
     </div>
   )
 }
 
 function RosterTable({
-  title, rows, genres, onPatch, onRemove, onAdd,
+  title, rows, genres, onPatch, onRemove, onAdd, scroll = false, readOnly = false,
 }: {
   title: string
   rows: RosterRow[]
@@ -89,54 +100,63 @@ function RosterTable({
   onPatch: (id: number, field: string, value: unknown) => void
   onRemove: (id: number) => void
   onAdd: (p: { name: string; provision: boolean }) => void
+  scroll?: boolean
+  readOnly?: boolean
 }) {
+  const colSpan = readOnly ? 5 : 6
   return (
     <div className="card">
       <div className="card-head"><span className="card-label">{title}</span></div>
-      <div className="tbl-wrap">
+      <div className={`tbl-wrap roster-tbl${scroll ? ' roster-scroll' : ''}`}>
         <table className="tbl">
           <thead>
             <tr>
-              <th>Evaluator Name</th><th>Today Available</th><th>Platform</th>
-              <th>Category</th><th style={{ width: 90 }}>Weight</th><th style={{ width: 80 }} />
+              <th>Evaluator Name</th>
+              <th style={{ width: 92 }}>Available</th>
+              <th style={{ width: 88 }}>Platform</th>
+              <th style={{ width: 150 }}>Category</th>
+              <th style={{ width: 76 }}>Weight</th>
+              {!readOnly && <th style={{ width: 70 }} />}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={6} className="empty">No evaluators yet</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={colSpan} className="empty">No evaluators yet</td></tr>}
             {rows.map(r => (
               <tr key={r.id}>
                 <td className="cell-name">{r.name}</td>
                 <td>
-                  <StyledSelect value={r.today_available ? 'Yes' : 'No'} options={AVAIL_OPTS}
+                  <StyledSelect value={r.today_available ? 'Yes' : 'No'} options={AVAIL_OPTS} disabled={readOnly}
                     onChange={v => onPatch(r.id, 'today_available', v)} />
                 </td>
                 <td>
-                  <StyledSelect value={r.game_platform || 'all'} options={PLATFORM_OPTS}
+                  <StyledSelect value={r.game_platform || 'all'} options={PLATFORM_OPTS} disabled={readOnly}
                     onChange={v => onPatch(r.id, 'game_platform', v)} />
                 </td>
                 <td>
-                  <CategoryPicker value={r.game_category} genres={genres}
+                  <CategoryPicker value={r.game_category} genres={genres} disabled={readOnly}
                     onChange={v => onPatch(r.id, 'game_category', v)} />
                 </td>
                 <td>
-                  <StyledSelect value={String(r.weight ?? 100)} options={WEIGHT_OPTS}
+                  <StyledSelect value={String(r.weight ?? 100)} options={WEIGHT_OPTS} disabled={readOnly}
                     onChange={v => onPatch(r.id, 'weight', Number(v))} />
                 </td>
-                <td>
-                  <button className="btn btn-sm btn-danger" onClick={() => onRemove(r.id)}>Remove</button>
-                </td>
+                {!readOnly && (
+                  <td>
+                    <button className="btn btn-sm btn-danger" onClick={() => onRemove(r.id)}>Remove</button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <AddEvalRow onAdd={onAdd} />
+      {!readOnly && <AddEvalRow onAdd={onAdd} />}
     </div>
   )
 }
 
 // Multi-select category over the active bucket's genres. Empty selection ↔ 'All'.
-function CategoryPicker({ value, genres, onChange }: { value: string; genres: string[]; onChange: (v: string) => void }) {
+function CategoryPicker({ value, genres, onChange, disabled }: { value: string; genres: string[]; onChange: (v: string) => void; disabled?: boolean }) {
   const selected = useMemo(
     () => (value && value.toLowerCase() !== 'all' ? value.split(',').map(s => s.trim()).filter(Boolean) : []),
     [value],
@@ -145,6 +165,7 @@ function CategoryPicker({ value, genres, onChange }: { value: string; genres: st
     <MultiSelect
       value={selected}
       placeholder="All"
+      disabled={disabled}
       options={genres.map(g => ({ value: g, label: g }))}
       onChange={vals => onChange(vals.length === 0 ? 'All' : vals.join(','))}
     />

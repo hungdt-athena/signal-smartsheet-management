@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { requireManager } from '@/lib/auth-guard'
+import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 //   GET /api/operations/runs?kind=reassign|handover&category=puzzle&limit=100
 
 export async function GET(req: NextRequest) {
-  const guard = await requireManager()
+  const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
 
   const p = req.nextUrl.searchParams
@@ -28,6 +28,13 @@ export async function GET(req: NextRequest) {
 
   const session = await getServerSession(authOptions)
   const viewer = session?.user?.email ?? null
+  const isEvaluator = session?.user?.role === 'evaluator'
+
+  // Evaluators may only read their OWN handover history (never reassign).
+  if (isEvaluator && kind !== 'handover') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  const scopeName = isEvaluator ? (session?.user?.name || '__no_such_evaluator__') : null
 
   try {
     const rows = await sql`
@@ -36,6 +43,7 @@ export async function GET(req: NextRequest) {
       FROM operation_runs
       WHERE kind = ${kind}
         AND (${category}::text IS NULL OR category_group = ${category})
+        AND (${scopeName}::text IS NULL OR from_evaluator = ${scopeName})
       ORDER BY submitted_at DESC, id DESC
       LIMIT ${limit}
     `

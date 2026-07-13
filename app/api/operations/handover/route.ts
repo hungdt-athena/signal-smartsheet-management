@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { requireManager } from '@/lib/auth-guard'
+import { requireRole } from '@/lib/auth-guard'
 import { isBucket } from '@/lib/buckets'
 import { selectPendingGames, loadRoster, distribute } from '@/lib/reassign-core'
 import { sourceBreakdowns, perEvaluatorPlatform, insertOperationRun, type DistSnapshot } from '@/lib/operation-runs'
@@ -30,8 +30,12 @@ interface Body {
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await requireManager()
+  // Managers submit for anyone; evaluators may only submit their OWN handover.
+  const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
+
+  const session = await getServerSession(authOptions)
+  const isEvaluator = session?.user?.role === 'evaluator'
 
   let body: Body
   try {
@@ -44,7 +48,10 @@ export async function POST(req: NextRequest) {
   if (!isBucket(category)) {
     return NextResponse.json({ error: 'category must be puzzle, arcade or simulation' }, { status: 400 })
   }
-  const from = String(body.evaluator_name ?? '').trim()
+  // An evaluator can only hand over their own games — ignore any body-supplied name.
+  const from = isEvaluator
+    ? (session?.user?.name || '').trim()
+    : String(body.evaluator_name ?? '').trim()
   if (!from) {
     return NextResponse.json({ error: 'evaluator_name is required' }, { status: 400 })
   }

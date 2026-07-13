@@ -5,6 +5,7 @@
 // NOT the submitter.
 'use client'
 import { useCallback, useEffect, useState } from 'react'
+import { useSession } from 'next-auth/react'
 import type { Bucket } from '@/lib/buckets'
 import type { DistResult } from '@/components/DistributionResult'
 import { OperationDetailModal } from '@/components/OperationDetailModal'
@@ -47,6 +48,8 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
   reloadToken?: number
   onChanged?: () => void
 }) {
+  const { data: session } = useSession()
+  const isEvaluator = session?.user?.role === 'evaluator'
   const [rows, setRows] = useState<OperationRun[]>([])
   const [viewer, setViewer] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -117,7 +120,8 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
               <tr><td colSpan={cols} className="empty">No history yet</td></tr>
             )}
             {rows.map(r => {
-              const canResolve = isHandover && r.status === 'pending' && (!r.submitted_by || r.submitted_by !== viewer)
+              // Only managers resolve; evaluators never see Approve/Reject.
+              const canResolve = isHandover && !isEvaluator && r.status === 'pending' && (!r.submitted_by || r.submitted_by !== viewer)
               const isOwn = isHandover && r.status === 'pending' && !!r.submitted_by && r.submitted_by === viewer
               return (
                 <tr key={r.id}>

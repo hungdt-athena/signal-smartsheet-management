@@ -19,14 +19,25 @@ export default withAuth(
     // the Team Operations tab. Route to a page the user can actually see.
     if (pathname === '/handover' || pathname.startsWith('/handover/') ||
         pathname === '/handover-puzzle' || pathname.startsWith('/handover-puzzle/')) {
-      return NextResponse.redirect(new URL(isManager ? '/team-ops?tab=handover' : NON_MANAGER_HOME, req.url))
+      const canHandover = isManager || role === 'evaluator'
+      return NextResponse.redirect(new URL(canHandover ? '/team-ops?tab=handover' : NON_MANAGER_HOME, req.url))
     }
 
-    // Manager-tier pages (admin + moderator) — Team Operations plus Users
-    // Management & Config. These never appear in a non-manager sidebar, so a
-    // non-manager hitting any of them by URL is bounced to their home.
-    // Mirrors the sidebar `adminOnly`/roles gating and the requireManager() API guards.
-    const managerPaths = ['/team-ops', '/admin', '/config']
+    // Team Operations: managers get every tab. Evaluators get the (scoped) Assign
+    // and Handover tabs only — Reassign redirects to Assign. Mirrors the sidebar
+    // child gating and the per-role API scoping. Non-evaluators → home.
+    const isEvaluator = role === 'evaluator'
+    const evaluatorTabs = ['assign', 'handover']
+    if (pathname === '/team-ops' || pathname.startsWith('/team-ops/')) {
+      if (!isManager) {
+        if (!isEvaluator) return NextResponse.redirect(new URL(NON_MANAGER_HOME, req.url))
+        const tab = searchParams.get('tab') || 'assign'
+        if (!evaluatorTabs.includes(tab)) return NextResponse.redirect(new URL('/team-ops?tab=assign', req.url))
+      }
+    }
+
+    // Users Management & Config stay manager-only.
+    const managerPaths = ['/admin', '/config']
     if (managerPaths.some(p => pathname === p || pathname.startsWith(p + '/')) && !isManager) {
       return NextResponse.redirect(new URL(NON_MANAGER_HOME, req.url))
     }

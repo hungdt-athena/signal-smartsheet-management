@@ -1,6 +1,7 @@
 'use client'
 import { Suspense, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { AssignSetup } from '@/components/AssignSetup'
 import { AssignHistory } from '@/components/AssignHistory'
 import { ReassignPanel } from '@/components/ReassignPanel'
@@ -25,9 +26,13 @@ export default function TeamOpsPage() {
 
 function TeamOpsInner() {
   const searchParams = useSearchParams()
+  const { data: session } = useSession()
+  // Evaluators get the scoped Assign + Handover tabs (no Reassign).
+  const allowed: Tab[] = session?.user?.role === 'evaluator'
+    ? ['assign', 'handover']
+    : ['assign', 'reassign', 'handover']
   const tab = (searchParams.get('tab') as Tab) || 'assign'
-  const isTab = TABS.some(t => t.value === tab)
-  const active: Tab = isTab ? tab : 'assign'
+  const active: Tab = allowed.includes(tab) ? tab : 'assign'
 
   return (
     <div className="page">
@@ -42,8 +47,12 @@ function TeamOpsInner() {
   )
 }
 
-// Assign tab: per-bucket roster (top) + assignment history (below).
+// Assign tab: per-bucket roster (left, 70%) + assignment history (right, 30%).
+// Evaluators see a read-only view scoped to their own Initial-list row.
 function AssignTab() {
+  const { data: session } = useSession()
+  const isEvaluator = session?.user?.role === 'evaluator'
+  const userName = session?.user?.name || ''
   const [bucket, setBucket] = useState<Bucket>('puzzle')
   return (
     <div>
@@ -54,8 +63,12 @@ function AssignTab() {
           </button>
         ))}
       </div>
-      <AssignSetup bucket={bucket} />
-      <AssignHistory bucket={bucket} />
+      <div className="assign-grid">
+        <AssignSetup bucket={bucket} isEvaluator={isEvaluator} userName={userName} />
+        <div className="assign-right">
+          <AssignHistory bucket={bucket} />
+        </div>
+      </div>
     </div>
   )
 }

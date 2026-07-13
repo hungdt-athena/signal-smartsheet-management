@@ -1,6 +1,8 @@
 // app/api/assign-setup/route.ts — DB-backed evaluator_roster editor (sole writer).
 import { NextRequest, NextResponse } from 'next/server'
-import { requireManager } from '@/lib/auth-guard'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+import { requireManager, requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { isBucket, isWeight, normalizeCategory } from '@/lib/buckets'
 
@@ -14,7 +16,9 @@ interface RosterRow {
 const PLATFORMS = ['all', 'ios', 'android']
 
 export async function GET(req: NextRequest) {
-  const guard = await requireManager()
+  // Read is open to evaluators too, but scoped to their own Initial-list row
+  // (no Final list). Managers see the full roster. Writes stay manager-only.
+  const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
   const group = req.nextUrl.searchParams.get('group') ?? ''
   if (!isBucket(group)) return NextResponse.json({ error: 'Invalid group' }, { status: 400 })
@@ -25,10 +29,16 @@ export async function GET(req: NextRequest) {
     WHERE category_group = ${group}
     ORDER BY sort_order NULLS LAST, name ASC
   `
-  return NextResponse.json({
-    initial: rows.filter(r => r.list_type === 'initial'),
-    final: rows.filter(r => r.list_type === 'final'),
-  }, { headers: { 'Cache-Control': 'no-store' } })
+  let initial = rows.filter(r => r.list_type === 'initial')
+  let final = rows.filter(r => r.list_type === 'final')
+
+  const session = await getServerSession(authOptions)
+  if (session?.user?.role === 'evaluator') {
+    const me = (session.user.name || '').toLowerCase()
+    initial = initial.filter(r => r.name.toLowerCase() === me)
+    final = []
+  }
+  return NextResponse.json({ initial, final }, { headers: { 'Cache-Control': 'no-store' } })
 }
 
 export async function POST(req: NextRequest) {

@@ -3,6 +3,7 @@
 // everyone currently available in the bucket. Preview (dryRun) before commit.
 'use client'
 import { useCallback, useEffect, useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 import { DistributionResult, type DistResult } from '@/components/DistributionResult'
@@ -12,6 +13,9 @@ interface RosterRow { id: number; name: string; today_available: boolean }
 const BUCKET_LABELS: Record<Bucket, string> = { puzzle: 'Puzzle', arcade: 'Arcade', simulation: 'Simulation' }
 
 export function HandoverPanel() {
+  const { data: session } = useSession()
+  const isEvaluator = session?.user?.role === 'evaluator'
+  const selfName = session?.user?.name || ''
   const [category, setCategory] = useState<Bucket>('puzzle')
   const [roster, setRoster] = useState<RosterRow[]>([])
   const [from, setFrom] = useState('')
@@ -32,8 +36,9 @@ export function HandoverPanel() {
 
   useEffect(() => {
     loadRoster()
-    setFrom(''); setResult(null); setMsg(null)
-  }, [loadRoster])
+    // Evaluators can only hand over their own games — lock the source to themselves.
+    setFrom(isEvaluator ? selfName : ''); setResult(null); setMsg(null)
+  }, [loadRoster, isEvaluator, selfName])
 
   const canRun = !!from && !!startDate && !!endDate
   const available = roster.filter(r => r.name !== from && r.today_available).length
@@ -74,8 +79,10 @@ export function HandoverPanel() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div className="field">
               <span className="label">Evaluator on leave</span>
-              <StyledSelect value={from} onChange={setFrom} placeholder="-- Select evaluator --"
-                options={roster.map(r => ({ value: r.name, label: r.name }))} />
+              <StyledSelect value={from} onChange={setFrom} placeholder="-- Select evaluator --" disabled={isEvaluator}
+                options={isEvaluator
+                  ? [{ value: selfName, label: selfName }]
+                  : roster.map(r => ({ value: r.name, label: r.name }))} />
             </div>
             <div className="field">
               <span className="label">Start date</span>
@@ -87,8 +94,9 @@ export function HandoverPanel() {
             </div>
           </div>
           <p style={{ fontSize: 12, color: 'var(--faint)', marginTop: 10 }}>
-            Their pending games assigned in this window go to the {available} currently-available evaluator{available === 1 ? '' : 's'} in this bucket.
-            Submitting creates a request another manager must approve — the split is recomputed at approval time.
+            {isEvaluator
+              ? 'Your pending games assigned in this window are redistributed to the available evaluators in this bucket. Preview to see the split; submitting creates a request a manager must approve.'
+              : `Their pending games assigned in this window go to the ${available} currently-available evaluator${available === 1 ? '' : 's'} in this bucket. Submitting creates a request another manager must approve — the split is recomputed at approval time.`}
           </p>
 
           {msg && <p className={msg.type === 'ok' ? 'msg-ok' : 'msg-err'} style={{ marginTop: 10 }}>{msg.text}</p>}

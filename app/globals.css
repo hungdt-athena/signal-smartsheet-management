@@ -266,6 +266,102 @@ body {
 .ht-name { font-family: var(--num); font-size: 12.5px; font-weight: 500; }
 .ht-note { font-size: 12px; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; }
 
+/* ===== Assign tab: roster (left, 70%) + history (right, 30%) ===== */
+.assign-grid {
+  display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
+  gap: var(--gap); align-items: stretch;
+}
+.assign-setup { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+.roster-head { display: flex; justify-content: space-between; align-items: center; }
+
+/* Compact roster cells so the 5–6 columns fit the narrower 70% column. */
+.roster-tbl .tbl th, .roster-tbl .tbl td { padding: 6px 8px; }
+.roster-tbl .tbl td { font-size: 12.5px; }
+.roster-tbl .ssel-btn { padding: 5px 8px; font-size: 12px; }
+
+/* Initial list keeps a fixed ~10-row height: scrolls when longer, holds when shorter. */
+.roster-scroll { height: 428px; overflow: auto; }
+.roster-scroll .tbl thead th {
+  position: sticky; top: 0; z-index: 2; background: var(--surface);
+}
+
+/* History matches the left column's height exactly. The right cell is sized by
+   the left column (its only child is absolutely positioned, so it has no
+   intrinsic height), and the card fills it and scrolls its timeline inside. */
+.assign-right { position: relative; min-width: 0; }
+.assign-right > .hist-card { position: absolute; inset: 0; }
+.hist-card { display: flex; flex-direction: column; min-height: 0; }
+
+/* ===== Assign History timeline (Year → Month → Day) ===== */
+.hist-sub { color: var(--faint); font-weight: 400; margin-left: 8px; font-variant-numeric: tabular-nums; }
+.hist { max-width: 880px; margin: 0 auto; }
+.hist-card .hist { flex: 1 1 auto; min-height: 0; overflow-y: auto; max-width: none; margin: 0; }
+
+@media (max-width: 900px) {
+  .assign-grid { grid-template-columns: 1fr; }
+  .assign-right { position: static; min-height: 460px; }
+  .assign-right > .hist-card { position: static; height: 100%; }
+}
+
+.hist-year + .hist-year { margin-top: 6px; }
+.hist-year-bar {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 12px 0 7px; margin-bottom: 2px;
+  border-bottom: 2px solid var(--border-strong);
+}
+.hist-year-num { font-family: var(--num); font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+.hist-year-meta { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.hist-month { border-bottom: 1px solid var(--border); }
+.hist-month:last-child { border-bottom: none; }
+.hist-month-head {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 11px 6px; border: none; background: none; cursor: pointer;
+  font-family: var(--font); color: var(--text); text-align: left;
+  border-radius: 7px; transition: background .12s;
+}
+.hist-month-head:hover { background: var(--surface-2); }
+.hist-caret {
+  display: inline-block; color: var(--faint); font-size: 15px; line-height: 1;
+  transition: transform .16s ease;
+}
+.hist-caret.open { transform: rotate(90deg); }
+.hist-month-name { font-size: 13px; font-weight: 700; letter-spacing: .01em; }
+.hist-month-meta { margin-left: auto; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.hist-days { padding: 2px 0 6px; }
+.hist-day { border-top: 1px solid var(--border); }
+.hist-days > .hist-day:first-child { border-top: none; }
+
+.hist-day-head {
+  display: grid; grid-template-columns: 46px 16px 1fr; gap: 12px;
+  align-items: center; width: 100%; padding: 8px 6px;
+  border: none; background: none; cursor: pointer; font-family: var(--font);
+  color: var(--text); text-align: left; border-radius: 7px; transition: background .12s;
+}
+.hist-day-head:hover { background: var(--surface-2); }
+.hist-daymark { display: flex; flex-direction: column; align-items: flex-start; line-height: 1; }
+.hist-dnum { font-family: var(--num); font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.hist-dwk  { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin-top: 4px; }
+.hist-day-meta { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.hist-day.open .hist-day-meta { color: var(--muted); }
+
+/* Rows align under the caret column: 46px daymark + 12px gap = 58px indent */
+.hist-rows { margin: 0 6px 6px 58px; border-left: 1px solid var(--border); }
+.hist-row {
+  display: grid; grid-template-columns: 92px minmax(0, 1fr) 60px;
+  align-items: center; gap: 12px; padding: 7px 2px 7px 15px;
+  border-top: 1px solid var(--border);
+}
+.hist-rows > .hist-row:first-child { border-top: none; }
+.hist-row .pill { font-size: 10px; }
+
+.hist-move { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.hist-to   { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-from { color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+.hist-arrow { color: var(--faint); font-size: 12px; flex-shrink: 0; }
+.hist-games { text-align: right; font-family: var(--num); font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
+
 /* ===== Badges & status ===== */
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
