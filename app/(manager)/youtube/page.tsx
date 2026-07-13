@@ -998,7 +998,7 @@ function RecordStatusBadge({ status, youtubeId }: { status: RecordStatus; youtub
 // ── Record Table ─────────────────────────────────────────────────────────────
 
 function RecordTable({
-  label, items, loading, isManager, recorders, onAssign, ytMap, onClickGame,
+  label, items, loading, isManager, recorders, onAssign, onReset, ytMap, onClickGame,
   dragOver, onHeaderAdd, onRowDragStart, confirmRemoveId,
   onRemoveRequest, onConfirmRemove, onCancelRemove,
 }: {
@@ -1008,6 +1008,7 @@ function RecordTable({
   isManager: boolean
   recorders: string[]
   onAssign: (item: ShortListItem, name: string) => void
+  onReset: (id: number) => void
   ytMap: Map<string, YtMatch>
   onClickGame: (gameId: string) => void
   dragOver: boolean
@@ -1125,9 +1126,17 @@ function RecordTable({
                             style={{ fontSize: 12 }}
                           />
                         ) : (
-                          <span style={{ fontSize: 12.5, color: assignee ? 'var(--text)' : 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            {assignLocked && <LockIcon />}{assignee || '—'}
-                          </span>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 12.5, color: assignee ? 'var(--text)' : 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              {assignLocked && <LockIcon />}{assignee || '—'}
+                            </span>
+                            {/* Recording (confirmed, not yet recorded): allow un-confirm → reassign. */}
+                            {isManager && status === 'recording' && (
+                              <button className="btn btn-sm btn-ghost" title="Reset — un-confirm to reassign"
+                                onClick={e => { e.stopPropagation(); onReset(item.id) }}
+                                style={{ fontSize: 11, padding: '1px 7px', color: 'var(--muted)', lineHeight: 1.4 }}>↺ Reset</button>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td>
@@ -1158,45 +1167,80 @@ function RecordTable({
 
 // ── Add Game Modal ───────────────────────────────────────────────────────────
 
-function AddGameModal({ category, batch, excludeIds, targetBucket, onAdded, onClose }: {
+interface CatalogGame {
+  game_id: string
+  title: string
+  app_link: string | null
+  icon_url: string | null
+}
+
+function AddGameModal({ category, batch, excludeGameIds, targetBucket, onAdded, onClose }: {
   category: string
   batch: string
-  excludeIds: Set<number>
+  excludeGameIds: Set<string>
   targetBucket: '5min' | '20min'
   onAdded: () => void
   onClose: () => void
 }) {
-  const [games, setGames] = useState<ShortListItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const [batchGames, setBatchGames] = useState<CatalogGame[]>([])
+  const [batchLoading, setBatchLoading] = useState(true)
+  const [results, setResults] = useState<CatalogGame[]>([])
+  const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
-  const [adding, setAdding] = useState<number | null>(null)
+  const [adding, setAdding] = useState<string | null>(null)
 
+  // Default (empty query): the games in the selected batch/category — the common
+  // case is pulling one of those into a bucket without having to type.
   useEffect(() => {
     const params = new URLSearchParams({ category, limit: '500' })
     if (batch) params.set('batch', batch)
     fetch(`/api/evaluations?${params}`)
       .then(r => r.ok ? r.json() : { data: [] })
-      .then(json => setGames((json.data || []) as ShortListItem[]))
+      .then(json => setBatchGames(((json.data || []) as ShortListItem[]).map(g => ({
+        game_id: g.game_id, title: g.title, app_link: g.app_link, icon_url: g.icon_url,
+      }))))
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => setBatchLoading(false))
   }, [category, batch])
 
-  const candidates = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return games
-      .filter(g => !excludeIds.has(g.id))
-      .filter(g => !q || (g.title || '').toLowerCase().includes(q))
-  }, [games, excludeIds, query])
+  // Whole-catalog search (game_info) — title substring, or exact resolve when a
+  // store URL is pasted. Debounced; ≥2 chars keeps the large catalog snappy.
+  useEffect(() => {
+    const q = query.trim()
+    const isLink = /^https?:\/\//i.test(q)
+    if (!isLink && q.length < 2) {
+      setResults([]); setLoading(false)
+      return
+    }
+    setLoading(true)
+    const ctrl = new AbortController()
+    const t = setTimeout(() => {
+      const params = new URLSearchParams(isLink ? { link: q } : { q })
+      fetch(`/api/games/search?${params}`, { signal: ctrl.signal })
+        .then(r => r.ok ? r.json() : { results: [] })
+        .then(json => setResults((json.results || []) as CatalogGame[]))
+        .catch(() => { /* aborted or failed */ })
+        .finally(() => setLoading(false))
+    }, 250)
+    return () => { clearTimeout(t); ctrl.abort() }
+  }, [query])
 
-  async function add(g: ShortListItem) {
-    setAdding(g.id)
+  const searching = query.trim().length > 0
+  const candidates = useMemo(
+    () => (searching ? results : batchGames).filter(g => !excludeGameIds.has(g.game_id)),
+    [searching, results, batchGames, excludeGameIds]
+  )
+
+  async function add(g: CatalogGame) {
+    setAdding(g.game_id)
     try {
-      await fetch('/api/evaluations/record-bucket', {
+      const res = await fetch('/api/evaluations/add-to-record', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: g.id, bucket: targetBucket }),
+        body: JSON.stringify({ game_id: g.game_id, category_group: category, bucket: targetBucket }),
       })
-    } catch { /* ignore */ }
+      if (!res.ok) { setAdding(null); return }
+    } catch { setAdding(null); return }
     onAdded()
     onClose()
   }
@@ -1208,7 +1252,9 @@ function AddGameModal({ category, batch, excludeIds, targetBucket, onAdded, onCl
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div>
             <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Add game to {targetBucket === '20min' ? '20 MIN' : '5 MIN'}</h2>
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>{batch || 'all batches'} · {category}</p>
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
+              {searching ? `Search all games · ${category}` : `${batch || 'all batches'} · ${category}`}
+            </p>
           </div>
           <button className="btn btn-sm btn-ghost" onClick={onClose} style={{ fontSize: 18, padding: '2px 8px' }}>x</button>
         </div>
@@ -1217,7 +1263,7 @@ function AddGameModal({ category, batch, excludeIds, targetBucket, onAdded, onCl
           autoFocus
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Search games..."
+          placeholder="Search by name or paste a store link…"
           style={{
             width: '100%', boxSizing: 'border-box', marginBottom: 12,
             padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)',
@@ -1226,19 +1272,19 @@ function AddGameModal({ category, batch, excludeIds, targetBucket, onAdded, onCl
         />
 
         <div style={{ maxHeight: 'calc(70vh - 180px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-          {loading ? (
-            <p className="empty">Loading...</p>
+          {(searching ? loading : batchLoading) ? (
+            <p className="empty">{searching ? 'Searching…' : 'Loading…'}</p>
           ) : candidates.length === 0 ? (
-            <p className="empty">No games found</p>
+            <p className="empty">{searching ? 'Không tìm thấy game trong DB' : 'No games in this batch'}</p>
           ) : candidates.map(g => (
-            <button key={g.id}
+            <button key={g.game_id}
               onClick={() => add(g)}
               disabled={adding !== null}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                 padding: '8px 12px', borderBottom: '1px solid var(--border)',
                 background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
-                color: 'var(--text)', opacity: adding !== null && adding !== g.id ? 0.5 : 1,
+                color: 'var(--text)', opacity: adding !== null && adding !== g.game_id ? 0.5 : 1,
               }}>
               {g.icon_url ? (
                 <img src={g.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
@@ -1246,7 +1292,7 @@ function AddGameModal({ category, batch, excludeIds, targetBucket, onAdded, onCl
                 <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
               )}
               <span className="cell-name" style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
-              {adding === g.id && <span style={{ fontSize: 11, color: 'var(--faint)' }}>Adding...</span>}
+              {adding === g.game_id && <span style={{ fontSize: 11, color: 'var(--faint)' }}>Adding…</span>}
             </button>
           ))}
         </div>
@@ -1381,6 +1427,21 @@ function RecordTab() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, bucket: 'none' }),
+      })
+      if (!res.ok) await fetchData()
+    } catch { await fetchData() }
+  }, [fetchData])
+
+  // Reset a confirmed (recording) game back to draft so it can be reassigned.
+  // Optimistic: clear record_confirmed_at → status becomes draft → dropdown
+  // unlocks. Only offered for 'recording' (never 'recorded').
+  const resetRecording = useCallback(async (id: number) => {
+    setData(prev => prev.map(d => d.id === id ? { ...d, record_confirmed_at: null } : d))
+    try {
+      const res = await fetch('/api/evaluations/confirm-records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [id], unset: true }),
       })
       if (!res.ok) await fetchData()
     } catch { await fetchData() }
@@ -1545,7 +1606,7 @@ function RecordTab() {
           onDragLeave={isManager ? (e => { if (e.currentTarget === e.target) setDragOverBucket(null) }) : undefined}
           onDrop={isManager ? (e => { e.preventDefault(); handleDrop('5min') }) : undefined}>
           <RecordTable label="5 MIN" items={shown5} loading={loading}
-            isManager={isManager} recorders={recorders} onAssign={assignRecorder}
+            isManager={isManager} recorders={recorders} onAssign={assignRecorder} onReset={resetRecording}
             ytMap={ytMap} onClickGame={setDetailGameId}
             dragOver={dragOverBucket === '5min'}
             onHeaderAdd={() => setAddBucket('5min')}
@@ -1560,7 +1621,7 @@ function RecordTab() {
           onDragLeave={isManager ? (e => { if (e.currentTarget === e.target) setDragOverBucket(null) }) : undefined}
           onDrop={isManager ? (e => { e.preventDefault(); handleDrop('20min') }) : undefined}>
           <RecordTable label="20 MIN" items={shown20} loading={loading}
-            isManager={isManager} recorders={recorders} onAssign={assignRecorder}
+            isManager={isManager} recorders={recorders} onAssign={assignRecorder} onReset={resetRecording}
             ytMap={ytMap} onClickGame={setDetailGameId}
             dragOver={dragOverBucket === '20min'}
             onHeaderAdd={() => setAddBucket('20min')}
@@ -1583,7 +1644,7 @@ function RecordTab() {
         <AddGameModal
           category={filterCategory}
           batch={filterBatch}
-          excludeIds={new Set(data.map(d => d.id))}
+          excludeGameIds={new Set(data.map(d => d.game_id))}
           targetBucket={addBucket}
           onAdded={fetchData}
           onClose={() => setAddBucket(null)}

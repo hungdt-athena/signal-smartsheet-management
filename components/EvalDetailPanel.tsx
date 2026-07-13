@@ -671,6 +671,26 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     setSaving(false)
   }
 
+  // Reset (recording → draft): un-confirm so a manager can pick a different
+  // recorder. Only offered while confirmed and not yet recorded (no YouTube).
+  const resetRecordConfirm = async () => {
+    if (!ev) return
+    try {
+      const res = await fetch('/api/evaluations/confirm-records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [ev.id], unset: true }),
+      })
+      if (!res.ok) { showToast('Failed to reset', true); return }
+      const fresh = await fetchEvalByGameId(ev.game_id)
+      if (fresh) {
+        cacheRef.current.set(ev.game_id, fresh)
+        applyData(fresh)
+        onSaved?.(fresh)
+      }
+    } catch { showToast('Network error', true) }
+  }
+
   // Auto-save: when enabled, persist edits ~800ms after the user stops changing
   // fields. A ref keeps the effect pointed at the latest save() closure without
   // re-arming the timer on every render. Switching games / unmounting clears the
@@ -1207,6 +1227,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   )}
                   <InfoField label="Assigned" value={fmtDate(ev.record_5min_date)} />
                 </div>
+                {canEditAssignee && recordConfirmed && !yt5 && (
+                  <button className="btn btn-sm btn-ghost" onClick={resetRecordConfirm}
+                    style={{ alignSelf: 'flex-start', fontSize: 11.5, padding: '3px 10px', color: 'var(--muted)' }}>
+                    ↺ Reset — un-confirm to reassign
+                  </button>
+                )}
                 {rec5Assignee && <FileNameField name={recFileName(ev.title, rec5Assignee, 5)} />}
                 <div className="field" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
                   <span className="label">YouTube Link</span>
@@ -1243,6 +1269,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   )}
                   <InfoField label="Assigned" value={fmtDate(ev.record_20min_date)} />
                 </div>
+                {canEditAssignee && recordConfirmed && !yt20 && (
+                  <button className="btn btn-sm btn-ghost" onClick={resetRecordConfirm}
+                    style={{ alignSelf: 'flex-start', fontSize: 11.5, padding: '3px 10px', color: 'var(--muted)' }}>
+                    ↺ Reset — un-confirm to reassign
+                  </button>
+                )}
                 {rec20Assignee && <FileNameField name={recFileName(ev.title, rec20Assignee, 20)} />}
                 <div className="field" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
                   <span className="label">YouTube Link</span>
