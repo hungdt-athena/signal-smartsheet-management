@@ -268,13 +268,13 @@ body {
 
 /* ===== Assign tab: roster (left, 70%) + history (right, 30%) ===== */
 .assign-grid {
-  display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
+  display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 4fr);
   gap: var(--gap); align-items: stretch;
 }
 .assign-setup { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 .roster-head { display: flex; justify-content: space-between; align-items: center; }
 
-/* Compact roster cells so the 5–6 columns fit the narrower 70% column. */
+/* Compact roster cells so the 5–6 columns fit the narrower 60% column. */
 .roster-tbl .tbl th, .roster-tbl .tbl td { padding: 6px 8px; }
 .roster-tbl .tbl td { font-size: 12.5px; }
 .roster-tbl .ssel-btn { padding: 5px 8px; font-size: 12px; }
@@ -349,12 +349,12 @@ body {
 /* Rows align under the caret column: 46px daymark + 12px gap = 58px indent */
 .hist-rows { margin: 0 6px 6px 58px; border-left: 1px solid var(--border); }
 .hist-row {
-  display: grid; grid-template-columns: 92px minmax(0, 1fr) 60px;
-  align-items: center; gap: 12px; padding: 7px 2px 7px 15px;
+  display: grid; grid-template-columns: 68px minmax(0, 1fr) 52px;
+  align-items: center; gap: 9px; padding: 7px 2px 7px 15px;
   border-top: 1px solid var(--border);
 }
 .hist-rows > .hist-row:first-child { border-top: none; }
-.hist-row .pill { font-size: 10px; }
+.hist-row .pill { font-size: 9.5px; padding: 2px 7px; gap: 3px; justify-self: start; }
 
 .hist-move { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
 .hist-to   { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

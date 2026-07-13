@@ -26,7 +26,6 @@ export default function TeamOpsPage() {
 
 function TeamOpsInner() {
   const searchParams = useSearchParams()
-  const { data: session } = useSession()
   // Evaluators see all three tabs, but Reassign is read-only for them (history
   // scoped to runs they're involved in — see ReassignPanel).
   const allowed: Tab[] = ['assign', 'reassign', 'handover']
@@ -46,7 +45,7 @@ function TeamOpsInner() {
   )
 }
 
-// Assign tab: per-bucket roster (left, 70%) + assignment history (right, 30%).
+// Assign tab: per-bucket roster (left, 60%) + assignment history (right, 40%).
 // Evaluators see a read-only view scoped to their own Initial-list row.
 function AssignTab() {
   const { data: session } = useSession()
