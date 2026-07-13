@@ -2,8 +2,12 @@
 // Builds the DistResult-shaped snapshot that reassign + handover store and that the
 // Team Operations "Details" popup re-renders, and owns the row insert.
 
+import type postgres from 'postgres'
 import { sql } from '@/lib/db'
 import type { Candidate } from '@/lib/reassign-core'
+
+// The values we store are plainly JSON-serializable; this narrows to what sql.json wants.
+type Json = postgres.JSONValue
 
 export type RunKind = 'reassign' | 'handover'
 export type RunStatus = 'committed' | 'pending' | 'approved' | 'rejected'
@@ -66,7 +70,7 @@ export async function insertOperationRun(input: {
   kind: RunKind
   category: string
   fromEvaluator: string
-  params: unknown
+  params: Record<string, unknown>
   snapshot: DistSnapshot
   status: RunStatus
   gameCount: number
@@ -77,7 +81,7 @@ export async function insertOperationRun(input: {
       (kind, category_group, from_evaluator, params, snapshot, status, game_count, submitted_by)
     VALUES (
       ${input.kind}, ${input.category}, ${input.fromEvaluator},
-      ${JSON.stringify(input.params)}::jsonb, ${JSON.stringify(input.snapshot)}::jsonb,
+      ${sql.json(input.params as Json)}, ${sql.json(input.snapshot as unknown as Json)},
       ${input.status}, ${input.gameCount}, ${input.submittedBy ?? null}
     )
     RETURNING id

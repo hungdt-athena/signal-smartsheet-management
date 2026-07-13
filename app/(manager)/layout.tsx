@@ -34,7 +34,7 @@ interface NavItem { href: string; label: string; icon: keyof typeof ICONS; admin
 const NAV_ITEMS: NavItem[] = [
   { href: '/team-ops',        label: 'Team Operations', icon: 'users', roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/team-ops?tab=assign',   label: 'Assign' },
-    { href: '/team-ops?tab=reassign', label: 'Reassign', roles: ['admin', 'moderator'] },
+    { href: '/team-ops?tab=reassign', label: 'Reassign' },
     { href: '/team-ops?tab=handover', label: 'Handover' },
   ]},
   // Arcade/Simulation hidden from non-admins while still in development.

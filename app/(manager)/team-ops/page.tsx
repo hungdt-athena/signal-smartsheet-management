@@ -27,10 +27,9 @@ export default function TeamOpsPage() {
 function TeamOpsInner() {
   const searchParams = useSearchParams()
   const { data: session } = useSession()
-  // Evaluators get the scoped Assign + Handover tabs (no Reassign).
-  const allowed: Tab[] = session?.user?.role === 'evaluator'
-    ? ['assign', 'handover']
-    : ['assign', 'reassign', 'handover']
+  // Evaluators see all three tabs, but Reassign is read-only for them (history
+  // scoped to runs they're involved in — see ReassignPanel).
+  const allowed: Tab[] = ['assign', 'reassign', 'handover']
   const tab = (searchParams.get('tab') as Tab) || 'assign'
   const active: Tab = allowed.includes(tab) ? tab : 'assign'
 

@@ -30,10 +30,11 @@ export async function GET(req: NextRequest) {
   const viewer = session?.user?.email ?? null
   const isEvaluator = session?.user?.role === 'evaluator'
 
-  // Evaluators may only read their OWN handover history (never reassign).
-  if (isEvaluator && kind !== 'handover') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  // Evaluators get a scoped, read-only view (never the whole team's history):
+  //   handover → only their OWN requests (from_evaluator = them).
+  //   reassign → only runs they are involved in — as the source (from) OR as a
+  //              recipient (a key in the resulting per_evaluator split, or picked in
+  //              params.selected_evaluators).
   const scopeName = isEvaluator ? (session?.user?.name || '__no_such_evaluator__') : null
 
   try {
@@ -43,7 +44,16 @@ export async function GET(req: NextRequest) {
       FROM operation_runs
       WHERE kind = ${kind}
         AND (${category}::text IS NULL OR category_group = ${category})
-        AND (${scopeName}::text IS NULL OR from_evaluator = ${scopeName})
+        AND (
+          ${scopeName}::text IS NULL
+          OR from_evaluator = ${scopeName}
+          OR (
+            ${kind} = 'reassign' AND (
+              jsonb_exists(COALESCE(result -> 'per_evaluator', snapshot -> 'per_evaluator', '{}'::jsonb), ${scopeName})
+              OR jsonb_exists(COALESCE(params -> 'selected_evaluators', '[]'::jsonb), ${scopeName})
+            )
+          )
+        )
       ORDER BY submitted_at DESC, id DESC
       LIMIT ${limit}
     `

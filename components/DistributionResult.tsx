@@ -50,7 +50,9 @@ export function DistributionResult({ result, action }: { result: DistResult; act
         .map(([name, p]) => ({ name, ios: p.ios, android: p.android, other: p.other, total: p.ios + p.android + p.other }))
         .sort((a, b) => b.total - a.total)
     }
-    return Object.entries(result.per_evaluator)
+    // Guard against a snapshot missing per_evaluator (e.g. legacy/malformed rows) so
+    // the "Details" popup renders an empty distribution instead of throwing.
+    return Object.entries(result.per_evaluator ?? {})
       .map(([name, n]) => ({ name, ios: 0, android: 0, other: 0, total: n }))
       .sort((a, b) => b.total - a.total)
   }, [detail, result.per_evaluator])

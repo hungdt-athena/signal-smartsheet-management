@@ -5,6 +5,7 @@
 // (platform + per-day breakdowns); changing any field clears the stale preview.
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { BUCKETS, WEIGHTS, type Bucket } from '@/lib/buckets'
 import { DistributionResult, type DistResult } from '@/components/DistributionResult'
@@ -16,6 +17,8 @@ const BUCKET_LABELS: Record<Bucket, string> = { puzzle: 'Puzzle', arcade: 'Arcad
 const WEIGHT_OPTS = WEIGHTS.map(w => ({ value: String(w), label: String(w) }))
 
 export function ReassignPanel() {
+  const { data: session } = useSession()
+  const isEvaluator = session?.user?.role === 'evaluator'
   const [category, setCategory] = useState<Bucket>('puzzle')
   const [roster, setRoster] = useState<RosterRow[]>([])
   const [from, setFrom] = useState('')
@@ -121,16 +124,33 @@ export function ReassignPanel() {
     </button>
   )
 
+  const bucketTabs = (
+    <div className="seg-wrapper" style={{ display: 'inline-flex', gap: 4, marginBottom: 14 }}>
+      {BUCKETS.map(b => (
+        <button key={b} className={`seg-btn-premium${category === b ? ' active' : ''}`} onClick={() => setCategory(b)}>
+          {BUCKET_LABELS[b]}
+        </button>
+      ))}
+    </div>
+  )
+
+  // Evaluators get a read-only view: just the history container, scoped by the runs
+  // API to operations they're involved in (as source or recipient). No form.
+  if (isEvaluator) {
+    return (
+      <div>
+        {bucketTabs}
+        <p style={{ fontSize: 12.5, color: 'var(--faint)', margin: '-4px 2px 12px' }}>
+          Re-assignments involving you — as the source or a recipient.
+        </p>
+        <OperationHistory kind="reassign" category={category} reloadToken={histToken} />
+      </div>
+    )
+  }
+
   return (
     <div>
-      {/* Bucket */}
-      <div className="seg-wrapper" style={{ display: 'inline-flex', gap: 4, marginBottom: 14 }}>
-        {BUCKETS.map(b => (
-          <button key={b} className={`seg-btn-premium${category === b ? ' active' : ''}`} onClick={() => setCategory(b)}>
-            {BUCKET_LABELS[b]}
-          </button>
-        ))}
-      </div>
+      {bucketTabs}
 
       <OperationHistory kind="reassign" category={category} reloadToken={histToken} />
 

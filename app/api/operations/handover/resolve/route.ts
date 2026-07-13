@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
     }
     await sql`
       UPDATE operation_runs
-      SET status = 'approved', result = ${JSON.stringify(result)}::jsonb,
+      SET status = 'approved', result = ${sql.json(result as unknown as import('postgres').JSONValue)},
           game_count = ${assignment.size}, reviewed_by = ${reviewer}, reviewed_at = NOW(),
           review_note = ${body.note ?? null}
       WHERE id = ${id}
