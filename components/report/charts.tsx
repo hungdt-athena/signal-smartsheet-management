@@ -16,7 +16,7 @@ const CONCLUSION_COLORS: Record<string, string> = {
   'Priority II': '#0ea5e9', 'Priority I': '#38bdf8',
   'Bypass': '#d23b3b', 'Playtest & Bypass': '#b45309',
   'Theme/Art': '#2563eb', 'Insight': '#15803d', 'Watch List': '#16a34a',
-  'List_Idea': '#7c3aed', 'Not Found': '#374151',
+  'List_Idea': '#7c3aed', 'Not Found': '#374151', 'Link_dead': '#9ca3af',
   '5min': '#2a78d6', '20min': '#eb6834', 'none': '#9ca3af',
 }
 export function conclusionColor(name: string, i = 0): string {

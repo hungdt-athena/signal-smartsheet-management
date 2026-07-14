@@ -14,14 +14,29 @@ interface Ev {
   key: string; name: string; evaluated: number; activeDays: number; throughput: number
   turnaround: number | null; signalRate: number; consistency: number
   escalated: number; triaged: number; finalPriority: number; survivalRate: number
+  linkDead: number; noted: number; noteRate: number; outcomeScore: number | null
   recorded: number; rec5: number; rec20: number
   initialConclusions: Record<string, number>; finalConclusions: Record<string, number>
+}
+
+// Quality orderings (user-defined weights). Initial: List_Idea is the strongest
+// signal, Bypass the weakest; Link_dead is waste, appended last in gray.
+// Final: Priority V best … Bypass worst; Not Found excluded from the score.
+const INIT_ORDER = ['List_Idea', 'Playtest & Bypass', 'Bypass']
+const FINAL_ORDER = ['Priority V', 'Priority IV', 'Insight', 'Watch List', 'Theme/Art', 'Bypass']
+
+// Stack keys: known weight order first, then anything else seen in the data, then extras.
+function orderedKeys(rows: Array<Record<string, number>>, order: string[], tail: string[] = []): string[] {
+  const seen = new Set<string>()
+  for (const r of rows) for (const k of Object.keys(r)) seen.add(k)
+  const rest = Array.from(seen).filter((k) => !order.includes(k) && !tail.includes(k)).sort()
+  return [...order.filter((k) => seen.has(k)), ...rest, ...tail.filter((k) => seen.has(k))]
 }
 interface Bundle {
   empty: boolean; canSeeTeam: boolean; view: View; category: string
   window: { label: string }
   options: { week: Opt[]; month: Opt[]; quarter: Opt[]; batch: Opt[] }
-  teamTotals: { evaluators: number; totalEvaluated: number; avgThroughput: number; avgTurnaround: number | null; signalRate: number; survivalRate: number; totalRecorded: number }
+  teamTotals: { evaluators: number; totalEvaluated: number; avgThroughput: number; avgTurnaround: number | null; signalRate: number; survivalRate: number; totalRecorded: number; linkDead: number; noteRate: number; outcomeScore: number | null }
   funnel: { evaluated: number; escalated: number; triaged: number; finalPriority: number }
   initialConclusions: Cnt[]; finalConclusions: Cnt[]
   series: Array<{ label: string; value: number }>
@@ -162,9 +177,13 @@ function Overview({ d, isManager }: { d: Bundle; isManager: boolean }) {
     { label: 'Avg throughput', value: fmt.dec(t.avgThroughput) + ' /day', pct: Math.min(100, t.avgThroughput), status: 'good' as const },
     { label: 'Active evaluators', value: String(t.evaluators), pct: 100, status: 'good' as const },
   ]
-  const topConcl = d.initialConclusions.slice(0, 5).map((c) => c.name)
-  const stackRows = d.evaluators.filter((e) => e.evaluated > 0).slice(0, 10)
-    .map((e) => ({ name: e.name, parts: e.initialConclusions }))
+  const active = d.evaluators.filter((e) => e.evaluated > 0)
+  // Initial mix stack: weight order (List_Idea > P&B > Bypass) + Link_dead in gray.
+  const initRows = active.slice(0, 12).map((e) => ({ name: e.name, parts: { ...e.initialConclusions, ...(e.linkDead ? { Link_dead: e.linkDead } : {}) } }))
+  const initKeys = orderedKeys(initRows.map((r) => r.parts), INIT_ORDER, ['Link_dead'])
+  // Picks → final outcomes stack: weight order PV…Bypass, Not Found appended (excluded from score).
+  const finRows = active.filter((e) => e.triaged > 0).map((e) => ({ name: e.name, parts: e.finalConclusions }))
+  const finKeys = orderedKeys(finRows.map((r) => r.parts), FINAL_ORDER, ['Not Found'])
   return (
     <>
       <div className="rp-kpi-row">
@@ -172,7 +191,9 @@ function Overview({ d, isManager }: { d: Bundle; isManager: boolean }) {
         <Kpi label="Avg throughput" value={fmt.dec(t.avgThroughput)} sub="games / active day" />
         <Kpi label="Avg turnaround" value={fmt.days(t.avgTurnaround)} sub="assign → evaluate" />
         <Kpi label="Signal rate" value={fmt.pct(t.signalRate)} sub="escalated, not bypassed" />
-        <Kpi label="Survival rate" value={fmt.pct(t.survivalRate)} sub="escalation → final priority" />
+        <Kpi label="Outcome score" value={t.outcomeScore == null ? '—' : fmt.dec(t.outcomeScore, 0)} sub="pick quality 0–100" />
+        <Kpi label="Note coverage" value={fmt.pct(t.noteRate)} sub="evaluations with a note" />
+        <Kpi label="Link dead" value={fmt.int(t.linkDead)} sub="dead store links found" />
       </div>
 
       <div className="rp-section-title">Shortlist funnel & team health</div>
@@ -200,10 +221,17 @@ function Overview({ d, isManager }: { d: Bundle; isManager: boolean }) {
       </div>
 
       {isManager && (
-        <Card label="Conclusions by evaluator" note="filtering style · top 10 by volume">
-          <StackedBars rows={stackRows} keys={topConcl} />
-          <ReadNote>Tall bars = high volume. The color mix is their filtering style — a visible non-Bypass share means they surface signal, not just gatekeep.</ReadNote>
-        </Card>
+        <>
+          <div className="rp-section-title">Output quality — initial → final</div>
+          <Card label="Initial conclusions by evaluator" note="quality order: List_Idea › Playtest & Bypass › Bypass · gray = Link_dead">
+            <StackedBars rows={initRows} keys={initKeys} />
+            <ReadNote>Purple (<b>List_Idea</b>) is the strongest signal an initial evaluator can produce; amber (<b>Playtest & Bypass</b>) is a hedge; red (<b>Bypass</b>) is pure gatekeeping. Gray tail = dead links they caught — housekeeping work that volume numbers hide.</ReadNote>
+          </Card>
+          <Card label="Their picks → final outcomes" note="quality order: Priority V › IV › Insight › Watch List › Theme/Art › Bypass · Not Found excluded from score">
+            {finRows.length ? <StackedBars rows={finRows} keys={finKeys} /> : <Empty text="No picks reached final conclusion in this window" />}
+            <ReadNote>Of the games each evaluator escalated, this is how the moderator judged them. More violet/teal (<b>Priority V/IV</b>) = picks that hold up; mostly blue (<b>Theme/Art</b>) = aesthetic-only finds; red (<b>Bypass</b>) = picks that were rejected outright.</ReadNote>
+          </Card>
+        </>
       )}
     </>
   )
@@ -216,6 +244,7 @@ function Leaderboard({ d }: { d: Bundle }) {
     [...ev].filter((e) => !filter || e.evaluated > 0).sort((a, b) => f(b) - f(a)).map((e) => ({ name: e.name, value: f(e) }))
   const byTurn = ev.filter((e) => e.turnaround != null).sort((a, b) => a.turnaround! - b.turnaround!).map((e) => ({ name: e.name, value: e.turnaround! }))
   const byRec = [...ev].filter((e) => e.recorded > 0).sort((a, b) => b.recorded - a.recorded).map((e) => ({ name: e.name, value: e.recorded }))
+  const byOutcome = ev.filter((e) => e.outcomeScore != null).sort((a, b) => b.outcomeScore! - a.outcomeScore!).map((e) => ({ name: e.name, value: e.outcomeScore! }))
   return (
     <div className="rp-grid-2">
       <Card label="Volume" note="games evaluated"><RankBars rows={rank((e) => e.evaluated)} unit="games" color={CAT[0]} /></Card>
@@ -223,6 +252,10 @@ function Leaderboard({ d }: { d: Bundle }) {
       <Card label="Turnaround (fastest first)" note="days assign → evaluate"><RankBars rows={byTurn} color={CAT[2]} format={(v) => `${v.toFixed(1)}d`} /></Card>
       <Card label="Signal rate" note="% escalated (not bypassed)"><RankBars rows={rank((e) => e.signalRate)} color={CAT[4]} format={fmt.pct} /></Card>
       <Card label="Survival rate" note="escalation → final priority"><RankBars rows={rank((e) => e.survivalRate)} color={CAT[3]} format={fmt.pct} /></Card>
+      <Card label="Outcome score" note="pick quality 0–100 (PV=100 … Bypass=0)">
+        {byOutcome.length ? <RankBars rows={byOutcome} color={CAT[6]} format={(v) => fmt.dec(v, 0)} /> : <Empty text="No judged picks in this window" />}
+      </Card>
+      <Card label="Note coverage" note="% evaluations with a note"><RankBars rows={rank((e) => e.noteRate)} color={CAT[5]} format={fmt.pct} /></Card>
       <Card label="Recording" note="videos recorded (5/20min)">{byRec.length ? <RankBars rows={byRec} unit="rec" color={CAT[7]} /> : <Empty text="No recordings in this window" />}</Card>
     </div>
   )
@@ -264,7 +297,9 @@ function Individual({ d, isManager, myName }: { d: Bundle; isManager: boolean; m
         <Kpi label="Throughput" value={fmt.dec(e.throughput)} sub="games / active day" />
         <Kpi label="Turnaround" value={fmt.days(e.turnaround)} sub="assign → evaluate" />
         <Kpi label="Signal rate" value={fmt.pct(e.signalRate)} sub="escalated" />
-        <Kpi label="Survival" value={fmt.pct(e.survivalRate)} sub="→ final priority" />
+        <Kpi label="Outcome score" value={e.outcomeScore == null ? '—' : fmt.dec(e.outcomeScore, 0)} sub="pick quality 0–100" />
+        <Kpi label="Note coverage" value={fmt.pct(e.noteRate)} sub={`${fmt.int(e.noted)} noted`} />
+        <Kpi label="Link dead" value={fmt.int(e.linkDead)} sub="dead links caught" />
         <Kpi label="Recorded" value={fmt.int(e.recorded)} sub={`${e.rec5} × 5min · ${e.rec20} × 20min`} />
       </div>
       <div className="rp-grid-2-1">

@@ -122,7 +122,10 @@ export async function GET(req: NextRequest) {
           count(*) FILTER (WHERE ge.assigned_date IS NOT NULL)::int AS ta_count,
           count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS escalated,
           count(*) FILTER (WHERE ge.final_conclusion IS NOT NULL AND ge.final_conclusion <> '')::int AS triaged,
-          count(*) FILTER (WHERE ge.final_conclusion ILIKE 'Priority%')::int AS final_priority
+          count(*) FILTER (WHERE ge.final_conclusion ILIKE 'Priority%')::int AS final_priority,
+          count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead'
+                             AND ge.initial_note IS NOT NULL AND btrim(ge.initial_note) <> '')::int AS noted
         ${evalBase}
         GROUP BY lower(ge.initial_evaluator)`,
       // per-evaluator initial conclusion distribution
@@ -201,6 +204,21 @@ export async function GET(req: NextRequest) {
       windowDays = span ? Math.max(7, Math.round((Date.parse(series[series.length - 1].b) - Date.parse(series[0].b)) / 864e5) + (unit === 'day' ? 1 : unit === 'week' ? 7 : 30)) : 30
     }
 
+    // Outcome quality weights for final conclusions on an evaluator's picks
+    // (user-defined ordering: PV > PIV > Insight > Watch List > Theme/Art > Bypass;
+    // Not Found is excluded — a game nobody could locate says nothing about the pick).
+    const OUTCOME_W: Record<string, number> = {
+      'Priority V': 100, 'Priority IV': 80, 'Insight': 60,
+      'Watch List': 40, 'Theme/Art': 20, 'Bypass': 0,
+    }
+    const outcomeScoreOf = (fin: Record<string, number>): number | null => {
+      let sum = 0, n = 0
+      for (const [c, cnt] of Object.entries(fin)) {
+        if (c in OUTCOME_W) { sum += OUTCOME_W[c] * cnt; n += cnt }
+      }
+      return n > 0 ? sum / n : null
+    }
+
     const evaluators = perEval.map((e) => {
       const evaluated = e.evaluated
       const rec = recBy.get(e.k) || { recorded: 0, rec5: 0, rec20: 0 }
@@ -216,6 +234,10 @@ export async function GET(req: NextRequest) {
         triaged: e.triaged,
         finalPriority: e.final_priority,
         survivalRate: e.escalated > 0 ? e.final_priority / e.escalated : 0,
+        linkDead: e.link_dead,
+        noted: e.noted,
+        noteRate: evaluated > 0 ? e.noted / evaluated : 0,
+        outcomeScore: outcomeScoreOf(finBy.get(e.k) || {}),
         recorded: rec.recorded, rec5: rec.rec5, rec20: rec.rec20,
         initialConclusions: initBy.get(e.k) || {},
         finalConclusions: finBy.get(e.k) || {},
@@ -228,6 +250,7 @@ export async function GET(req: NextRequest) {
         evaluators.push({
           key: k, name: r.name, evaluated: 0, activeDays: 0, throughput: 0, turnaround: null,
           signalRate: 0, consistency: 0, escalated: 0, triaged: 0, finalPriority: 0, survivalRate: 0,
+          linkDead: 0, noted: 0, noteRate: 0, outcomeScore: null,
           recorded: rec.recorded, rec5: rec.rec5, rec20: rec.rec20, initialConclusions: {}, finalConclusions: {},
         })
       }
@@ -245,6 +268,9 @@ export async function GET(req: NextRequest) {
     }
     const tput = activeEvals.map((e) => e.throughput)
     const tas = evaluators.map((e) => e.turnaround).filter((t): t is number => t != null)
+    // team outcome score: weighted over ALL final conclusions in scope
+    const teamFin: Record<string, number> = {}
+    for (const e of evaluators) for (const [c, n] of Object.entries(e.finalConclusions)) teamFin[c] = (teamFin[c] || 0) + n
     const teamTotals = {
       evaluators: activeEvals.length,
       totalEvaluated: funnel.evaluated,
@@ -253,6 +279,9 @@ export async function GET(req: NextRequest) {
       signalRate: funnel.evaluated ? funnel.escalated / funnel.evaluated : 0,
       survivalRate: funnel.escalated ? funnel.finalPriority / funnel.escalated : 0,
       totalRecorded: sum((e) => e.recorded),
+      linkDead: sum((e) => e.linkDead),
+      noteRate: funnel.evaluated ? sum((e) => e.noted) / funnel.evaluated : 0,
+      outcomeScore: outcomeScoreOf(teamFin),
     }
 
     // team conclusion distributions
