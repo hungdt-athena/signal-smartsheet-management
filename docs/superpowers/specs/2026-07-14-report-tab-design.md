@@ -45,10 +45,19 @@ Grouped by evaluator (`lower(initial_evaluator)` / recorder), sliceable by perio
 - **Consistency** — active-days ÷ days-in-period
 
 **Recording domain** (rows with `record_confirmed_at IS NOT NULL`)
-- **Records done** — count of confirmed recordings (recorder = `record_assignee`)
-- **5min / 20min split** — by `record_bucket`
-- **Recording turnaround** — avg days `record_assign_date → record_confirmed_at`
+- **Records done** — count of confirmed recordings. Recorders live in
+  `record_5min_assignee` / `record_20min_assignee` (the flat `record_assignee`
+  column is unused in prod); both slots are UNIONed, each filled slot = one record.
+- **5min / 20min split** — derived from which slot is filled (the `record_bucket`
+  column is too sparse to rely on).
+- **Recording turnaround** — N/A: prod has no recording assign-date populated, so
+  turnaround is left null for this domain.
 - **Volume / trend** — over time
+
+> **Discernment note:** initial evaluators almost never use "Priority" labels — the
+> real positive signal is escalation vs bypass. The metric is therefore **Signal
+> rate** = share of conclusions that are *not* a bypass (`List_Idea`, `Priority*`,
+> …), not a literal "Priority rate".
 
 Averages are stored as **sum + count** components so Month/Quarter/Overall
 re-derive correctly (never average pre-averaged weeks).
