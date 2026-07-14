@@ -1,8 +1,30 @@
 # Report Tab — Design Spec
 
-**Date:** 2026-07-14
-**Status:** Approved → implementing
+**Date:** 2026-07-14 (redesigned 2026-07-15 after visual review)
+**Status:** Implemented + visually verified (headless screenshots)
 **Branch:** `feat/report-tab`
+
+## v2 redesign (2026-07-15)
+
+After reviewing v1 the design changed materially:
+- **Read path is now live SQL + in-memory cache** (`GET /api/report`), not the weekly
+  rollup. ~40k rows aggregate sub-second; this serves every view mode + funnel +
+  recording uniformly. The rollup table/cron remain only as an optional scale fallback.
+- **Adaptive filter:** "View by" = Week / Month / Quarter / **Batch** / Custom, with a
+  second control that adapts (a bucket dropdown, or from–to date inputs for Custom).
+- **Recording is folded into each evaluator's profile** (recorded count, 5min/20min),
+  not a separate domain/toggle.
+- **Shortlist funnel:** Evaluated → Escalated → Triaged → Final Priority, with per-step
+  conversion → measures pick quality (**survival rate** = final-priority ÷ escalated).
+- **Radar** per evaluator + team overlay, plus an **all-rounder score** (mean of 5
+  normalized axes: Volume · Consistency · Signal · Survival · Recording).
+- Sub-tabs: Team Overview / Leaderboard / Individual / Compare / Activity.
+- Charts hand-rolled (Funnel, Radar, HealthBars, StackedBars, ColumnChart, Donut,
+  Heatmap, RankBars). Verified via Chrome headless screenshots during build.
+- **Batch is sparse** (only ~800 shortlist rows carry a label); it is a shortlist/funnel
+  lens, while Week/Month/Quarter/Custom use `evaluate_date`.
+
+The sections below describe the original v1 rollup design (kept for history).
 
 ## Goal
 
