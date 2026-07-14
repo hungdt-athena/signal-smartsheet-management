@@ -1331,8 +1331,11 @@ function RecordTab() {
   const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null)
   const dragRef = useRef<{ id: number; from: '5min' | '20min' } | null>(null)
   const [availableBatches, setAvailableBatches] = useState<string[]>([])
+  const [syncToast, setSyncToast] = useState<string | null>(null)
 
   const fetchSeqRef = useRef(0)
+  // One recorder auto-sync per (category, batch) view — see the sync effect.
+  const syncedKeyRef = useRef('')
   // Default the batch filter to the team's current batch once (later manual
   // "All batches" choices stick).
   const batchDefaultedRef = useRef(false)
@@ -1377,6 +1380,34 @@ function RecordTab() {
       .then((rows: YtbRow[]) => setYtMap(buildYtMap(rows)))
       .catch(() => {})
   }, [])
+
+  // Auto-sync recorders from YouTube once per (category, batch): a game recorded
+  // by someone other than the assignee (they uploaded directly) has its DB
+  // recorder silently corrected to match the uploader (sheet `pic`). Managers
+  // only — evaluators can't write and see only their own rows.
+  useEffect(() => {
+    if (!isManager) return
+    const key = `${filterCategory}|${filterBatch}`
+    if (syncedKeyRef.current === key) return
+    syncedKeyRef.current = key
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/evaluations/reconcile-recorders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'apply', category: filterCategory, batch: filterBatch || undefined }),
+        })
+        if (!res.ok || cancelled) return
+        const json = await res.json()
+        if (cancelled || !json.applied) return
+        setSyncToast(`Đã đồng bộ ${json.applied} recorder từ YouTube`)
+        fetchData()
+        setTimeout(() => { if (!cancelled) setSyncToast(null) }, 6000)
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [isManager, filterCategory, filterBatch, fetchData])
 
   // Optimistically assign a recorder to a game's bucket and drop it to draft.
   const assignRecorder = useCallback(async (item: ShortListItem, name: string) => {
@@ -1532,6 +1563,17 @@ function RecordTab() {
           <p className="h-sub">{total} games · {filterBatch || 'all batches'} · {filterCategory}{!isManager && userName ? ` · ${userName}` : ''}</p>
         </div>
       </div>
+
+      {syncToast && (
+        <div style={{
+          position: 'fixed', bottom: 20, right: 20, zIndex: 100,
+          background: 'var(--accent, #2563eb)', color: '#fff',
+          padding: '10px 16px', borderRadius: 10, fontSize: 12.5, fontWeight: 600,
+          boxShadow: '0 6px 20px rgba(0,0,0,.25)',
+        }}>
+          ✓ {syncToast}
+        </div>
+      )}
 
       <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
         <div style={{ width: 140 }}>

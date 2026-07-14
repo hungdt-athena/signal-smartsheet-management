@@ -11,12 +11,16 @@ export interface YtbMatchRow {
   youtubeId: string
   duration: string
   time: string
+  pic?: string
 }
 
-// A resolved match: the YouTube id plus when the file was uploaded (sheet `time`).
+// A resolved match: the YouTube id, when the file was uploaded (sheet `time`),
+// and the person who uploaded it (sheet `pic`) — used to reconcile the DB
+// recorder against who actually recorded.
 export interface YtMatch {
   id: string
   time: string
+  pic: string
 }
 
 export function normalizeTitle(s: string): string {
@@ -39,21 +43,40 @@ export function durationBucket(duration: string): Bucket {
   return Number.isFinite(n) && n >= 15 ? '20min' : '5min'
 }
 
+// Same normalization as titles (strip accents/case/whitespace) — used to match
+// a sheet `pic` value against a `dashboard_users.name`, tolerating casing drift
+// (e.g. sheet "MYTL" → DB "MyTL").
+export function normalizeName(s: string): string {
+  return normalizeTitle(s)
+}
+
 export function ytKey(title: string, bucket: Bucket): string {
   return `${normalizeTitle(title)}|${bucket}`
 }
 
+// Parse the sheet `time` to a sortable timestamp; unparseable times sort last so
+// a real date always wins over a blank/garbage one.
+function timeRank(time: string): number {
+  const ms = Date.parse((time || '').trim())
+  return Number.isFinite(ms) ? ms : Number.POSITIVE_INFINITY
+}
+
 export function buildYtMap(rows: YtbMatchRow[]): Map<string, YtMatch> {
+  // For each game+bucket, keep the EARLIEST upload that has a real youtubeId
+  // ("record cũ nhất để sync" — when two people upload the same game, the one
+  // who uploaded first is the source of truth). Equal ranks keep the first seen
+  // (sheet row order), so a blank-time row can't displace an earlier one.
   const m = new Map<string, YtMatch>()
+  const rank = new Map<string, number>()
   for (const row of rows) {
-    if (!row.gameTitle) continue
+    if (!row.gameTitle || !row.youtubeId) continue
     const key = ytKey(row.gameTitle, durationBucket(row.duration))
-    // Prefer rows that actually have a youtubeId.
-    if (row.youtubeId && (!m.has(key) || !m.get(key)!.id)) m.set(key, { id: row.youtubeId, time: row.time || '' })
-    else if (!m.has(key)) m.set(key, { id: row.youtubeId || '', time: row.time || '' })
+    const r = timeRank(row.time)
+    if (!m.has(key) || r < rank.get(key)!) {
+      m.set(key, { id: row.youtubeId, time: row.time || '', pic: row.pic || '' })
+      rank.set(key, r)
+    }
   }
-  // Drop entries that never resolved to a real id.
-  for (const [k, v] of Array.from(m.entries())) if (!v.id) m.delete(k)
   return m
 }
 
