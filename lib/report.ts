@@ -40,7 +40,7 @@ export interface Metrics {
   activeDays: number
   throughput: number       // games per active day
   turnaround: number | null // avg days assign→complete (null when no dated rows)
-  priorityRate: number     // 0..1 share of Priority* conclusions (evaluation only)
+  priorityRate: number     // 0..1 "signal rate": share escalated (not bypassed), evaluation only
   consistency: number      // 0..1 active days / (weeks in range × 7)
 }
 

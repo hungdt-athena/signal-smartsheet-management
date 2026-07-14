@@ -100,7 +100,10 @@ export async function POST(req: NextRequest) {
             count(DISTINCT ev_date)::int AS active_days,
             COALESCE(SUM(CASE WHEN adate IS NOT NULL THEN GREATEST(ev_date - adate, 0) END), 0)::numeric AS turnaround_sum,
             count(*) FILTER (WHERE adate IS NOT NULL)::int AS turnaround_count,
-            count(*) FILTER (WHERE concl ILIKE 'Priority%')::int AS priority_count
+            -- "signal_count": games the evaluator escalated rather than bypassed
+            -- (List_Idea, Priority*, etc.). Initial evaluators rarely use "Priority"
+            -- labels — the real positive signal is anything that isn't a bypass.
+            count(*) FILTER (WHERE concl IS NOT NULL AND concl <> '' AND concl <> 'Link_dead' AND concl NOT ILIKE '%bypass%')::int AS priority_count
           FROM base GROUP BY wk, cat, ekey
         )
         INSERT INTO report_rollup
@@ -116,20 +119,30 @@ export async function POST(req: NextRequest) {
       `
 
       // ---- RECORDING domain ----
+      // Recorders live in record_5min_assignee / record_20min_assignee (the flat
+      // record_assignee column is unused in prod). A game can in principle be
+      // recorded in both slots, so we UNION the two — each filled slot is one
+      // credited record. Completion is record_confirmed_at; there is no assign-date
+      // for recording, so turnaround is left null (0/0). bucket = the slot.
       await tx`DELETE FROM report_rollup WHERE domain = 'recording' AND ${rowPred()}`
       const recRows = await tx`
         WITH base AS (
-          SELECT
-            (ge.record_confirmed_at AT TIME ZONE ${VN})::date AS ev_date,
+          SELECT (ge.record_confirmed_at AT TIME ZONE ${VN})::date AS ev_date,
             ${weekOf(sql`ge.record_confirmed_at`)} AS wk,
-            lower(ge.record_assignee) AS ekey,
-            ge.record_assignee AS ename,
-            ge.category_group AS cat,
-            (ge.record_assign_date AT TIME ZONE ${VN})::date AS adate,
-            COALESCE(NULLIF(ge.record_bucket, ''), 'none') AS bucket
+            lower(ge.record_5min_assignee) AS ekey, ge.record_5min_assignee AS ename,
+            ge.category_group AS cat, '5min' AS bucket
           FROM game_evaluations ge
           WHERE ge.record_confirmed_at IS NOT NULL
-            AND ge.record_assignee IS NOT NULL AND ge.record_assignee <> ''
+            AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
+            AND ${sourcePred(sql`ge.record_confirmed_at`)}
+          UNION ALL
+          SELECT (ge.record_confirmed_at AT TIME ZONE ${VN})::date AS ev_date,
+            ${weekOf(sql`ge.record_confirmed_at`)} AS wk,
+            lower(ge.record_20min_assignee) AS ekey, ge.record_20min_assignee AS ename,
+            ge.category_group AS cat, '20min' AS bucket
+          FROM game_evaluations ge
+          WHERE ge.record_confirmed_at IS NOT NULL
+            AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
             AND ${sourcePred(sql`ge.record_confirmed_at`)}
         ),
         buck AS (
@@ -144,9 +157,7 @@ export async function POST(req: NextRequest) {
           SELECT wk, cat, ekey,
             mode() WITHIN GROUP (ORDER BY ename) AS ename,
             count(*)::int AS games,
-            count(DISTINCT ev_date)::int AS active_days,
-            COALESCE(SUM(CASE WHEN adate IS NOT NULL THEN GREATEST(ev_date - adate, 0) END), 0)::numeric AS turnaround_sum,
-            count(*) FILTER (WHERE adate IS NOT NULL)::int AS turnaround_count
+            count(DISTINCT ev_date)::int AS active_days
           FROM base GROUP BY wk, cat, ekey
         )
         INSERT INTO report_rollup
@@ -155,8 +166,7 @@ export async function POST(req: NextRequest) {
            turnaround_count, priority_count, conclusions, computed_at)
         SELECT a.wk, to_char(a.wk, 'YYYY-MM'), ${quarterExpr(sql`a.wk`)},
           a.cat, 'recording', a.ename, a.ekey, a.games, a.active_days,
-          a.turnaround_sum, a.turnaround_count, 0,
-          COALESCE(ba.conclusions, '{}'::jsonb), now()
+          0, 0, 0, COALESCE(ba.conclusions, '{}'::jsonb), now()
         FROM agg a LEFT JOIN buck_agg ba USING (wk, cat, ekey)
         RETURNING 1
       `

@@ -162,7 +162,7 @@ function Overview({ d, isManager }: { d: Bundle; isManager: boolean }) {
         <Kpi label={isManager ? 'Active people' : 'Active weeks'} value={isManager ? fmt.int(t.activePeople) : fmt.int(d.weeksInRange)} sub={isManager ? 'evaluators' : 'weeks'} />
         <Kpi label="Avg throughput" value={fmt.dec(t.avgThroughput)} sub="games / active day" />
         <Kpi label="Avg turnaround" value={fmt.days(t.avgTurnaround)} sub="assign → done" />
-        {d.domain === 'evaluation' && <Kpi label="Priority rate" value={fmt.pct(t.priorityRate)} sub="Priority conclusions" />}
+        {d.domain === 'evaluation' && <Kpi label="Signal rate" value={fmt.pct(t.priorityRate)} sub="escalated, not bypassed" />}
       </div>
 
       <div className="grid-2">
@@ -172,7 +172,7 @@ function Overview({ d, isManager }: { d: Bundle; isManager: boolean }) {
         </Card>
         <Card label={d.domain === 'evaluation' ? 'Conclusion distribution' : 'Recording split'} note="share of outcomes">
           <Donut data={d.conclusions} />
-          <ReadNote>{d.domain === 'evaluation' ? 'A healthy mix has a visible Priority slice — pure Bypass means aggressive filtering with little signal found.' : '5min vs 20min recording mix across the team.'}</ReadNote>
+          <ReadNote>{d.domain === 'evaluation' ? 'Mostly Bypass = aggressive filtering; a visible List_Idea / Priority slice means the evaluator is finding signal worth escalating.' : '5min vs 20min recording mix across the team.'}</ReadNote>
         </Card>
       </div>
 
@@ -203,7 +203,7 @@ function Leaderboard({ d }: { d: Bundle }) {
       <Card label="Turnaround (fastest first)" note="days assign → done"><RankBars rows={byTurnaround} color={CAT[2]} format={(v) => `${v.toFixed(1)}d`} /></Card>
       <Card label="Consistency" note="active days / range"><RankBars rows={byConsistency} color={CAT[3]} format={fmt.pct} /></Card>
       {d.domain === 'evaluation' && (
-        <Card label="Priority rate" note="% Priority conclusions"><RankBars rows={byPriority} color={CAT[4]} format={fmt.pct} /></Card>
+        <Card label="Signal rate" note="% escalated (not bypassed)"><RankBars rows={byPriority} color={CAT[4]} format={fmt.pct} /></Card>
       )}
     </div>
   )
@@ -238,7 +238,7 @@ function Individual({ d, isManager, myName }: { d: Bundle; isManager: boolean; m
         <Kpi label="Throughput" value={fmt.dec(m.throughput)} sub="games / active day" />
         <Kpi label="Turnaround" value={fmt.days(m.turnaround)} sub="assign → done" />
         <Kpi label="Consistency" value={fmt.pct(m.consistency)} sub="active days / range" />
-        {d.domain === 'evaluation' && <Kpi label="Priority rate" value={fmt.pct(m.priorityRate)} />}
+        {d.domain === 'evaluation' && <Kpi label="Signal rate" value={fmt.pct(m.priorityRate)} sub="escalated, not bypassed" />}
       </div>
       <div className="grid-2">
         <Card label={`${selected.name} — volume by ${d.period}`} note="games per period">
