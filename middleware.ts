@@ -36,6 +36,16 @@ export default withAuth(
       }
     }
 
+    // Report: everyone can see it, but the Leaderboard tab (cross-evaluator
+    // ranking) is manager-only — evaluators are name-scoped to their own data, so
+    // a ranking of others would leak. Redirect them to Overview. The /api/report
+    // endpoint enforces the same scoping server-side.
+    if ((pathname === '/report' || pathname.startsWith('/report/')) && !isManager) {
+      if ((searchParams.get('tab') || '') === 'leaderboard') {
+        return NextResponse.redirect(new URL('/report?tab=overview', req.url))
+      }
+    }
+
     // Users Management & Config stay manager-only.
     const managerPaths = ['/admin', '/config']
     if (managerPaths.some(p => pathname === p || pathname.startsWith(p + '/')) && !isManager) {
@@ -70,6 +80,7 @@ export const config = {
     '/team-ops/:path*',
     '/evaluations/:path*',
     '/youtube/:path*',
+    '/report/:path*',
     '/handover-puzzle/:path*',
     '/handover/:path*',
     '/drive-videos/:path*',

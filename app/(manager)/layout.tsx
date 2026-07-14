@@ -26,6 +26,7 @@ const ICONS: Record<string, string | string[]> = {
   table:  ['M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18'],
   sliders: ['M4 21V14', 'M4 10V3', 'M12 21V12', 'M12 8V3', 'M20 21V16', 'M20 12V3', 'M1 14H7', 'M9 8H15', 'M17 16H23'],
   book:   ['M4 19.5A2.5 2.5 0 0 1 6.5 17H20', 'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'],
+  chart:  ['M3 3v18h18', 'M7 15l3-4 3 3 4-6'],
 }
 
 interface NavChild { href: string; label: string; roles?: string[]; external?: boolean }
@@ -46,6 +47,12 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
     { href: '/youtube?tab=record_video', label: 'Record', roles: ['admin', 'moderator', 'evaluator'] },
+  ]},
+  { href: '/report',          label: 'Report', icon: 'chart', roles: ['admin', 'moderator', 'evaluator'], children: [
+    { href: '/report?tab=overview',    label: 'Overview' },
+    { href: '/report?tab=leaderboard', label: 'Leaderboard', roles: ['admin', 'moderator'] },
+    { href: '/report?tab=individual',  label: 'Individual' },
+    { href: '/report?tab=activity',    label: 'Activity' },
   ]},
   { href: '/admin',           label: 'Users Management', icon: 'shield', adminOnly: true },
   { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin', 'moderator'] },
