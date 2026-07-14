@@ -49,42 +49,45 @@ export function Kpi({ label, value, sub, trend, hi }: {
 }
 
 // ---------- vertical column chart over time (volume) ----------
-export function ColumnChart({ data, height = 200, color = CAT[0] }: {
-  data: Array<{ label: string; value: number; sub?: string }>; height?: number; color?: string
+// Fixed viewBox so labels/bars stay a sensible size regardless of point count.
+export function ColumnChart({ data, color = CAT[0] }: {
+  data: Array<{ label: string; value: number; sub?: string }>; color?: string
 }) {
   const [hover, setHover] = useState<number | null>(null)
   if (data.length === 0) return <Empty />
   const max = Math.max(1, ...data.map((d) => d.value))
-  const W = Math.max(data.length * 26, 300), H = height, pad = 24
-  const bw = (W - pad) / data.length
-  const barW = Math.min(28, bw * 0.62)
-  // Thin out x labels when crowded.
-  const step = Math.ceil(data.length / 14)
+  const VW = 1000, VH = 250, padX = 12, padB = 30, padT = 20
+  const innerW = VW - padX * 2, innerH = VH - padB - padT
+  const slot = innerW / data.length
+  const barW = Math.min(58, slot * 0.6)
+  const n = data.length
+  const step = Math.ceil(n / 16)
+  const showVals = n <= 16
   return (
     <div className="rp-chart-wrap">
-      <svg viewBox={`0 0 ${W} ${H}`} className="rp-svg" preserveAspectRatio="xMidYMid meet"
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg" preserveAspectRatio="xMidYMid meet"
         onMouseLeave={() => setHover(null)}>
-        {[0.25, 0.5, 0.75, 1].map((g) => (
-          <line key={g} x1={0} x2={W} y1={(H - pad) * (1 - g)} y2={(H - pad) * (1 - g)} className="rp-grid" />
+        {[0, 0.25, 0.5, 0.75, 1].map((g) => (
+          <line key={g} x1={padX} x2={VW - padX} y1={padT + innerH * (1 - g)} y2={padT + innerH * (1 - g)} className="rp-grid" />
         ))}
         {data.map((d, i) => {
-          const h = (d.value / max) * (H - pad - 8)
-          const x = pad + i * bw + (bw - barW) / 2
-          const y = (H - pad) - h
+          const h = (d.value / max) * innerH
+          const cx = padX + i * slot + slot / 2
+          const x = cx - barW / 2
+          const y = padT + innerH - h
           return (
             <g key={i} onMouseEnter={() => setHover(i)}>
-              <rect x={pad + i * bw} y={0} width={bw} height={H - pad} fill="transparent" />
-              <rect x={x} y={y} width={barW} height={Math.max(h, 1)} rx={3}
-                fill={color} opacity={hover == null || hover === i ? 1 : 0.5} />
-              {i % step === 0 && (
-                <text x={pad + i * bw + bw / 2} y={H - pad + 14} className="rp-xlabel">{d.label}</text>
-              )}
+              <rect x={padX + i * slot} y={padT} width={slot} height={innerH} fill="transparent" />
+              <rect x={x} y={y} width={barW} height={Math.max(h, 1)} rx={4}
+                fill={color} opacity={hover == null || hover === i ? 1 : 0.45} />
+              {showVals && <text x={cx} y={y - 5} className="rp-barval">{fmt.int(d.value)}</text>}
+              {i % step === 0 && <text x={cx} y={VH - 10} className="rp-xlabel">{d.label}</text>}
             </g>
           )
         })}
       </svg>
       {hover != null && (
-        <div className="rp-tip" style={{ left: `${((pad + hover * bw + bw / 2) / W) * 100}%` }}>
+        <div className="rp-tip" style={{ left: `${((padX + hover * slot + slot / 2) / VW) * 100}%` }}>
           <b>{data[hover].label}</b><br />{fmt.int(data[hover].value)}{data[hover].sub ? ` · ${data[hover].sub}` : ''}
         </div>
       )}
@@ -203,4 +206,159 @@ function FragmentRow({ children }: { children: React.ReactNode }) {
 
 export function Empty({ text = 'No data' }: { text?: string }) {
   return <div className="rp-empty">{text}</div>
+}
+
+// ---------- funnel (decreasing stages + conversion %) ----------
+export function Funnel({ stages }: {
+  stages: Array<{ label: string; value: number; hint?: string }>
+}) {
+  if (stages.length === 0 || stages[0].value === 0) return <Empty />
+  const top = stages[0].value
+  // sequential blue ramp, dark→light down the funnel
+  const shade = (i: number) => `color-mix(in srgb, ${CAT[0]} ${Math.round(100 - i * 14)}%, #ffffff)`
+  return (
+    <div className="rp-funnel">
+      {stages.map((s, i) => {
+        const pctOfTop = (s.value / top) * 100
+        const prev = i > 0 ? stages[i - 1].value : null
+        const conv = prev && prev > 0 ? (s.value / prev) * 100 : null
+        return (
+          <div className="rp-funnel-row" key={s.label}>
+            <div className="rp-funnel-head">
+              <span className="rp-funnel-label">{s.label}</span>
+              <span className="rp-funnel-val">{fmt.int(s.value)}
+                <span className="rp-funnel-pct"> · {Math.round(pctOfTop)}% of top</span>
+              </span>
+            </div>
+            <div className="rp-funnel-bar-track">
+              <div className="rp-funnel-bar" style={{ width: `${Math.max(pctOfTop, 1.5)}%`, background: shade(i) }} />
+            </div>
+            {conv != null && i > 0 && (
+              <div className="rp-funnel-conv">↳ {Math.round(conv)}% converted from {stages[i - 1].label}</div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---------- radar (N axes, one or more overlaid series) ----------
+export function Radar({ axes, series, size = 240 }: {
+  axes: string[]
+  series: Array<{ name: string; values: number[]; color?: string }> // values 0..100 aligned to axes
+  size?: number
+}) {
+  const [hi, setHi] = useState<number | null>(null)
+  if (axes.length < 3) return <Empty />
+  const cx = size / 2, cy = size / 2, R = size / 2 - 46
+  const ang = (i: number) => (i / axes.length) * 2 * Math.PI - Math.PI / 2
+  const pt = (i: number, r: number) => [cx + r * Math.cos(ang(i)), cy + r * Math.sin(ang(i))]
+  const rings = [0.25, 0.5, 0.75, 1]
+  return (
+    <div className="rp-radar-wrap">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow: 'visible' }}>
+        {/* grid rings */}
+        {rings.map((g) => (
+          <polygon key={g} className="rp-radar-grid"
+            points={axes.map((_, i) => pt(i, R * g).join(',')).join(' ')} />
+        ))}
+        {/* spokes + labels */}
+        {axes.map((a, i) => {
+          const [x, y] = pt(i, R)
+          const [lx, ly] = pt(i, R + 16)
+          return (
+            <g key={a}>
+              <line className="rp-radar-spoke" x1={cx} y1={cy} x2={x} y2={y} />
+              <text x={lx} y={ly} className="rp-radar-axis"
+                textAnchor={Math.abs(lx - cx) < 6 ? 'middle' : lx > cx ? 'start' : 'end'}
+                dominantBaseline={Math.abs(ly - cy) < 6 ? 'middle' : ly > cy ? 'hanging' : 'auto'}>{a}</text>
+            </g>
+          )
+        })}
+        {/* series polygons */}
+        {series.map((s, si) => {
+          const color = s.color || CAT[si % CAT.length]
+          const dim = hi != null && hi !== si
+          const poly = s.values.map((v, i) => pt(i, R * Math.max(0, Math.min(100, v)) / 100).join(',')).join(' ')
+          return (
+            <g key={s.name} opacity={dim ? 0.12 : 1}>
+              <polygon points={poly} fill={color} fillOpacity={series.length > 1 ? 0.08 : 0.16} stroke={color} strokeWidth={2} />
+              {s.values.map((v, i) => { const [x, y] = pt(i, R * Math.max(0, Math.min(100, v)) / 100); return <circle key={i} cx={x} cy={y} r={3} fill={color} /> })}
+            </g>
+          )
+        })}
+      </svg>
+      {series.length > 1 && (
+        <div className="rp-legend">
+          {series.map((s, si) => (
+            <div className="rp-legend-row" key={s.name} onMouseEnter={() => setHi(si)} onMouseLeave={() => setHi(null)}>
+              <span className="rp-dot" style={{ background: s.color || CAT[si % CAT.length] }} />
+              <span className="rp-legend-name">{s.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- team health bars (green/amber/red thresholds) ----------
+export function HealthBars({ rows }: {
+  rows: Array<{ label: string; value: string; pct: number; status: 'good' | 'warn' | 'bad' }>
+}) {
+  const col = { good: 'var(--good)', warn: 'var(--warn)', bad: 'var(--bad)' }
+  return (
+    <div className="rp-health">
+      {rows.map((r) => (
+        <div className="rp-health-row" key={r.label}>
+          <div className="rp-health-top">
+            <span className="rp-health-label">{r.label}</span>
+            <span className="rp-health-val" style={{ color: col[r.status] }}>{r.value}</span>
+          </div>
+          <div className="rp-health-track">
+            <div className="rp-health-fill" style={{ width: `${Math.max(2, Math.min(100, r.pct))}%`, background: col[r.status] }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---------- stacked conclusion bars per evaluator ----------
+export function StackedBars({ rows, keys }: {
+  rows: Array<{ name: string; parts: Record<string, number> }>
+  keys: string[] // conclusion names in stack order
+}) {
+  const [hover, setHover] = useState<string | null>(null)
+  if (rows.length === 0) return <Empty />
+  const totals = rows.map((r) => keys.reduce((s, k) => s + (r.parts[k] || 0), 0))
+  const max = Math.max(1, ...totals)
+  return (
+    <div>
+      <div className="rp-legend rp-legend-horiz">
+        {keys.map((k, i) => (
+          <div className="rp-legend-row" key={k} onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}>
+            <span className="rp-dot" style={{ background: conclusionColor(k, i) }} /><span className="rp-legend-name">{k}</span>
+          </div>
+        ))}
+      </div>
+      <div className="rp-stack">
+        {rows.map((r, ri) => (
+          <div className="rp-stack-row" key={r.name}>
+            <span className="rp-stack-name" title={r.name}>{r.name}</span>
+            <span className="rp-stack-track">
+              {keys.map((k, i) => {
+                const v = r.parts[k] || 0
+                if (!v) return null
+                return <span key={k} className="rp-stack-seg" title={`${r.name} · ${k}: ${v}`}
+                  style={{ width: `${(v / max) * 100}%`, background: conclusionColor(k, i), opacity: hover && hover !== k ? 0.3 : 1 }} />
+              })}
+            </span>
+            <span className="rp-stack-total">{fmt.int(totals[ri])}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }

@@ -5,8 +5,13 @@ import { sql } from '@/lib/db'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
-// POST /api/cron/report-rollup — (re)compute the report_rollup table that powers
-// the Report tab. Weeks are anchored on real timestamps (evaluate_date for the
+// NOTE: The Report tab now reads live from game_evaluations via GET /api/report
+// (with an in-memory cache) — that endpoint is the source of truth. This rollup
+// route + the report_rollup table remain as an OPTIONAL pre-aggregation for scale
+// (wire into cron only if live aggregation ever gets slow); they are not required
+// by the current read path.
+//
+// POST /api/cron/report-rollup — (re)compute the report_rollup table. Weeks are anchored on real timestamps (evaluate_date for the
 // evaluation domain, record_confirmed_at for recording), truncated to the Monday
 // of the ISO week in Asia/Ho_Chi_Minh.
 //
