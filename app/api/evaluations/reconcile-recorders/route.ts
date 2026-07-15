@@ -21,6 +21,12 @@ export const dynamic = 'force-dynamic'
 //
 // Only a `pic` that maps (accent/case-insensitively) to a dashboard_users.name
 // is applied — an unknown `pic` is reported under `unmatched`, never written.
+//
+// The same pass also persists the matched upload's YouTube link into
+// `game_evaluations.youtube_link` (20min upload preferred over 5min). The link
+// shown on the Record card is matched live from the sheet and never stored, so
+// downstream consumers joining by game_id (Signal Sense's playtest overlay)
+// would otherwise see NULL.
 
 interface Change {
   id: number
@@ -45,7 +51,28 @@ interface Unmatched {
   uploaded_at: string
 }
 
+interface LinkChange {
+  id: number
+  game_id: string
+  title: string
+  batch: string | null
+  bucket: Bucket        // which upload's link is used (20min preferred)
+  from: string | null   // current DB youtube_link
+  to: string            // https://youtu.be/<id> of the matched upload
+  uploaded_at: string
+}
+
 const BUCKETS: Bucket[] = ['5min', '20min']
+
+// Bare 11-char YouTube id from any stored form (youtu.be/…, watch?v=…, embed,
+// shorts, or already-bare id) — used to compare stored links by identity so a
+// format difference alone doesn't count as a change.
+function extractYtId(link: string): string | null {
+  const s = (link || '').trim()
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s
+  const m = s.match(/(?:youtu\.be\/|[?&]v=|\/embed\/|\/shorts\/|\/live\/)([A-Za-z0-9_-]{11})/)
+  return m ? m[1] : null
+}
 
 export async function POST(req: NextRequest) {
   const guard = await requireRole(['admin', 'moderator'])
@@ -78,7 +105,7 @@ export async function POST(req: NextRequest) {
       : sql``
     const rows = await sql`
       SELECT ge.id, ge.game_id, ge.batch, gi.title,
-        ge.record_5min_assignee, ge.record_20min_assignee
+        ge.record_5min_assignee, ge.record_20min_assignee, ge.youtube_link
       FROM game_evaluations ge
       JOIN game_info gi ON ge.game_id = gi.game_id
       WHERE (ge.record_bucket IN ('5min','20min')
@@ -89,8 +116,24 @@ export async function POST(req: NextRequest) {
 
     const changes: Change[] = []
     const unmatched: Unmatched[] = []
+    const linkChanges: LinkChange[] = []
 
     for (const row of rows) {
+      // Persist the matched upload's YouTube link (20min preferred — the full
+      // gameplay record beats the 5-min clip as a demo). Skip when the stored
+      // link already points at the same video, whatever its URL format.
+      const yt20 = ytMap.get(ytKey(row.title, '20min'))
+      const yt5 = ytMap.get(ytKey(row.title, '5min'))
+      const ytLink = yt20 || yt5
+      if (ytLink?.id && extractYtId(row.youtube_link || '') !== ytLink.id) {
+        linkChanges.push({
+          id: row.id, game_id: row.game_id, title: row.title, batch: row.batch,
+          bucket: yt20 ? '20min' : '5min',
+          from: row.youtube_link || null,
+          to: `https://youtu.be/${ytLink.id}`,
+          uploaded_at: ytLink.time,
+        })
+      }
       for (const bucket of BUCKETS) {
         const yt = ytMap.get(ytKey(row.title, bucket))
         if (!yt) continue                       // no upload in this bucket
@@ -119,7 +162,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (mode === 'dry') {
-      return NextResponse.json({ mode, changes, unmatched, applied: 0 })
+      return NextResponse.json({ mode, changes, unmatched, link_changes: linkChanges, applied: 0, links_applied: 0 })
     }
 
     // 4. Apply — write the mapped recorder for each change (optionally filtered by
@@ -144,7 +187,22 @@ export async function POST(req: NextRequest) {
       if (res.count > 0) appliedChanges.push(c)
     }
 
-    return NextResponse.json({ mode, applied, changes: appliedChanges, unmatched })
+    let linksApplied = 0
+    const appliedLinks: LinkChange[] = []
+    for (const lc of linkChanges) {
+      if (idFilter && !idFilter.has(lc.id)) continue
+      const res = await sql`
+        UPDATE game_evaluations
+        SET youtube_link = ${lc.to}
+        WHERE id = ${lc.id}`
+      linksApplied += res.count
+      if (res.count > 0) appliedLinks.push(lc)
+    }
+
+    return NextResponse.json({
+      mode, applied, changes: appliedChanges, unmatched,
+      links_applied: linksApplied, link_changes: appliedLinks,
+    })
   } catch (err) {
     console.error('POST /api/evaluations/reconcile-recorders error:', err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })

@@ -1400,9 +1400,12 @@ function RecordTab() {
         })
         if (!res.ok || cancelled) return
         const json = await res.json()
-        if (cancelled || !json.applied) return
-        setSyncToast(`Đã đồng bộ ${json.applied} recorder từ YouTube`)
-        fetchData()
+        if (cancelled || (!json.applied && !json.links_applied)) return
+        const parts = []
+        if (json.applied) parts.push(`${json.applied} recorder`)
+        if (json.links_applied) parts.push(`${json.links_applied} link YouTube`)
+        setSyncToast(`Đã đồng bộ ${parts.join(' + ')} từ YouTube`)
+        if (json.applied) fetchData()
         setTimeout(() => { if (!cancelled) setSyncToast(null) }, 6000)
       } catch { /* ignore */ }
     })()
