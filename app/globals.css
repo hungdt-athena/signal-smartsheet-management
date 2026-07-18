@@ -1651,16 +1651,21 @@ input:checked + .slider:before {
 .rp-tab.active { color: var(--accent-strong); border-bottom-color: var(--accent); }
 
 .rp-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--gap); }
+.rp-kpi-row-dense { grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 12px; }
 .rp-kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 15px 16px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 6px; }
+  padding: 15px 16px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 6px;
+  transition: box-shadow .18s, border-color .18s; }
+.rp-kpi:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
 .rp-kpi.hi { background: var(--accent-weak); border-color: var(--accent-border); }
 .rp-kpi-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .rp-kpi.hi .rp-kpi-label { color: var(--accent-strong); }
-.rp-kpi-value { font-size: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--text); font-variant-numeric: tabular-nums; }
+.rp-kpi-main { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.rp-kpi-value { font-size: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.05; }
 .rp-kpi-sub { font-size: 11.5px; color: var(--faint); display: flex; align-items: center; gap: 8px; }
 .rp-trend { font-weight: 700; font-variant-numeric: tabular-nums; }
 .rp-trend.up { color: var(--good); }
 .rp-trend.down { color: var(--bad); }
+.rp-spark { flex-shrink: 0; opacity: .95; }
 
 .rp-chart-wrap { position: relative; width: 100%; }
 .rp-svg { width: 100%; height: auto; display: block; overflow: visible; }
@@ -1756,3 +1761,26 @@ input:checked + .slider:before {
 .rp-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); align-items: start; }
 @media (max-width: 1100px) { .rp-grid-2 { grid-template-columns: 1fr; } }
 .rp-stale-note { font-size: 12px; color: var(--warn); background: var(--warn-weak); border: 1px solid transparent; border-radius: 8px; padding: 8px 12px; }
+
+/* ---- line chart / trend ---- */
+.rp-ylabel { font-size: 11px; fill: var(--faint); text-anchor: end; font-variant-numeric: tabular-nums; }
+.rp-cursor { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.rp-tip-row { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.rp-tip .rp-dot { width: 8px; height: 8px; }
+
+/* ---- scatter / quadrant ---- */
+.rp-quad { stroke: var(--border-strong); stroke-width: 1.2; stroke-dasharray: 4 4; }
+.rp-quad-lbl { font-size: 10px; fill: var(--faint); font-weight: 600; }
+.rp-scatter-lbl { font-size: 11px; fill: var(--muted); font-weight: 600; }
+.rp-axis-title { font-size: 11px; fill: var(--faint); font-weight: 700; letter-spacing: .03em; }
+
+/* ---- bump chart ---- */
+.rp-bump-rank { font-size: 12px; fill: var(--faint); font-weight: 700; text-anchor: middle; font-variant-numeric: tabular-nums; }
+.rp-bump-name { font-size: 12px; fill: var(--text); font-weight: 600; }
+
+/* ---- dense dashboard grid ---- */
+.rp-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap); align-items: start; }
+@media (max-width: 1300px) { .rp-grid-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 720px) { .rp-grid-4 { grid-template-columns: 1fr; } }
+.rp-grid-2 > .card, .rp-grid-2-1 > .card { min-width: 0; }
+.rp-chart-wrap svg text { pointer-events: none; }

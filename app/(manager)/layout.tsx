@@ -48,9 +48,9 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
     { href: '/youtube?tab=record_video', label: 'Record', roles: ['admin', 'moderator', 'evaluator'] },
   ]},
-  { href: '/report',          label: 'Report', icon: 'chart', roles: ['admin', 'moderator', 'evaluator'], children: [
+  { href: '/report',          label: 'Report', icon: 'chart', roles: ['admin'], children: [
     { href: '/report?tab=overview',    label: 'Overview' },
-    { href: '/report?tab=leaderboard', label: 'Leaderboard', roles: ['admin', 'moderator'] },
+    { href: '/report?tab=leaderboard', label: 'Leaderboard' },
     { href: '/report?tab=individual',  label: 'Individual' },
     { href: '/report?tab=activity',    label: 'Activity' },
   ]},

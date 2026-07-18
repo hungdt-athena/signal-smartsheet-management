@@ -3,7 +3,7 @@
 // the bundle small and matches the app's existing inline-SVG style. Palette is the
 // dataviz-validated categorical set; conclusion hues reuse the app's badge intent.
 
-import { useState } from 'react'
+import { useId, useState } from 'react'
 
 // Validated categorical palette (see scripts/validate_palette.js). Assigned in fixed
 // order, never cycled past 8 — a 9th series folds into "Other" upstream.
@@ -31,19 +31,286 @@ export const fmt = {
   signed: (n: number | null) => (n == null ? '—' : `${n > 0 ? '+' : ''}${Math.round(n * 100)}%`),
 }
 
-// ---------- KPI card ----------
-export function Kpi({ label, value, sub, trend, hi }: {
+// ---------- KPI card (optional inline sparkline) ----------
+export function Kpi({ label, value, sub, trend, hi, spark, sparkColor }: {
   label: string; value: string; sub?: string; trend?: number | null; hi?: boolean
+  spark?: number[]; sparkColor?: string
 }) {
   const tclass = trend == null ? '' : trend > 0 ? 'up' : trend < 0 ? 'down' : ''
+  // derive a trend from the sparkline tail if none was supplied
+  let autoTrend = trend
+  if (autoTrend == null && spark && spark.length >= 2) {
+    const a = spark[spark.length - 2], b = spark[spark.length - 1]
+    if (a > 0) autoTrend = (b - a) / a
+  }
+  const at = autoTrend == null ? '' : autoTrend > 0.001 ? 'up' : autoTrend < -0.001 ? 'down' : ''
+  const col = sparkColor || (hi ? 'var(--accent-strong)' : 'var(--accent)')
   return (
     <div className={'rp-kpi' + (hi ? ' hi' : '')}>
       <div className="rp-kpi-label">{label}</div>
-      <div className="rp-kpi-value">{value}</div>
+      <div className="rp-kpi-main">
+        <div className="rp-kpi-value">{value}</div>
+        {spark && spark.length >= 2 && <Sparkline data={spark} color={col} />}
+      </div>
       <div className="rp-kpi-sub">
         {sub}
-        {trend != null && <span className={'rp-trend ' + tclass}>{fmt.signed(trend)}</span>}
+        {trend != null
+          ? <span className={'rp-trend ' + tclass}>{fmt.signed(trend)}</span>
+          : autoTrend != null && at && <span className={'rp-trend ' + at}>{fmt.signed(autoTrend)}</span>}
       </div>
+    </div>
+  )
+}
+
+// ---------- sparkline (tiny inline trend, area-filled) ----------
+export function Sparkline({ data, color = CAT[0], w = 76, h = 30 }: {
+  data: number[]; color?: string; w?: number; h?: number
+}) {
+  const uid = useId().replace(/:/g, '')
+  if (data.length < 2) return null
+  const max = Math.max(...data), min = Math.min(...data)
+  const span = max - min || 1
+  const pad = 3
+  const x = (i: number) => pad + (i / (data.length - 1)) * (w - pad * 2)
+  const y = (v: number) => pad + (1 - (v - min) / span) * (h - pad * 2)
+  const line = data.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ')
+  const area = `${line} L${x(data.length - 1).toFixed(1)} ${h - pad} L${x(0).toFixed(1)} ${h - pad} Z`
+  const gid = 'sp-' + uid
+  return (
+    <svg className="rp-spark" viewBox={`0 0 ${w} ${h}`} width={w} height={h} preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#${gid})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth={1.7} strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={x(data.length - 1)} cy={y(data[data.length - 1])} r={2.4} fill={color} />
+    </svg>
+  )
+}
+
+// ---------- multi-series line / area chart over time ----------
+export function LineChart({ series, area = false, format }: {
+  series: Array<{ name: string; color?: string; points: Array<{ label: string; value: number }> }>
+  area?: boolean; format?: (v: number) => string
+}) {
+  const [hover, setHover] = useState<number | null>(null)
+  const uid = useId().replace(/:/g, '')
+  const n = series[0]?.points.length || 0
+  if (n === 0) return <Empty />
+  const f = format || fmt.int
+  const max = Math.max(1, ...series.flatMap((s) => s.points.map((p) => p.value)))
+  const VW = 1000, VH = 260, padX = 40, padB = 30, padT = 16
+  const innerW = VW - padX - 12, innerH = VH - padB - padT
+  const x = (i: number) => padX + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW)
+  const y = (v: number) => padT + innerH * (1 - v / max)
+  const labels = series[0].points.map((p) => p.label)
+  const step = Math.ceil(n / 12)
+  const ticks = [0, 0.25, 0.5, 0.75, 1]
+  return (
+    <div className="rp-chart-wrap">
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg" preserveAspectRatio="xMidYMid meet"
+        onMouseLeave={() => setHover(null)}>
+        {ticks.map((g) => (
+          <g key={g}>
+            <line x1={padX} x2={VW - 12} y1={padT + innerH * (1 - g)} y2={padT + innerH * (1 - g)} className="rp-grid" />
+            <text x={padX - 8} y={padT + innerH * (1 - g) + 4} className="rp-ylabel">{f(max * g)}</text>
+          </g>
+        ))}
+        {area && series.map((s, si) => {
+          const color = s.color || CAT[si % CAT.length]
+          const gid = `lg-${uid}-${si}`
+          const path = s.points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ')
+          const fill = `${path} L${x(n - 1).toFixed(1)} ${padT + innerH} L${x(0).toFixed(1)} ${padT + innerH} Z`
+          return (
+            <g key={s.name}>
+              <defs>
+                <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={color} stopOpacity="0.22" />
+                  <stop offset="100%" stopColor={color} stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              <path d={fill} fill={`url(#${gid})`} />
+            </g>
+          )
+        })}
+        {series.map((s, si) => {
+          const color = s.color || CAT[si % CAT.length]
+          const path = s.points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ')
+          return (
+            <g key={s.name}>
+              <path d={path} fill="none" stroke={color} strokeWidth={2.4} strokeLinejoin="round" strokeLinecap="round" />
+              {n <= 24 && s.points.map((p, i) => (
+                <circle key={i} cx={x(i)} cy={y(p.value)} r={hover === i ? 4 : 2.6} fill={color}
+                  opacity={hover == null || hover === i ? 1 : 0.5} />
+              ))}
+            </g>
+          )
+        })}
+        {labels.map((l, i) => i % step === 0 && (
+          <text key={i} x={x(i)} y={VH - 10} className="rp-xlabel">{l}</text>
+        ))}
+        {/* hover hit-areas */}
+        {labels.map((_, i) => (
+          <rect key={i} x={x(i) - innerW / (2 * Math.max(1, n - 1))} y={padT}
+            width={innerW / Math.max(1, n - 1)} height={innerH} fill="transparent"
+            onMouseEnter={() => setHover(i)} />
+        ))}
+        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={padT} y2={padT + innerH} className="rp-cursor" />}
+      </svg>
+      {hover != null && (
+        <div className="rp-tip" style={{ left: `${(x(hover) / VW) * 100}%` }}>
+          <b>{labels[hover]}</b>
+          {series.map((s, si) => (
+            <div key={s.name} className="rp-tip-row">
+              <span className="rp-dot" style={{ background: s.color || CAT[si % CAT.length] }} />
+              {s.name}: <b>{f(s.points[hover].value)}</b>
+            </div>
+          ))}
+        </div>
+      )}
+      {series.length > 1 && (
+        <div className="rp-legend rp-legend-horiz" style={{ marginTop: 6, marginBottom: 0 }}>
+          {series.map((s, si) => (
+            <div className="rp-legend-row" key={s.name}>
+              <span className="rp-dot" style={{ background: s.color || CAT[si % CAT.length] }} />
+              <span className="rp-legend-name">{s.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- scatter / quadrant ----------
+export function Scatter({ points, xLabel, yLabel, xFormat, yFormat }: {
+  points: Array<{ name: string; x: number; y: number; size?: number; color?: string }>
+  xLabel: string; yLabel: string; xFormat?: (v: number) => string; yFormat?: (v: number) => string
+}) {
+  const [hover, setHover] = useState<number | null>(null)
+  if (points.length === 0) return <Empty />
+  const xf = xFormat || fmt.dec, yf = yFormat || fmt.int
+  const VW = 640, VH = 420, padL = 46, padB = 40, padT = 14, padR = 14
+  const innerW = VW - padL - padR, innerH = VH - padB - padT
+  const maxX = Math.max(1, ...points.map((p) => p.x)) * 1.08
+  const maxY = Math.max(1, ...points.map((p) => p.y)) * 1.08
+  const meanX = points.reduce((s, p) => s + p.x, 0) / points.length
+  const meanY = points.reduce((s, p) => s + p.y, 0) / points.length
+  const maxSize = Math.max(1, ...points.map((p) => p.size || 1))
+  const px = (v: number) => padL + (v / maxX) * innerW
+  const py = (v: number) => padT + innerH * (1 - v / maxY)
+  const rad = (s?: number) => 5 + Math.sqrt((s || 1) / maxSize) * 13
+  return (
+    <div className="rp-chart-wrap">
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg" preserveAspectRatio="xMidYMid meet"
+        onMouseLeave={() => setHover(null)}>
+        {[0, 0.25, 0.5, 0.75, 1].map((g) => (
+          <g key={g}>
+            <line x1={padL} x2={VW - padR} y1={padT + innerH * g} y2={padT + innerH * g} className="rp-grid" />
+            <text x={padL - 8} y={padT + innerH * g + 4} className="rp-ylabel">{yf(maxY * (1 - g))}</text>
+          </g>
+        ))}
+        {[0, 0.25, 0.5, 0.75, 1].map((g) => (
+          <text key={g} x={padL + innerW * g} y={VH - 12} className="rp-xlabel">{xf(maxX * g)}</text>
+        ))}
+        {/* mean quadrant lines */}
+        <line x1={px(meanX)} x2={px(meanX)} y1={padT} y2={padT + innerH} className="rp-quad" />
+        <line x1={padL} x2={VW - padR} y1={py(meanY)} y2={py(meanY)} className="rp-quad" />
+        <text x={px(meanX) + 4} y={padT + 10} className="rp-quad-lbl">avg {xLabel}</text>
+        <text x={padL + 4} y={py(meanY) - 4} className="rp-quad-lbl">avg {yLabel}</text>
+        {points.map((p, i) => (
+          <g key={p.name} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+            <circle cx={px(p.x)} cy={py(p.y)} r={rad(p.size)} fill={p.color || CAT[i % CAT.length]}
+              fillOpacity={hover == null || hover === i ? 0.62 : 0.18} stroke={p.color || CAT[i % CAT.length]}
+              strokeWidth={hover === i ? 2 : 1} />
+            {(hover === i || points.length <= 12) && (
+              <text x={px(p.x)} y={py(p.y) - rad(p.size) - 3} className="rp-scatter-lbl" textAnchor="middle">{p.name}</text>
+            )}
+          </g>
+        ))}
+        <text x={padL + innerW / 2} y={VH - 1} className="rp-axis-title" textAnchor="middle">{xLabel} →</text>
+        <text x={-(padT + innerH / 2)} y={12} className="rp-axis-title" textAnchor="middle" transform="rotate(-90)">{yLabel} →</text>
+      </svg>
+      {hover != null && (
+        <div className="rp-tip" style={{ left: `${(px(points[hover].x) / VW) * 100}%` }}>
+          <b>{points[hover].name}</b><br />
+          {xLabel}: {xf(points[hover].x)}<br />{yLabel}: {yf(points[hover].y)}
+          {points[hover].size != null && <><br />vol: {fmt.int(points[hover].size!)}</>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- bump chart (rank position over periods) ----------
+export function BumpChart({ periods, rows, topN = 8 }: {
+  periods: Array<{ key: string; label: string }>
+  rows: Array<{ name: string; cells: Record<string, number> }>
+  topN?: number
+}) {
+  const [hi, setHi] = useState<string | null>(null)
+  if (periods.length < 2 || rows.length === 0) return <Empty text="Need at least two periods to rank" />
+  // per period, rank people by value (desc). rank 1 = best. missing = no rank that period.
+  const ranks: Record<string, Record<string, number>> = {}
+  for (const p of periods) {
+    const present = rows.filter((r) => (r.cells[p.key] || 0) > 0)
+      .sort((a, b) => (b.cells[p.key] || 0) - (a.cells[p.key] || 0))
+    present.forEach((r, i) => { (ranks[r.name] ||= {})[p.key] = i + 1 })
+  }
+  // keep people who reach topN in at least one period
+  const keep = rows.filter((r) => periods.some((p) => (ranks[r.name]?.[p.key] || 99) <= topN))
+    .sort((a, b) => (ranks[a.name]?.[periods[periods.length - 1].key] || 99) - (ranks[b.name]?.[periods[periods.length - 1].key] || 99))
+  if (keep.length === 0) return <Empty />
+  const rowsShown = Math.min(topN, keep.length)
+  const VW = 1000, rowH = 30, padT = 14, padB = 26, padL = 130, padR = 130
+  const VH = padT + padB + rowH * (rowsShown - 1)
+  const innerW = VW - padL - padR
+  const x = (i: number) => padL + (periods.length === 1 ? innerW / 2 : (i / (periods.length - 1)) * innerW)
+  const y = (rank: number) => padT + (rank - 1) * rowH
+  const step = Math.ceil(periods.length / 12)
+  return (
+    <div className="rp-chart-wrap">
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg" preserveAspectRatio="xMidYMid meet"
+        onMouseLeave={() => setHi(null)}>
+        {Array.from({ length: rowsShown }, (_, r) => (
+          <text key={r} x={padL - 24} y={y(r + 1) + 4} className="rp-bump-rank">{r + 1}</text>
+        ))}
+        {periods.map((p, i) => i % step === 0 && (
+          <text key={p.key} x={x(i)} y={VH - 8} className="rp-xlabel">{p.label}</text>
+        ))}
+        {keep.map((r, ci) => {
+          const color = CAT[ci % CAT.length]
+          const dim = hi != null && hi !== r.name
+          const seg: string[] = []
+          const dots: Array<[number, number]> = []
+          let started = false
+          periods.forEach((p, i) => {
+            const rk = ranks[r.name]?.[p.key]
+            if (rk && rk <= topN) {
+              seg.push(`${started ? 'L' : 'M'}${x(i).toFixed(1)} ${y(rk).toFixed(1)}`)
+              dots.push([x(i), y(rk)])
+              started = true
+            } else { started = false }
+          })
+          const last = keep.length && ranks[r.name]?.[periods[periods.length - 1].key]
+          const first = ranks[r.name]?.[periods.find((p) => ranks[r.name]?.[p.key])?.key || '']
+          return (
+            <g key={r.name} opacity={dim ? 0.15 : 1} onMouseEnter={() => setHi(r.name)}
+              onMouseLeave={() => setHi(null)} style={{ cursor: 'default' }}>
+              <path d={seg.join(' ')} fill="none" stroke={color} strokeWidth={dim ? 2 : 3}
+                strokeLinejoin="round" strokeLinecap="round" />
+              {dots.map(([cx, cy], k) => <circle key={k} cx={cx} cy={cy} r={4} fill={color} stroke="var(--surface)" strokeWidth={1.5} />)}
+              {first && <text x={x(periods.findIndex((p) => ranks[r.name]?.[p.key])) - 8} y={y(first) + 4}
+                className="rp-bump-name" textAnchor="end">{r.name}</text>}
+              {last && last <= topN && <text x={x(periods.length - 1) + 8} y={y(last) + 4}
+                className="rp-bump-name" textAnchor="start">{r.name}</text>}
+            </g>
+          )
+        })}
+      </svg>
     </div>
   )
 }

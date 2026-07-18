@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { requireAuth } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
+import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
 
@@ -61,7 +59,7 @@ function resolveWindow(view: View, key: string, from: string, to: string): {
 }
 
 export async function GET(req: NextRequest) {
-  const guard = await requireAuth()
+  const guard = await requireRole('admin')
   if (guard) return guard
 
   try {
@@ -73,17 +71,7 @@ export async function GET(req: NextRequest) {
     const to = (searchParams.get('to') || '').trim()
     const category = (searchParams.get('category') || 'all').toLowerCase()
 
-    let restrictTo = ''
-    if (process.env.SKIP_AUTH !== 'true') {
-      const session = await getServerSession(authOptions)
-      const role = session?.user?.role
-      if (role !== 'admin' && role !== 'moderator') {
-        restrictTo = session?.user?.name || ''
-        if (!restrictTo) return NextResponse.json({ empty: true, canSeeTeam: false, evaluators: [] })
-      }
-    }
-
-    const cacheKey = JSON.stringify({ view, key, from, to, category, restrictTo })
+    const cacheKey = JSON.stringify({ view, key, from, to, category })
     const hit = CACHE.get(cacheKey)
     if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.body)
 
@@ -91,7 +79,6 @@ export async function GET(req: NextRequest) {
 
     // WHERE fragments shared by evaluation queries.
     const catF = category !== 'all' ? sql`AND ge.category_group = ${category}` : sql``
-    const scopeF = restrictTo ? sql`AND lower(ge.initial_evaluator) = lower(${restrictTo})` : sql``
     // Window: batch view filters by label; date views filter evaluate_date.
     const winF = win.batch
       ? sql`AND ge.batch = ${win.batch}`
@@ -109,7 +96,7 @@ export async function GET(req: NextRequest) {
       FROM game_evaluations ge
       WHERE ge.evaluate_date IS NOT NULL
         AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
-        ${catF} ${scopeF} ${winF}`
+        ${catF} ${winF}`
 
     const [perEval, initConcl, finConcl, series, evalSeries, recorders, optRows] = await Promise.all([
       // per-evaluator core + funnel
@@ -136,8 +123,13 @@ export async function GET(req: NextRequest) {
       sql`SELECT lower(ge.initial_evaluator) AS k, ge.final_conclusion AS c, count(*)::int AS n
         ${evalBase} AND ge.final_conclusion IS NOT NULL AND ge.final_conclusion <> ''
         GROUP BY lower(ge.initial_evaluator), ge.final_conclusion`,
-      // team time series (bucketed)
-      sql`SELECT date_trunc(${unit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b, count(*)::int AS n
+      // team time series (bucketed) — volume plus funnel metrics for trend/sparklines
+      sql`SELECT date_trunc(${unit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b,
+          count(*)::int AS n,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead')::int AS evaluated,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS escalated,
+          count(*) FILTER (WHERE ge.final_conclusion IS NOT NULL AND ge.final_conclusion <> '')::int AS triaged,
+          count(*) FILTER (WHERE ge.final_conclusion ILIKE 'Priority%')::int AS final_priority
         ${evalBase}
         GROUP BY 1 ORDER BY 1`,
       // per-evaluator time series (heatmap cells)
@@ -151,7 +143,6 @@ export async function GET(req: NextRequest) {
           FROM game_evaluations ge
           WHERE ge.record_confirmed_at IS NOT NULL AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
             ${catF}
-            ${restrictTo ? sql`AND lower(ge.record_5min_assignee) = lower(${restrictTo})` : sql``}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
               ${win.from ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
               ${win.to ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}`}
@@ -160,7 +151,6 @@ export async function GET(req: NextRequest) {
           FROM game_evaluations ge
           WHERE ge.record_confirmed_at IS NOT NULL AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
             ${catF}
-            ${restrictTo ? sql`AND lower(ge.record_20min_assignee) = lower(${restrictTo})` : sql``}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
               ${win.from ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
               ${win.to ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}`}
@@ -315,6 +305,19 @@ export async function GET(req: NextRequest) {
     }
     const seriesLabeled = series.map((s) => ({ label: bucketLabel(s.b), value: s.n }))
 
+    // multi-metric time series (one point per bucket) — powers trend lines & KPI sparklines
+    const metricSeries = series.map((s) => ({
+      key: s.b,
+      label: bucketLabel(s.b),
+      volume: s.n,
+      evaluated: s.evaluated,
+      escalated: s.escalated,
+      triaged: s.triaged,
+      finalPriority: s.final_priority,
+      signalRate: s.evaluated > 0 ? s.escalated / s.evaluated : 0,
+      survivalRate: s.escalated > 0 ? s.final_priority / s.escalated : 0,
+    }))
+
     // heatmap: person × bucket
     const bucketKeys = Array.from(new Set(evalSeries.map((r) => r.b))).sort()
     const heatCells = new Map<string, Record<string, number>>()
@@ -342,13 +345,14 @@ export async function GET(req: NextRequest) {
 
     const body = {
       empty: evaluators.length === 0,
-      canSeeTeam: restrictTo === '',
+      canSeeTeam: true,
       view, category, window: win,
       options: { week: weekLabels, month: monthLabels, quarter: quarterLabels, batch: batchLabels },
       teamTotals, funnel,
       initialConclusions: mergeMap((e) => e.initialConclusions),
       finalConclusions: mergeMap((e) => e.finalConclusions),
       series: seriesLabeled,
+      metricSeries,
       heatmap,
       evaluators, radar,
     }

@@ -1,10 +1,9 @@
 'use client'
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { useSession } from 'next-auth/react'
 import {
   Kpi, ColumnChart, RankBars, Donut, Heatmap, Funnel, Radar, HealthBars, StackedBars,
-  Empty, fmt, CAT,
+  LineChart, Scatter, BumpChart, Empty, fmt, CAT,
 } from '@/components/report/charts'
 
 type View = 'week' | 'month' | 'quarter' | 'batch' | 'custom'
@@ -40,6 +39,7 @@ interface Bundle {
   funnel: { evaluated: number; escalated: number; triaged: number; finalPriority: number }
   initialConclusions: Cnt[]; finalConclusions: Cnt[]
   series: Array<{ label: string; value: number }>
+  metricSeries: Array<{ key: string; label: string; volume: number; evaluated: number; escalated: number; triaged: number; finalPriority: number; signalRate: number; survivalRate: number }>
   heatmap: { periods: Array<{ key: string; label: string }>; rows: Array<{ name: string; cells: Record<string, number> }> }
   evaluators: Ev[]
   radar: Array<{ key: string; name: string; axes: Record<string, number> }>
@@ -47,16 +47,12 @@ interface Bundle {
 type Opt = { key: string; label: string }
 type Cnt = { name: string; count: number }
 
-const TABS_ADMIN = [
+// Report is admin-only (nav + middleware + /api/report guard) — no evaluator variant.
+const TABS = [
   { id: 'overview', label: 'Team Overview' },
   { id: 'leaderboard', label: 'Leaderboard' },
   { id: 'individual', label: 'Individual' },
   { id: 'compare', label: 'Compare' },
-  { id: 'activity', label: 'Activity' },
-]
-const TABS_EVAL = [
-  { id: 'overview', label: 'My Overview' },
-  { id: 'individual', label: 'Deep Dive' },
   { id: 'activity', label: 'Activity' },
 ]
 
@@ -66,10 +62,6 @@ export default function ReportPage() {
 
 function ReportInner() {
   const sp = useSearchParams(); const router = useRouter()
-  const { data: session } = useSession()
-  const role = session?.user?.role
-  const isManager = role === 'admin' || role === 'moderator'
-  const myName = session?.user?.name || ''
 
   const tab = sp.get('tab') || 'overview'
   const [view, setView] = useState<View>('month')
@@ -80,8 +72,6 @@ function ReportInner() {
   const [data, setData] = useState<Bundle | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
-
-  const tabs = isManager ? TABS_ADMIN : TABS_EVAL
 
   const fetchData = useCallback(async () => {
     setLoading(true); setErr('')
@@ -141,7 +131,7 @@ function ReportInner() {
       </div>
 
       <div className="rp-tabs">
-        {tabs.map((t) => <button key={t.id} className={'rp-tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>{t.label}</button>)}
+        {TABS.map((t) => <button key={t.id} className={'rp-tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>{t.label}</button>)}
       </div>
 
       {err && !data && <div className="card" style={{ color: 'var(--bad)' }}>Couldn’t load report: {err}. The database may be waking up — try Refresh.</div>}
@@ -151,10 +141,10 @@ function ReportInner() {
 
       {!loading && data && !data.empty && (
         <>
-          {tab === 'overview' && <Overview d={data} isManager={isManager} />}
-          {tab === 'leaderboard' && isManager && <Leaderboard d={data} />}
-          {tab === 'individual' && <Individual d={data} isManager={isManager} myName={myName} />}
-          {tab === 'compare' && isManager && <Compare d={data} />}
+          {tab === 'overview' && <Overview d={data} />}
+          {tab === 'leaderboard' && <Leaderboard d={data} />}
+          {tab === 'individual' && <Individual d={data} />}
+          {tab === 'compare' && <Compare d={data} />}
           {tab === 'activity' && <Activity d={data} />}
         </>
       )}
@@ -163,7 +153,7 @@ function ReportInner() {
 }
 
 /* ---------------- Team Overview ---------------- */
-function Overview({ d, isManager }: { d: Bundle; isManager: boolean }) {
+function Overview({ d }: { d: Bundle }) {
   const t = d.teamTotals
   const funnelStages = [
     { label: 'Evaluated', value: d.funnel.evaluated },
@@ -184,17 +174,43 @@ function Overview({ d, isManager }: { d: Bundle; isManager: boolean }) {
   // Picks → final outcomes stack: weight order PV…Bypass, Not Found appended (excluded from score).
   const finRows = active.filter((e) => e.triaged > 0).map((e) => ({ name: e.name, parts: e.finalConclusions }))
   const finKeys = orderedKeys(finRows.map((r) => r.parts), FINAL_ORDER, ['Not Found'])
+
+  // time-series derivations for trends & sparklines
+  const ms = d.metricSeries || []
+  const pts = (f: (m: Bundle['metricSeries'][number]) => number) => ms.map((m) => ({ label: m.label, value: f(m) }))
+  const volSpark = ms.map((m) => m.volume)
+  const sigSpark = ms.map((m) => Math.round(m.signalRate * 100))
+  const survSpark = ms.map((m) => Math.round(m.survivalRate * 100))
+  const fpSpark = ms.map((m) => m.finalPriority)
+  const pipelineSeries = [
+    { name: 'Evaluated', color: CAT[0], points: pts((m) => m.evaluated) },
+    { name: 'Escalated', color: CAT[2], points: pts((m) => m.escalated) },
+    { name: 'Final Priority', color: CAT[4], points: pts((m) => m.finalPriority) },
+  ]
+  const rateSeries = [
+    { name: 'Signal rate %', color: CAT[1], points: pts((m) => Math.round(m.signalRate * 100)) },
+    { name: 'Survival rate %', color: CAT[3], points: pts((m) => Math.round(m.survivalRate * 100)) },
+  ]
+  // quality quadrant: throughput (x) vs pick quality (y), bubble = volume
+  const scatterPts = active.filter((e) => e.outcomeScore != null)
+    .map((e, i) => ({ name: e.name, x: e.throughput, y: e.outcomeScore as number, size: e.evaluated, color: CAT[i % CAT.length] }))
   return (
     <>
-      <div className="rp-kpi-row">
-        <Kpi label="Games evaluated" value={fmt.int(t.totalEvaluated)} sub={d.window.label} hi />
+      <div className="rp-kpi-row rp-kpi-row-dense">
+        <Kpi label="Games evaluated" value={fmt.int(t.totalEvaluated)} sub={d.window.label} hi spark={volSpark} />
         <Kpi label="Avg throughput" value={fmt.dec(t.avgThroughput)} sub="games / active day" />
         <Kpi label="Avg turnaround" value={fmt.days(t.avgTurnaround)} sub="assign → evaluate" />
-        <Kpi label="Signal rate" value={fmt.pct(t.signalRate)} sub="escalated, not bypassed" />
+        <Kpi label="Signal rate" value={fmt.pct(t.signalRate)} sub="escalated, not bypassed" spark={sigSpark} sparkColor={CAT[1]} />
+        <Kpi label="Survival rate" value={fmt.pct(t.survivalRate)} sub="escalation → final" spark={survSpark} sparkColor={CAT[3]} />
+        <Kpi label="Final priority" value={fmt.int(d.funnel.finalPriority)} sub="picks that held up" spark={fpSpark} sparkColor={CAT[4]} />
         <Kpi label="Outcome score" value={t.outcomeScore == null ? '—' : fmt.dec(t.outcomeScore, 0)} sub="pick quality 0–100" />
         <Kpi label="Note coverage" value={fmt.pct(t.noteRate)} sub="evaluations with a note" />
-        <Kpi label="Link dead" value={fmt.int(t.linkDead)} sub="dead store links found" />
       </div>
+
+      <Card label="Pipeline over time" note="evaluated → escalated → final priority per bucket">
+        <LineChart series={pipelineSeries} area />
+        <ReadNote>The gap between <b>Evaluated</b> and <b>Escalated</b> is how much gets filtered out; the gap down to <b>Final Priority</b> is pick quality. Converging lines = tighter, higher-yield funnel.</ReadNote>
+      </Card>
 
       <div className="rp-section-title">Shortlist funnel & team health</div>
       <div className="rp-grid-2-1">
@@ -207,9 +223,14 @@ function Overview({ d, isManager }: { d: Bundle; isManager: boolean }) {
         </Card>
       </div>
 
-      <Card label={`Volume over time`} note="games evaluated per bucket">
-        <ColumnChart data={d.series} />
-      </Card>
+      <div className="rp-grid-2">
+        <Card label="Quality rates over time" note="signal & survival %, per bucket">
+          {ms.length >= 2 ? <LineChart series={rateSeries} format={(v) => `${Math.round(v)}%`} /> : <Empty text="Need more than one period" />}
+        </Card>
+        <Card label="Volume over time" note="games evaluated per bucket">
+          <ColumnChart data={d.series} />
+        </Card>
+      </div>
 
       <div className="rp-grid-2">
         <Card label="Initial conclusions" note="what evaluators decided">
@@ -220,19 +241,20 @@ function Overview({ d, isManager }: { d: Bundle; isManager: boolean }) {
         </Card>
       </div>
 
-      {isManager && (
-        <>
-          <div className="rp-section-title">Output quality — initial → final</div>
-          <Card label="Initial conclusions by evaluator" note="quality order: List_Idea › Playtest & Bypass › Bypass · gray = Link_dead">
-            <StackedBars rows={initRows} keys={initKeys} />
-            <ReadNote>Purple (<b>List_Idea</b>) is the strongest signal an initial evaluator can produce; amber (<b>Playtest & Bypass</b>) is a hedge; red (<b>Bypass</b>) is pure gatekeeping. Gray tail = dead links they caught — housekeeping work that volume numbers hide.</ReadNote>
-          </Card>
-          <Card label="Their picks → final outcomes" note="quality order: Priority V › IV › Insight › Watch List › Theme/Art › Bypass · Not Found excluded from score">
-            {finRows.length ? <StackedBars rows={finRows} keys={finKeys} /> : <Empty text="No picks reached final conclusion in this window" />}
-            <ReadNote>Of the games each evaluator escalated, this is how the moderator judged them. More violet/teal (<b>Priority V/IV</b>) = picks that hold up; mostly blue (<b>Theme/Art</b>) = aesthetic-only finds; red (<b>Bypass</b>) = picks that were rejected outright.</ReadNote>
-          </Card>
-        </>
-      )}
+      <div className="rp-section-title">Output quality — initial → final</div>
+      <Card label="Volume vs pick quality" note="x = throughput · y = outcome score · bubble = games evaluated">
+        {scatterPts.length ? <Scatter points={scatterPts} xLabel="Throughput" yLabel="Outcome score"
+          xFormat={(v) => fmt.dec(v, 1)} yFormat={(v) => fmt.dec(v, 0)} /> : <Empty text="No judged picks in this window" />}
+        <ReadNote>Top-right = high volume <i>and</i> high-quality picks (the ideal). Bottom-right = fast but loose (lots of low-quality escalations). Top-left = selective, low volume. Bubble size = how many games they evaluated.</ReadNote>
+      </Card>
+      <Card label="Initial conclusions by evaluator" note="quality order: List_Idea › Playtest & Bypass › Bypass · gray = Link_dead">
+        <StackedBars rows={initRows} keys={initKeys} />
+        <ReadNote>Purple (<b>List_Idea</b>) is the strongest signal an initial evaluator can produce; amber (<b>Playtest & Bypass</b>) is a hedge; red (<b>Bypass</b>) is pure gatekeeping. Gray tail = dead links they caught — housekeeping work that volume numbers hide.</ReadNote>
+      </Card>
+      <Card label="Their picks → final outcomes" note="quality order: Priority V › IV › Insight › Watch List › Theme/Art › Bypass · Not Found excluded from score">
+        {finRows.length ? <StackedBars rows={finRows} keys={finKeys} /> : <Empty text="No picks reached final conclusion in this window" />}
+        <ReadNote>Of the games each evaluator escalated, this is how the moderator judged them. More violet/teal (<b>Priority V/IV</b>) = picks that hold up; mostly blue (<b>Theme/Art</b>) = aesthetic-only finds; red (<b>Bypass</b>) = picks that were rejected outright.</ReadNote>
+      </Card>
     </>
   )
 }
@@ -245,8 +267,16 @@ function Leaderboard({ d }: { d: Bundle }) {
   const byTurn = ev.filter((e) => e.turnaround != null).sort((a, b) => a.turnaround! - b.turnaround!).map((e) => ({ name: e.name, value: e.turnaround! }))
   const byRec = [...ev].filter((e) => e.recorded > 0).sort((a, b) => b.recorded - a.recorded).map((e) => ({ name: e.name, value: e.recorded }))
   const byOutcome = ev.filter((e) => e.outcomeScore != null).sort((a, b) => b.outcomeScore! - a.outcomeScore!).map((e) => ({ name: e.name, value: e.outcomeScore! }))
+  const canBump = d.heatmap.periods.length >= 2
   return (
-    <div className="rp-grid-2">
+    <>
+      {canBump && (
+        <Card label="Rank movement" note="volume rank per period — who's climbing vs slipping">
+          <BumpChart periods={d.heatmap.periods} rows={d.heatmap.rows} />
+          <ReadNote>Each line is one evaluator's <b>rank</b> (1 = most games) across periods. Lines rising toward the top = accelerating; dropping = slowing. Hover a line to isolate it.</ReadNote>
+        </Card>
+      )}
+      <div className="rp-grid-2">
       <Card label="Volume" note="games evaluated"><RankBars rows={rank((e) => e.evaluated)} unit="games" color={CAT[0]} /></Card>
       <Card label="Throughput" note="games / active day"><RankBars rows={rank((e) => e.throughput)} color={CAT[1]} format={(v) => fmt.dec(v)} /></Card>
       <Card label="Turnaround (fastest first)" note="days assign → evaluate"><RankBars rows={byTurn} color={CAT[2]} format={(v) => `${v.toFixed(1)}d`} /></Card>
@@ -257,18 +287,18 @@ function Leaderboard({ d }: { d: Bundle }) {
       </Card>
       <Card label="Note coverage" note="% evaluations with a note"><RankBars rows={rank((e) => e.noteRate)} color={CAT[5]} format={fmt.pct} /></Card>
       <Card label="Recording" note="videos recorded (5/20min)">{byRec.length ? <RankBars rows={byRec} unit="rec" color={CAT[7]} /> : <Empty text="No recordings in this window" />}</Card>
-    </div>
+      </div>
+    </>
   )
 }
 
 /* ---------------- Individual ---------------- */
-function Individual({ d, isManager, myName }: { d: Bundle; isManager: boolean; myName: string }) {
+function Individual({ d }: { d: Bundle }) {
   const [selKey, setSel] = useState('')
   const selected = useMemo(() => {
     if (!d.evaluators.length) return null
-    if (!isManager) return d.evaluators.find((e) => e.key === myName.toLowerCase()) || d.evaluators[0]
     return d.evaluators.find((e) => e.key === selKey) || d.evaluators[0]
-  }, [d.evaluators, selKey, isManager, myName])
+  }, [d.evaluators, selKey])
   if (!selected) return <div className="card"><Empty /></div>
   const e = selected
   const rad = d.radar.find((r) => r.key === e.key)
@@ -281,19 +311,21 @@ function Individual({ d, isManager, myName }: { d: Bundle; isManager: boolean; m
     { label: 'Triaged', value: e.triaged },
     { label: 'Final Priority', value: e.finalPriority },
   ]
+  // personal volume trend from the heatmap (per-period cells for this person)
+  const hrow = d.heatmap.rows.find((r) => r.name === e.name)
+  const personPts = hrow ? d.heatmap.periods.map((p) => ({ label: p.label, value: hrow.cells[p.key] || 0 })) : []
+  const personSpark = personPts.map((p) => p.value)
   return (
     <>
-      {isManager && (
-        <div className="rp-people">
-          {d.evaluators.map((x) => (
-            <button key={x.key} className={'rp-chip' + (x.key === e.key ? ' active' : '')} onClick={() => setSel(x.key)}>
-              {x.name} <span className="rp-chip-n">{x.evaluated || x.recorded}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="rp-kpi-row">
-        <Kpi label="Evaluated" value={fmt.int(e.evaluated)} hi />
+      <div className="rp-people">
+        {d.evaluators.map((x) => (
+          <button key={x.key} className={'rp-chip' + (x.key === e.key ? ' active' : '')} onClick={() => setSel(x.key)}>
+            {x.name} <span className="rp-chip-n">{x.evaluated || x.recorded}</span>
+          </button>
+        ))}
+      </div>
+      <div className="rp-kpi-row rp-kpi-row-dense">
+        <Kpi label="Evaluated" value={fmt.int(e.evaluated)} hi spark={personSpark.length >= 2 ? personSpark : undefined} />
         <Kpi label="Throughput" value={fmt.dec(e.throughput)} sub="games / active day" />
         <Kpi label="Turnaround" value={fmt.days(e.turnaround)} sub="assign → evaluate" />
         <Kpi label="Signal rate" value={fmt.pct(e.signalRate)} sub="escalated" />
@@ -311,6 +343,11 @@ function Individual({ d, isManager, myName }: { d: Bundle; isManager: boolean; m
           <Funnel stages={funnelStages} />
         </Card>
       </div>
+      {personPts.length >= 2 && (
+        <Card label={`${e.name} — volume trend`} note="games evaluated per period">
+          <LineChart series={[{ name: e.name, color: CAT[0], points: personPts }]} area />
+        </Card>
+      )}
       <div className="rp-grid-2">
         <Card label="Initial conclusion mix" note="their filtering">{initC.length ? <Donut data={initC} /> : <Empty />}</Card>
         <Card label="Final outcomes" note="how their picks were judged">{finC.length ? <Donut data={finC} /> : <Empty text="None reached final conclusion" />}</Card>
@@ -327,27 +364,46 @@ function Compare({ d }: { d: Bundle }) {
   const allRound = d.radar
     .map((r) => ({ name: r.name, value: RADAR_AXES.reduce((s, a) => s + (r.axes[a] || 0), 0) / RADAR_AXES.length }))
     .sort((a, b) => b.value - a.value)
+  // scatter: volume (x) vs survival rate (y), bubble = throughput
+  const scatterPts = d.evaluators.filter((e) => e.evaluated > 0)
+    .map((e, i) => ({ name: e.name, x: e.evaluated, y: e.survivalRate * 100, size: Math.max(1, e.throughput), color: CAT[i % CAT.length] }))
   return (
-    <div className="rp-grid-2-1">
-      <Card label="Performance radar — top evaluators" note="5 axes · normalized to team best">
-        <Radar axes={[...RADAR_AXES]} series={series} size={320} />
-        <ReadNote>Each polygon is one evaluator across Volume · Consistency · Signal · Survival · Recording. Larger, more balanced = stronger all-rounder. Hover a legend name to isolate it.</ReadNote>
+    <>
+      <div className="rp-grid-2-1">
+        <Card label="Performance radar — top evaluators" note="5 axes · normalized to team best">
+          <Radar axes={[...RADAR_AXES]} series={series} size={320} />
+          <ReadNote>Each polygon is one evaluator across Volume · Consistency · Signal · Survival · Recording. Larger, more balanced = stronger all-rounder. Hover a legend name to isolate it.</ReadNote>
+        </Card>
+        <Card label="All-rounder score" note="avg of 5 normalized axes">
+          <RankBars rows={allRound} color={CAT[4]} format={(v) => fmt.dec(v, 0)} />
+          <ReadNote>A single balance score: high only when someone is strong across <b>all</b> dimensions, not just volume. Use it to spot well-rounded evaluators vs. one-trick specialists.</ReadNote>
+        </Card>
+      </div>
+      <Card label="Volume vs survival rate" note="x = games evaluated · y = survival % · bubble = throughput">
+        {scatterPts.length ? <Scatter points={scatterPts} xLabel="Volume" yLabel="Survival %"
+          xFormat={(v) => fmt.int(v)} yFormat={(v) => `${Math.round(v)}%`} /> : <Empty />}
+        <ReadNote>Right = high volume; up = a big share of escalations reach Final Priority. Top-right evaluators produce a lot <i>and</i> pick well. Bottom-right = high volume but loose filtering.</ReadNote>
       </Card>
-      <Card label="All-rounder score" note="avg of 5 normalized axes">
-        <RankBars rows={allRound} color={CAT[4]} format={(v) => fmt.dec(v, 0)} />
-        <ReadNote>A single balance score: high only when someone is strong across <b>all</b> dimensions, not just volume. Use it to spot well-rounded evaluators vs. one-trick specialists.</ReadNote>
-      </Card>
-    </div>
+    </>
   )
 }
 
 /* ---------------- Activity heatmap ---------------- */
 function Activity({ d }: { d: Bundle }) {
+  const canBump = d.heatmap.periods.length >= 2
   return (
-    <Card label="Activity heatmap" note="games evaluated · person × period">
-      <Heatmap periods={d.heatmap.periods} rows={d.heatmap.rows} />
-      <ReadNote>Darker = more games that period. Solid rows = working every period; gaps = idle stretches. Spot who is accelerating vs. slowing.</ReadNote>
-    </Card>
+    <>
+      <Card label="Activity heatmap" note="games evaluated · person × period">
+        <Heatmap periods={d.heatmap.periods} rows={d.heatmap.rows} />
+        <ReadNote>Darker = more games that period. Solid rows = working every period; gaps = idle stretches. Spot who is accelerating vs. slowing.</ReadNote>
+      </Card>
+      {canBump && (
+        <Card label="Rank movement" note="volume rank per period">
+          <BumpChart periods={d.heatmap.periods} rows={d.heatmap.rows} />
+          <ReadNote>The same activity, read as <b>rank</b>: lines climbing toward rank 1 are pulling ahead; lines falling are losing ground period over period.</ReadNote>
+        </Card>
+      )}
+    </>
   )
 }
 
