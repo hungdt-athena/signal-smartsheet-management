@@ -273,7 +273,7 @@ function Leaderboard({ d }: { d: Bundle }) {
       {canBump && (
         <Card label="Rank movement" note="volume rank per period — who's climbing vs slipping">
           <BumpChart periods={d.heatmap.periods} rows={d.heatmap.rows} />
-          <ReadNote>Each line is one evaluator's <b>rank</b> (1 = most games) across periods. Lines rising toward the top = accelerating; dropping = slowing. Hover a line to isolate it.</ReadNote>
+          <ReadNote>Each line is one evaluator&apos;s <b>rank</b> (1 = most games) across periods. Lines rising toward the top = accelerating; dropping = slowing. Hover a line to isolate it.</ReadNote>
         </Card>
       )}
       <div className="rp-grid-2">
