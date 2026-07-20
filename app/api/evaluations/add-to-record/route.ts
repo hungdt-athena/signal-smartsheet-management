@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { getConfigValues } from '@/lib/config'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +24,13 @@ export async function POST(req: NextRequest) {
   const guard = await requireRole(['admin', 'moderator'])
   if (guard) return guard
   try {
-    const { game_id, category_group, bucket, batch } = await req.json()
+    const {
+      game_id, category_group, bucket, batch,
+      // Optional eval overrides confirmed in the Add-game popup. When present the
+      // caller has explicitly chosen these values, so they're applied as-is (the
+      // legacy server-side auto-fill only runs when none are provided).
+      initial_evaluator, initial_conclusion, final_conclusion, final_evaluator,
+    } = await req.json()
     if (!game_id) {
       return NextResponse.json({ error: 'game_id is required' }, { status: 400 })
     }
@@ -52,29 +59,79 @@ export async function POST(req: NextRequest) {
       ON CONFLICT (game_id, category_group) DO NOTHING
     `
 
+    // Normalize the optional overrides: a non-empty string is applied, anything
+    // else means "not provided" (leave the column untouched via COALESCE below).
+    const clean = (v: unknown): string | null =>
+      typeof v === 'string' && v.trim() ? v.trim() : null
+    const initEval = clean(initial_evaluator)
+    const initConcl = clean(initial_conclusion)
+    const finalConcl = clean(final_conclusion)
+    const finalEval = clean(final_evaluator)
+    const hasOverride = !!(initEval || initConcl || finalConcl || finalEval)
+
+    // Validate the confirmed conclusions against the configured option lists
+    // (mirrors the PATCH handler) so a forged value can't slip in.
+    if (initConcl) {
+      const opts = await getConfigValues('conclusion')
+      if (!opts.includes(initConcl)) {
+        return NextResponse.json({ error: 'Invalid initial_conclusion' }, { status: 400 })
+      }
+    }
+    if (finalConcl) {
+      const opts = await getConfigValues('final_conclusion')
+      if (!opts.includes(finalConcl)) {
+        return NextResponse.json({ error: 'Invalid final_conclusion' }, { status: 400 })
+      }
+    }
+
     // Set the bucket, and (when a batch is supplied) move the row into that week so
     // it surfaces in the batch-filtered record list. A NULL batchVal leaves the
     // existing batch untouched.
-    //
-    // When the row has no genuine evaluation yet (initial_conclusion NULL or a
-    // bypass verdict), auto-fill it as a VinhTD List_Idea with the bucket's final
-    // conclusion. The `autoFill` CASE guard reads the pre-update initial_conclusion
-    // so a real evaluation is never overwritten. Dates mirror the PATCH handler.
-    const finalConclusion = FINAL_FOR_BUCKET[bucket as keyof typeof FINAL_FOR_BUCKET]
-    const autoFill = sql`(initial_conclusion IS NULL OR initial_conclusion ILIKE '%bypass%')`
-    const result = await sql`
-      UPDATE game_evaluations
-      SET record_bucket = ${bucket},
-          batch = COALESCE(${batchVal}, batch),
-          initial_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE initial_evaluator END,
-          initial_conclusion = CASE WHEN ${autoFill} THEN 'List_Idea' ELSE initial_conclusion END,
-          evaluate_date = CASE WHEN ${autoFill} THEN NOW() ELSE evaluate_date END,
-          final_conclusion = CASE WHEN ${autoFill} THEN ${finalConclusion} ELSE final_conclusion END,
-          final_conclusion_date = CASE WHEN ${autoFill} THEN NOW() ELSE final_conclusion_date END,
-          final_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE final_evaluator END
-      WHERE game_id = ${game_id} AND category_group = ${category_group}
-      RETURNING id
-    `
+    let result
+    if (hasOverride) {
+      // Explicit values confirmed in the popup: apply each (COALESCE keeps the
+      // existing value when a field was left blank). evaluate_date /
+      // final_conclusion_date only advance when the value actually changed, so
+      // confirming an unchanged real evaluation doesn't skew report timing.
+      result = await sql`
+        UPDATE game_evaluations
+        SET record_bucket = ${bucket},
+            batch = COALESCE(${batchVal}, batch),
+            initial_evaluator = COALESCE(${initEval}, initial_evaluator),
+            initial_conclusion = COALESCE(${initConcl}, initial_conclusion),
+            evaluate_date = CASE
+              WHEN ${initConcl}::text IS NOT NULL AND initial_conclusion IS DISTINCT FROM ${initConcl}
+                THEN NOW() ELSE evaluate_date END,
+            final_conclusion = COALESCE(${finalConcl}, final_conclusion),
+            final_conclusion_date = CASE
+              WHEN ${finalConcl}::text IS NOT NULL AND final_conclusion IS DISTINCT FROM ${finalConcl}
+                THEN NOW() ELSE final_conclusion_date END,
+            final_evaluator = COALESCE(${finalEval}, final_evaluator)
+        WHERE game_id = ${game_id} AND category_group = ${category_group}
+        RETURNING id
+      `
+    } else {
+      // Legacy fallback (no overrides — e.g. an n8n caller): when the row has no
+      // genuine evaluation yet (initial_conclusion NULL or a bypass verdict),
+      // auto-attribute it to VinhTD as a List_Idea with the bucket's final
+      // conclusion (5min → Insight, 20min → Priority IV). The CASE guard reads the
+      // pre-update value so a real evaluation is never overwritten.
+      const finalConclusion = FINAL_FOR_BUCKET[bucket as keyof typeof FINAL_FOR_BUCKET]
+      const autoFill = sql`(initial_conclusion IS NULL OR initial_conclusion ILIKE '%bypass%')`
+      result = await sql`
+        UPDATE game_evaluations
+        SET record_bucket = ${bucket},
+            batch = COALESCE(${batchVal}, batch),
+            initial_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE initial_evaluator END,
+            initial_conclusion = CASE WHEN ${autoFill} THEN 'List_Idea' ELSE initial_conclusion END,
+            evaluate_date = CASE WHEN ${autoFill} THEN NOW() ELSE evaluate_date END,
+            final_conclusion = CASE WHEN ${autoFill} THEN ${finalConclusion} ELSE final_conclusion END,
+            final_conclusion_date = CASE WHEN ${autoFill} THEN NOW() ELSE final_conclusion_date END,
+            final_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE final_evaluator END
+        WHERE game_id = ${game_id} AND category_group = ${category_group}
+        RETURNING id
+      `
+    }
     return NextResponse.json({ ok: true, id: result[0]?.id })
   } catch (err) {
     console.error('POST /api/evaluations/add-to-record error:', err)

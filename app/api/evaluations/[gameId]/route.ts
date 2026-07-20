@@ -16,7 +16,7 @@ function cleanupManualScreenshots(gameId: string) {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { gameId: string } }
 ) {
   const guard = await requireAuth()
@@ -25,6 +25,11 @@ export async function GET(
   try {
     const gameId = params.gameId
     if (!gameId) return NextResponse.json({ error: 'Invalid game_id' }, { status: 400 })
+
+    // Optional: scope to a category so a game with eval rows in more than one
+    // category returns the right one (the record popup passes this).
+    const category = req.nextUrl.searchParams.get('category') || ''
+    const categoryFilter = category ? sql`AND ge.category_group = ${category}` : sql``
 
     const rows = await sql`
       SELECT ge.id, ge.game_id, ge.category_group, ge.genre_1, ge.genre_2,
@@ -53,6 +58,7 @@ export async function GET(
       JOIN game_info gi ON ge.game_id = gi.game_id
       LEFT JOIN developer dev ON gi.publisher_id = dev.id
       WHERE ge.game_id = ${gameId}
+        ${categoryFilter}
     `
 
     if (rows.length === 0) {

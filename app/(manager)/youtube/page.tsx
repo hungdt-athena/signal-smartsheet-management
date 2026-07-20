@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { prettyConclusion } from '@/lib/buckets'
+import { useConfig } from '@/hooks/useConfig'
 import { LockIcon, UserIcon } from '@/components/icons'
 import EvalDetailPanel from '@/components/EvalDetailPanel'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
@@ -1174,11 +1175,199 @@ interface CatalogGame {
   icon_url: string | null
 }
 
-function AddGameModal({ category, batch, excludeGameIds, targetBucket, onAdded, onClose }: {
+// Final conclusion each bucket implies, and the reverse (final → bucket) so that
+// changing the final conclusion in the confirm popup re-derives the container.
+const FINAL_FOR_BUCKET: Record<'5min' | '20min', string> = { '5min': 'Insight', '20min': 'Priority IV' }
+function bucketForFinal(final: string, fallback: '5min' | '20min'): '5min' | '20min' {
+  return final === 'Priority IV' ? '20min' : final === 'Insight' ? '5min' : fallback
+}
+const BYPASS_RE = /bypass/i
+
+interface OriginalEval {
+  initial_evaluator: string | null
+  initial_conclusion: string | null
+  final_conclusion: string | null
+  final_evaluator: string | null
+}
+
+// Confirm step for adding a game to a record bucket. Shows the game's current
+// evaluation (Original) beside editable inputs and only writes on Confirm — this
+// guards against accidental adds and lets the adder correct the auto-attribution.
+// A game never really evaluated (no initial conclusion) or only bypassed is
+// pre-filled with the VinhTD / List_Idea / bucket-final defaults; a genuine
+// evaluation is pre-filled with its own values (kept unless the adder edits them).
+function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onConfirmed, onCancel }: {
+  game: CatalogGame
+  category: string
+  batch: string
+  targetBucket: '5min' | '20min'
+  recorders: string[]
+  onConfirmed: () => void
+  onCancel: () => void
+}) {
+  const { conclusion: conclusionOptions, final_conclusion: finalOptions } = useConfig()
+  const [orig, setOrig] = useState<OriginalEval | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const [initEvaluator, setInitEvaluator] = useState('')
+  const [initConclusion, setInitConclusion] = useState('')
+  const [finalConclusion, setFinalConclusion] = useState('')
+  const [finalEvaluator, setFinalEvaluator] = useState('')
+
+  // Load the current evaluation and seed the form (smart defaults by case).
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    fetch(`/api/evaluations/${game.game_id}?${new URLSearchParams({ category })}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((json: { data?: OriginalEval } | null) => {
+        if (cancelled) return
+        const d = json?.data ?? null
+        setOrig(d)
+        const ic = d?.initial_conclusion ?? null
+        const eligible = !ic || BYPASS_RE.test(ic)
+        if (eligible) {
+          setInitEvaluator('VinhTD')
+          setInitConclusion('List_Idea')
+          setFinalConclusion(FINAL_FOR_BUCKET[targetBucket])
+          setFinalEvaluator('VinhTD')
+        } else {
+          setInitEvaluator(d?.initial_evaluator ?? '')
+          setInitConclusion(ic ?? '')
+          setFinalConclusion(d?.final_conclusion ?? '')
+          setFinalEvaluator(d?.final_evaluator ?? '')
+        }
+      })
+      .catch(() => { if (!cancelled) setOrig(null) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [game.game_id, category, targetBucket])
+
+  // Container the game will land in — driven by the chosen final conclusion.
+  const resolvedBucket = bucketForFinal(finalConclusion, targetBucket)
+  // Name suggestions for the evaluator inputs — team members plus the VinhTD default.
+  const nameOptions = useMemo(
+    () => Array.from(new Set(['VinhTD', ...recorders])),
+    [recorders]
+  )
+
+  async function confirm() {
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/evaluations/add-to-record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          game_id: game.game_id, category_group: category, bucket: resolvedBucket, batch,
+          initial_evaluator: initEvaluator, initial_conclusion: initConclusion,
+          final_conclusion: finalConclusion, final_evaluator: finalEvaluator,
+        }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => null)
+        setError(j?.error ?? 'Failed to add')
+        setSaving(false)
+        return
+      }
+    } catch { setError('Network error'); setSaving(false); return }
+    onConfirmed()
+  }
+
+  const nameListId = `confirm-add-names-${game.game_id}`
+  const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.3 }
+  const origStyle: React.CSSProperties = { fontSize: 12.5, color: 'var(--faint)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+  const fieldStyle: React.CSSProperties = {
+    width: '100%', boxSizing: 'border-box', padding: '6px 9px', borderRadius: 8,
+    border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: 12.5,
+  }
+
+  return (
+    <div className="eval-modal-backdrop" onClick={onCancel} style={{ zIndex: 60 }}>
+      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
+        style={{ padding: '20px 22px 20px', maxWidth: 560, width: '92vw' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          {game.icon_url ? (
+            <img src={game.icon_url} alt="" width={30} height={30} style={{ borderRadius: 7, flexShrink: 0 }} />
+          ) : (
+            <div style={{ width: 30, height: 30, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
+          )}
+          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{game.title}</h2>
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 14px 40px' }}>
+          Confirm add · {category} · {batch || 'no batch'}
+        </p>
+
+        {loading ? (
+          <p className="empty">Loading…</p>
+        ) : (
+          <>
+            {/* Column headers */}
+            <div style={{ display: 'grid', gridTemplateColumns: '116px 1fr 1fr', gap: '6px 10px', alignItems: 'center', marginBottom: 4 }}>
+              <span />
+              <span style={labelStyle}>Original</span>
+              <span style={labelStyle}>New (applied)</span>
+
+              {/* Initial evaluator */}
+              <span style={labelStyle}>Init. evaluator</span>
+              <span style={origStyle}>{orig?.initial_evaluator || '—'}</span>
+              <input list={nameListId} value={initEvaluator} onChange={e => setInitEvaluator(e.target.value)} style={fieldStyle} placeholder="evaluator" />
+
+              {/* Initial conclusion */}
+              <span style={labelStyle}>Init. conclusion</span>
+              <span style={origStyle}>{orig?.initial_conclusion ? prettyConclusion(orig.initial_conclusion) : '—'}</span>
+              <select value={initConclusion} onChange={e => setInitConclusion(e.target.value)} style={fieldStyle}>
+                <option value="">(none)</option>
+                {conclusionOptions.map(c => <option key={c} value={c}>{prettyConclusion(c)}</option>)}
+              </select>
+
+              {/* Final conclusion */}
+              <span style={labelStyle}>Final conclusion</span>
+              <span style={origStyle}>{orig?.final_conclusion ? prettyConclusion(orig.final_conclusion) : '—'}</span>
+              <select value={finalConclusion} onChange={e => setFinalConclusion(e.target.value)} style={fieldStyle}>
+                <option value="">(none)</option>
+                {finalOptions.map(c => <option key={c} value={c}>{prettyConclusion(c)}</option>)}
+              </select>
+
+              {/* Final evaluator */}
+              <span style={labelStyle}>Final evaluator</span>
+              <span style={origStyle}>{orig?.final_evaluator || '—'}</span>
+              <input list={nameListId} value={finalEvaluator} onChange={e => setFinalEvaluator(e.target.value)} style={fieldStyle} placeholder="evaluator" />
+            </div>
+            <datalist id={nameListId}>
+              {nameOptions.map(n => <option key={n} value={n} />)}
+            </datalist>
+
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0 0' }}>
+              → Lands in <b style={{ color: 'var(--text)' }}>{resolvedBucket === '20min' ? '20 MIN' : '5 MIN'}</b>
+              {resolvedBucket !== targetBucket && <span style={{ color: 'var(--accent)' }}> (moved by final conclusion)</span>}
+            </p>
+
+            {error && <p style={{ fontSize: 12, color: 'var(--danger, #d23b3b)', margin: '8px 0 0' }}>{error}</p>}
+          </>
+        )}
+
+        {/* Footer */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <button className="btn btn-sm" onClick={onCancel} disabled={saving}>Cancel</button>
+          <button className="btn btn-sm btn-primary" onClick={confirm} disabled={loading || saving}>
+            {saving ? 'Adding…' : 'Confirm add'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AddGameModal({ category, batch, excludeGameIds, targetBucket, recorders, onAdded, onClose }: {
   category: string
   batch: string
   excludeGameIds: Set<string>
   targetBucket: '5min' | '20min'
+  recorders: string[]
   onAdded: () => void
   onClose: () => void
 }) {
@@ -1187,7 +1376,9 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, onAdded, 
   const [results, setResults] = useState<CatalogGame[]>([])
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
-  const [adding, setAdding] = useState<string | null>(null)
+  // The game awaiting confirmation. Picking a game no longer adds it directly —
+  // it opens ConfirmAddModal so the adder can review/override its evaluation.
+  const [pending, setPending] = useState<CatalogGame | null>(null)
 
   // Default (empty query): the games in the selected batch/category — the common
   // case is pulling one of those into a bucket without having to type.
@@ -1231,20 +1422,6 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, onAdded, 
     [searching, results, batchGames, excludeGameIds]
   )
 
-  async function add(g: CatalogGame) {
-    setAdding(g.game_id)
-    try {
-      const res = await fetch('/api/evaluations/add-to-record', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_id: g.game_id, category_group: category, bucket: targetBucket, batch }),
-      })
-      if (!res.ok) { setAdding(null); return }
-    } catch { setAdding(null); return }
-    onAdded()
-    onClose()
-  }
-
   return (
     <div className="eval-modal-backdrop" onClick={onClose}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}
@@ -1278,13 +1455,12 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, onAdded, 
             <p className="empty">{searching ? 'Không tìm thấy game trong DB' : 'No games in this batch'}</p>
           ) : candidates.map(g => (
             <button key={g.game_id}
-              onClick={() => add(g)}
-              disabled={adding !== null}
+              onClick={() => setPending(g)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                 padding: '8px 12px', borderBottom: '1px solid var(--border)',
                 background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
-                color: 'var(--text)', opacity: adding !== null && adding !== g.game_id ? 0.5 : 1,
+                color: 'var(--text)',
               }}>
               {g.icon_url ? (
                 <img src={g.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
@@ -1292,11 +1468,22 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, onAdded, 
                 <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
               )}
               <span className="cell-name" style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
-              {adding === g.game_id && <span style={{ fontSize: 11, color: 'var(--faint)' }}>Adding…</span>}
             </button>
           ))}
         </div>
       </div>
+
+      {pending && (
+        <ConfirmAddModal
+          game={pending}
+          category={category}
+          batch={batch}
+          targetBucket={targetBucket}
+          recorders={recorders}
+          onConfirmed={() => { onAdded(); onClose() }}
+          onCancel={() => setPending(null)}
+        />
+      )}
     </div>
   )
 }
@@ -1691,6 +1878,7 @@ function RecordTab() {
           batch={filterBatch}
           excludeGameIds={new Set(data.map(d => d.game_id))}
           targetBucket={addBucket}
+          recorders={recorders}
           onAdded={fetchData}
           onClose={() => setAddBucket(null)}
         />
