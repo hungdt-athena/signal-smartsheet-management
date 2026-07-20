@@ -1237,7 +1237,7 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, onAdded, 
       const res = await fetch('/api/evaluations/add-to-record', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_id: g.game_id, category_group: category, bucket: targetBucket }),
+        body: JSON.stringify({ game_id: g.game_id, category_group: category, bucket: targetBucket, batch }),
       })
       if (!res.ok) { setAdding(null); return }
     } catch { setAdding(null); return }

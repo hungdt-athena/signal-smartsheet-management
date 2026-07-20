@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true, "skipLibCheck": true, "incremental": false },
+  "include": [
+    "components/report/charts.tsx",
+    "app/(manager)/report/page.tsx",
+    "app/api/report/route.ts",
+    "types/**/*.d.ts",
+    "next-env.d.ts"
+  ]
+}
