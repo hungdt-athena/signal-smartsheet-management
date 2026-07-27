@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
+import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 
 export const dynamic = 'force-dynamic'
+
+// Lowercase names kept out of every report aggregation (evaluation + recording).
+const EXCLUDED = SYSTEM_EVALUATOR_KEY_LIST
 
 // GET /api/report — live evaluator-performance analytics over game_evaluations.
 // Objective metrics only (no note scoring). Recording work is folded into each
@@ -92,10 +96,15 @@ export async function GET(req: NextRequest) {
       : win.batch ? 14 : 400
     const unit = spanDays <= 16 ? 'day' : spanDays <= 130 ? 'week' : 'month'
 
+    // System accounts (Shortcut, vinhtd) never count as evaluators here — their rows
+    // are bulk attribution, not evaluation work. See lib/system-accounts.
+    const notSystem = sql`AND lower(ge.initial_evaluator) <> ALL(${EXCLUDED})`
+
     const evalBase = sql`
       FROM game_evaluations ge
       WHERE ge.evaluate_date IS NOT NULL
         AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+        ${notSystem}
         ${catF} ${winF}`
 
     const [perEval, initConcl, finConcl, series, evalSeries, recorders, optRows] = await Promise.all([
@@ -142,6 +151,7 @@ export async function GET(req: NextRequest) {
           SELECT lower(ge.record_5min_assignee) AS k, ge.record_5min_assignee AS name, '5min' AS slot
           FROM game_evaluations ge
           WHERE ge.record_confirmed_at IS NOT NULL AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
+            AND lower(ge.record_5min_assignee) <> ALL(${EXCLUDED})
             ${catF}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
               ${win.from ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
@@ -150,6 +160,7 @@ export async function GET(req: NextRequest) {
           SELECT lower(ge.record_20min_assignee), ge.record_20min_assignee, '20min'
           FROM game_evaluations ge
           WHERE ge.record_confirmed_at IS NOT NULL AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
+            AND lower(ge.record_20min_assignee) <> ALL(${EXCLUDED})
             ${catF}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
               ${win.from ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}

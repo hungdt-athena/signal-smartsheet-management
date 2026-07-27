@@ -9,6 +9,7 @@ import { useConfig } from '@/hooks/useConfig'
 import { LockIcon, UserIcon } from '@/components/icons'
 import EvalDetailPanel from '@/components/EvalDetailPanel'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
+import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
 
 interface YtbRow {
   row_index: number
@@ -1194,7 +1195,7 @@ interface OriginalEval {
 // evaluation (Original) beside editable inputs and only writes on Confirm — this
 // guards against accidental adds and lets the adder correct the auto-attribution.
 // A game never really evaluated (no initial conclusion) or only bypassed is
-// pre-filled with the VinhTD / List_Idea / bucket-final defaults; a genuine
+// pre-filled with the Shortcut / List_Idea / bucket-final defaults; a genuine
 // evaluation is pre-filled with its own values (kept unless the adder edits them).
 function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onConfirmed, onCancel }: {
   game: CatalogGame
@@ -1229,10 +1230,10 @@ function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onCon
         const ic = d?.initial_conclusion ?? null
         const eligible = !ic || BYPASS_RE.test(ic)
         if (eligible) {
-          setInitEvaluator('VinhTD')
+          setInitEvaluator(SHORTCUT_EVALUATOR)
           setInitConclusion('List_Idea')
           setFinalConclusion(FINAL_FOR_BUCKET[targetBucket])
-          setFinalEvaluator('VinhTD')
+          setFinalEvaluator(SHORTCUT_EVALUATOR)
         } else {
           setInitEvaluator(d?.initial_evaluator ?? '')
           setInitConclusion(ic ?? '')
@@ -1247,9 +1248,10 @@ function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onCon
 
   // Container the game will land in — driven by the chosen final conclusion.
   const resolvedBucket = bucketForFinal(finalConclusion, targetBucket)
-  // Name suggestions for the evaluator inputs — team members plus the VinhTD default.
+  // Name suggestions for the evaluator inputs — team members plus the Shortcut
+  // system account (no dashboard_users row, so it must be added explicitly).
   const nameOptions = useMemo(
-    () => Array.from(new Set(['VinhTD', ...recorders])),
+    () => Array.from(new Set([SHORTCUT_EVALUATOR, ...recorders])),
     [recorders]
   )
 

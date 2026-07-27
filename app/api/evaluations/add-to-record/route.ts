@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getConfigValues } from '@/lib/config'
+import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,10 +11,12 @@ const CATEGORIES = ['puzzle', 'arcade', 'simulation'] as const
 
 // Games pulled into record that were never really evaluated (or only bypassed —
 // Bypass / M_ByPass / Playtest & Bypass, all caught by ILIKE '%bypass%') are
-// auto-attributed to VinhTD with a List_Idea initial + the final conclusion the
-// bucket implies (5min → Insight, 20min → Priority IV, mirroring effectiveBucket
-// / the record-view filter). A game with a genuine evaluation is left untouched.
-const AUTO_EVALUATOR = 'VinhTD'
+// auto-attributed to the `Shortcut` system account with a List_Idea initial + the
+// final conclusion the bucket implies (5min → Insight, 20min → Priority IV,
+// mirroring effectiveBucket / the record-view filter). A game with a genuine
+// evaluation is left untouched. Shortcut keeps this bulk attribution off a real
+// person's record and is excluded from the Report tab (see lib/system-accounts).
+const AUTO_EVALUATOR = SHORTCUT_EVALUATOR
 const FINAL_FOR_BUCKET = { '5min': 'Insight', '20min': 'Priority IV' } as const
 
 // Pull a game into a record bucket by game_id — even if it has no evaluation
@@ -113,7 +116,7 @@ export async function POST(req: NextRequest) {
     } else {
       // Legacy fallback (no overrides — e.g. an n8n caller): when the row has no
       // genuine evaluation yet (initial_conclusion NULL or a bypass verdict),
-      // auto-attribute it to VinhTD as a List_Idea with the bucket's final
+      // auto-attribute it to Shortcut as a List_Idea with the bucket's final
       // conclusion (5min → Insight, 20min → Priority IV). The CASE guard reads the
       // pre-update value so a real evaluation is never overwritten.
       const finalConclusion = FINAL_FOR_BUCKET[bucket as keyof typeof FINAL_FOR_BUCKET]

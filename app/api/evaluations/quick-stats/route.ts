@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
+import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,9 +55,12 @@ export async function GET(req: NextRequest) {
       ? sql`AND ge.evaluate_date IS NOT NULL`
       : sql``
 
+    // System accounts (Shortcut, vinhtd) are bulk attribution, not evaluation work —
+    // kept out of the stats rows, same as the Report tab. See lib/system-accounts.
     const baseWhere = sql`
       ge.category_group = ${category}
         AND ge.initial_evaluator IS NOT NULL
+        AND lower(ge.initial_evaluator) <> ALL(${SYSTEM_EVALUATOR_KEY_LIST})
         ${evalFilter}
         ${timeFilter}
         ${evaluatorFilter}

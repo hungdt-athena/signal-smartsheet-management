@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -25,6 +26,11 @@ export const maxDuration = 120
 // Auth: x-webhook-secret (n8n cron) OR admin session — same idiom as push-evaluations.
 
 const VN = 'Asia/Ho_Chi_Minh'
+
+// System accounts (Shortcut, vinhtd) are bulk attribution, not evaluation work —
+// kept out of the rollup so frozen weeks match the live report. See
+// lib/system-accounts.
+const EXCLUDED = SYSTEM_EVALUATOR_KEY_LIST
 
 function hasWebhookSecret(req: NextRequest): boolean {
   const secret = process.env.WEBHOOK_SECRET
@@ -86,6 +92,7 @@ export async function POST(req: NextRequest) {
           FROM game_evaluations ge
           WHERE ge.evaluate_date IS NOT NULL
             AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+            AND lower(ge.initial_evaluator) <> ALL(${EXCLUDED})
             AND ${sourcePred(sql`ge.evaluate_date`)}
         ),
         concl AS (
@@ -139,6 +146,7 @@ export async function POST(req: NextRequest) {
           FROM game_evaluations ge
           WHERE ge.record_confirmed_at IS NOT NULL
             AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
+            AND lower(ge.record_5min_assignee) <> ALL(${EXCLUDED})
             AND ${sourcePred(sql`ge.record_confirmed_at`)}
           UNION ALL
           SELECT (ge.record_confirmed_at AT TIME ZONE ${VN})::date AS ev_date,
@@ -148,6 +156,7 @@ export async function POST(req: NextRequest) {
           FROM game_evaluations ge
           WHERE ge.record_confirmed_at IS NOT NULL
             AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
+            AND lower(ge.record_20min_assignee) <> ALL(${EXCLUDED})
             AND ${sourcePred(sql`ge.record_confirmed_at`)}
         ),
         buck AS (
