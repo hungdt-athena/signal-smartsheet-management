@@ -18,12 +18,12 @@ const MIME_EXT: Record<string, string> = {
   'image/webp': 'webp',
 }
 
-/** Allowed: admin/moderator, or the game's assigned initial evaluator. Null when allowed. */
+/** Allowed: admin, or the game's assigned initial evaluator. Null when allowed. */
 async function checkPermission(gameId: string): Promise<NextResponse | null> {
   if (process.env.SKIP_AUTH === 'true') return null
   const session = await getServerSession(authOptions)
   const role = session?.user?.role
-  if (role === 'admin' || role === 'moderator') return null
+  if (role === 'admin') return null
   const rows = await sql`SELECT initial_evaluator FROM game_evaluations WHERE game_id = ${gameId}`
   if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (rows[0].initial_evaluator !== session?.user?.name) {

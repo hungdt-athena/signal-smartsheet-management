@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 //   GET /api/operations/runs?kind=reassign|handover&category=puzzle&limit=100
 
 export async function GET(req: NextRequest) {
-  const guard = await requireRole(['admin', 'moderator', 'evaluator'])
+  const guard = await requireRole(['admin', 'evaluator'])
   if (guard) return guard
 
   const p = req.nextUrl.searchParams

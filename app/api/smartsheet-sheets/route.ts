@@ -17,7 +17,7 @@ export async function GET() {
 
 // PATCH /api/smartsheet-sheets — update sheet_id in DB and sync to Google Sheets via n8n
 export async function PATCH(req: NextRequest) {
-  const guard = await requireRole(['admin', 'moderator'])
+  const guard = await requireRole(['admin'])
   if (guard) return guard
 
   const { sheet_name, sheet_id } = await req.json()

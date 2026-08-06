@@ -3,7 +3,7 @@
 // the bundle small and matches the app's existing inline-SVG style. Palette is the
 // dataviz-validated categorical set; conclusion hues reuse the app's badge intent.
 
-import { useId, useState } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 
 // Validated categorical palette (see scripts/validate_palette.js). Assigned in fixed
 // order, never cycled past 8 — a 9th series folds into "Other" upstream.
@@ -26,15 +26,47 @@ export function conclusionColor(name: string, i = 0): string {
 export const fmt = {
   int: (n: number) => Math.round(n).toLocaleString('en-US'),
   dec: (n: number, d = 1) => n.toFixed(d),
-  pct: (n: number) => `${Math.round(n * 100)}%`,
+  // sub-1% rates keep a decimal so they don't collapse to "0%" / "1%"
+  pct: (n: number) => { const p = n * 100; return p > 0 && p < 2 ? `${p.toFixed(1)}%` : `${Math.round(p)}%` },
   days: (n: number | null) => (n == null ? '—' : `${n.toFixed(1)}d`),
   signed: (n: number | null) => (n == null ? '—' : `${n > 0 ? '+' : ''}${Math.round(n * 100)}%`),
 }
 
+// ---------- "?" tooltip: metric definition + how to act on it ----------
+// The popover is position:fixed and placed from the icon's viewport rect, clamped
+// to the viewport — it can never be clipped by card/grid boundaries.
+export function InfoTip({ title, children }: { title?: string; children: ReactNode }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    const W = 270
+    const x = Math.min(Math.max(8, r.left + r.width / 2 - W / 2), window.innerWidth - W - 8)
+    setPos({ x, y: r.bottom + 7 })
+  }
+  return (
+    <span className="rp-qtip" ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)}>
+      <span className="rp-qtip-icon" aria-label="What is this?">?</span>
+      {pos && (
+        <span className="rp-qtip-pop" role="tooltip" style={{ left: pos.x, top: pos.y }}>
+          {title && <span className="rp-qtip-title">{title}</span>}
+          {children}
+        </span>
+      )}
+    </span>
+  )
+}
+
+// ---------- data-driven insight callout (colored strip under a chart) ----------
+export function Insight({ level = 'info', children }: { level?: 'info' | 'warn' | 'bad' | 'good'; children: ReactNode }) {
+  return <div className={`rp-insight rp-insight-${level}`}>{children}</div>
+}
+
 // ---------- KPI card (optional inline sparkline) ----------
-export function Kpi({ label, value, sub, trend, hi, spark, sparkColor }: {
+export function Kpi({ label, value, sub, trend, hi, spark, sparkColor, tip }: {
   label: string; value: string; sub?: string; trend?: number | null; hi?: boolean
-  spark?: number[]; sparkColor?: string
+  spark?: number[]; sparkColor?: string; tip?: ReactNode
 }) {
   const tclass = trend == null ? '' : trend > 0 ? 'up' : trend < 0 ? 'down' : ''
   // derive a trend from the sparkline tail if none was supplied
@@ -47,7 +79,7 @@ export function Kpi({ label, value, sub, trend, hi, spark, sparkColor }: {
   const col = sparkColor || (hi ? 'var(--accent-strong)' : 'var(--accent)')
   return (
     <div className={'rp-kpi' + (hi ? ' hi' : '')}>
-      <div className="rp-kpi-label">{label}</div>
+      <div className="rp-kpi-label">{label}{tip && <InfoTip title={label}>{tip}</InfoTip>}</div>
       <div className="rp-kpi-main">
         <div className="rp-kpi-value">{value}</div>
         {spark && spark.length >= 2 && <Sparkline data={spark} color={col} />}
@@ -92,20 +124,29 @@ export function Sparkline({ data, color = CAT[0], w = 76, h = 30 }: {
 }
 
 // ---------- multi-series line / area chart over time ----------
-export function LineChart({ series, area = false, format }: {
-  series: Array<{ name: string; color?: string; points: Array<{ label: string; value: number }> }>
+export function LineChart({ series, area = false, format, rightLabel, rightFormat }: {
+  // a series marked axis:'right' is scaled to its own maximum, so a small-magnitude
+  // line (e.g. headcount) stays readable next to a large one (e.g. game counts)
+  series: Array<{ name: string; color?: string; axis?: 'left' | 'right'; dashed?: boolean; points: Array<{ label: string; value: number }> }>
   area?: boolean; format?: (v: number) => string
+  rightLabel?: string; rightFormat?: (v: number) => string
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const uid = useId().replace(/:/g, '')
   const n = series[0]?.points.length || 0
   if (n === 0) return <Empty />
   const f = format || fmt.int
-  const max = Math.max(1, ...series.flatMap((s) => s.points.map((p) => p.value)))
+  const fr = rightFormat || f
+  const isRight = (s: { axis?: 'left' | 'right' }) => s.axis === 'right'
+  const hasRight = series.some(isRight)
+  const max = Math.max(1, ...series.filter((s) => !isRight(s)).flatMap((s) => s.points.map((p) => p.value)))
+  const maxR = Math.max(1, ...series.filter(isRight).flatMap((s) => s.points.map((p) => p.value)))
   const VW = 1000, VH = 260, padX = 40, padB = 30, padT = 16
-  const innerW = VW - padX - 12, innerH = VH - padB - padT
+  const innerW = VW - padX - (hasRight ? 46 : 12), innerH = VH - padB - padT
   const x = (i: number) => padX + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW)
   const y = (v: number) => padT + innerH * (1 - v / max)
+  const yR = (v: number) => padT + innerH * (1 - v / maxR)
+  const yOf = (s: { axis?: 'left' | 'right' }, v: number) => (isRight(s) ? yR(v) : y(v))
   const labels = series[0].points.map((p) => p.label)
   const step = Math.ceil(n / 12)
   const ticks = [0, 0.25, 0.5, 0.75, 1]
@@ -115,11 +156,13 @@ export function LineChart({ series, area = false, format }: {
         onMouseLeave={() => setHover(null)}>
         {ticks.map((g) => (
           <g key={g}>
-            <line x1={padX} x2={VW - 12} y1={padT + innerH * (1 - g)} y2={padT + innerH * (1 - g)} className="rp-grid" />
+            <line x1={padX} x2={padX + innerW} y1={padT + innerH * (1 - g)} y2={padT + innerH * (1 - g)} className="rp-grid" />
             <text x={padX - 8} y={padT + innerH * (1 - g) + 4} className="rp-ylabel">{f(max * g)}</text>
+            {hasRight && <text x={padX + innerW + 8} y={padT + innerH * (1 - g) + 4} className="rp-ylabel" textAnchor="start">{fr(maxR * g)}</text>}
           </g>
         ))}
         {area && series.map((s, si) => {
+          if (isRight(s)) return null
           const color = s.color || CAT[si % CAT.length]
           const gid = `lg-${uid}-${si}`
           const path = s.points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ')
@@ -138,12 +181,13 @@ export function LineChart({ series, area = false, format }: {
         })}
         {series.map((s, si) => {
           const color = s.color || CAT[si % CAT.length]
-          const path = s.points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ')
+          const path = s.points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${yOf(s, p.value).toFixed(1)}`).join(' ')
           return (
             <g key={s.name}>
-              <path d={path} fill="none" stroke={color} strokeWidth={2.4} strokeLinejoin="round" strokeLinecap="round" />
+              <path d={path} fill="none" stroke={color} strokeWidth={2.4} strokeLinejoin="round" strokeLinecap="round"
+                strokeDasharray={s.dashed ? '6 4' : undefined} />
               {n <= 24 && s.points.map((p, i) => (
-                <circle key={i} cx={x(i)} cy={y(p.value)} r={hover === i ? 4 : 2.6} fill={color}
+                <circle key={i} cx={x(i)} cy={yOf(s, p.value)} r={hover === i ? 4 : 2.6} fill={color}
                   opacity={hover == null || hover === i ? 1 : 0.5} />
               ))}
             </g>
@@ -158,6 +202,9 @@ export function LineChart({ series, area = false, format }: {
             width={innerW / Math.max(1, n - 1)} height={innerH} fill="transparent"
             onMouseEnter={() => setHover(i)} />
         ))}
+        {hasRight && rightLabel && (
+          <text x={padX + innerW + 8} y={padT - 4} className="rp-ylabel" textAnchor="start" opacity={0.75}>{rightLabel}</text>
+        )}
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={padT} y2={padT + innerH} className="rp-cursor" />}
       </svg>
       {hover != null && (
@@ -166,7 +213,7 @@ export function LineChart({ series, area = false, format }: {
           {series.map((s, si) => (
             <div key={s.name} className="rp-tip-row">
               <span className="rp-dot" style={{ background: s.color || CAT[si % CAT.length] }} />
-              {s.name}: <b>{f(s.points[hover].value)}</b>
+              {s.name}: <b>{(isRight(s) ? fr : f)(s.points[hover].value)}</b>
             </div>
           ))}
         </div>
@@ -275,8 +322,9 @@ export function BumpChart({ periods, rows, topN = 8 }: {
     <div className="rp-chart-wrap">
       <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg" preserveAspectRatio="xMidYMid meet"
         onMouseLeave={() => setHi(null)}>
+        {/* rank digits live in their own far-left gutter so long names can't cover them */}
         {Array.from({ length: rowsShown }, (_, r) => (
-          <text key={r} x={padL - 24} y={y(r + 1) + 4} className="rp-bump-rank">{r + 1}</text>
+          <text key={r} x={16} y={y(r + 1) + 4} className="rp-bump-rank" textAnchor="middle">{r + 1}</text>
         ))}
         {periods.map((p, i) => i % step === 0 && (
           <text key={p.key} x={x(i)} y={VH - 8} className="rp-xlabel">{p.label}</text>
@@ -477,7 +525,11 @@ export function Empty({ text = 'No data' }: { text?: string }) {
 
 // ---------- funnel (decreasing stages + conversion %) ----------
 export function Funnel({ stages }: {
-  stages: Array<{ label: string; value: number; hint?: string }>
+  stages: Array<{
+    label: string; value: number; hint?: string
+    // optional split of a stage into colored segments (e.g. Final Priority = Priority IV + Insight)
+    parts?: Array<{ label: string; value: number; color: string }>
+  }>
 }) {
   if (stages.length === 0 || stages[0].value === 0) return <Empty />
   const top = stages[0].value
@@ -493,12 +545,25 @@ export function Funnel({ stages }: {
           <div className="rp-funnel-row" key={s.label}>
             <div className="rp-funnel-head">
               <span className="rp-funnel-label">{s.label}</span>
-              <span className="rp-funnel-val">{fmt.int(s.value)}
+              <span className="rp-funnel-val">
+                {s.parts?.length
+                  ? s.parts.map((p, j) => (
+                      <span key={p.label}>{j > 0 && ' + '}<span style={{ color: p.color, fontWeight: 700 }}>{fmt.int(p.value)}</span> {p.label}</span>
+                    ))
+                  : fmt.int(s.value)}
                 <span className="rp-funnel-pct"> · {Math.round(pctOfTop)}% of top</span>
               </span>
             </div>
             <div className="rp-funnel-bar-track">
-              <div className="rp-funnel-bar" style={{ width: `${Math.max(pctOfTop, 1.5)}%`, background: shade(i) }} />
+              {s.parts?.length ? (
+                <div className="rp-funnel-bar" style={{ width: `${Math.max(pctOfTop, 1.5)}%`, background: 'transparent', display: 'flex', overflow: 'hidden' }}>
+                  {s.parts.filter((p) => p.value > 0).map((p) => (
+                    <div key={p.label} style={{ width: `${(p.value / s.value) * 100}%`, background: p.color, minWidth: 2 }} />
+                  ))}
+                </div>
+              ) : (
+                <div className="rp-funnel-bar" style={{ width: `${Math.max(pctOfTop, 1.5)}%`, background: shade(i) }} />
+              )}
             </div>
             {conv != null && i > 0 && (
               <div className="rp-funnel-conv">↳ {Math.round(conv)}% converted from {stages[i - 1].label}</div>
@@ -593,11 +658,15 @@ export function HealthBars({ rows }: {
 }
 
 // ---------- stacked conclusion bars per evaluator ----------
-export function StackedBars({ rows, keys }: {
+export function StackedBars({ rows, keys, colors, unit }: {
   rows: Array<{ name: string; parts: Record<string, number> }>
   keys: string[] // conclusion names in stack order
+  colors?: Record<string, string> // override the conclusion palette (e.g. age bands)
+  unit?: string // noun for the hover line, default "their"
 }) {
+  const colorOf = (k: string, i: number) => colors?.[k] || conclusionColor(k, i)
   const [hover, setHover] = useState<string | null>(null)
+  const [seg, setSeg] = useState<{ name: string; k: string; v: number; total: number } | null>(null)
   if (rows.length === 0) return <Empty />
   const totals = rows.map((r) => keys.reduce((s, k) => s + (r.parts[k] || 0), 0))
   const max = Math.max(1, ...totals)
@@ -606,9 +675,18 @@ export function StackedBars({ rows, keys }: {
       <div className="rp-legend rp-legend-horiz">
         {keys.map((k, i) => (
           <div className="rp-legend-row" key={k} onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}>
-            <span className="rp-dot" style={{ background: conclusionColor(k, i) }} /><span className="rp-legend-name">{k}</span>
+            <span className="rp-dot" style={{ background: colorOf(k, i) }} /><span className="rp-legend-name">{k}</span>
           </div>
         ))}
+      </div>
+      {/* hovered-segment stats (reserved height so the chart doesn't jump) */}
+      <div className="rp-stack-info">
+        {seg ? (
+          <>
+            <span className="rp-dot" style={{ background: colorOf(seg.k, keys.indexOf(seg.k)) }} />
+            <span>{seg.name} · {seg.k}: <b>{fmt.int(seg.v)}</b> ({Math.round((seg.v / seg.total) * 100)}% of {unit || 'their'} {fmt.int(seg.total)})</span>
+          </>
+        ) : <span style={{ opacity: .55 }}>Hover a segment for exact counts</span>}
       </div>
       <div className="rp-stack">
         {rows.map((r, ri) => (
@@ -619,7 +697,9 @@ export function StackedBars({ rows, keys }: {
                 const v = r.parts[k] || 0
                 if (!v) return null
                 return <span key={k} className="rp-stack-seg" title={`${r.name} · ${k}: ${v}`}
-                  style={{ width: `${(v / max) * 100}%`, background: conclusionColor(k, i), opacity: hover && hover !== k ? 0.3 : 1 }} />
+                  onMouseEnter={() => { setHover(k); setSeg({ name: r.name, k, v, total: totals[ri] }) }}
+                  onMouseLeave={() => { setHover(null); setSeg(null) }}
+                  style={{ width: `${(v / max) * 100}%`, background: colorOf(k, i), opacity: hover && hover !== k ? 0.3 : 1 }} />
               })}
             </span>
             <span className="rp-stack-total">{fmt.int(totals[ri])}</span>

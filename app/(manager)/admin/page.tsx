@@ -1,36 +1,36 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 
-type Role = 'admin' | 'moderator' | 'evaluator'
+type Role = 'admin' | 'evaluator'
 
 interface User {
   id: number
   email: string
   name: string
   role: Role
+  title: string | null
   created_at: string
 }
 
 const SUPER_ADMIN = 'hungdt@athena.studio'
 
-const ROLE_LABELS: Record<Role, string> = {
-  admin: 'Admin', moderator: 'Moderator', evaluator: 'Evaluator',
-}
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'evaluator', label: 'Evaluator' },
+]
+
+// Job classification (independent of the access role) — drives the Report
+// title filter. '' = not set.
+const TITLE_OPTIONS = [
+  { value: '', label: '—' },
+  { value: 'Admin', label: 'Admin' },
+  { value: 'Fulltime', label: 'Fulltime' },
+  { value: 'Freelancer', label: 'Freelancer' },
+  { value: 'Recorder', label: 'Recorder' },
+]
 
 export default function AdminPage() {
-  const { data: session } = useSession()
-  const myRole = session?.user?.role
-  const isAdmin = myRole === 'admin'
-
-  // Roles this user is allowed to assign. Only admins may grant 'admin'.
-  const assignableRoles: { value: Role; label: string }[] = [
-    ...(isAdmin ? [{ value: 'admin' as Role, label: 'Admin' }] : []),
-    { value: 'moderator', label: 'Moderator' },
-    { value: 'evaluator', label: 'Evaluator' },
-  ]
-
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -41,6 +41,10 @@ export default function AdminPage() {
   const [newRole, setNewRole] = useState<Role>('evaluator')
   const [adding, setAdding] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  // Inline display-name editing: id of the row being edited + its draft value.
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editName, setEditName] = useState('')
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
@@ -82,19 +86,29 @@ export default function AdminPage() {
     }
   }
 
-  async function handleRoleChange(id: number, role: string) {
+  async function updateUser(id: number, patch: { role?: string; name?: string; title?: string }) {
     try {
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, role }),
+        body: JSON.stringify({ id, ...patch }),
       })
       if (res.ok) fetchUsers()
       else {
         const body = await res.json()
-        alert(body.error ?? 'Failed to update role')
+        alert(body.error ?? 'Failed to update')
       }
     } catch { /* ignore */ }
+  }
+
+  function startEditName(u: User) {
+    setEditingId(u.id)
+    setEditName(u.name)
+  }
+  function commitEditName(u: User) {
+    const name = editName.trim()
+    setEditingId(null)
+    if (name && name !== u.name) updateUser(u.id, { name })
   }
 
   async function handleDelete(id: number, email: string) {
@@ -173,7 +187,7 @@ export default function AdminPage() {
             <StyledSelect
               value={newRole}
               onChange={v => setNewRole(v as Role)}
-              options={assignableRoles}
+              options={ROLE_OPTIONS}
             />
           </div>
           <button type="submit" className="btn btn-primary" disabled={adding || !newEmail}>
@@ -205,26 +219,20 @@ export default function AdminPage() {
                 <th>Email</th>
                 <th>Name</th>
                 <th>Role</th>
+                <th>Title</th>
                 <th>Created</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {users.length === 0 && !loading && (
-                <tr><td colSpan={5} className="empty">No users</td></tr>
+                <tr><td colSpan={6} className="empty">No users</td></tr>
               )}
               {loading && (
-                <tr><td colSpan={5} className="empty">Loading...</td></tr>
+                <tr><td colSpan={6} className="empty">Loading...</td></tr>
               )}
               {!loading && users.map(u => {
                 const isSuper = u.email === SUPER_ADMIN
-                // Moderators cannot modify or delete admin accounts.
-                const lockedForMod = !isAdmin && u.role === 'admin'
-                const rowLocked = isSuper || lockedForMod
-                // Ensure the current role is always shown as an option label.
-                const roleOpts = assignableRoles.some(o => o.value === u.role)
-                  ? assignableRoles
-                  : [{ value: u.role, label: ROLE_LABELS[u.role] }, ...assignableRoles]
                 return (
                   <tr key={u.id}>
                     <td>
@@ -233,20 +241,45 @@ export default function AdminPage() {
                         <span className="badge running" style={{ fontSize: 9, padding: '1px 5px', marginLeft: 6 }}>SUPER</span>
                       )}
                     </td>
-                    <td>{u.name}</td>
+                    <td>
+                      {editingId === u.id ? (
+                        <input className="input" autoFocus
+                          value={editName}
+                          onChange={e => setEditName(e.target.value)}
+                          onBlur={() => commitEditName(u)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') commitEditName(u)
+                            if (e.key === 'Escape') setEditingId(null)
+                          }}
+                          style={{ minWidth: 100, padding: '3px 6px' }}
+                        />
+                      ) : (
+                        <span onClick={() => startEditName(u)} title="Click to edit display name"
+                          style={{ cursor: 'pointer', borderBottom: '1px dashed var(--faint)' }}>
+                          {u.name}
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <StyledSelect
                         value={u.role}
-                        disabled={rowLocked}
-                        onChange={v => handleRoleChange(u.id, v)}
-                        options={roleOpts}
+                        disabled={isSuper}
+                        onChange={v => updateUser(u.id, { role: v })}
+                        options={ROLE_OPTIONS}
+                      />
+                    </td>
+                    <td>
+                      <StyledSelect
+                        value={u.title || ''}
+                        onChange={v => updateUser(u.id, { title: v })}
+                        options={TITLE_OPTIONS}
                       />
                     </td>
                     <td style={{ color: 'var(--faint)', fontSize: 12 }}>
                       {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
                     </td>
                     <td>
-                      {!rowLocked && (
+                      {!isSuper && (
                         <button className="btn btn-sm btn-danger"
                           onClick={() => handleDelete(u.id, u.email)}>
                           Remove

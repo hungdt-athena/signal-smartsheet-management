@@ -54,11 +54,15 @@ export function parseISODate(iso: string): { y: number; m: number; d: number } {
   return { y, m, d }
 }
 
-/** "W2 Jun 2026" from a week-start (Monday) date. Week-of-month = ceil(day/7). */
+/** "W2 Jun 2026" from a week-start (Monday) date.
+ * Team convention: a week is named by its LAST day (Sunday) — the week containing
+ * Aug 1 is "W1 Aug", matching how batches are labeled (batch "W4 Jul, 2026" =
+ * Mon Jul 20 – Sun Jul 26). Week-of-month = ceil(sunday/7). */
 export function weekLabel(isoWeekStart: string): string {
   const { y, m, d } = parseISODate(isoWeekStart)
-  const wom = Math.floor((d - 1) / 7) + 1
-  return `W${wom} ${MONTHS[m - 1] ?? '?'} ${y}`
+  const sun = new Date(Date.UTC(y, m - 1, d + 6))
+  const wom = Math.ceil(sun.getUTCDate() / 7)
+  return `W${wom} ${MONTHS[sun.getUTCMonth()] ?? '?'} ${sun.getUTCFullYear()}`
 }
 
 /** "Jun 2026" from a 'YYYY-MM' key. */

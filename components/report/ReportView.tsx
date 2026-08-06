@@ -1,0 +1,831 @@
+'use client'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Kpi, ColumnChart, RankBars, Donut, Heatmap, Funnel, Radar, HealthBars, StackedBars,
+  LineChart, Scatter, BumpChart, Empty, fmt, CAT, InfoTip, Insight,
+} from '@/components/report/charts'
+
+type View = 'week' | 'month' | 'quarter' | 'batch' | 'custom'
+const RADAR_AXES = ['Volume', 'Consistency', 'Signal', 'Survival', 'Recording'] as const
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+// today's Y/M/D in the report timezone (Asia/Ho_Chi_Minh, same as the server)
+function vnToday(): { y: number; m: number; d: number } {
+  const iso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())
+  const [y, m, d] = iso.split('-').map(Number)
+  return { y, m, d }
+}
+// the bucket key for "now" in a given view — each view defaults to its current period
+function currentKey(view: View): string {
+  const { y, m, d } = vnToday()
+  if (view === 'month') return `${y}-${pad2(m)}`
+  if (view === 'quarter') return `${y}-Q${Math.ceil(m / 3)}`
+  if (view === 'week') {
+    // Monday of the current week, matching Postgres date_trunc('week')
+    const dt = new Date(Date.UTC(y, m - 1, d))
+    dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7))
+    return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`
+  }
+  return ''
+}
+// label a key the same way the API labels its dropdown options: period name
+// + explicit start–end range (weeks follow the team's batch convention: named by
+// the week's LAST day, so 27/7–2/8 = "W1 Aug")
+function keyLabel(view: View, key: string): string {
+  const dm = (dt: Date) => `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`
+  const lastDay = (y: number, m: number) => new Date(Date.UTC(y, m, 0))
+  if (view === 'week') {
+    const [y, m, d] = key.split('-').map(Number)
+    const start = new Date(Date.UTC(y, m - 1, d))
+    const sun = new Date(Date.UTC(y, m - 1, d + 6))
+    return `W${Math.ceil(sun.getUTCDate() / 7)} ${MONTHS[sun.getUTCMonth()]} ${sun.getUTCFullYear()} · ${dm(start)} – ${dm(sun)}`
+  }
+  if (view === 'month') { const [y, m] = key.split('-').map(Number); return `${MONTHS[m - 1]} ${y} · 1/${m} – ${dm(lastDay(y, m))}` }
+  if (view === 'quarter') { const [y, q] = key.split('-Q').map(Number); const sm = (q - 1) * 3 + 1; return `Q${q} ${y} · 1/${sm} – ${dm(lastDay(y, sm + 2))}` }
+  return key
+}
+
+interface Ev {
+  key: string; name: string; title: string | null; assigned: number; evaluated: number; activeDays: number; throughput: number
+  turnaround: number | null; signalRate: number; consistency: number
+  shortlisted: number; priorityIV: number; insight: number; finalPriority: number; survivalRate: number
+  linkDead: number; noted: number; noteRate: number
+  recorded: number; rec5: number; rec20: number
+  initialConclusions: Record<string, number>; finalConclusions: Record<string, number>
+}
+
+// Metric definitions shown in "?" tooltips — formula first, one line of context.
+const F = ({ children }: { children: React.ReactNode }) => <span style={{ display: 'block', fontFamily: 'ui-monospace, monospace', fontSize: '11px', margin: '2px 0 5px', color: 'var(--text)' }}>{children}</span>
+const TIP = {
+  assigned: <><F>= count(games with assigned_date in window)</F>Games handed over in this window.</>,
+  evaluated: <><F>= count(initial_conclusion ≠ ∅, ≠ Link_dead)</F>By evaluate date.</>,
+  gppd: <><F>= Σ evaluated ÷ Σ active days</F>Weighted team velocity — heavy contributors move it.</>,
+  throughput: <><F>= avg( evaluatedᵢ ÷ active daysᵢ )</F>Everyone weighs the same, part-timers not penalized.</>,
+  turnaround: <><F>= avg( evaluate date − assigned date )</F>Rising = queues sitting.</>,
+  survival: <><F>= shortlist ÷ assigned</F>Shortlist = initial conclusion not bypass. Reads high in Batch view by design.</>,
+  signal: <><F>= (Priority IV + Insight) ÷ assigned</F>End-to-end yield, usually &lt;1% — watch the trend.</>,
+  finalPriority: <><F>= count(final ∈ {'{'}Priority IV, Insight{'}'})</F>Priority V not counted (team convention).</>,
+  noteCoverage: <><F>= noted ÷ evaluated</F>Target ≥90%.</>,
+  linkDead: <><F>= count(initial_conclusion = Link_dead)</F>Housekeeping volume, not pick quality.</>,
+  perDay: (what: string) => <><F>= {what} ÷ active days</F>Active day = a day with ≥1 evaluation — schedule-fair.</>,
+  backlog: <><F>= count(no evaluate date AND no conclusion)</F>Absolute stock — ignores the filter window. Rows imported already-evaluated are not stock.</>,
+  netChange: <><F>= new games in − evaluated</F>Positive = stock grew this window.</>,
+  recorded: <><F>= count(5min) + count(20min)</F>Matched by actual uploader.</>,
+  consistency: <><F>= active days ÷ weekdays in window (Mon–Fri)</F>Weekend work counts into active days as a bonus; capped at 100%.</>,
+  radar: <><F>axis = value ÷ team best × 100</F>Volume = games evaluated · Consistency = active days ÷ weekdays (weekend counts as bonus) · Signal & Survival = rates ÷ assigned · Recording = videos. Every axis normalized to the best person.</>,
+  allRounder: <><F>= mean of the 5 radar axes</F>High only when strong across the board.</>,
+}
+
+// Quality orderings (user-defined weights). Initial: List_Idea is the strongest
+// signal, Bypass the weakest; Link_dead is waste, appended last in gray.
+// Final: Priority V best … Bypass worst; Not Found excluded from the score.
+const INIT_ORDER = ['List_Idea', 'Playtest & Bypass', 'Bypass']
+const FINAL_ORDER = ['Priority V', 'Priority IV', 'Insight', 'Watch List', 'Theme/Art', 'Bypass']
+
+// Stack keys: known weight order first, then anything else seen in the data, then extras.
+function orderedKeys(rows: Array<Record<string, number>>, order: string[], tail: string[] = []): string[] {
+  const seen = new Set<string>()
+  for (const r of rows) for (const k of Object.keys(r)) seen.add(k)
+  const rest = Array.from(seen).filter((k) => !order.includes(k) && !tail.includes(k)).sort()
+  return [...order.filter((k) => seen.has(k)), ...rest, ...tail.filter((k) => seen.has(k))]
+}
+interface Bundle {
+  empty: boolean; canSeeTeam: boolean; view: View; category: string
+  window: { label: string }
+  bucketUnit: 'day' | 'week' | 'month'
+  options: { week: Opt[]; month: Opt[]; quarter: Opt[]; batch: Opt[] }
+  teamTotals: { evaluators: number; totalAssigned: number; totalEvaluated: number; avgThroughput: number; personDayThroughput: number; avgTurnaround: number | null; signalRate: number; survivalRate: number; totalRecorded: number; linkDead: number; noteRate: number }
+  funnel: { assigned: number; evaluated: number; shortlisted: number; priorityIV: number; insight: number; finalPriority: number }
+  initialConclusions: Cnt[]; finalConclusions: Cnt[]
+  series: Array<{ label: string; value: number }>
+  metricSeries: Array<{ key: string; label: string; volume: number; assigned: number; evaluated: number; shortlisted: number; priorityIV: number; insight: number; finalPriority: number; signalRate: number; survivalRate: number }>
+  heatmap: { periods: Array<{ key: string; label: string }>; rows: Array<{ name: string; cells: Record<string, number> }> }
+  personSeries: Record<string, Array<{ key: string; label: string; assigned: number; evaluated: number; linkDead: number }>>
+  videos: Record<string, Array<{ gameId: string; title: string | null; os: string | null; slot: string; batch: string | null; recordedOn: string | null; youtube: string | null }>>
+  evaluators: Ev[]
+  radar: Array<{ key: string; name: string; axes: Record<string, number> }>
+  pipeline: null | {
+    series: Array<{ key: string; label: string; newGames: number; evaluated: number; backlog: number; people: number }>
+    current: { backlog: number; age: { a0: number; a1: number; a2: number; a3: number } }
+    window: { newGames: number; evaluated: number }
+    aging: AgeRow[]
+    cleared: Array<AgeRow & { avgAge: number }>
+  }
+}
+type Opt = { key: string; label: string }
+type Cnt = { name: string; count: number }
+type AgeRow = { key: string; label: string; a0: number; a1: number; a2: number; a3: number }
+
+// Age bands for backlog / clearing mix. Order = stack order (fresh at the bottom).
+const AGE_BANDS = [
+  { k: 'a0' as const, label: '0–3d', color: '#1baf7a' },
+  { k: 'a1' as const, label: '4–7d', color: '#eda100' },
+  { k: 'a2' as const, label: '8–14d', color: '#eb6834' },
+  { k: 'a3' as const, label: '15d+', color: '#e34948' },
+]
+const AGE_KEYS = AGE_BANDS.map((b) => b.label)
+const AGE_COLORS = Object.fromEntries(AGE_BANDS.map((b) => [b.label, b.color]))
+const ageParts = (r: { a0: number; a1: number; a2: number; a3: number }) =>
+  Object.fromEntries(AGE_BANDS.map((b) => [b.label, r[b.k]]))
+const ageTotal = (r: { a0: number; a1: number; a2: number; a3: number }) => r.a0 + r.a1 + r.a2 + r.a3
+
+// Report is admin-only (nav + middleware + /api/report guard) — no evaluator variant.
+const TABS = [
+  { id: 'overview', label: 'Team Overview' },
+  { id: 'leaderboard', label: 'Leaderboard' },
+  { id: 'individual', label: 'Individual' },
+  { id: 'compare', label: 'Compare' },
+  { id: 'activity', label: 'Activity' },
+  { id: 'pipeline', label: 'Pipeline' },
+]
+
+// Embedded as the "Performance" sub-tab of Team Operations. Internal tabs are
+// plain state (the ?tab= URL param belongs to Team Ops).
+export function ReportView() {
+  return <Suspense><ReportInner /></Suspense>
+}
+
+function ReportInner() {
+  const [tab, setTab] = useState('overview')
+  const [view, setView] = useState<View>('week')
+  const [selKey, setSelKey] = useState(() => currentKey('week'))  // adaptive bucket key ('' = all); defaults to the current period
+  const [from, setFrom] = useState(''); const [to, setTo] = useState('')
+  const [category, setCategory] = useState('all')
+  const [title, setTitle] = useState('all')  // job classification lens (dashboard_users.title)
+
+  const [data, setData] = useState<Bundle | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+
+  const fetchData = useCallback(async () => {
+    setLoading(true); setErr('')
+    try {
+      const p = new URLSearchParams({ view, category })
+      if (title !== 'all') p.set('title', title)
+      if (view === 'custom') { if (from) p.set('from', from); if (to) p.set('to', to) }
+      else if (selKey) p.set('key', selKey)
+      const res = await fetch(`/api/report?${p}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setData(await res.json())
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed') }
+    finally { setLoading(false) }
+  }, [view, selKey, from, to, category, title])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  // Switching the lens defaults its bucket to "now": this week / this month /
+  // this quarter / latest batch. Custom pre-fills the current month so the page
+  // never silently flips back to all-time.
+  const changeView = (v: string) => {
+    const nv = v as View
+    setView(nv)
+    if (nv === 'batch') setSelKey(data?.options.batch[0]?.key || '')
+    else if (nv === 'custom') {
+      setSelKey('')
+      if (!from && !to) {
+        const { y, m, d } = vnToday()
+        setFrom(`${y}-${pad2(m)}-01`); setTo(`${y}-${pad2(m)}-${pad2(d)}`)
+      }
+    } else setSelKey(currentKey(nv))
+  }
+
+  const optList: Opt[] = data ? (data.options[view as 'week' | 'month' | 'quarter' | 'batch'] || []) : []
+  // current period may not have data yet — surface it in the dropdown anyway
+  const optListShown: Opt[] = selKey && view !== 'batch' && view !== 'custom' && !optList.some((o) => o.key === selKey)
+    ? [{ key: selKey, label: keyLabel(view, selKey) }, ...optList] : optList
+
+  return (
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <h1 className="h-title">Performance</h1>
+          <p className="h-sub">Evaluator performance · initial evaluation, recording & shortlist funnel {data && <>· <b>{data.window.label}</b></>}</p>
+        </div>
+        <div className="head-actions">
+          <button className="btn btn-sm" onClick={fetchData} disabled={loading}>{loading ? 'Loading…' : '↻ Refresh'}</button>
+        </div>
+      </div>
+
+      {/* Filter bar: view lens + adaptive picker + category */}
+      <div className="rp-filters card">
+        <Seg label="View by" value={view} onChange={changeView}
+          options={[['week', 'Week'], ['month', 'Month'], ['quarter', 'Quarter'], ['batch', 'Batch'], ['custom', 'Custom']]} />
+        {view === 'custom' ? (
+          <div className="rp-seg-group">
+            <span className="rp-seg-label">Range</span>
+            <input type="date" className="rp-date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <span style={{ color: 'var(--faint)' }}>→</span>
+            <input type="date" className="rp-date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
+        ) : (
+          <div className="rp-seg-group">
+            <span className="rp-seg-label">{view === 'batch' ? 'Batch' : view === 'week' ? 'Week' : view === 'quarter' ? 'Quarter' : 'Month'}</span>
+            <select className="rp-select" value={selKey} onChange={(e) => setSelKey(e.target.value)}>
+              <option value="">{view === 'batch' ? 'All batches' : 'All time'}</option>
+              {optListShown.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="rp-filter-spacer" />
+        <Seg label="Title" value={title} onChange={setTitle}
+          options={[['all', 'All'], ['fulltime', 'Fulltime'], ['freelancer', 'Freelancer']]} />
+        <Seg label="Category" value={category} onChange={setCategory}
+          options={[['all', 'All'], ['puzzle', 'Puzzle'], ['arcade', 'Arcade'], ['simulation', 'Sim']]} />
+      </div>
+
+      <div className="rp-tabs">
+        {TABS.map((t) => <button key={t.id} className={'rp-tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>{t.label}</button>)}
+      </div>
+
+      {err && !data && <div className="card" style={{ color: 'var(--bad)' }}>Couldn’t load report: {err}. The database may be waking up — try Refresh.</div>}
+      {err && data && <div className="rp-stale-note">Couldn’t refresh ({err}) — showing last loaded data.</div>}
+      {loading && !data && <div className="card"><Empty text="Loading…" /></div>}
+      {!loading && data && data.empty && <div className="card"><Empty text="No data for this selection." /></div>}
+
+      {!loading && data && !data.empty && (
+        <>
+          {tab === 'overview' && <Overview d={data} />}
+          {tab === 'leaderboard' && <Leaderboard d={data} />}
+          {tab === 'individual' && <Individual d={data} />}
+          {tab === 'compare' && <Compare d={data} />}
+          {tab === 'activity' && <Activity d={data} />}
+          {tab === 'pipeline' && <Pipeline d={data} />}
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ---------------- Team Overview ---------------- */
+function Overview({ d }: { d: Bundle }) {
+  const t = d.teamTotals
+  const funnelStages = [
+    { label: 'Assigned', value: d.funnel.assigned },
+    { label: 'Evaluated', value: d.funnel.evaluated },
+    { label: 'Shortlist', value: d.funnel.shortlisted },
+    { label: 'Final Priority', value: d.funnel.finalPriority, parts: [
+      { label: 'Priority IV', value: d.funnel.priorityIV, color: CAT[4] },
+      { label: 'Insight', value: d.funnel.insight, color: CAT[6] },
+    ] },
+  ]
+  const health = [
+    { label: 'Survival (assigned → shortlist)', value: fmt.pct(t.survivalRate), pct: Math.min(100, t.survivalRate * 100 * 4), status: band(t.survivalRate, 0.04, 0.08) },
+    { label: 'Signal (assigned → final priority)', value: fmt.pct(t.signalRate), pct: Math.min(100, t.signalRate * 100 * 40), status: band(t.signalRate, 0.005, 0.015) },
+    { label: 'Avg throughput', value: fmt.dec(t.avgThroughput) + ' /day', pct: Math.min(100, t.avgThroughput), status: 'good' as const },
+    { label: 'Active evaluators', value: String(t.evaluators), pct: 100, status: 'good' as const },
+  ]
+  const active = d.evaluators.filter((e) => e.evaluated > 0)
+  // Initial mix stack: weight order (List_Idea > P&B > Bypass) + Link_dead in gray.
+  const initRows = active.slice(0, 12).map((e) => ({ name: e.name, parts: { ...e.initialConclusions, ...(e.linkDead ? { Link_dead: e.linkDead } : {}) } }))
+  const initKeys = orderedKeys(initRows.map((r) => r.parts), INIT_ORDER, ['Link_dead'])
+  // Picks → final outcomes stack: weight order PV…Bypass, Not Found appended (excluded from score).
+  const finRows = active.filter((e) => Object.keys(e.finalConclusions).length > 0).map((e) => ({ name: e.name, parts: e.finalConclusions }))
+  const finKeys = orderedKeys(finRows.map((r) => r.parts), FINAL_ORDER, ['Not Found'])
+
+  // time-series derivations for trends & sparklines
+  const ms = d.metricSeries || []
+  const pts = (f: (m: Bundle['metricSeries'][number]) => number) => ms.map((m) => ({ label: m.label, value: f(m) }))
+  const volSpark = ms.map((m) => m.volume)
+  const sigSpark = ms.map((m) => Math.round(m.signalRate * 1000))
+  const survSpark = ms.map((m) => Math.round(m.survivalRate * 1000))
+  const fpSpark = ms.map((m) => m.finalPriority)
+  const pipelineSeries = [
+    { name: 'Assigned', color: CAT[5], points: pts((m) => m.assigned) },
+    { name: 'Evaluated', color: CAT[0], points: pts((m) => m.evaluated) },
+    { name: 'Shortlist', color: CAT[2], points: pts((m) => m.shortlisted) },
+    { name: 'Final Priority', color: CAT[4], points: pts((m) => m.finalPriority) },
+  ]
+  const rateSeries = [
+    { name: 'Survival rate %', color: CAT[3], points: pts((m) => m.survivalRate * 100) },
+    { name: 'Signal rate %', color: CAT[1], points: pts((m) => m.signalRate * 100) },
+  ]
+  // data-driven callouts for this window
+  const f = d.funnel
+  const worstNote = active.filter((x) => x.evaluated >= 50).sort((a, b) => a.noteRate - b.noteRate)[0]
+  const insights: React.ReactNode[] = []
+  if (f.assigned > 0 && f.evaluated < f.assigned * 0.8) insights.push(
+    <Insight key="behind" level="warn"><span><b>Intake is outpacing evaluation:</b> {fmt.int(f.assigned)} assigned vs {fmt.int(f.evaluated)} evaluated ({fmt.pct(f.evaluated / f.assigned)} cleared) → expect backlog growth; rebalance assignments or add capacity.</span></Insight>)
+  if (f.assigned > 0 && f.evaluated > f.assigned * 1.2) insights.push(
+    <Insight key="burn" level="good"><span><b>Burning down backlog:</b> the team evaluated {fmt.int(f.evaluated)} vs only {fmt.int(f.assigned)} newly assigned — older queue is being cleared.</span></Insight>)
+  if (f.evaluated > 0 && t.noteRate < 0.9) insights.push(
+    <Insight key="note" level="warn"><span><b>Note coverage {fmt.pct(t.noteRate)}</b> (target ≥90%){worstNote && worstNote.noteRate < 0.9 ? <> — lowest: <b>{worstNote.name}</b> at {fmt.pct(worstNote.noteRate)}</> : null} → remind evaluators that unexplained conclusions can&apos;t be audited.</span></Insight>)
+  if (f.shortlisted > 0 && f.finalPriority === 0) insights.push(
+    <Insight key="notriage" level="info"><span><b>No shortlisted game has reached Final Priority yet</b> in this window ({fmt.int(f.shortlisted)} waiting) — check whether moderators have triaged the shortlist.</span></Insight>)
+  return (
+    <>
+      <Guide title="Team Overview — is the pipeline flowing and are picks holding up?"
+        read={[
+          <span key="1"><b>KPI row</b>: volume first (Assigned, Evaluated, velocity), then quality (Survival, Signal, Final priority). Hover the <b>?</b> on any KPI for its definition. Sparklines = trend inside the window.</span>,
+          <span key="2"><b>Pipeline over time</b>: red (Assigned) above blue (Evaluated) = load building; the gap down to Shortlist/Final Priority is the filter doing its job.</span>,
+          <span key="3"><b>Shortlist funnel</b>: conversion per step; the last bar splits <b>Priority IV</b> (violet) vs <b>Insight</b> (teal).</span>,
+          <span key="4"><b>Stacked bars</b>: each evaluator&apos;s conclusion mix — more purple (List_Idea) = more signal surfaced.</span>,
+        ]}
+        act={[
+          <span key="1"><b>Assigned ≫ Evaluated</b> → rebalance assignments or add evaluator capacity before backlog compounds.</span>,
+          <span key="2"><b>Survival dropping week-over-week</b> → what&apos;s being pushed in is getting worse: revisit the push filters (scraper window / types).</span>,
+          <span key="3"><b>Final Priority = 0 all window</b> → moderators may not have triaged — nudge the shortlist review.</span>,
+          <span key="4"><b>Note coverage &lt; 90%</b> → require a note at least for every List_Idea.</span>,
+        ]} />
+      <div className="rp-kpi-row rp-kpi-row-dense">
+        <Kpi label="Assigned" value={fmt.int(t.totalAssigned)} sub={d.window.label} tip={TIP.assigned} />
+        <Kpi label="Games evaluated" value={fmt.int(t.totalEvaluated)} sub={d.window.label} hi spark={volSpark} tip={TIP.evaluated} />
+        <Kpi label="Games / person / day" value={fmt.dec(t.personDayThroughput)} sub="team velocity, per active day" tip={TIP.gppd} />
+        <Kpi label="Avg throughput" value={fmt.dec(t.avgThroughput)} sub="games / active day" tip={TIP.throughput} />
+        <Kpi label="Avg turnaround" value={fmt.days(t.avgTurnaround)} sub="assign → evaluate" tip={TIP.turnaround} />
+        <Kpi label="Survival rate" value={fmt.pct(t.survivalRate)} sub="assigned → shortlist" spark={survSpark} sparkColor={CAT[3]} tip={TIP.survival} />
+        <Kpi label="Signal rate" value={fmt.pct(t.signalRate)} sub="assigned → final priority" spark={sigSpark} sparkColor={CAT[1]} tip={TIP.signal} />
+        <Kpi label="Final priority" value={fmt.int(d.funnel.finalPriority)} sub={`${fmt.int(d.funnel.priorityIV)} Priority IV · ${fmt.int(d.funnel.insight)} Insight`} spark={fpSpark} sparkColor={CAT[4]} tip={TIP.finalPriority} />
+        <Kpi label="Note coverage" value={fmt.pct(t.noteRate)} sub="evaluations with a note" tip={TIP.noteCoverage} />
+      </div>
+      {insights}
+
+      <Card label="Pipeline over time" note="assigned → evaluated → shortlist → final priority per bucket"
+        tip={<><F>per bucket: assigned by assigned_date · others by evaluate_date</F>Final Priority = Priority IV + Insight.</>}>
+        <LineChart series={pipelineSeries} area />
+        <ReadNote><b>Evaluated</b> → <b>Shortlist</b> gap = filtering; gap down to <b>Final Priority</b> = pick quality.</ReadNote>
+      </Card>
+
+      <div className="rp-section-title">Shortlist funnel & team health</div>
+      <div className="rp-grid-2-1">
+        <Card label="Shortlist funnel" note="assigned → evaluated → shortlist → final priority"
+          tip={<><F>shortlist = initial ≠ bypass · final = Priority IV + Insight</F>Each bar shows conversion from the previous step.</>}>
+          <Funnel stages={funnelStages} />
+          <ReadNote>Watch conversion per step — the final bar splits <b>Priority IV</b> (violet) vs <b>Insight</b> (teal).</ReadNote>
+        </Card>
+        <Card label="Team health" note="leading indicators"
+          tip={<><F>survival = shortlist ÷ assigned · signal = final ÷ assigned</F>Throughput = avg games/active day · Active = evaluators with ≥1 evaluation.</>}>
+          <HealthBars rows={health} />
+        </Card>
+      </div>
+
+      <div className="rp-grid-2">
+        <Card label="Quality rates over time" note="survival & signal %, per bucket"
+          tip={<><F>survival = shortlist ÷ assigned · signal = final priority ÷ assigned</F>Both computed per bucket; assigned bucketed by assigned_date.</>}>
+          {ms.length >= 2 ? <LineChart series={rateSeries} format={(v) => `${v.toFixed(1)}%`} /> : <Empty text="Need more than one period" />}
+        </Card>
+        <Card label="Volume over time" note="games evaluated per bucket"
+          tip={<><F>= count(evaluated) per bucket</F>Bucket = day/week/month depending on the window span.</>}>
+          <ColumnChart data={d.series} />
+        </Card>
+      </div>
+
+      <div className="rp-grid-2">
+        <Card label="Initial conclusions" note="what evaluators decided"
+          tip={<><F>= distribution of initial_conclusion (Link_dead excluded)</F></>}>
+          <Donut data={d.initialConclusions} />
+        </Card>
+        <Card label="Final conclusions" note="moderator outcomes on shortlisted games"
+          tip={<><F>= distribution of final_conclusion</F>Only shortlisted games get one.</>}>
+          {d.finalConclusions.length ? <Donut data={d.finalConclusions} /> : <Empty text="No final conclusions in this window" />}
+        </Card>
+      </div>
+
+      <div className="rp-section-title">Output quality — initial → final</div>
+      <Card label="Initial conclusions by evaluator" note="quality order: List_Idea › Playtest & Bypass › Bypass · gray = Link_dead"
+        tip={<><F>bar = one evaluator · segment = count per conclusion</F>Hover a segment for exact counts.</>}>
+        <StackedBars rows={initRows} keys={initKeys} />
+        <ReadNote>Purple (<b>List_Idea</b>) = signal, red (<b>Bypass</b>) = gatekeeping, gray = dead links caught.</ReadNote>
+      </Card>
+      <Card label="Their picks → final outcomes" note="quality order: Priority V › IV › Insight › Watch List › Theme/Art › Bypass"
+        tip={<><F>bar = games one evaluator shortlisted · segment = moderator verdict</F>Hover a segment for exact counts.</>}>
+        {finRows.length ? <StackedBars rows={finRows} keys={finKeys} /> : <Empty text="No picks reached final conclusion in this window" />}
+        <ReadNote>How the moderator judged each evaluator&apos;s shortlist — violet/teal = picks that held up.</ReadNote>
+      </Card>
+    </>
+  )
+}
+
+/* ---------------- Leaderboard ---------------- */
+function Leaderboard({ d }: { d: Bundle }) {
+  const ev = d.evaluators
+  const rank = (f: (e: Ev) => number, filter = true) =>
+    [...ev].filter((e) => !filter || e.evaluated > 0).sort((a, b) => f(b) - f(a)).map((e) => ({ name: e.name, value: f(e) }))
+  const byTurn = ev.filter((e) => e.turnaround != null).sort((a, b) => a.turnaround! - b.turnaround!).map((e) => ({ name: e.name, value: e.turnaround! }))
+  const byRec = [...ev].filter((e) => e.recorded > 0).sort((a, b) => b.recorded - a.recorded).map((e) => ({ name: e.name, value: e.recorded }))
+  const canBump = d.heatmap.periods.length >= 2
+  // callouts: concentration + outliers
+  const activeLb = ev.filter((e) => e.evaluated > 0)
+  const totalEval = activeLb.reduce((s, e) => s + e.evaluated, 0)
+  const top = activeLb[0]
+  const teamTa = d.teamTotals.avgTurnaround
+  const slow = teamTa != null ? activeLb.filter((e) => e.turnaround != null && e.turnaround > teamTa * 2 && e.evaluated >= 50) : []
+  const lbInsights: React.ReactNode[] = []
+  if (top && totalEval > 0 && top.evaluated / totalEval > 0.4 && activeLb.length >= 3) lbInsights.push(
+    <Insight key="conc" level="info"><span><b>Output is concentrated:</b> {top.name} did {fmt.pct(top.evaluated / totalEval)} of all evaluations — great output, but a single point of failure if they&apos;re out.</span></Insight>)
+  if (slow.length) lbInsights.push(
+    <Insight key="slow" level="warn"><span><b>Turnaround outlier{slow.length > 1 ? 's' : ''}:</b> {slow.map((e) => `${e.name} (${e.turnaround!.toFixed(1)}d)`).join(', ')} — over 2× the team average ({teamTa!.toFixed(1)}d) → check if their queue is overloaded or blocked.</span></Insight>)
+  return (
+    <>
+      <Guide title="Leaderboard — who produces, and does their volume hold up?"
+        read={[
+          <span key="1"><b>Volume / Throughput</b> = quantity; <b>Survival / Signal / Final priority</b> = quality. Never judge one without the other.</span>,
+          <span key="2"><b>Rank movement</b>: each line is a person&apos;s volume rank per period — rising toward 1 = accelerating, falling = slowing. Hover to isolate.</span>,
+          <span key="3"><b>Turnaround</b> ranks fastest first — it measures how long assignments sit, not how fast someone plays.</span>,
+        ]}
+        act={[
+          <span key="1"><b>High volume + near-zero Survival</b> → spot-check their bypasses: are real signals being thrown away?</span>,
+          <span key="2"><b>Turnaround &gt; 2× team average</b> → their queue is stuck: rebalance or unblock.</span>,
+          <span key="3"><b>Rank falling several periods in a row</b> → check workload, handover, or motivation early — not after the month closes.</span>,
+        ]} />
+      {lbInsights}
+      {canBump && (
+        <Card label="Rank movement" note="volume rank per period — who's climbing vs slipping"
+          tip={<><F>rank = position by games evaluated, per period</F>1 = most games that period.</>}>
+          <BumpChart periods={d.heatmap.periods} rows={d.heatmap.rows} />
+          <ReadNote>Rank 1 = most games. Rising lines = accelerating. Hover to isolate.</ReadNote>
+        </Card>
+      )}
+      <div className="rp-grid-2">
+      <Card label="Volume" note="games evaluated" tip={TIP.evaluated}><RankBars rows={rank((e) => e.evaluated)} unit="games" color={CAT[0]} /></Card>
+      <Card label="Throughput" note="games / active day" tip={TIP.perDay('games evaluated')}><RankBars rows={rank((e) => e.throughput)} color={CAT[1]} format={(v) => fmt.dec(v)} /></Card>
+      <Card label="Turnaround (fastest first)" note="days assign → evaluate" tip={TIP.turnaround}><RankBars rows={byTurn} color={CAT[2]} format={(v) => `${v.toFixed(1)}d`} /></Card>
+      <Card label="Survival rate" note="assigned → shortlist" tip={TIP.survival}><RankBars rows={rank((e) => e.survivalRate)} color={CAT[3]} format={fmt.pct} /></Card>
+      <Card label="Signal rate" note="assigned → final priority (Priority IV + Insight)" tip={TIP.signal}><RankBars rows={rank((e) => e.signalRate)} color={CAT[4]} format={fmt.pct} /></Card>
+      <Card label="Final priority" note="Priority IV + Insight picks" tip={TIP.finalPriority}><RankBars rows={rank((e) => e.finalPriority)} unit="games" color={CAT[6]} /></Card>
+      <Card label="Note coverage" note="% evaluations with a note" tip={TIP.noteCoverage}><RankBars rows={rank((e) => e.noteRate)} color={CAT[5]} format={fmt.pct} /></Card>
+      <Card label="Recording" note="videos recorded (5/20min)" tip={TIP.recorded}>{byRec.length ? <RankBars rows={byRec} unit="rec" color={CAT[7]} /> : <Empty text="No recordings in this window" />}</Card>
+      </div>
+    </>
+  )
+}
+
+/* ---------------- Individual ---------------- */
+function Individual({ d }: { d: Bundle }) {
+  const [selKey, setSel] = useState('')
+  const selected = useMemo(() => {
+    if (!d.evaluators.length) return null
+    return d.evaluators.find((e) => e.key === selKey) || d.evaluators[0]
+  }, [d.evaluators, selKey])
+  if (!selected) return <div className="card"><Empty /></div>
+  const e = selected
+  const rad = d.radar.find((r) => r.key === e.key)
+  const radarValues = rad ? RADAR_AXES.map((a) => rad.axes[a] || 0) : RADAR_AXES.map(() => 0)
+  const initC = Object.entries(e.initialConclusions).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
+  const finC = Object.entries(e.finalConclusions).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
+  const funnelStages = [
+    { label: 'Assigned', value: e.assigned },
+    { label: 'Evaluated', value: e.evaluated },
+    { label: 'Shortlist', value: e.shortlisted },
+    { label: 'Final Priority', value: e.finalPriority, parts: [
+      { label: 'Priority IV', value: e.priorityIV, color: CAT[4] },
+      { label: 'Insight', value: e.insight, color: CAT[6] },
+    ] },
+  ]
+  // per-conclusion daily rates, same denominator as Throughput (active days)
+  const perDay = (c: string) => e.activeDays > 0 ? (e.initialConclusions[c] || 0) / e.activeDays : 0
+  // personal activity per bucket: assigned / evaluated / link dead
+  const ps = d.personSeries?.[e.key] || []
+  const vids = d.videos?.[e.key] || []
+  const personSpark = ps.map((p) => p.evaluated)
+  const actSeries = [
+    { name: 'Assigned', color: CAT[5], points: ps.map((p) => ({ label: p.label, value: p.assigned })) },
+    { name: 'Evaluated', color: CAT[0], points: ps.map((p) => ({ label: p.label, value: p.evaluated })) },
+    { name: 'Link dead', color: '#94a3b8', points: ps.map((p) => ({ label: p.label, value: p.linkDead })) },
+  ]
+  // person-level callouts for this window
+  const deadShare = e.evaluated + e.linkDead > 0 ? e.linkDead / (e.evaluated + e.linkDead) : 0
+  const t = d.teamTotals
+  const pInsights: React.ReactNode[] = []
+  if (e.assigned > 0 && e.evaluated === 0) pInsights.push(
+    <Insight key="idle" level="bad"><span><b>{e.name} hasn&apos;t evaluated anything this window</b> despite {fmt.int(e.assigned)} assigned → check availability or reassign the queue.</span></Insight>)
+  else if (e.assigned > 0 && e.evaluated < e.assigned * 0.8) pInsights.push(
+    <Insight key="behind" level="warn"><span><b>Falling behind:</b> {fmt.int(e.assigned)} assigned vs {fmt.int(e.evaluated)} evaluated ({fmt.pct(e.evaluated / e.assigned)} cleared) → their queue is growing; rebalance if it persists.</span></Insight>)
+  if (e.evaluated >= 100 && t.survivalRate > 0 && e.survivalRate < t.survivalRate * 0.5) pInsights.push(
+    <Insight key="lowsurv" level="warn"><span><b>Shortlist rate {fmt.pct(e.survivalRate)}</b> — under half the team&apos;s {fmt.pct(t.survivalRate)} → review a sample of their bypasses together (calibration), or their assignments are low-quality sources.</span></Insight>)
+  if (e.evaluated > 0 && e.noteRate < 0.9) pInsights.push(
+    <Insight key="note" level="warn"><span><b>Note coverage {fmt.pct(e.noteRate)}</b> (target ≥90%) → ask for a note on every non-bypass at minimum.</span></Insight>)
+  if (deadShare > 0.08) pInsights.push(
+    <Insight key="dead" level="info"><span><b>{fmt.pct(deadShare)} of their throughput is dead links</b> ({fmt.int(e.linkDead)} games) — that&apos;s source quality, not their filtering; volume numbers undercount their effort.</span></Insight>)
+  return (
+    <>
+      <Guide title="Individual — one evaluator's workload, tempo and pick quality"
+        read={[
+          <span key="1"><b>Chips</b> switch person — every card below re-renders for them.</span>,
+          <span key="2"><b>Activity over time</b>: red (Assigned) above blue (Evaluated) = work piling up on them; blue above red = clearing older queue. Gray = dead links.</span>,
+          <span key="3"><b>Bypass / P&amp;B / List_Idea per day</b>: filtering tempo, divided by their active days — compare mix, not just totals.</span>,
+          <span key="4"><b>Radar + funnel</b>: a balanced polygon and a funnel that converts = healthy; big volume with a flat funnel = fast but low-signal.</span>,
+        ]}
+        act={[
+          <span key="1"><b>Assigned ≫ Evaluated</b> → reassign part of their queue before it compounds.</span>,
+          <span key="2"><b>Survival far below team</b> → calibration session on a sample of their bypasses.</span>,
+          <span key="3"><b>List_Idea/day ≈ 0 while others find signal</b> → pair-review; maybe their category slice is dry, maybe the bar is too high.</span>,
+        ]} />
+      <div className="rp-people">
+        {d.evaluators.map((x) => (
+          <button key={x.key} className={'rp-chip' + (x.key === e.key ? ' active' : '')} onClick={() => setSel(x.key)}>
+            {x.name}{x.title && <span className="rp-chip-title">{x.title}</span>} <span className="rp-chip-n">{x.evaluated || x.recorded}</span>
+          </button>
+        ))}
+      </div>
+      <div className="rp-kpi-row rp-kpi-row-dense">
+        <Kpi label="Assigned" value={fmt.int(e.assigned)} sub="games handed to them" tip={TIP.assigned} />
+        <Kpi label="Evaluated" value={fmt.int(e.evaluated)} hi spark={personSpark.length >= 2 ? personSpark : undefined} tip={TIP.evaluated} />
+        <Kpi label="Throughput" value={fmt.dec(e.throughput)} sub="games / active day" tip={TIP.perDay('Games evaluated')} />
+        <Kpi label="Turnaround" value={fmt.days(e.turnaround)} sub="assign → evaluate" tip={TIP.turnaround} />
+        <Kpi label="Survival rate" value={fmt.pct(e.survivalRate)} sub="assigned → shortlist" tip={TIP.survival} />
+        <Kpi label="Signal rate" value={fmt.pct(e.signalRate)} sub="assigned → final priority" tip={TIP.signal} />
+        <Kpi label="Bypass / day" value={fmt.dec(perDay('Bypass'))} sub={`${fmt.int(e.initialConclusions['Bypass'] || 0)} total`} tip={TIP.perDay('Bypass')} />
+        <Kpi label="P&B / day" value={fmt.dec(perDay('Playtest & Bypass'))} sub={`${fmt.int(e.initialConclusions['Playtest & Bypass'] || 0)} playtest & bypass`} tip={TIP.perDay('Playtest & Bypass')} />
+        <Kpi label="List_Idea / day" value={fmt.dec(perDay('List_Idea'))} sub={`${fmt.int(e.initialConclusions['List_Idea'] || 0)} total`} tip={TIP.perDay('List_Idea')} />
+        <Kpi label="Note coverage" value={fmt.pct(e.noteRate)} sub={`${fmt.int(e.noted)} noted`} tip={TIP.noteCoverage} />
+        <Kpi label="Link dead" value={fmt.int(e.linkDead)} sub="dead links caught" tip={TIP.linkDead} />
+        <Kpi label="Recorded" value={fmt.int(e.recorded)} sub={`${e.rec5} × 5min · ${e.rec20} × 20min`} tip={TIP.recorded} />
+      </div>
+      {pInsights}
+      <div className="rp-grid-2-1">
+        <Card label={`${e.name} — performance shape`} note="5 axes, normalized to team best" tip={TIP.radar}>
+          <Radar axes={[...RADAR_AXES]} series={[{ name: e.name, values: radarValues }]} />
+          <ReadNote>Balanced polygon = well-rounded; spiky = imbalanced.</ReadNote>
+        </Card>
+        <Card label="Pick funnel" note="assigned → final priority (Priority IV + Insight)"
+          tip={<><F>shortlist = initial ≠ bypass · final = Priority IV + Insight</F></>}>
+          <Funnel stages={funnelStages} />
+        </Card>
+      </div>
+      {ps.length >= 2 && (
+        <Card label={`${e.name} — activity over time`} note="assigned · evaluated · link dead per bucket"
+          tip={<><F>assigned by assigned_date · evaluated & link dead by evaluate_date</F>Buckets = union of both axes.</>}>
+          <LineChart series={actSeries} area />
+          <ReadNote>Red above blue = work piling up; blue above red = clearing older queue. Gray = dead links.</ReadNote>
+        </Card>
+      )}
+      <Card label={`${e.name} — recording queue`} note="videos assigned & recorded in this window · pending always shown"
+        tip={<><F>rows where they are the 5min/20min assignee</F>Recorded rows filtered by window; pending has no date so always shown.</>}>
+        {vids.length ? (
+          <div className="rp-vid-wrap">
+            <table className="rp-vidtable">
+              <thead><tr><th>#</th><th>Game</th><th>Slot</th><th>Batch</th><th>Status</th><th>Link</th></tr></thead>
+              <tbody>
+                {vids.map((v, i) => (
+                  <tr key={`${v.gameId}-${v.slot}`}>
+                    <td className="rp-vid-i">{i + 1}</td>
+                    <td className="rp-vid-game">{v.title || v.gameId}{v.os && <span className="rp-vid-os"> · {v.os}</span>}</td>
+                    <td>{v.slot}</td>
+                    <td>{v.batch || '—'}</td>
+                    <td>{v.recordedOn
+                      ? <span className="rp-vid-done">Recorded {v.recordedOn.split('-').reverse().slice(0, 2).map(Number).join('/')}</span>
+                      : <span className="rp-vid-pending">Pending</span>}</td>
+                    <td>{v.youtube ? <a href={v.youtube} target="_blank" rel="noreferrer">YouTube ↗</a> : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <Empty text="No recording assignments in this window" />}
+      </Card>
+      <div className="rp-grid-2">
+        <Card label="Initial conclusion mix" note="their filtering" tip={<><F>= distribution of their initial_conclusion</F></>}>{initC.length ? <Donut data={initC} /> : <Empty />}</Card>
+        <Card label="Final outcomes" note="how their picks were judged" tip={<><F>= final_conclusion on games they shortlisted</F></>}>{finC.length ? <Donut data={finC} /> : <Empty text="None reached final conclusion" />}</Card>
+      </div>
+    </>
+  )
+}
+
+/* ---------------- Compare (radar overlay + all-rounder ranking) ---------------- */
+function Compare({ d }: { d: Bundle }) {
+  const top = d.radar.slice(0, 8)
+  const series = top.map((r, i) => ({ name: r.name, values: RADAR_AXES.map((a) => r.axes[a] || 0), color: CAT[i % CAT.length] }))
+  // all-rounder = mean of the 5 normalized axes
+  const allRound = d.radar
+    .map((r) => ({ name: r.name, value: RADAR_AXES.reduce((s, a) => s + (r.axes[a] || 0), 0) / RADAR_AXES.length }))
+    .sort((a, b) => b.value - a.value)
+  // scatter: volume (x) vs survival rate (y), bubble = throughput
+  const scatterPts = d.evaluators.filter((e) => e.evaluated > 0)
+    .map((e, i) => ({ name: e.name, x: e.evaluated, y: e.survivalRate * 100, size: Math.max(1, e.throughput), color: CAT[i % CAT.length] }))
+  return (
+    <>
+      <Guide title="Compare — put evaluators side by side"
+        read={[
+          <span key="1"><b>Radar overlay</b>: each polygon is one evaluator over Volume · Consistency · Signal · Survival · Recording, normalized to the team best (100). Hover a name to isolate.</span>,
+          <span key="2"><b>All-rounder score</b> = mean of the 5 axes — high only when someone is strong across the board, not just on volume.</span>,
+          <span key="3"><b>Scatter</b>: right = more volume, up = more of their assigned work reaches shortlist; bubble = throughput.</span>,
+        ]}
+        act={[
+          <span key="1"><b>Bottom-left of the scatter</b> (low volume, low survival) → pair them with a top-right evaluator for calibration.</span>,
+          <span key="2"><b>Spiky radar</b> (one long axis) → assign work that exercises the short axes, or accept the specialization deliberately.</span>,
+        ]} />
+      <div className="rp-grid-2-1">
+        <Card label="Performance radar — top evaluators" note="5 axes · normalized to team best" tip={TIP.radar}>
+          <Radar axes={[...RADAR_AXES]} series={series} size={320} />
+          <ReadNote>Larger, more balanced polygon = stronger all-rounder. Hover a name to isolate.</ReadNote>
+        </Card>
+        <Card label="All-rounder score" note="avg of 5 normalized axes" tip={TIP.allRounder}>
+          <RankBars rows={allRound} color={CAT[4]} format={(v) => fmt.dec(v, 0)} />
+          <ReadNote>High only when strong on <b>all</b> 5 axes — not just volume.</ReadNote>
+        </Card>
+      </div>
+      <Card label="Volume vs survival rate" note="x = games evaluated · y = survival % (assigned → shortlist) · bubble = throughput"
+        tip={<><F>x = evaluated · y = shortlist ÷ assigned · bubble = games ÷ active day</F></>}>
+        {scatterPts.length ? <Scatter points={scatterPts} xLabel="Volume" yLabel="Survival %"
+          xFormat={(v) => fmt.int(v)} yFormat={(v) => `${Math.round(v)}%`} /> : <Empty />}
+        <ReadNote>Top-right = high volume <i>and</i> high signal. Bottom-right = fast but almost all bypassed.</ReadNote>
+      </Card>
+    </>
+  )
+}
+
+/* ---------------- Activity heatmap ---------------- */
+function Activity({ d }: { d: Bundle }) {
+  const canBump = d.heatmap.periods.length >= 2
+  return (
+    <>
+      <Guide title="Activity — who worked when"
+        read={[
+          <span key="1"><b>Heatmap</b>: darker cell = more games that period; a solid row = steady cadence, holes = idle stretches.</span>,
+          <span key="2"><b>Rank movement</b>: the same data read as rank — climbing lines are pulling ahead of peers, not just of their own past.</span>,
+        ]}
+        act={[
+          <span key="1"><b>A solid row that suddenly goes blank</b> → check leave/handover before their queue silently rots.</span>,
+          <span key="2"><b>Consistently light rows</b> → rebalance assignment weights so games don&apos;t pool behind slow lanes.</span>,
+        ]} />
+      <Card label="Activity heatmap" note="games evaluated · person × period"
+        tip={<><F>cell = count(evaluated) for that person, that period</F></>}>
+        <Heatmap periods={d.heatmap.periods} rows={d.heatmap.rows} />
+        <ReadNote>Darker = more games. Gaps in a row = idle stretches.</ReadNote>
+      </Card>
+      {canBump && (
+        <Card label="Rank movement" note="volume rank per period"
+          tip={<><F>rank = position by games evaluated, per period</F>1 = most games that period.</>}>
+          <BumpChart periods={d.heatmap.periods} rows={d.heatmap.rows} />
+          <ReadNote>Same data as rank: climbing = pulling ahead of peers.</ReadNote>
+        </Card>
+      )}
+    </>
+  )
+}
+
+/* ---------------- Pipeline (game flow: new vs evaluated vs backlog) ---------------- */
+function Pipeline({ d }: { d: Bundle }) {
+  const p = d.pipeline
+  if (!p) return <div className="card"><Empty text="Pipeline needs a time axis — switch View by to Week, Month, Quarter or Custom (a batch has no date range)." /></div>
+  if (!p.series.length) return <div className="card"><Empty text="No pipeline activity in this window." /></div>
+  const net = p.window.newGames - p.window.evaluated
+  const pts = (f: (r: NonNullable<Bundle['pipeline']>['series'][number]) => number) =>
+    p.series.map((r) => ({ label: r.label, value: f(r) }))
+  const flowSeries = [
+    { name: 'New games in', color: CAT[0], points: pts((r) => r.newGames) },
+    { name: 'Evaluated', color: CAT[2], points: pts((r) => r.evaluated) },
+    // own axis: headcount is single digits next to counts in the hundreds
+    { name: 'Evaluators active', color: CAT[4], axis: 'right' as const, dashed: true, points: pts((r) => r.people) },
+  ]
+  const backlogSeries = [{ name: 'Backlog', color: CAT[3], points: pts((r) => r.backlog) }]
+  const backlogSpark = p.series.map((r) => r.backlog)
+  // pace estimate: buckets to clear the current stock at this window's clearing rate
+  const perBucket = p.series.length ? p.window.evaluated / p.series.length : 0
+  const pipeInsights: React.ReactNode[] = []
+  if (net > 0) pipeInsights.push(
+    <Insight key="grow" level="warn"><span><b>Backlog grew by {fmt.int(net)}</b> this window ({fmt.int(p.window.newGames)} in vs {fmt.int(p.window.evaluated)} evaluated) → throttle intake (push filters) or add evaluation capacity.</span></Insight>)
+  if (net < 0) pipeInsights.push(
+    <Insight key="shrink" level="good"><span><b>Backlog shrank by {fmt.int(-net)}</b> this window — evaluation is outpacing intake.</span></Insight>)
+  const unitName = d.bucketUnit === 'day' ? 'day' : d.bucketUnit === 'week' ? 'week' : 'month'
+  const avgPeople = p.series.length ? p.series.reduce((s, r) => s + r.people, 0) / p.series.length : 0
+  if (perBucket > 0 && p.current.backlog > 0) pipeInsights.push(
+    <Insight key="pace" level="info"><span>
+      <b>Time to clear ≈ {fmt.dec(p.current.backlog / perBucket, 1)} {unitName}s</b> — hypothetical: assumes intake stops today, so read it as &ldquo;the stock weighs this many {unitName}s of work&rdquo;, not as a forecast.
+      <F>pace = {fmt.int(p.window.evaluated)} evaluated ÷ {p.series.length} {unitName}{p.series.length > 1 ? 's' : ''} in window = {fmt.int(perBucket)}/{unitName}</F>
+      <F>time to clear = {fmt.int(p.current.backlog)} backlog ÷ {fmt.int(perBucket)} = {fmt.dec(p.current.backlog / perBucket, 1)} {unitName}s</F>
+      {avgPeople > 0 && <>That pace came from ~{fmt.dec(avgPeople, 1)} evaluators active per {unitName} (~{fmt.int(perBucket / avgPeople)} games each). </>}
+      The last {unitName} is usually still in progress, which drags the pace down — the estimate is conservative.
+    </span></Insight>)
+  const oldStock = p.current.age.a2 + p.current.age.a3
+  const clearedTot = p.cleared.reduce((s, r) => s + ageTotal(r), 0)
+  const clearedOld = p.cleared.reduce((s, r) => s + r.a2 + r.a3, 0)
+  // bucket avgAge is per-bucket, so weight it by that bucket's cleared count
+  const avgWait = clearedTot ? p.cleared.reduce((s, r) => s + r.avgAge * ageTotal(r), 0) / clearedTot : null
+  if (p.current.backlog > 0) pipeInsights.push(
+    <Insight key="age" level={oldStock / p.current.backlog > 0.5 ? 'warn' : 'info'}><span>
+      <b>{fmt.pct(oldStock / p.current.backlog)} of the stock is 8 days or older</b> ({fmt.int(oldStock)} of {fmt.int(p.current.backlog)}), while <b>{fmt.pct(clearedTot ? clearedOld / clearedTot : 0)}</b> of what the team cleared this window was that old.
+      {clearedTot > 0 && clearedOld / clearedTot < oldStock / p.current.backlog
+        ? ' Clearing skews fresher than the stock → the old tail is growing; pull aged games to the front of the queue.'
+        : ' Clearing is at least as old as the stock → the tail is being worked down.'}
+    </span></Insight>)
+  return (
+    <>
+      <Guide title="Pipeline — is the game stock flowing or piling up?"
+        read={[
+          <span key="1"><b>Backlog now</b> = games pushed but not yet evaluated — an absolute stock, unaffected by the filter window.</span>,
+          <span key="2"><b>Flow — in vs out</b>: blue above orange = intake outpacing evaluation; the crossing point is break-even.</span>,
+          <span key="3"><b>Backlog over time</b>: the slope is the story — how fast the stock grows or burns, cumulative over all history.</span>,
+        ]}
+        act={[
+          <span key="1"><b>New games above Evaluated for 2+ buckets</b> → tighten push eligibility or add capacity before the stock compounds.</span>,
+          <span key="2"><b>Backlog flat while evaluators are at capacity</b> → the pipeline is balanced; change nothing.</span>,
+          <span key="3"><b>Backlog spikes right after a push</b> → stagger pushes across the week instead of one bulk drop.</span>,
+        ]} />
+      <div className="rp-kpi-row">
+        <Kpi label="Backlog now" value={fmt.int(p.current.backlog)} sub="pushed, not yet evaluated" hi spark={backlogSpark.length >= 2 ? backlogSpark : undefined} sparkColor={CAT[3]} tip={TIP.backlog} />
+        <Kpi label="New games" value={fmt.int(p.window.newGames)} sub={`entered pipeline · ${d.window.label}`} tip={<>Games inserted into the evaluation pipeline in this window (by import date). Counts every game — including Shortcut-attributed ones — because this tab measures games, not people.</>} />
+        <Kpi label="Evaluated" value={fmt.int(p.window.evaluated)} sub={`cleared · ${d.window.label}`} tip={TIP.evaluated} />
+        <Kpi label="Net change" value={(net > 0 ? '+' : '') + fmt.int(net)} sub={net > 0 ? 'backlog growing' : net < 0 ? 'backlog shrinking' : 'flat'} tip={TIP.netChange} />
+        <Kpi label="Aged stock" value={fmt.int(oldStock)} sub={`${fmt.pct(p.current.backlog ? oldStock / p.current.backlog : 0)} of backlog is 8d+`}
+          tip={<><F>= backlog rows where today − import day &gt; 7</F>The tail. Bands: 0–3d {fmt.int(p.current.age.a0)} · 4–7d {fmt.int(p.current.age.a1)} · 8–14d {fmt.int(p.current.age.a2)} · 15d+ {fmt.int(p.current.age.a3)}.</>} />
+        <Kpi label="Avg wait" value={avgWait == null ? '—' : `${fmt.dec(avgWait, 1)}d`} sub={`import → evaluate · ${d.window.label}`}
+          tip={<><F>= Σ (evaluate day − import day) ÷ games evaluated, in window</F>How long a game sits before someone evaluates it. Rising = queue discipline slipping.</>} />
+      </div>
+      {pipeInsights}
+      <Card label="Flow — in vs out" note="new games in, games evaluated, and people working, per bucket"
+        tip={<><F>in = count(imported_at) · out = count(evaluate_date), per bucket</F><F>evaluators active = distinct rostered evaluators with ≥1 evaluation that bucket</F>Flow counts games (Shortcut rows included); headcount counts rostered people only, on its own right-hand axis.</>}>
+        <LineChart series={flowSeries} area rightLabel="people" rightFormat={(v) => fmt.int(v)} />
+        <ReadNote><b>New games in</b> above <b>Evaluated</b> = falling behind; crossing = break-even. Compare the dashed <b>Evaluators active</b> line: output falling while headcount holds is a throughput problem, both falling together is just coverage.</ReadNote>
+      </Card>
+      <Card label="Backlog over time" note="games pushed but not yet evaluated, end of each bucket"
+        tip={<><F>backlog = Σ in − Σ out, cumulative over all history</F>Rows that arrived already evaluated (backfills) leave the stock on their import day.</>}>
+        {p.series.length >= 2 ? <LineChart series={backlogSeries} area /> : <Empty text="Need more than one period" />}
+        <ReadNote>Cumulative stock (not reset per window) — the slope is the pace.</ReadNote>
+      </Card>
+      <div className="rp-grid-2">
+        <Card label="Backlog by age" note="how old the games still waiting are, end of each bucket"
+          tip={<><F>age = bucket end day − import day, for games still unevaluated</F>Same stock as &ldquo;Backlog over time&rdquo;, split into bands instead of one total.</>}>
+          {p.aging.length ? <StackedBars rows={p.aging.map((r) => ({ name: r.label, parts: ageParts(r) }))} keys={AGE_KEYS} colors={AGE_COLORS} unit="that bucket's" /> : <Empty />}
+          <ReadNote>Red/orange growing while the total is flat = the tail is rotting, not clearing.</ReadNote>
+        </Card>
+        <Card label="Cleared — old vs new" note="age of each game at the moment it was evaluated"
+          tip={<><F>age = evaluate day − import day, for games evaluated in the bucket</F>Shows whether the team eats fresh pushes or works the aged queue.</>}>
+          {p.cleared.length ? <StackedBars rows={p.cleared.map((r) => ({ name: r.label, parts: ageParts(r) }))} keys={AGE_KEYS} colors={AGE_COLORS} unit="that bucket's" /> : <Empty />}
+          <ReadNote>All green = only fresh pushes are being eaten; aged games never leave the queue.</ReadNote>
+        </Card>
+      </div>
+    </>
+  )
+}
+
+/* ---------------- shared bits ---------------- */
+function band(v: number, warn: number, good: number): 'good' | 'warn' | 'bad' {
+  return v >= good ? 'good' : v >= warn ? 'warn' : 'bad'
+}
+function Card({ label, note, tip, children }: { label: string; note?: string; tip?: React.ReactNode; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (!open) return
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [open])
+  const head = (expanded: boolean) => (
+    <div className="card-head">
+      <span className="card-label">{label}{tip && <InfoTip title={label}>{tip}</InfoTip>}</span>
+      <span className="card-head-right">
+        {note && <span className="card-note" title={note}>{note}</span>}
+        <button className="rp-expand" onClick={() => setOpen(!expanded)}
+          aria-label={expanded ? 'Close' : 'Expand'} title={expanded ? 'Close (Esc)' : 'Expand'}>
+          {expanded ? '✕' : '⤢'}
+        </button>
+      </span>
+    </div>
+  )
+  return (
+    <>
+      <div className="card">
+        {head(false)}
+        {children}
+      </div>
+      {open && (
+        <div className="rp-modal-backdrop" onClick={() => setOpen(false)}>
+          <div className="rp-modal card" onClick={(e) => e.stopPropagation()}>
+            {head(true)}
+            {children}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+/* Per-tab usage guide: what each element means + what to do when it looks off.
+   Modeled after "How to read / Actions" review-dashboard panels. */
+function Guide({ title, read, act }: { title: string; read: React.ReactNode[]; act: React.ReactNode[] }) {
+  const [open, setOpen] = useState(true)
+  return (
+    <div className="card rp-guide">
+      <div className="rp-guide-head">
+        <span className="rp-guide-kicker">How to use</span>
+        <span className="rp-guide-title">{title}</span>
+        <button className="rp-guide-toggle" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Show'}</button>
+      </div>
+      {open && (
+        <>
+          <div className="read">
+            <div className="rp-guide-col-title read">◎ How to read</div>
+            <ul>{read.map((r, i) => <li key={i}>{r}</li>)}</ul>
+          </div>
+          <div className="act">
+            <div className="rp-guide-col-title act">⚡ Actions</div>
+            <ul>{act.map((a, i) => <li key={i}>{a}</li>)}</ul>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+function ReadNote({ children }: { children: React.ReactNode }) { return <p className="rp-readnote">{children}</p> }
+function Seg({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: Array<[string, string]> }) {
+  return (
+    <div className="rp-seg-group">
+      <span className="rp-seg-label">{label}</span>
+      <div className="seg">
+        {options.map(([v, l]) => <button key={v} className={'rp-seg-btn' + (value === v ? ' active' : '')} onClick={() => onChange(v)}>{l}</button>)}
+      </div>
+    </div>
+  )
+}

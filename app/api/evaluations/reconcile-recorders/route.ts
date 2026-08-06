@@ -75,7 +75,7 @@ function extractYtId(link: string): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await requireRole(['admin', 'moderator'])
+  const guard = await requireRole(['admin'])
   if (guard) return guard
 
   try {

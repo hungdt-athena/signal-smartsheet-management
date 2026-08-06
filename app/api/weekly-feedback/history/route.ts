@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   if (process.env.SKIP_AUTH !== 'true') {
     const session = await getServerSession(authOptions)
     const role = session?.user?.role
-    isManager = role === 'admin' || role === 'moderator'
+    isManager = role === 'admin'
     name = session?.user?.name || ''
   }
 

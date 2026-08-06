@@ -5,7 +5,7 @@ import { sql } from '@/lib/db'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const guard = await requireRole(['admin', 'moderator'])
+  const guard = await requireRole(['admin'])
   if (guard) return guard
   try {
     const { ids, unset } = await req.json()

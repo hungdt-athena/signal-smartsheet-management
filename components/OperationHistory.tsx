@@ -4,7 +4,7 @@
 // rows carry a status pill; pending ones show Approve/Reject to any manager who is
 // NOT the submitter.
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import type { Bucket } from '@/lib/buckets'
 import type { DistResult } from '@/components/DistributionResult'
@@ -42,6 +42,35 @@ function targetCount(run: OperationRun): number {
   return Object.keys(dist?.per_evaluator ?? {}).length
 }
 
+// How the run's game set was picked: by a date window, by a quantity cap, or both.
+// Handover is always date-windowed; reassign stores it in params.mode
+// ('range' | 'quantity' | 'range+quantity'), with a shape-based fallback for old rows.
+function runMode(r: OperationRun): 'date' | 'quantity' | 'date+qty' {
+  if (r.kind === 'handover') return 'date'
+  const m = r.params?.mode
+  if (m === 'range+quantity') return 'date+qty'
+  if (m === 'quantity') return 'quantity'
+  if (m === 'range') return 'date'
+  if (r.params?.start_date && r.params?.count) return 'date+qty'
+  return r.params?.count ? 'quantity' : 'date'
+}
+
+const MODE_LABEL: Record<ReturnType<typeof runMode>, string> = {
+  date: 'Date', quantity: 'Quantity', 'date+qty': 'Date + Qty',
+}
+
+function modeValue(r: OperationRun): string {
+  const mode = runMode(r)
+  const window = `${fmtDate(r.params?.start_date)} → ${fmtDate(r.params?.end_date)}`
+  const qty = r.params?.count != null ? String(r.params.count) : '—'
+  if (mode === 'date') return window
+  if (mode === 'quantity') return qty
+  return `${window} · ${qty}`
+}
+
+// Rows revealed per infinite-scroll step (and the initial window).
+const PAGE = 5
+
 export function OperationHistory({ kind, category, reloadToken, onChanged }: {
   kind: 'reassign' | 'handover'
   category: Bucket
@@ -56,6 +85,11 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<OperationRun | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  // Client-side infinite scroll: the API returns the whole window (≤200 rows);
+  // only `visible` of them render, and scrolling the wrap reveals PAGE more.
+  const [visible, setVisible] = useState(PAGE)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null)
@@ -70,6 +104,19 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
   }, [kind, category])
 
   useEffect(() => { refresh() }, [refresh, reloadToken])
+  useEffect(() => { setVisible(PAGE) }, [kind, category])
+
+  const hasMore = visible < rows.length
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore) return
+    const io = new IntersectionObserver(
+      entries => { if (entries.some(e => e.isIntersecting)) setVisible(v => v + PAGE) },
+      { root: scrollRef.current, rootMargin: '80px' },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, rows.length])
 
   async function resolve(id: number, action: 'approve' | 'reject') {
     setBusyId(id); setError(null)
@@ -87,7 +134,8 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
   }
 
   const isHandover = kind === 'handover'
-  const cols = isHandover ? 6 : 5
+  const cols = 7
+  const shown = rows.slice(0, visible)
 
   return (
     <div className="card" style={{ marginBottom: 18 }}>
@@ -103,13 +151,15 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
 
       {error && <p className="msg-err" style={{ margin: '8px 0' }}>{error}</p>}
 
-      <div className="tbl-wrap">
+      <div className="tbl-wrap ophist-scroll" ref={scrollRef}>
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width: 130 }}>Date</th>
+              <th style={{ width: 90 }}>Date</th>
               <th>From</th>
-              {isHandover ? <th style={{ width: 150 }}>Window</th> : <th style={{ width: 80 }}>Targets</th>}
+              <th style={{ width: 90 }}>Mode</th>
+              <th style={{ width: 160 }}>Value</th>
+              {!isHandover && <th style={{ width: 70 }}>Targets</th>}
               <th style={{ width: 70 }}>Games</th>
               {isHandover && <th style={{ width: 170 }}>Status</th>}
               <th style={{ width: 90 }}></th>
@@ -119,7 +169,7 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
             {rows.length === 0 && !loading && (
               <tr><td colSpan={cols} className="empty">No history yet</td></tr>
             )}
-            {rows.map(r => {
+            {shown.map(r => {
               // Only managers resolve; evaluators never see Approve/Reject.
               const canResolve = isHandover && !isEvaluator && r.status === 'pending' && (!r.submitted_by || r.submitted_by !== viewer)
               const isOwn = isHandover && r.status === 'pending' && !!r.submitted_by && r.submitted_by === viewer
@@ -127,9 +177,9 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
                 <tr key={r.id}>
                   <td>{fmtDate(r.submitted_at)}</td>
                   <td className="cell-name">{r.from_evaluator}</td>
-                  {isHandover
-                    ? <td style={{ fontSize: 12 }}>{fmtDate(r.params?.start_date)} → {fmtDate(r.params?.end_date)}</td>
-                    : <td style={{ fontWeight: 600 }}>{targetCount(r)}</td>}
+                  <td><span className="pill muted" style={{ fontSize: 10 }}>{MODE_LABEL[runMode(r)]}</span></td>
+                  <td style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{modeValue(r)}</td>
+                  {!isHandover && <td style={{ fontWeight: 600 }}>{targetCount(r)}</td>}
                   <td style={{ fontWeight: 600 }}>{r.game_count}</td>
                   {isHandover && (
                     <td>
@@ -151,6 +201,11 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
                 </tr>
               )
             })}
+            {hasMore && (
+              <tr ref={sentinelRef}>
+                <td colSpan={cols} className="ophist-more">Loading more…</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

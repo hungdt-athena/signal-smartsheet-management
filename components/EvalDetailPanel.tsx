@@ -567,10 +567,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   }
 
   const isAdmin = role === 'admin'
-  const isManager = role === 'admin' || role === 'moderator'
+  const isManager = role === 'admin'
   // Evaluation content (conclusion/note/drive) — admin or the assigned evaluator.
   const canEditEval = !readOnly && (isAdmin || ev?.initial_evaluator === userName)
-  // Final Note + Final Conclusion are manager-only fields (admin or moderator).
+  // Final Note + Final Conclusion are manager-only fields (admin).
   const canEditFinalNote = !readOnly && isManager
   // Game Alike is editable by the evaluator OR a manager, in any stage.
   const canEditGameAlike = canEditEval || canEditFinalNote
@@ -596,7 +596,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const recordConfirmed = !!ev?.record_confirmed_at
   // Final conclusion options (managed from the Config tab).
   const { final_conclusion: finalConclusionOptions } = useConfig()
-  // Re-assigning recorders is a manager action (admin or moderator), enabled per-context.
+  // Re-assigning recorders is a manager action (admin), enabled per-context.
   const canEditAssignee = !readOnly && isManager && !!canAssignRecords
   // Any editable surface → show the save button.
   const canEdit = canEditEval || canEdit5 || canEdit20 || canEditAssignee || canEditFinalNote
@@ -741,7 +741,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
   const screenshots = ev.screenshot_urls || []
   const manualShots = ev.manual_screenshot_urls || []
-  // Manual uploads: admin/moderator or the assigned evaluator (matches the API rule).
+  // Manual uploads: admin or the assigned evaluator (matches the API rule).
   const canEditShots = !readOnly && (isManager || ev.initial_evaluator === userName)
   const cats = ev.categories || []
 

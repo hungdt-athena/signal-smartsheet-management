@@ -24,7 +24,7 @@ const FINAL_FOR_BUCKET = { '5min': 'Insight', '20min': 'Priority IV' } as const
 // The eval row is created lazily (mirroring cron/push-evaluations) so the
 // record flow can operate on it. Returns the eval `id`.
 export async function POST(req: NextRequest) {
-  const guard = await requireRole(['admin', 'moderator'])
+  const guard = await requireRole(['admin'])
   if (guard) return guard
   try {
     const {

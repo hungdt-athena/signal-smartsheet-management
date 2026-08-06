@@ -20,7 +20,7 @@ export const maxDuration = 60
 //             result stored.
 //   reject  → mark the run 'rejected'. No game changes.
 //
-// Any manager (admin/moderator) may resolve, EXCEPT the person who submitted it.
+// Any manager (admin) may resolve, EXCEPT the person who submitted it.
 
 interface Body {
   id?: number

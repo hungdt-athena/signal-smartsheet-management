@@ -14,7 +14,7 @@ async function resolveSession(): Promise<SessionInfo> {
   const session = await getServerSession(authOptions)
   const role = session?.user?.role
   return {
-    isManager: role === 'admin' || role === 'moderator',
+    isManager: role === 'admin',
     name: session?.user?.name || '',
   }
 }

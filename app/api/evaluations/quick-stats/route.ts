@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     if (process.env.SKIP_AUTH !== 'true') {
       const session = await getServerSession(authOptions)
       const role = session?.user?.role
-      if (role !== 'admin' && role !== 'moderator') {
+      if (role !== 'admin') {
         restrictTo = session?.user?.name || ''
         if (!restrictTo) return NextResponse.json({ data: [] })
       }

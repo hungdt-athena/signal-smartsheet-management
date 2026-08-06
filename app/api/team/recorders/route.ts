@@ -5,7 +5,7 @@ import { sql } from '@/lib/db'
 export const dynamic = 'force-dynamic'
 
 // GET /api/team/recorders — candidate recorders for assignment.
-// Any dashboard user can be a recorder, ordered evaluators → moderators → admins.
+// Any dashboard user can be a recorder, ordered evaluators, then admins.
 export async function GET(_req: NextRequest) {
   const guard = await requireAuth()
   if (guard) return guard
@@ -16,8 +16,7 @@ export async function GET(_req: NextRequest) {
     ORDER BY
       CASE role
         WHEN 'evaluator' THEN 0
-        WHEN 'moderator' THEN 1
-        WHEN 'admin' THEN 2
+                WHEN 'admin' THEN 2
         ELSE 3
       END,
       name

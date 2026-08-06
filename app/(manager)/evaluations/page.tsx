@@ -514,7 +514,7 @@ function ShortListEvalTab() {
   const { data: session } = useSession()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
-  const isManager = role === 'admin' || role === 'moderator'
+  const isManager = role === 'admin'
   const { final_conclusion: finalConclusionOptions } = useConfig()
 
   const [data, setData] = useState<ShortListItem[]>([])
@@ -973,7 +973,7 @@ function EvaluationsPageInner() {
     if (append) setLoadingMore(true); else setLoading(true)
     try {
       const params = new URLSearchParams({ category, page: String(page), limit: String(PAGE_SIZE) })
-      const isManager = role === 'admin' || role === 'moderator'
+      const isManager = role === 'admin'
       if (!isManager) {
         if (userName) params.set('evaluator', userName)
       } else if (filterEvaluator) {
@@ -1079,7 +1079,7 @@ function EvaluationsPageInner() {
           <p className="h-sub">
             {total} games · {category}
             {filterStatus === 'pending' ? ' · All time' : df.value.from ? ` · ${valueLabel(df.value)}` : ''}
-            {role !== 'admin' && role !== 'moderator' && userName ? ` · ${userName}` : ''}
+            {role !== 'admin' && userName ? ` · ${userName}` : ''}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -1190,7 +1190,7 @@ function EvaluationsPageInner() {
           {sortAsc ? 'Oldest first' : 'Newest first'}
         </button>
 
-        {(role === 'admin' || role === 'moderator') && (
+        {(role === 'admin') && (
           <div style={{ width: 180 }}>
             <StyledSelect
               value={filterEvaluator}

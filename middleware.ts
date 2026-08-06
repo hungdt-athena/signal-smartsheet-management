@@ -8,7 +8,7 @@ export default withAuth(
 
     const { pathname, searchParams } = req.nextUrl
     const role = req.nextauth.token?.role as string | undefined
-    const isManager = role === 'admin' || role === 'moderator'
+    const isManager = role === 'admin'
 
     // Default landing for non-managers: the first page visible in their sidebar
     // (Evaluate). Keep in sync with app/page.tsx. Anything they can't see in the
@@ -34,12 +34,6 @@ export default withAuth(
         const tab = searchParams.get('tab') || 'assign'
         if (!evaluatorTabs.includes(tab)) return NextResponse.redirect(new URL('/team-ops?tab=assign', req.url))
       }
-    }
-
-    // Report: admin-only. Moderators fall back to their manager home (Dashboard);
-    // evaluators to theirs. /api/report enforces the same guard server-side.
-    if ((pathname === '/report' || pathname.startsWith('/report/')) && role !== 'admin') {
-      return NextResponse.redirect(new URL(isManager ? '/dashboard' : NON_MANAGER_HOME, req.url))
     }
 
     // Users Management & Config stay manager-only.
@@ -76,7 +70,6 @@ export const config = {
     '/team-ops/:path*',
     '/evaluations/:path*',
     '/youtube/:path*',
-    '/report/:path*',
     '/handover-puzzle/:path*',
     '/handover/:path*',
     '/drive-videos/:path*',

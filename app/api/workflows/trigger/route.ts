@@ -22,7 +22,7 @@ function getWebhookMap(): Record<string, string | undefined> {
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await requireRole(['admin', 'moderator'])
+  const guard = await requireRole(['admin'])
   if (guard) return guard
 
   const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)

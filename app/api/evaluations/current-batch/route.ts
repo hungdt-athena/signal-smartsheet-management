@@ -25,11 +25,11 @@ export async function POST(req: NextRequest) {
   const guard = await requireAuth()
   if (guard) return guard
 
-  // Manager-only (admin / moderator).
+  // Manager-only (admin).
   if (process.env.SKIP_AUTH !== 'true') {
     const session = await getServerSession(authOptions)
     const role = session?.user?.role
-    if (role !== 'admin' && role !== 'moderator') {
+    if (role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden: manager role required' }, { status: 403 })
     }
   }

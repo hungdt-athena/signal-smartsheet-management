@@ -1496,7 +1496,7 @@ function RecordTab() {
   const { data: session } = useSession()
   const userName = session?.user?.name || ''
   const role = session?.user?.role
-  const isManager = role === 'admin' || role === 'moderator'
+  const isManager = role === 'admin'
 
   const [data, setData] = useState<ShortListItem[]>([])
   const [total, setTotal] = useState(0)

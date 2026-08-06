@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 const BUCKETS = ['5min', '20min', 'none'] as const
 
 export async function POST(req: NextRequest) {
-  const guard = await requireRole(['admin', 'moderator'])
+  const guard = await requireRole(['admin'])
   if (guard) return guard
   try {
     const { id, bucket } = await req.json()

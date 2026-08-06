@@ -79,7 +79,7 @@ function groupByCalendar(labels: string[]) {
 export function WeeklyFeedbackTab() {
   const { data: session } = useSession()
   const role = session?.user?.role
-  const isManager = role === 'admin' || role === 'moderator'
+  const isManager = role === 'admin'
   const userName = session?.user?.name || ''
 
   // Overview / Editor toggle is local state only — NO url params.

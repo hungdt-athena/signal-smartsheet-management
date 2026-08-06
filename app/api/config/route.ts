@@ -10,7 +10,7 @@ interface OptionRow { id: number; field: string; value: string; sort_order: numb
 /**
  * GET /api/config            — active option values per field (any authed user).
  *                              Shape: { conclusion: string[], final_conclusion: string[], genre: string[] }
- * GET /api/config?manage=1   — full rows incl. inactive (admin + moderator).
+ * GET /api/config?manage=1   — full rows incl. inactive (admin).
  *                              Shape: { conclusion: OptionRow[], ... }
  */
 export async function GET(req: NextRequest) {

@@ -2,7 +2,7 @@
 // Shows one row per (run, evaluator): daily auto-assign, manual re-assign, handover.
 // Rendered as a Year → Month → Day timeline instead of a flat table.
 'use client'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Bucket } from '@/lib/buckets'
 
 interface HistoryRow {
@@ -29,9 +29,14 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-interface DayGroup { key: string; d: string; weekday: string; rows: HistoryRow[]; runs: number; games: number }
-interface MonthGroup { key: string; name: string; days: DayGroup[]; runs: number; games: number }
-interface YearGroup { year: string; months: MonthGroup[]; runs: number; games: number }
+// Per-action game totals — assign/reassign/handover must never be summed into
+// one number: a reassigned game was already counted by its original assign.
+interface ActionTotals { assign: number; reassign: number; handover: number }
+const zeroTotals = (): ActionTotals => ({ assign: 0, reassign: 0, handover: 0 })
+
+interface DayGroup { key: string; d: string; weekday: string; rows: HistoryRow[]; runs: number; games: ActionTotals }
+interface MonthGroup { key: string; name: string; days: DayGroup[]; runs: number; games: ActionTotals }
+interface YearGroup { year: string; months: MonthGroup[]; runs: number; games: ActionTotals }
 
 // run_date is a plain YYYY-MM-DD (VN date) — parse as UTC to avoid a timezone shift.
 function groupRows(rows: HistoryRow[]): YearGroup[] {
@@ -44,23 +49,40 @@ function groupRows(rows: HistoryRow[]): YearGroup[] {
     const [ys, ms, ds] = iso.split('-')
     const mk = `${ys}-${ms}`
     const g = r.game_count || 0
-    if (!cy || cy.year !== ys) { cy = { year: ys, months: [], runs: 0, games: 0 }; years.push(cy); cm = null; cd = null }
-    if (!cm || cm.key !== mk) { cm = { key: mk, name: `${MONTHS[+ms - 1]} ${ys}`, days: [], runs: 0, games: 0 }; cy.months.push(cm); cd = null }
+    const act: keyof ActionTotals = r.action in ACTION_LABEL ? r.action : 'assign'
+    if (!cy || cy.year !== ys) { cy = { year: ys, months: [], runs: 0, games: zeroTotals() }; years.push(cy); cm = null; cd = null }
+    if (!cm || cm.key !== mk) { cm = { key: mk, name: `${MONTHS[+ms - 1]} ${ys}`, days: [], runs: 0, games: zeroTotals() }; cy.months.push(cm); cd = null }
     if (!cd || cd.key !== iso) {
       const dow = new Date(`${iso}T00:00:00Z`).getUTCDay()
-      cd = { key: iso, d: ds, weekday: WEEKDAYS[dow], rows: [], runs: 0, games: 0 }
+      cd = { key: iso, d: ds, weekday: WEEKDAYS[dow], rows: [], runs: 0, games: zeroTotals() }
       cm.days.push(cd)
     }
     cd.rows.push(r)
-    cd.runs++; cd.games += g
-    cm.runs++; cm.games += g
-    cy.runs++; cy.games += g
+    cd.runs++; cd.games[act] += g
+    cm.runs++; cm.games[act] += g
+    cy.runs++; cy.games[act] += g
   }
   return years
 }
 
 const fmtInt = (n: number) => n.toLocaleString('en-US')
-const runsGames = (runs: number, games: number) => `${runs} ${runs === 1 ? 'run' : 'runs'} · ${fmtInt(games)} games`
+
+// "3 runs · 120 assigned · 15 reassigned" — zero actions are omitted so the
+// common all-assign day stays as compact as before.
+function RunsGames({ runs, games }: { runs: number; games: ActionTotals }) {
+  const parts: ReactNode[] = [`${runs} ${runs === 1 ? 'run' : 'runs'}`]
+  if (games.assign) parts.push(<span className="hist-n-assign" key="a">{fmtInt(games.assign)} assigned</span>)
+  if (games.reassign) parts.push(<span className="hist-n-reassign" key="r">{fmtInt(games.reassign)} reassigned</span>)
+  if (games.handover) parts.push(<span className="hist-n-handover" key="h">{fmtInt(games.handover)} handover</span>)
+  if (parts.length === 1) parts.push('0 games')
+  return (
+    <>
+      {parts.map((p, i) => (
+        <span key={i}>{i > 0 && ' · '}{p}</span>
+      ))}
+    </>
+  )
+}
 
 export function AssignHistory({ bucket }: { bucket: Bucket }) {
   const [rows, setRows] = useState<HistoryRow[]>([])
@@ -83,7 +105,10 @@ export function AssignHistory({ bucket }: { bucket: Bucket }) {
   useEffect(() => { refresh() }, [refresh])
 
   const years = useMemo(() => groupRows(rows), [rows])
-  const totalGames = useMemo(() => rows.reduce((s, r) => s + (r.game_count || 0), 0), [rows])
+  const totalGames = useMemo(() => years.reduce((t, y) => {
+    t.assign += y.games.assign; t.reassign += y.games.reassign; t.handover += y.games.handover
+    return t
+  }, zeroTotals()), [years])
   const multiYear = years.length > 1
 
   // Signature of the current grouping — only re-seed defaults when the shape changes
@@ -116,7 +141,7 @@ export function AssignHistory({ bucket }: { bucket: Bucket }) {
       <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span className="card-label">
           History
-          {rows.length > 0 && <span className="hist-sub">{runsGames(rows.length, totalGames)}</span>}
+          {rows.length > 0 && <span className="hist-sub"><RunsGames runs={rows.length} games={totalGames} /></span>}
         </span>
         <button className="btn btn-sm" onClick={refresh} disabled={loading}>
           <span className={loading ? 'spin' : ''}>↻</span>{loading ? '...' : 'Refresh'}
@@ -132,7 +157,7 @@ export function AssignHistory({ bucket }: { bucket: Bucket }) {
             {multiYear && (
               <div className="hist-year-bar">
                 <span className="hist-year-num">{yg.year}</span>
-                <span className="hist-year-meta">{runsGames(yg.runs, yg.games)}</span>
+                <span className="hist-year-meta"><RunsGames runs={yg.runs} games={yg.games} /></span>
               </div>
             )}
             {yg.months.map(mg => {
@@ -142,7 +167,7 @@ export function AssignHistory({ bucket }: { bucket: Bucket }) {
                   <button className="hist-month-head" onClick={() => toggleMonth(mg.key)} aria-expanded={mOpen}>
                     <span className={`hist-caret${mOpen ? ' open' : ''}`}>›</span>
                     <span className="hist-month-name">{mg.name}</span>
-                    <span className="hist-month-meta">{runsGames(mg.runs, mg.games)}</span>
+                    <span className="hist-month-meta"><RunsGames runs={mg.runs} games={mg.games} /></span>
                   </button>
                   {mOpen && (
                     <div className="hist-days">
@@ -156,7 +181,7 @@ export function AssignHistory({ bucket }: { bucket: Bucket }) {
                                 <span className="hist-dwk">{dg.weekday}</span>
                               </span>
                               <span className={`hist-caret${dOpen ? ' open' : ''}`}>›</span>
-                              <span className="hist-day-meta">{runsGames(dg.runs, dg.games)}</span>
+                              <span className="hist-day-meta"><RunsGames runs={dg.runs} games={dg.games} /></span>
                             </button>
                             {dOpen && (
                               <div className="hist-rows">

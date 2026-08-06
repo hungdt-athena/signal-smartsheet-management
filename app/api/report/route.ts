@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
+import { weekLabel } from '@/lib/report'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 
 export const dynamic = 'force-dynamic'
@@ -44,13 +45,13 @@ function resolveWindow(view: View, key: string, from: string, to: string): {
   if (view === 'week' && /^\d{4}-\d{2}-\d{2}$/.test(key)) {
     const [y, m, day] = key.split('-').map(Number)
     const start = new Date(Date.UTC(y, m - 1, day))
-    const end = new Date(start.getTime() + 6 * 864e5)
-    const wom = Math.floor((day - 1) / 7) + 1
-    return { label: `W${wom} ${MONTHS[m - 1]} ${y}`, from: key, to: d(end.getUTCFullYear(), end.getUTCMonth() + 1, end.getUTCDate()) }
+    // `to` is EXCLUSIVE → next Monday, so Sunday stays inside the week
+    const end = new Date(start.getTime() + 7 * 864e5)
+    return { label: weekLabel(key), from: key, to: d(end.getUTCFullYear(), end.getUTCMonth() + 1, end.getUTCDate()) }
   }
   if (view === 'month' && /^\d{4}-\d{2}$/.test(key)) {
     const [y, m] = key.split('-').map(Number)
-    const to = m === 12 ? d(y, 12, 31) : d(y, m + 1, 1)
+    const to = m === 12 ? d(y + 1, 1, 1) : d(y, m + 1, 1)
     return { label: `${MONTHS[m - 1]} ${y}`, from: d(y, m, 1), to }
   }
   if (view === 'quarter' && /^\d{4}-Q[1-4]$/.test(key)) {
@@ -74,8 +75,12 @@ export async function GET(req: NextRequest) {
     const from = (searchParams.get('from') || '').trim()
     const to = (searchParams.get('to') || '').trim()
     const category = (searchParams.get('category') || 'all').toLowerCase()
+    // Title lens: narrow every people-based aggregate to one job classification
+    // (dashboard_users.title). Only Fulltime/Freelancer are exposed as filters.
+    const title = (['fulltime', 'freelancer'].includes((searchParams.get('title') || '').toLowerCase())
+      ? (searchParams.get('title') || '').toLowerCase() : 'all')
 
-    const cacheKey = JSON.stringify({ view, key, from, to, category })
+    const cacheKey = JSON.stringify({ view, key, from, to, category, title })
     const hit = CACHE.get(cacheKey)
     if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.body)
 
@@ -96,9 +101,27 @@ export async function GET(req: NextRequest) {
       : win.batch ? 14 : 400
     const unit = spanDays <= 16 ? 'day' : spanDays <= 130 ? 'week' : 'month'
 
-    // System accounts (Shortcut, vinhtd) never count as evaluators here — their rows
-    // are bulk attribution, not evaluation work. See lib/system-accounts.
-    const notSystem = sql`AND lower(ge.initial_evaluator) <> ALL(${EXCLUDED})`
+    // Only people currently declared on the Assign roster count in the report —
+    // historical/one-off names (tiennh, quangnm…) and system accounts are noise.
+    // Falls back to the system-account exclusion if the roster table is empty.
+    const rosterRows = await sql`SELECT lower(name) AS k FROM evaluator_roster WHERE list_type = 'initial'`
+    let roster: string[] = rosterRows.map((r) => r.k)
+    // title map keyed by lower(display name) — report keys are display names too
+    const titleRows = await sql`SELECT lower(name) AS k, title FROM dashboard_users WHERE name IS NOT NULL AND name <> ''`
+    const titleBy = new Map<string, string | null>(titleRows.map((r) => [r.k, r.title]))
+    if (title !== 'all') {
+      const titled = titleRows.filter((r) => (r.title || '').toLowerCase() === title).map((r) => r.k)
+      roster = roster.length ? roster.filter((k) => titled.includes(k)) : titled
+    }
+    // With a title lens the roster IS the filter: an empty list must match
+    // nobody instead of falling back to the exclusion-only branch.
+    const useRoster = roster.length > 0 || title !== 'all'
+    const notSystem = useRoster
+      ? sql`AND lower(ge.initial_evaluator) = ANY(${roster})`
+      : sql`AND lower(ge.initial_evaluator) <> ALL(${EXCLUDED})`
+    const recOk = (col: 'record_5min_assignee' | 'record_20min_assignee') => useRoster
+      ? sql`AND lower(ge.${sql.unsafe(col)}) = ANY(${roster})`
+      : sql`AND lower(ge.${sql.unsafe(col)}) <> ALL(${EXCLUDED})`
 
     const evalBase = sql`
       FROM game_evaluations ge
@@ -107,8 +130,121 @@ export async function GET(req: NextRequest) {
         ${notSystem}
         ${catF} ${winF}`
 
-    const [perEval, initConcl, finConcl, series, evalSeries, recorders, optRows] = await Promise.all([
-      // per-evaluator core + funnel
+    // Pipeline flow (game-level, NOT person-level): games entering the pipeline
+    // (imported_at) vs games evaluated (evaluate_date) vs end-of-bucket backlog
+    // (pushed but not yet evaluated). System accounts are NOT excluded — their rows
+    // are real games flowing through. Backlog is cumulative over ALL history (so it
+    // shows true absolute stock), then sliced to the window. Batch view has no time
+    // axis → pipeline is null there.
+    const pipelinePromise = win.batch ? Promise.resolve(null) : Promise.all([
+      sql`
+        WITH r AS (
+          SELECT (ge.imported_at AT TIME ZONE ${VN})::date AS in_day,
+                 (ge.evaluate_date AT TIME ZONE ${VN})::date AS eval_day,
+                 (ge.initial_conclusion IS NOT NULL) AS done
+          FROM game_evaluations ge
+          WHERE ge.imported_at IS NOT NULL ${catF}
+        ), ev AS (
+          SELECT in_day AS day, count(*)::int AS new_n, 0 AS eval_n, 0 AS out_n FROM r GROUP BY 1
+          UNION ALL
+          SELECT eval_day, 0, count(*)::int, 0 FROM r WHERE eval_day IS NOT NULL GROUP BY 1
+          UNION ALL
+          -- Stock exit day. Two irregular shapes exist in the data:
+          --   • backfilled rows whose evaluate_date precedes imported_at (evaluated on
+          --     Smartsheet, imported later) → GREATEST keeps backlog from going negative;
+          --   • the Jun-2026 bulk import (~5.7k rows) that carries initial_conclusion but
+          --     no evaluate_date at all → it arrived already evaluated, so it exits on
+          --     its import day instead of sitting in the backlog forever.
+          SELECT CASE WHEN eval_day IS NULL THEN in_day ELSE GREATEST(in_day, eval_day) END,
+                 0, 0, count(*)::int
+          FROM r WHERE eval_day IS NOT NULL OR done GROUP BY 1
+        ), daily AS (
+          SELECT day, SUM(new_n)::int AS new_n, SUM(eval_n)::int AS eval_n,
+            (SUM(SUM(new_n)) OVER (ORDER BY day) - SUM(SUM(out_n)) OVER (ORDER BY day))::int AS backlog
+          FROM ev GROUP BY day
+        )
+        SELECT date_trunc(${unit}, day)::date::text AS b,
+          SUM(new_n)::int AS new_games, SUM(eval_n)::int AS evaluated,
+          (array_agg(backlog ORDER BY day DESC))[1]::int AS backlog
+        FROM daily
+        WHERE TRUE
+          ${win.from ? sql`AND day >= ${win.from}::date` : sql``}
+          ${win.to ? sql`AND day < ${win.to}::date` : sql``}
+        GROUP BY 1 ORDER BY 1`,
+      sql`
+        SELECT count(*)::int AS backlog,
+          count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date <= 3)::int AS a0,
+          count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date BETWEEN 4 AND 7)::int AS a1,
+          count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date BETWEEN 8 AND 14)::int AS a2,
+          count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date > 14)::int AS a3
+        FROM game_evaluations ge
+        WHERE ge.evaluate_date IS NULL AND ge.initial_conclusion IS NULL ${catF}`,
+      // Ageing of the stock itself: at the END of every bucket, how old were the
+      // games still waiting? Answers "is the tail rotting or are we clearing it?".
+      // A row is in stock on day D when it arrived on/before D and had not left yet.
+      sql`
+        WITH r AS (
+          SELECT (ge.imported_at AT TIME ZONE ${VN})::date AS in_day,
+                 CASE
+                   WHEN ge.evaluate_date IS NOT NULL
+                     THEN GREATEST((ge.imported_at AT TIME ZONE ${VN})::date, (ge.evaluate_date AT TIME ZONE ${VN})::date)
+                   WHEN ge.initial_conclusion IS NOT NULL THEN (ge.imported_at AT TIME ZONE ${VN})::date
+                   ELSE NULL
+                 END AS out_day
+          FROM game_evaluations ge
+          WHERE ge.imported_at IS NOT NULL ${catF}
+        ), b AS (
+          SELECT COALESCE(${win.from ?? null}::date, (SELECT min(in_day) FROM r)) AS f,
+                 -- never snapshot past today: a future day would age the stock that
+                 -- still sits there and invent a tail that has not happened yet
+                 LEAST(COALESCE(${win.to ?? null}::date, CURRENT_DATE + 1), CURRENT_DATE + 1) AS t
+        ), snaps AS (
+          SELECT date_trunc(${unit}, g)::date AS bkt, max(g::date) AS snap
+          FROM b, generate_series(b.f, b.t - 1, interval '1 day') g
+          GROUP BY 1
+        )
+        SELECT s.bkt::text AS b,
+          count(*) FILTER (WHERE s.snap - r.in_day <= 3)::int AS a0,
+          count(*) FILTER (WHERE s.snap - r.in_day BETWEEN 4 AND 7)::int AS a1,
+          count(*) FILTER (WHERE s.snap - r.in_day BETWEEN 8 AND 14)::int AS a2,
+          count(*) FILTER (WHERE s.snap - r.in_day > 14)::int AS a3
+        FROM snaps s
+        JOIN r ON r.in_day <= s.snap AND (r.out_day IS NULL OR r.out_day > s.snap)
+        GROUP BY 1 ORDER BY 1`,
+      // Capacity on the day: how many rostered evaluators actually logged work in each
+      // bucket. Pairs with the flow lines — output dropping while headcount holds is a
+      // different problem from output dropping because nobody was working.
+      sql`
+        SELECT date_trunc(${unit}, (ge.evaluate_date AT TIME ZONE ${VN}))::date::text AS b,
+          count(DISTINCT lower(ge.initial_evaluator))::int AS people
+        ${evalBase}
+        GROUP BY 1 ORDER BY 1`,
+      // Clearing mix: of the games evaluated in each bucket, how old were they at the
+      // moment of evaluation? Fresh-only clearing means the old tail never moves.
+      sql`
+        WITH r AS (
+          SELECT (ge.imported_at AT TIME ZONE ${VN})::date AS in_day,
+                 (ge.evaluate_date AT TIME ZONE ${VN})::date AS eval_day
+          FROM game_evaluations ge
+          WHERE ge.imported_at IS NOT NULL AND ge.evaluate_date IS NOT NULL ${catF}
+        )
+        SELECT date_trunc(${unit}, eval_day)::date::text AS b,
+          count(*) FILTER (WHERE eval_day - in_day <= 3)::int AS a0,
+          count(*) FILTER (WHERE eval_day - in_day BETWEEN 4 AND 7)::int AS a1,
+          count(*) FILTER (WHERE eval_day - in_day BETWEEN 8 AND 14)::int AS a2,
+          count(*) FILTER (WHERE eval_day - in_day > 14)::int AS a3,
+          round(avg(GREATEST(eval_day - in_day, 0)), 1)::float AS avg_age
+        FROM r
+        WHERE TRUE
+          ${win.from ? sql`AND eval_day >= ${win.from}::date` : sql``}
+          ${win.to ? sql`AND eval_day < ${win.to}::date` : sql``}
+        GROUP BY 1 ORDER BY 1`,
+    ])
+
+    const [perEval, assignedRows, assignedSeries, initConcl, finConcl, series, evalSeries, evalAsgSeries, recorders, optRows, videoRows, pipelineRaw] = await Promise.all([
+      // per-evaluator core + funnel. Shortlist = initial not bypassed (List_Idea);
+      // Final Priority = moderator judged 'Priority IV' or 'Insight' (user-defined —
+      // Priority V intentionally NOT counted).
       sql`
         SELECT lower(ge.initial_evaluator) AS k,
           mode() WITHIN GROUP (ORDER BY ge.initial_evaluator) AS name,
@@ -116,14 +252,40 @@ export async function GET(req: NextRequest) {
           count(DISTINCT (ge.evaluate_date AT TIME ZONE ${VN})::date)::int AS active_days,
           COALESCE(SUM(CASE WHEN ge.assigned_date IS NOT NULL THEN GREATEST((ge.evaluate_date AT TIME ZONE ${VN})::date - ge.assigned_date, 0) END), 0)::numeric AS ta_sum,
           count(*) FILTER (WHERE ge.assigned_date IS NOT NULL)::int AS ta_count,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS escalated,
-          count(*) FILTER (WHERE ge.final_conclusion IS NOT NULL AND ge.final_conclusion <> '')::int AS triaged,
-          count(*) FILTER (WHERE ge.final_conclusion ILIKE 'Priority%')::int AS final_priority,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
+          count(*) FILTER (WHERE ge.final_conclusion = 'Priority IV')::int AS priority_iv,
+          count(*) FILTER (WHERE ge.final_conclusion = 'Insight')::int AS insight,
           count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead,
           count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead'
                              AND ge.initial_note IS NOT NULL AND btrim(ge.initial_note) <> '')::int AS noted
         ${evalBase}
         GROUP BY lower(ge.initial_evaluator)`,
+      // assigned per evaluator — windowed on assigned_date (a DATE, no tz shift),
+      // the funnel's top stage. Independent of evaluate_date so unevaluated
+      // assignments still count.
+      sql`
+        SELECT lower(ge.initial_evaluator) AS k,
+          mode() WITHIN GROUP (ORDER BY ge.initial_evaluator) AS name,
+          count(*)::int AS assigned
+        FROM game_evaluations ge
+        WHERE ge.assigned_date IS NOT NULL
+          AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+          ${notSystem} ${catF}
+          ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
+            ${win.from ? sql`AND ge.assigned_date >= ${win.from}::date` : sql``}
+            ${win.to ? sql`AND ge.assigned_date < ${win.to}::date` : sql``}`}
+        GROUP BY 1`,
+      // assigned per time bucket (denominator for signal/survival trend lines)
+      sql`
+        SELECT date_trunc(${unit}, ge.assigned_date)::date::text AS b, count(*)::int AS n
+        FROM game_evaluations ge
+        WHERE ge.assigned_date IS NOT NULL
+          AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+          ${notSystem} ${catF}
+          ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
+            ${win.from ? sql`AND ge.assigned_date >= ${win.from}::date` : sql``}
+            ${win.to ? sql`AND ge.assigned_date < ${win.to}::date` : sql``}`}
+        GROUP BY 1`,
       // per-evaluator initial conclusion distribution
       sql`SELECT lower(ge.initial_evaluator) AS k, ge.initial_conclusion AS c, count(*)::int AS n
         ${evalBase} AND ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead'
@@ -136,14 +298,27 @@ export async function GET(req: NextRequest) {
       sql`SELECT date_trunc(${unit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b,
           count(*)::int AS n,
           count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead')::int AS evaluated,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS escalated,
-          count(*) FILTER (WHERE ge.final_conclusion IS NOT NULL AND ge.final_conclusion <> '')::int AS triaged,
-          count(*) FILTER (WHERE ge.final_conclusion ILIKE 'Priority%')::int AS final_priority
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
+          count(*) FILTER (WHERE ge.final_conclusion = 'Priority IV')::int AS priority_iv,
+          count(*) FILTER (WHERE ge.final_conclusion = 'Insight')::int AS insight
         ${evalBase}
         GROUP BY 1 ORDER BY 1`,
-      // per-evaluator time series (heatmap cells)
-      sql`SELECT lower(ge.initial_evaluator) AS k, date_trunc(${unit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b, count(*)::int AS n
+      // per-evaluator time series (heatmap cells + individual activity chart)
+      sql`SELECT lower(ge.initial_evaluator) AS k, date_trunc(${unit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b, count(*)::int AS n,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead')::int AS evaluated,
+          count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead
         ${evalBase}
+        GROUP BY 1, 2`,
+      // per-evaluator assigned per bucket (assigned_date axis, for the same chart)
+      sql`
+        SELECT lower(ge.initial_evaluator) AS k, date_trunc(${unit}, ge.assigned_date)::date::text AS b, count(*)::int AS n
+        FROM game_evaluations ge
+        WHERE ge.assigned_date IS NOT NULL
+          AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+          ${notSystem} ${catF}
+          ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
+            ${win.from ? sql`AND ge.assigned_date >= ${win.from}::date` : sql``}
+            ${win.to ? sql`AND ge.assigned_date < ${win.to}::date` : sql``}`}
         GROUP BY 1, 2`,
       // recording per recorder (5min + 20min slots), same window on record_confirmed_at (or batch)
       sql`
@@ -151,7 +326,7 @@ export async function GET(req: NextRequest) {
           SELECT lower(ge.record_5min_assignee) AS k, ge.record_5min_assignee AS name, '5min' AS slot
           FROM game_evaluations ge
           WHERE ge.record_confirmed_at IS NOT NULL AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
-            AND lower(ge.record_5min_assignee) <> ALL(${EXCLUDED})
+            ${recOk('record_5min_assignee')}
             ${catF}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
               ${win.from ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
@@ -160,7 +335,7 @@ export async function GET(req: NextRequest) {
           SELECT lower(ge.record_20min_assignee), ge.record_20min_assignee, '20min'
           FROM game_evaluations ge
           WHERE ge.record_confirmed_at IS NOT NULL AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
-            AND lower(ge.record_20min_assignee) <> ALL(${EXCLUDED})
+            ${recOk('record_20min_assignee')}
             ${catF}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
               ${win.from ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
@@ -187,6 +362,29 @@ export async function GET(req: NextRequest) {
         UNION ALL
         SELECT 'batch', batch FROM game_evaluations WHERE batch IS NOT NULL AND batch <> '' ${category !== 'all' ? sql`AND category_group=${category}` : sql``}
         GROUP BY 1,2`,
+      // recording queue per assignee: recorded-in-window rows + still-pending rows
+      // (pending has no timestamp to window on; batch view windows on the batch label)
+      sql`
+        WITH rec AS (
+          SELECT lower(ge.record_5min_assignee) AS k, '5min' AS slot, ge.game_id, gi.title, gi.os,
+                 ge.batch, ge.record_confirmed_at, ge.youtube_link
+          FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
+          WHERE ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> '' ${recOk('record_5min_assignee')} ${catF}
+          UNION ALL
+          SELECT lower(ge.record_20min_assignee), '20min', ge.game_id, gi.title, gi.os,
+                 ge.batch, ge.record_confirmed_at, ge.youtube_link
+          FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
+          WHERE ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> '' ${recOk('record_20min_assignee')} ${catF}
+        )
+        SELECT k, slot, game_id, title, os, batch,
+          (record_confirmed_at AT TIME ZONE ${VN})::date::text AS recorded_on, youtube_link
+        FROM rec
+        WHERE TRUE ${win.batch ? sql`AND batch = ${win.batch}` : sql`
+          AND (record_confirmed_at IS NULL OR (TRUE
+            ${win.from ? sql`AND (record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
+            ${win.to ? sql`AND (record_confirmed_at AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}))`}
+        ORDER BY record_confirmed_at DESC NULLS FIRST, slot`,
+      pipelinePromise,
     ])
 
     // fold conclusion maps
@@ -196,65 +394,79 @@ export async function GET(req: NextRequest) {
     for (const r of finConcl) { const m = finBy.get(r.k) || {}; m[r.c] = r.n; finBy.set(r.k, m) }
     const recBy = new Map<string, { recorded: number; rec5: number; rec20: number }>()
     for (const r of recorders) recBy.set(r.k, { recorded: r.recorded, rec5: r.rec5, rec20: r.rec20 })
+    const asgBy = new Map<string, { name: string; assigned: number }>()
+    for (const r of assignedRows) asgBy.set(r.k, { name: r.name, assigned: r.assigned })
 
-    // window days for consistency denominator
-    let windowDays = spanDays
-    if (win.batch || (!win.from && !win.to)) {
-      // derive from actual data span in scope
-      const span = series.length ? series : null
-      windowDays = span ? Math.max(7, Math.round((Date.parse(series[series.length - 1].b) - Date.parse(series[0].b)) / 864e5) + (unit === 'day' ? 1 : unit === 'week' ? 7 : 30)) : 30
+    // Expected working days in the window: Mon–Fri only (team convention — user
+    // rule: everyone is on a 5-day week; weekend work still counts INTO active
+    // days as a bonus, so Sat/Sun can make up for a missed weekday).
+    const weekdaysBetween = (fromISO: string, toISOExcl: string): number => {
+      let n = 0
+      const d = new Date(fromISO + 'T00:00:00Z')
+      const end = new Date(toISOExcl + 'T00:00:00Z')
+      while (d < end) { const dow = d.getUTCDay(); if (dow !== 0 && dow !== 6) n++; d.setUTCDate(d.getUTCDate() + 1) }
+      return n
     }
+    let expectedDays = win.from && win.to ? weekdaysBetween(win.from, win.to) : 0
+    if (!expectedDays && series.length) {
+      // batch / all-time: derive the span from the data buckets
+      const endD = new Date(series[series.length - 1].b + 'T00:00:00Z')
+      endD.setUTCDate(endD.getUTCDate() + (unit === 'day' ? 1 : unit === 'week' ? 7 : 30))
+      expectedDays = weekdaysBetween(series[0].b, endD.toISOString().slice(0, 10))
+    }
+    expectedDays = Math.max(1, expectedDays)
 
-    // Outcome quality weights for final conclusions on an evaluator's picks
-    // (user-defined ordering: PV > PIV > Insight > Watch List > Theme/Art > Bypass;
-    // Not Found is excluded — a game nobody could locate says nothing about the pick).
-    const OUTCOME_W: Record<string, number> = {
-      'Priority V': 100, 'Priority IV': 80, 'Insight': 60,
-      'Watch List': 40, 'Theme/Art': 20, 'Bypass': 0,
-    }
-    const outcomeScoreOf = (fin: Record<string, number>): number | null => {
-      let sum = 0, n = 0
-      for (const [c, cnt] of Object.entries(fin)) {
-        if (c in OUTCOME_W) { sum += OUTCOME_W[c] * cnt; n += cnt }
-      }
-      return n > 0 ? sum / n : null
-    }
-
+    // Rates are anchored on ASSIGNED (user-defined): survival = how much of the
+    // assigned work reaches shortlist; signal = how much reaches Final Priority
+    // (Priority IV + Insight) — the end-to-end yield of what was handed to them.
     const evaluators = perEval.map((e) => {
       const evaluated = e.evaluated
       const rec = recBy.get(e.k) || { recorded: 0, rec5: 0, rec20: 0 }
+      const assigned = asgBy.get(e.k)?.assigned || 0
+      const finalPriority = e.priority_iv + e.insight
+      // active days ÷ expected weekdays; weekend active days count in the
+      // numerator (bonus), capped at 100%.
+      const consistency = Math.min(1, e.active_days / expectedDays)
       return {
         key: e.k, name: e.name,
+        title: titleBy.get(e.k) || null,
+        assigned,
         evaluated,
         activeDays: e.active_days,
         throughput: e.active_days > 0 ? evaluated / e.active_days : 0,
         turnaround: e.ta_count > 0 ? Number(e.ta_sum) / e.ta_count : null,
-        signalRate: evaluated > 0 ? e.escalated / evaluated : 0,
-        consistency: Math.min(1, e.active_days / Math.max(1, windowDays)),
-        escalated: e.escalated,
-        triaged: e.triaged,
-        finalPriority: e.final_priority,
-        survivalRate: e.escalated > 0 ? e.final_priority / e.escalated : 0,
+        signalRate: assigned > 0 ? finalPriority / assigned : 0,
+        consistency,
+        shortlisted: e.shortlisted,
+        priorityIV: e.priority_iv,
+        insight: e.insight,
+        finalPriority,
+        survivalRate: assigned > 0 ? e.shortlisted / assigned : 0,
         linkDead: e.link_dead,
         noted: e.noted,
         noteRate: evaluated > 0 ? e.noted / evaluated : 0,
-        outcomeScore: outcomeScoreOf(finBy.get(e.k) || {}),
         recorded: rec.recorded, rec5: rec.rec5, rec20: rec.rec20,
         initialConclusions: initBy.get(e.k) || {},
         finalConclusions: finBy.get(e.k) || {},
       }
     })
-    // include recorders who did no evaluation in this window
+    // include recorders / assigned-only people who did no evaluation in this window
+    const blank = (key: string, name: string) => ({
+      key, name, title: titleBy.get(key) || null, assigned: 0, evaluated: 0, activeDays: 0, throughput: 0, turnaround: null as number | null,
+      signalRate: 0, consistency: 0, shortlisted: 0, priorityIV: 0, insight: 0, finalPriority: 0, survivalRate: 0,
+      linkDead: 0, noted: 0, noteRate: 0,
+      recorded: 0, rec5: 0, rec20: 0, initialConclusions: {}, finalConclusions: {},
+    })
     for (const [k, rec] of Array.from(recBy.entries())) {
       if (!evaluators.find((e) => e.key === k)) {
         const r = recorders.find((x) => x.k === k)!
-        evaluators.push({
-          key: k, name: r.name, evaluated: 0, activeDays: 0, throughput: 0, turnaround: null,
-          signalRate: 0, consistency: 0, escalated: 0, triaged: 0, finalPriority: 0, survivalRate: 0,
-          linkDead: 0, noted: 0, noteRate: 0, outcomeScore: null,
-          recorded: rec.recorded, rec5: rec.rec5, rec20: rec.rec20, initialConclusions: {}, finalConclusions: {},
-        })
+        evaluators.push({ ...blank(k, r.name), recorded: rec.recorded, rec5: rec.rec5, rec20: rec.rec20 })
       }
+    }
+    for (const [k, a] of Array.from(asgBy.entries())) {
+      const ex = evaluators.find((e) => e.key === k)
+      if (ex) continue
+      evaluators.push({ ...blank(k, a.name), assigned: a.assigned })
     }
     evaluators.sort((a, b) => b.evaluated - a.evaluated)
 
@@ -262,27 +474,31 @@ export async function GET(req: NextRequest) {
     const sum = (f: (e: typeof evaluators[number]) => number) => evaluators.reduce((s, e) => s + f(e), 0)
     const activeEvals = evaluators.filter((e) => e.evaluated > 0)
     const funnel = {
+      assigned: sum((e) => e.assigned),
       evaluated: sum((e) => e.evaluated),
-      escalated: sum((e) => e.escalated),
-      triaged: sum((e) => e.triaged),
+      shortlisted: sum((e) => e.shortlisted),
+      priorityIV: sum((e) => e.priorityIV),
+      insight: sum((e) => e.insight),
       finalPriority: sum((e) => e.finalPriority),
     }
     const tput = activeEvals.map((e) => e.throughput)
     const tas = evaluators.map((e) => e.turnaround).filter((t): t is number => t != null)
-    // team outcome score: weighted over ALL final conclusions in scope
-    const teamFin: Record<string, number> = {}
-    for (const e of evaluators) for (const [c, n] of Object.entries(e.finalConclusions)) teamFin[c] = (teamFin[c] || 0) + n
+    // Weighted team velocity: total games ÷ total person-active-days. Unlike
+    // avgThroughput (unweighted mean of per-person rates), heavy contributors
+    // count proportionally here.
+    const totalActiveDays = activeEvals.reduce((s, e) => s + e.activeDays, 0)
     const teamTotals = {
       evaluators: activeEvals.length,
+      totalAssigned: funnel.assigned,
       totalEvaluated: funnel.evaluated,
       avgThroughput: tput.length ? tput.reduce((a, b) => a + b, 0) / tput.length : 0,
+      personDayThroughput: totalActiveDays > 0 ? funnel.evaluated / totalActiveDays : 0,
       avgTurnaround: tas.length ? tas.reduce((a, b) => a + b, 0) / tas.length : null,
-      signalRate: funnel.evaluated ? funnel.escalated / funnel.evaluated : 0,
-      survivalRate: funnel.escalated ? funnel.finalPriority / funnel.escalated : 0,
+      signalRate: funnel.assigned ? funnel.finalPriority / funnel.assigned : 0,
+      survivalRate: funnel.assigned ? funnel.shortlisted / funnel.assigned : 0,
       totalRecorded: sum((e) => e.recorded),
       linkDead: sum((e) => e.linkDead),
       noteRate: funnel.evaluated ? sum((e) => e.noted) / funnel.evaluated : 0,
-      outcomeScore: outcomeScoreOf(teamFin),
     }
 
     // team conclusion distributions
@@ -292,17 +508,20 @@ export async function GET(req: NextRequest) {
       return Object.entries(m).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
     }
 
-    // radar (normalize each axis to team max = 100)
-    const maxOf = (f: (e: typeof evaluators[number]) => number) => Math.max(1, ...evaluators.map(f))
+    // radar — EVERY axis normalized to the team's best (=100) so shapes are
+    // comparable even when the raw metric lives in a narrow band (rates ~0–15%).
+    const maxOf = (f: (e: typeof evaluators[number]) => number) => Math.max(1e-9, ...evaluators.map(f))
     const mv = maxOf((e) => e.evaluated), mr = maxOf((e) => e.recorded)
+    const msg = maxOf((e) => e.signalRate), msv = maxOf((e) => e.survivalRate)
+    const mc = maxOf((e) => e.consistency)
     const radar = evaluators.map((e) => ({
       key: e.key,
       name: e.name,
       axes: {
         Volume: Math.round((e.evaluated / mv) * 100),
-        Consistency: Math.round(e.consistency * 100),
-        Signal: Math.round(e.signalRate * 100),
-        Survival: Math.round(e.survivalRate * 100),
+        Consistency: Math.round((e.consistency / mc) * 100),
+        Signal: Math.round((e.signalRate / msg) * 100),
+        Survival: Math.round((e.survivalRate / msv) * 100),
         Recording: Math.round((e.recorded / mr) * 100),
       },
     }))
@@ -311,23 +530,36 @@ export async function GET(req: NextRequest) {
     const bucketLabel = (b: string) => {
       const [y, m, d2] = b.split('-').map(Number)
       return unit === 'month' ? `${MONTHS[m - 1]} ${y}`
-        : unit === 'week' ? `W${Math.floor((d2 - 1) / 7) + 1} ${MONTHS[m - 1]}`
+        : unit === 'week' ? weekLabel(b).replace(/ \d{4}$/, '')
         : `${d2}/${m}`
     }
     const seriesLabeled = series.map((s) => ({ label: bucketLabel(s.b), value: s.n }))
 
-    // multi-metric time series (one point per bucket) — powers trend lines & KPI sparklines
-    const metricSeries = series.map((s) => ({
-      key: s.b,
-      label: bucketLabel(s.b),
-      volume: s.n,
-      evaluated: s.evaluated,
-      escalated: s.escalated,
-      triaged: s.triaged,
-      finalPriority: s.final_priority,
-      signalRate: s.evaluated > 0 ? s.escalated / s.evaluated : 0,
-      survivalRate: s.escalated > 0 ? s.final_priority / s.escalated : 0,
-    }))
+    // multi-metric time series (one point per bucket) — powers trend lines & KPI
+    // sparklines. Assigned is bucketed on assigned_date, the rest on evaluate_date;
+    // buckets are the union of both so an assign-only bucket still shows up.
+    const asgSeriesBy = new Map<string, number>(assignedSeries.map((r) => [r.b, r.n]))
+    const evalSeriesBy = new Map<string, (typeof series)[number]>(series.map((s) => [s.b, s]))
+    const allBuckets = Array.from(new Set(Array.from(evalSeriesBy.keys()).concat(Array.from(asgSeriesBy.keys())))).sort()
+    const metricSeries = allBuckets.map((b) => {
+      const s = evalSeriesBy.get(b)
+      const assigned = asgSeriesBy.get(b) || 0
+      const shortlisted = s?.shortlisted || 0
+      const finalPriority = (s?.priority_iv || 0) + (s?.insight || 0)
+      return {
+        key: b,
+        label: bucketLabel(b),
+        volume: s?.n || 0,
+        assigned,
+        evaluated: s?.evaluated || 0,
+        shortlisted,
+        priorityIV: s?.priority_iv || 0,
+        insight: s?.insight || 0,
+        finalPriority,
+        signalRate: assigned > 0 ? finalPriority / assigned : 0,
+        survivalRate: assigned > 0 ? shortlisted / assigned : 0,
+      }
+    })
 
     // heatmap: person × bucket
     const bucketKeys = Array.from(new Set(evalSeries.map((r) => r.b))).sort()
@@ -338,6 +570,25 @@ export async function GET(req: NextRequest) {
       rows: evaluators.filter((e) => e.evaluated > 0).map((e) => ({ name: e.name, cells: heatCells.get(e.key) || {} })),
     }
 
+    // per-person activity series: assigned / evaluated / link dead per bucket
+    // (assigned is bucketed on assigned_date, the rest on evaluate_date — buckets
+    // are the union so an assign-only day still shows)
+    type PersonCell = { assigned: number; evaluated: number; linkDead: number }
+    const psBy = new Map<string, Map<string, PersonCell>>()
+    const psCell = (k: string, b: string): PersonCell => {
+      let m = psBy.get(k)
+      if (!m) { m = new Map(); psBy.set(k, m) }
+      let c = m.get(b)
+      if (!c) { c = { assigned: 0, evaluated: 0, linkDead: 0 }; m.set(b, c) }
+      return c
+    }
+    for (const r of evalSeries) { const c = psCell(r.k, r.b); c.evaluated = r.evaluated; c.linkDead = r.link_dead }
+    for (const r of evalAsgSeries) { psCell(r.k, r.b).assigned = r.n }
+    const personSeries: Record<string, Array<{ key: string; label: string } & PersonCell>> = {}
+    for (const [k, m] of Array.from(psBy.entries())) {
+      personSeries[k] = Array.from(m.keys()).sort().map((b) => ({ key: b, label: bucketLabel(b), ...m.get(b)! }))
+    }
+
     // options for adaptive dropdown
     const opts: Record<string, string[]> = { week: [], month: [], quarter: [], batch: [] }
     for (const r of optRows) if (opts[r.kind]) opts[r.kind].push(r.v)
@@ -345,19 +596,78 @@ export async function GET(req: NextRequest) {
     opts.month.sort().reverse()
     opts.quarter.sort().reverse()
     opts.batch.sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a))
-    // pretty labels for week keys
+    // pretty labels for period keys, each with its start–end date range so the
+    // picker is unambiguous (e.g. "W1 Aug 2026 · 27/7 – 2/8")
+    const dm = (dt: Date) => `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`
+    const lastDay = (y: number, m: number) => new Date(Date.UTC(y, m, 0)) // m is 1-based → day 0 of next month
     const weekLabels = opts.week.map((w) => {
-      const [y, m, d2] = w.split('-').map(Number)
-      return { key: w, label: `W${Math.floor((d2 - 1) / 7) + 1} ${MONTHS[m - 1]} ${y}` }
+      const [y, m, day] = w.split('-').map(Number)
+      const start = new Date(Date.UTC(y, m - 1, day))
+      const end = new Date(Date.UTC(y, m - 1, day + 6))
+      return { key: w, label: `${weekLabel(w)} · ${dm(start)} – ${dm(end)}` }
     })
-    const monthLabels = opts.month.map((k) => { const [y, m] = k.split('-').map(Number); return { key: k, label: `${MONTHS[m - 1]} ${y}` } })
-    const quarterLabels = opts.quarter.map((k) => { const [y, q] = k.split('-Q'); return { key: k, label: `Q${q} ${y}` } })
+    const monthLabels = opts.month.map((k) => {
+      const [y, m] = k.split('-').map(Number)
+      return { key: k, label: `${MONTHS[m - 1]} ${y} · 1/${m} – ${dm(lastDay(y, m))}` }
+    })
+    const quarterLabels = opts.quarter.map((k) => {
+      const [y, q] = k.split('-Q').map(Number)
+      const sm = (q - 1) * 3 + 1
+      return { key: k, label: `Q${q} ${y} · 1/${sm} – ${dm(lastDay(y, sm + 2))}` }
+    })
     const batchLabels = opts.batch.map((k) => ({ key: k, label: k }))
+
+    // recording queue per assignee (only people already in the evaluator list)
+    const videos: Record<string, Array<{ gameId: string; title: string | null; os: string | null; slot: string; batch: string | null; recordedOn: string | null; youtube: string | null }>> = {}
+    for (const v of videoRows) {
+      (videos[v.k] ||= []).push({
+        gameId: v.game_id, title: v.title, os: v.os, slot: v.slot,
+        batch: v.batch, recordedOn: v.recorded_on, youtube: v.youtube_link,
+      })
+    }
+
+    // pipeline payload (null on batch view)
+    type AgeRow = { key: string; label: string; a0: number; a1: number; a2: number; a3: number }
+    let pipeline: null | {
+      series: Array<{ key: string; label: string; newGames: number; evaluated: number; backlog: number; people: number }>
+      current: { backlog: number; age: { a0: number; a1: number; a2: number; a3: number } }
+      window: { newGames: number; evaluated: number }
+      aging: AgeRow[]
+      cleared: Array<AgeRow & { avgAge: number }>
+    } = null
+    if (pipelineRaw) {
+      const [pipeSeries, backlogNow, agingRows, peopleRows, clearedRows] = pipelineRaw
+      const peopleBy = new Map<string, number>(peopleRows.map((r) => [r.b, r.people]))
+      const seriesP = pipeSeries.map((r) => ({
+        key: r.b, label: bucketLabel(r.b),
+        newGames: r.new_games, evaluated: r.evaluated, backlog: r.backlog,
+        people: peopleBy.get(r.b) ?? 0,
+      }))
+      const b0 = backlogNow[0]
+      pipeline = {
+        series: seriesP,
+        current: {
+          backlog: b0?.backlog ?? 0,
+          age: { a0: b0?.a0 ?? 0, a1: b0?.a1 ?? 0, a2: b0?.a2 ?? 0, a3: b0?.a3 ?? 0 },
+        },
+        window: {
+          newGames: seriesP.reduce((s, r) => s + r.newGames, 0),
+          evaluated: seriesP.reduce((s, r) => s + r.evaluated, 0),
+        },
+        aging: agingRows.map((r) => ({
+          key: r.b, label: bucketLabel(r.b), a0: r.a0, a1: r.a1, a2: r.a2, a3: r.a3,
+        })),
+        cleared: clearedRows.map((r) => ({
+          key: r.b, label: bucketLabel(r.b), a0: r.a0, a1: r.a1, a2: r.a2, a3: r.a3,
+          avgAge: r.avg_age ?? 0,
+        })),
+      }
+    }
 
     const body = {
       empty: evaluators.length === 0,
       canSeeTeam: true,
-      view, category, window: win,
+      view, category, title, window: win, bucketUnit: unit,
       options: { week: weekLabels, month: monthLabels, quarter: quarterLabels, batch: batchLabels },
       teamTotals, funnel,
       initialConclusions: mergeMap((e) => e.initialConclusions),
@@ -365,7 +675,10 @@ export async function GET(req: NextRequest) {
       series: seriesLabeled,
       metricSeries,
       heatmap,
+      personSeries,
+      videos,
       evaluators, radar,
+      pipeline,
     }
     CACHE.set(cacheKey, { at: Date.now(), body })
     return NextResponse.json(body)

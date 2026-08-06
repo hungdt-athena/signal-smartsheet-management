@@ -33,10 +33,11 @@ interface NavChild { href: string; label: string; roles?: string[]; external?: b
 interface NavItem { href: string; label: string; icon: keyof typeof ICONS; adminOnly?: boolean; roles?: string[]; external?: boolean; children?: NavChild[] }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/team-ops',        label: 'Team Operations', icon: 'users', roles: ['admin', 'moderator', 'evaluator'], children: [
+  { href: '/team-ops',        label: 'Team Operations', icon: 'users', roles: ['admin', 'evaluator'], children: [
     { href: '/team-ops?tab=assign',   label: 'Assign' },
     { href: '/team-ops?tab=reassign', label: 'Reassign' },
     { href: '/team-ops?tab=handover', label: 'Handover' },
+    { href: '/team-ops?tab=performance', label: 'Performance', roles: ['admin'] },
   ]},
   // Arcade/Simulation hidden from non-admins while still in development.
   { href: '/evaluations',     label: 'Evaluations', icon: 'clipboard', children: [
@@ -44,18 +45,12 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/evaluations?cat=short_list', label: 'Short List' },
     { href: '/evaluations?cat=weekly_feedback', label: 'Weekly Feedback' },
   ]},
-  { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
+  { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
-    { href: '/youtube?tab=record_video', label: 'Record', roles: ['admin', 'moderator', 'evaluator'] },
-  ]},
-  { href: '/report',          label: 'Report', icon: 'chart', roles: ['admin'], children: [
-    { href: '/report?tab=overview',    label: 'Overview' },
-    { href: '/report?tab=leaderboard', label: 'Leaderboard' },
-    { href: '/report?tab=individual',  label: 'Individual' },
-    { href: '/report?tab=activity',    label: 'Activity' },
+    { href: '/youtube?tab=record_video', label: 'Record', roles: ['admin', 'evaluator'] },
   ]},
   { href: '/admin',           label: 'Users Management', icon: 'shield', adminOnly: true },
-  { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin', 'moderator'] },
+  { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin'] },
   { href: '/guide',           label: 'Guide',      icon: 'book', external: true, children: [
     { href: '/evaluator-guide.html#vi', label: 'VI', external: true },
     { href: '/evaluator-guide.html#en', label: 'EN', external: true },
@@ -84,7 +79,7 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
 
   const visibleItems = NAV_ITEMS.filter(item => {
     if (item.roles) return item.roles.includes(role ?? '')
-    if (item.adminOnly) return role === 'admin' || role === 'moderator'
+    if (item.adminOnly) return role === 'admin'
     return true
   })
 

@@ -18,7 +18,7 @@ const PLATFORMS = ['all', 'ios', 'android']
 export async function GET(req: NextRequest) {
   // Read is open to evaluators too, but scoped to their own Initial-list row
   // (no Final list). Managers see the full roster. Writes stay manager-only.
-  const guard = await requireRole(['admin', 'moderator', 'evaluator'])
+  const guard = await requireRole(['admin', 'evaluator'])
   if (guard) return guard
   const group = req.nextUrl.searchParams.get('group') ?? ''
   if (!isBucket(group)) return NextResponse.json({ error: 'Invalid group' }, { status: 400 })

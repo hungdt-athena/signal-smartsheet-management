@@ -18,10 +18,15 @@ function row(over: Partial<RollupRow>): RollupRow {
 }
 
 describe('period labels', () => {
-  it('weekLabel = W{n} Mon YYYY by day-of-month', () => {
+  it('weekLabel = W{n} Mon YYYY named by the week\'s LAST day (team batch convention)', () => {
     expect(weekLabel('2026-06-01')).toBe('W1 Jun 2026')
     expect(weekLabel('2026-06-08')).toBe('W2 Jun 2026')
-    expect(weekLabel('2026-06-29')).toBe('W5 Jun 2026')
+    // Mon Jun 29 – Sun Jul 5 contains Jul 1 → it is W1 Jul, not W5 Jun
+    expect(weekLabel('2026-06-29')).toBe('W1 Jul 2026')
+    // Mon Jul 20 – Sun Jul 26 → W4 Jul (matches batch 'W4 Jul, 2026')
+    expect(weekLabel('2026-07-20')).toBe('W4 Jul 2026')
+    // Mon Jul 27 – Sun Aug 2 contains Aug 1 → W1 Aug
+    expect(weekLabel('2026-07-27')).toBe('W1 Aug 2026')
     expect(weekLabel('2026-01-15')).toBe('W3 Jan 2026')
   })
   it('monthLabel / quarterLabel', () => {

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 
-type Role = 'admin' | 'moderator' | 'evaluator'
+type Role = 'admin' | 'evaluator'
 
 /** Returns null if allowed, or a 401/403 NextResponse if blocked.
  *  Accepts a single role or a list of allowed roles.
@@ -18,9 +18,9 @@ export async function requireRole(role: Role | Role[]): Promise<NextResponse | n
   return null
 }
 
-/** Allows admin or moderator (the "manager" tier). */
+/** Allows the "manager" tier (admin only, since the moderator role was retired). */
 export function requireManager(): Promise<NextResponse | null> {
-  return requireRole(['admin', 'moderator'])
+  return requireRole(['admin'])
 }
 
 /** Returns null if the user is logged in (any role), or 401 if not.
