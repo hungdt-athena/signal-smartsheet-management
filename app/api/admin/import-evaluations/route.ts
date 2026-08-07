@@ -133,6 +133,13 @@ export async function POST(req: NextRequest) {
           ON CONFLICT (game_id, category_group) DO NOTHING
         `
         inserted = res.count
+        // Imported rows carry only assigned_date; seed first_assigned_date (the
+        // team-intake axis, migration 033) from it — the Smartsheet export has no
+        // record of earlier reassigns, so this is the best available origin date.
+        await tx`
+          UPDATE game_evaluations SET first_assigned_date = assigned_date
+          WHERE category_group = ${category} AND assigned_date IS NOT NULL AND first_assigned_date IS NULL
+        `
       }
     })
   } catch (e) {

@@ -99,7 +99,8 @@ export async function POST(req: NextRequest) {
         await sql`
           UPDATE game_evaluations
           SET initial_evaluator = ${name},
-              assigned_date = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+              assigned_date = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
+              first_assigned_date = COALESCE(first_assigned_date, (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)
           WHERE id IN ${sql(ids)}
         `
         perEvaluatorGameIds.set(name, ids.map(id => idToGameId.get(id)!).filter(Boolean))

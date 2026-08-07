@@ -1,12 +1,12 @@
 'use client'
-// Hand-rolled SVG/CSS chart primitives for the Report tab. No chart library — keeps
+// Hand-rolled SVG/CSS chart primitives for the Report tab. No chart library - keeps
 // the bundle small and matches the app's existing inline-SVG style. Palette is the
 // dataviz-validated categorical set; conclusion hues reuse the app's badge intent.
 
 import { useId, useRef, useState, type ReactNode } from 'react'
 
 // Validated categorical palette (see scripts/validate_palette.js). Assigned in fixed
-// order, never cycled past 8 — a 9th series folds into "Other" upstream.
+// order, never cycled past 8 - a 9th series folds into "Other" upstream.
 export const CAT = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834']
 
 // Semantic colors per conclusion / record bucket. Falls back to the categorical
@@ -28,13 +28,26 @@ export const fmt = {
   dec: (n: number, d = 1) => n.toFixed(d),
   // sub-1% rates keep a decimal so they don't collapse to "0%" / "1%"
   pct: (n: number) => { const p = n * 100; return p > 0 && p < 2 ? `${p.toFixed(1)}%` : `${Math.round(p)}%` },
-  days: (n: number | null) => (n == null ? '—' : `${n.toFixed(1)}d`),
-  signed: (n: number | null) => (n == null ? '—' : `${n > 0 ? '+' : ''}${Math.round(n * 100)}%`),
+  days: (n: number | null) => (n == null ? '-' : `${n.toFixed(1)}d`),
+  signed: (n: number | null) => (n == null ? '-' : `${n > 0 ? '+' : ''}${Math.round(n * 100)}%`),
+}
+
+// Axis scale with round gridline values: pick a 1/2/2.5/5 x 10^k step so ticks land
+// on numbers a human reads at a glance (0 · 250 · 500 …) instead of fractions of the
+// raw maximum (0 · 6.7% · 13.3% …).
+export function niceScale(rawMax: number, tickCount = 4): { max: number; ticks: number[] } {
+  if (!isFinite(rawMax) || rawMax <= 0) return { max: 1, ticks: [0, 1] }
+  const raw = rawMax / tickCount
+  const base = Math.pow(10, Math.floor(Math.log10(raw)))
+  const f = raw / base
+  const step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * base
+  const max = step * tickCount
+  return { max, ticks: Array.from({ length: tickCount + 1 }, (_, i) => i * step) }
 }
 
 // ---------- "?" tooltip: metric definition + how to act on it ----------
 // The popover is position:fixed and placed from the icon's viewport rect, clamped
-// to the viewport — it can never be clipped by card/grid boundaries.
+// to the viewport - it can never be clipped by card/grid boundaries.
 export function InfoTip({ title, children }: { title?: string; children: ReactNode }) {
   const ref = useRef<HTMLSpanElement>(null)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
@@ -139,9 +152,10 @@ export function LineChart({ series, area = false, format, rightLabel, rightForma
   const fr = rightFormat || f
   const isRight = (s: { axis?: 'left' | 'right' }) => s.axis === 'right'
   const hasRight = series.some(isRight)
-  const max = Math.max(1, ...series.filter((s) => !isRight(s)).flatMap((s) => s.points.map((p) => p.value)))
-  const maxR = Math.max(1, ...series.filter(isRight).flatMap((s) => s.points.map((p) => p.value)))
-  const VW = 1000, VH = 260, padX = 40, padB = 30, padT = 16
+  const left = niceScale(Math.max(1, ...series.filter((s) => !isRight(s)).flatMap((s) => s.points.map((p) => p.value))))
+  const right = niceScale(Math.max(1, ...series.filter(isRight).flatMap((s) => s.points.map((p) => p.value))))
+  const max = left.max, maxR = right.max
+  const VW = 1000, VH = 260, padX = 40, padB = 30, padT = 22
   const innerW = VW - padX - (hasRight ? 46 : 12), innerH = VH - padB - padT
   const x = (i: number) => padX + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW)
   const y = (v: number) => padT + innerH * (1 - v / max)
@@ -149,16 +163,35 @@ export function LineChart({ series, area = false, format, rightLabel, rightForma
   const yOf = (s: { axis?: 'left' | 'right' }, v: number) => (isRight(s) ? yR(v) : y(v))
   const labels = series[0].points.map((p) => p.label)
   const step = Math.ceil(n / 12)
-  const ticks = [0, 0.25, 0.5, 0.75, 1]
+  // Point values are printed next to their dot only when the chart is sparse enough
+  // to stay readable; denser charts keep the hover tooltip. Series that land on top
+  // of each other (all the low lines bunched near zero) are pushed apart vertically,
+  // so a label always belongs to exactly one visible dot.
+  const showValues = n <= 8 && series.length <= 4
+  const MIN_GAP = 14
+  const labelY: number[][] = series.map(() => [])
+  if (showValues) {
+    for (let i = 0; i < n; i++) {
+      const order = series
+        .map((s, si) => ({ si, y: yOf(s, s.points[i].value) }))
+        .sort((a, b) => b.y - a.y) // bottom-most first, push upward from there
+      let floor = Infinity
+      for (const o of order) {
+        const wanted = Math.min(o.y - 9, floor - MIN_GAP)
+        labelY[o.si][i] = Math.max(wanted, padT - 6)
+        floor = labelY[o.si][i]
+      }
+    }
+  }
   return (
     <div className="rp-chart-wrap">
       <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg" preserveAspectRatio="xMidYMid meet"
         onMouseLeave={() => setHover(null)}>
-        {ticks.map((g) => (
-          <g key={g}>
-            <line x1={padX} x2={padX + innerW} y1={padT + innerH * (1 - g)} y2={padT + innerH * (1 - g)} className="rp-grid" />
-            <text x={padX - 8} y={padT + innerH * (1 - g) + 4} className="rp-ylabel">{f(max * g)}</text>
-            {hasRight && <text x={padX + innerW + 8} y={padT + innerH * (1 - g) + 4} className="rp-ylabel" textAnchor="start">{fr(maxR * g)}</text>}
+        {left.ticks.map((tv, ti) => (
+          <g key={tv}>
+            <line x1={padX} x2={padX + innerW} y1={y(tv)} y2={y(tv)} className="rp-grid" />
+            <text x={padX - 8} y={y(tv) + 4} className="rp-ylabel">{f(tv)}</text>
+            {hasRight && <text x={padX + innerW + 8} y={yR(right.ticks[ti]) + 4} className="rp-ylabel" textAnchor="start">{fr(right.ticks[ti])}</text>}
           </g>
         ))}
         {area && series.map((s, si) => {
@@ -189,6 +222,12 @@ export function LineChart({ series, area = false, format, rightLabel, rightForma
               {n <= 24 && s.points.map((p, i) => (
                 <circle key={i} cx={x(i)} cy={yOf(s, p.value)} r={hover === i ? 4 : 2.6} fill={color}
                   opacity={hover == null || hover === i ? 1 : 0.5} />
+              ))}
+              {showValues && s.points.map((p, i) => (
+                <text key={`v${i}`} x={x(i)} y={labelY[si][i]} className="rp-dotval"
+                  textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fill={color}>
+                  {(isRight(s) ? fr : f)(p.value)}
+                </text>
               ))}
             </g>
           )
@@ -365,45 +404,94 @@ export function BumpChart({ periods, rows, topN = 8 }: {
 
 // ---------- vertical column chart over time (volume) ----------
 // Fixed viewBox so labels/bars stay a sensible size regardless of point count.
-export function ColumnChart({ data, color = CAT[0] }: {
+export function ColumnChart({ data, color = CAT[0], line }: {
   data: Array<{ label: string; value: number; sub?: string }>; color?: string
+  // optional overlay on its own right-hand axis (e.g. active headcount vs volume)
+  line?: { name: string; color?: string; values: number[]; format?: (v: number) => string }
 }) {
   const [hover, setHover] = useState<number | null>(null)
   if (data.length === 0) return <Empty />
-  const max = Math.max(1, ...data.map((d) => d.value))
-  const VW = 1000, VH = 250, padX = 12, padB = 30, padT = 20
-  const innerW = VW - padX * 2, innerH = VH - padB - padT
+  const { max, ticks } = niceScale(Math.max(1, ...data.map((d) => d.value)))
+  const lineCol = line?.color || CAT[3]
+  const lf = line?.format || fmt.int
+  const rs = niceScale(Math.max(1, ...(line?.values || [1])))
+  // Narrower viewBox than the wide line charts: this one usually sits in a half-width
+  // card, and a 1000-unit box shrinks every label past legibility there.
+  const VW = 700, VH = 240, padL = 40, padR = line ? 38 : 10, padB = 28, padT = 22
+  const innerW = VW - padL - padR, innerH = VH - padB - padT
   const slot = innerW / data.length
-  const barW = Math.min(58, slot * 0.6)
+  const barW = Math.min(44, slot * 0.6)
   const n = data.length
   const step = Math.ceil(n / 16)
   const showVals = n <= 16
+  const cxOf = (i: number) => padL + i * slot + slot / 2
+  const yOf = (v: number) => padT + innerH * (1 - v / max)
+  const yLine = (v: number) => padT + innerH * (1 - v / rs.max)
   return (
     <div className="rp-chart-wrap">
       <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg" preserveAspectRatio="xMidYMid meet"
         onMouseLeave={() => setHover(null)}>
-        {[0, 0.25, 0.5, 0.75, 1].map((g) => (
-          <line key={g} x1={padX} x2={VW - padX} y1={padT + innerH * (1 - g)} y2={padT + innerH * (1 - g)} className="rp-grid" />
+        {ticks.map((tv, ti) => (
+          <g key={tv}>
+            <line x1={padL} x2={VW - padR} y1={yOf(tv)} y2={yOf(tv)} className="rp-grid" />
+            <text x={padL - 8} y={yOf(tv) + 4} className="rp-ylabel">{fmt.int(tv)}</text>
+            {line && <text x={VW - padR + 8} y={yLine(rs.ticks[ti]) + 4} className="rp-ylabel" textAnchor="start">{lf(rs.ticks[ti])}</text>}
+          </g>
         ))}
         {data.map((d, i) => {
           const h = (d.value / max) * innerH
-          const cx = padX + i * slot + slot / 2
+          const cx = cxOf(i)
           const x = cx - barW / 2
-          const y = padT + innerH - h
+          const y = yOf(d.value)
           return (
             <g key={i} onMouseEnter={() => setHover(i)}>
-              <rect x={padX + i * slot} y={padT} width={slot} height={innerH} fill="transparent" />
+              <rect x={padL + i * slot} y={padT} width={slot} height={innerH} fill="transparent" />
               <rect x={x} y={y} width={barW} height={Math.max(h, 1)} rx={4}
                 fill={color} opacity={hover == null || hover === i ? 1 : 0.45} />
-              {showVals && <text x={cx} y={y - 5} className="rp-barval">{fmt.int(d.value)}</text>}
+              {showVals && <text x={cx} y={y - 6} className="rp-barval">{fmt.int(d.value)}</text>}
               {i % step === 0 && <text x={cx} y={VH - 10} className="rp-xlabel">{d.label}</text>}
             </g>
           )
         })}
+        {line && (
+          <g>
+            <path d={line.values.map((v, i) => `${i ? 'L' : 'M'}${cxOf(i).toFixed(1)} ${yLine(v).toFixed(1)}`).join(' ')}
+              fill="none" stroke={lineCol} strokeWidth={2.4} strokeDasharray="6 4" strokeLinejoin="round" strokeLinecap="round" />
+            {line.values.map((v, i) => {
+              // The bar's own value sits just above the bar top. Put the line label on
+              // whichever side of the dot is clear of it, so the two never collide.
+              const cx = cxOf(i), dotY = yLine(v), barTop = yOf(data[i]?.value ?? 0)
+              // Never print the line's value over a bar. When the dot sits inside the
+              // bar's body, move the label out to the side; otherwise put it above the
+              // dot, lifted clear of the bar's own value label at barTop-6.
+              const insideBar = dotY > barTop - 4
+              const rightRoom = cx + barW / 2 + 26 < VW - padR
+              const lx = insideBar ? cx + (rightRoom ? barW / 2 + 6 : -(barW / 2 + 6)) : cx
+              const ly = insideBar ? dotY + 4
+                : Math.abs((dotY - 9) - (barTop - 6)) < 13 ? barTop - 20 : dotY - 9
+              return (
+                <g key={i}>
+                  <circle cx={cx} cy={dotY} r={3.4} fill={lineCol} stroke="var(--surface)" strokeWidth={1.4} />
+                  {showVals && (
+                    <text x={lx} y={Math.max(ly, 10)} className="rp-dotval" fill={lineCol}
+                      textAnchor={insideBar ? (rightRoom ? 'start' : 'end') : 'middle'}>{lf(v)}</text>
+                  )}
+                </g>
+              )
+            })}
+          </g>
+        )}
       </svg>
       {hover != null && (
-        <div className="rp-tip" style={{ left: `${((padX + hover * slot + slot / 2) / VW) * 100}%` }}>
+        <div className="rp-tip" style={{ left: `${(cxOf(hover) / VW) * 100}%` }}>
           <b>{data[hover].label}</b><br />{fmt.int(data[hover].value)}{data[hover].sub ? ` · ${data[hover].sub}` : ''}
+          {line && <><br /><span style={{ color: lineCol }}>●</span> {line.name}: <b>{lf(line.values[hover] ?? 0)}</b></>}
+        </div>
+      )}
+      {line && (
+        <div className="rp-legend rp-legend-horiz" style={{ marginTop: 6, marginBottom: 0 }}>
+          <div className="rp-legend-row"><span className="rp-dot" style={{ background: color }} /><span className="rp-legend-name">Games evaluated</span></div>
+          <div className="rp-legend-row"><span className="rp-dot" style={{ background: lineCol }} /><span className="rp-legend-name">{line.name}</span></div>
         </div>
       )}
     </div>
@@ -412,18 +500,27 @@ export function ColumnChart({ data, color = CAT[0] }: {
 
 // ---------- horizontal ranked bars ----------
 export function RankBars({ rows, unit, color = CAT[0], format }: {
-  rows: Array<{ name: string; value: number }>; unit?: string; color?: string
+  // `sub` prints the raw numbers behind a derived value (a score or a rate means
+  // nothing without the volume it was computed from)
+  rows: Array<{ name: string; value: number; sub?: string }>; unit?: string; color?: string
   format?: (v: number) => string
 }) {
   if (rows.length === 0) return <Empty />
-  const max = Math.max(1, ...rows.map((r) => r.value))
+  // Scale to the board's OWN peak so the leader always fills the capsule. The old
+  // Math.max(1, …) floor silently broke every rate board: with values like 0.011
+  // (1.1%) the peak became 1 and the top bar rendered at 1% of the track, making all
+  // rows look identically empty and impossible to compare.
+  const peak = Math.max(0, ...rows.map((r) => r.value))
+  const max = peak > 0 ? peak : 1
   const f = format || fmt.int
   return (
     <div className="rp-rank">
       {rows.map((r, i) => (
         <div className="rp-rank-row" key={r.name}>
           <span className="rp-rank-i">{i + 1}</span>
-          <span className="rp-rank-name" title={r.name}>{r.name}</span>
+          <span className="rp-rank-name" title={r.sub ? `${r.name} · ${r.sub}` : r.name}>
+            {r.name}{r.sub && <span className="rp-rank-sub">{r.sub}</span>}
+          </span>
           <span className="rp-rank-track">
             <span className="rp-rank-fill" style={{ width: `${(r.value / max) * 100}%`, background: color }} />
           </span>
@@ -523,7 +620,12 @@ export function Empty({ text = 'No data' }: { text?: string }) {
   return <div className="rp-empty">{text}</div>
 }
 
-// ---------- funnel (decreasing stages + conversion %) ----------
+// ---------- funnel (tapering stages + conversion %) ----------
+// Drawn as real tapering bands so the shape itself carries the message. A funnel
+// must never widen, but the data can: team Assigned counts NEW intake while
+// Evaluated also clears older backlog, so Evaluated legitimately exceeds it. Widths
+// therefore follow the running minimum (the shape stays a funnel) while the printed
+// numbers stay true, and the offending stage says why it broke the sequence.
 export function Funnel({ stages }: {
   stages: Array<{
     label: string; value: number; hint?: string
@@ -531,65 +633,98 @@ export function Funnel({ stages }: {
     parts?: Array<{ label: string; value: number; color: string }>
   }>
 }) {
-  if (stages.length === 0 || stages[0].value === 0) return <Empty />
-  const top = stages[0].value
-  // sequential blue ramp, dark→light down the funnel
+  const uid = useId().replace(/:/g, '')
+  if (stages.length === 0 || stages.every((s) => s.value === 0)) return <Empty />
+  // width driver = running minimum, so the shape only ever narrows
+  const runMin: number[] = []
+  stages.forEach((s, i) => runMin.push(i === 0 ? s.value : Math.min(runMin[i - 1], s.value)))
+  const peak = Math.max(1, runMin[0])
+  // Narrow viewBox: the funnel shares a row with other cards, so a 1000-unit box
+  // would shrink its captions to noise in the half-width slot.
+  const VW = 660, bandH = 58, gapH = 30, padT = 6
+  const VH = padT + stages.length * bandH + (stages.length - 1) * gapH + 6
+  // captions are SVG text (no wrapping), so the right gutter is sized for the longest
+  // sub-line the component can emit and those lines are kept deliberately short
+  const labelW = 112, valW = 160
+  const cx = labelW + (VW - labelW - valW) / 2
+  const halfW = (VW - labelW - valW) / 2
+  const wOf = (v: number) => Math.max(3, (v / peak) * halfW * 2) / 2 // half-width, min 3px sliver
+  const topY = (i: number) => padT + i * (bandH + gapH)
+  // sequential blue ramp, dark at the wide top → light at the narrow tip
   const shade = (i: number) => `color-mix(in srgb, ${CAT[0]} ${Math.round(100 - i * 14)}%, #ffffff)`
   return (
-    <div className="rp-funnel">
-      {stages.map((s, i) => {
-        const pctOfTop = (s.value / top) * 100
-        const prev = i > 0 ? stages[i - 1].value : null
-        const conv = prev && prev > 0 ? (s.value / prev) * 100 : null
-        return (
-          <div className="rp-funnel-row" key={s.label}>
-            <div className="rp-funnel-head">
-              <span className="rp-funnel-label">{s.label}</span>
-              <span className="rp-funnel-val">
-                {s.parts?.length
-                  ? s.parts.map((p, j) => (
-                      <span key={p.label}>{j > 0 && ' + '}<span style={{ color: p.color, fontWeight: 700 }}>{fmt.int(p.value)}</span> {p.label}</span>
-                    ))
-                  : fmt.int(s.value)}
-                <span className="rp-funnel-pct"> · {Math.round(pctOfTop)}% of top</span>
-              </span>
-            </div>
-            <div className="rp-funnel-bar-track">
-              {s.parts?.length ? (
-                <div className="rp-funnel-bar" style={{ width: `${Math.max(pctOfTop, 1.5)}%`, background: 'transparent', display: 'flex', overflow: 'hidden' }}>
-                  {s.parts.filter((p) => p.value > 0).map((p) => (
-                    <div key={p.label} style={{ width: `${(p.value / s.value) * 100}%`, background: p.color, minWidth: 2 }} />
-                  ))}
-                </div>
+    <div className="rp-chart-wrap">
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg rp-funnel-svg" preserveAspectRatio="xMidYMid meet">
+        {stages.map((s, i) => {
+          const y0 = topY(i), y1 = y0 + bandH
+          const wTop = wOf(runMin[i])
+          // taper toward the next stage so the neck between bands reads as a drop
+          const wBot = i < stages.length - 1 ? Math.max(wOf(runMin[i + 1]), wTop * 0.35) : wTop * 0.9
+          const overflow = s.value > runMin[i]
+          const path = `M${cx - wTop} ${y0} L${cx + wTop} ${y0} L${cx + wBot} ${y1} L${cx - wBot} ${y1} Z`
+          const prev = i > 0 ? stages[i - 1].value : null
+          const conv = prev && prev > 0 ? (s.value / prev) * 100 : null
+          const clip = `fn-${uid}-${i}`
+          const parts = s.parts?.filter((p) => p.value > 0) || []
+          let acc = 0
+          return (
+            <g key={s.label}>
+              {parts.length ? (
+                <>
+                  <defs><clipPath id={clip}><path d={path} /></clipPath></defs>
+                  {parts.map((p) => {
+                    const x0 = cx - wTop + (acc / s.value) * wTop * 2
+                    const w = (p.value / s.value) * wTop * 2
+                    acc += p.value
+                    return <rect key={p.label} x={x0} y={y0} width={Math.max(w, 1)} height={bandH} fill={p.color} clipPath={`url(#${clip})`} />
+                  })}
+                  <path d={path} fill="none" stroke="var(--surface)" strokeWidth={1} />
+                </>
               ) : (
-                <div className="rp-funnel-bar" style={{ width: `${Math.max(pctOfTop, 1.5)}%`, background: shade(i) }} />
+                <path d={path} fill={shade(i)} />
               )}
-            </div>
-            {conv != null && i > 0 && (
-              <div className="rp-funnel-conv">↳ {Math.round(conv)}% converted from {stages[i - 1].label}</div>
-            )}
-          </div>
-        )
-      })}
+              <text x={labelW - 16} y={y0 + bandH / 2 + 5} className="rp-fn-label" textAnchor="end">{s.label}</text>
+              <text x={VW - valW + 16} y={y0 + bandH / 2 - 3} className="rp-fn-val" textAnchor="start">{fmt.int(s.value)}</text>
+              <text x={VW - valW + 16} y={y0 + bandH / 2 + 14} className="rp-fn-sub" textAnchor="start">
+                {parts.length
+                  ? parts.map((p) => `${fmt.int(p.value)} ${p.label.replace('Priority ', 'P-')}`).join(' + ')
+                  : overflow ? 'incl. older backlog'
+                  : conv != null ? `${Math.round(conv)}% of ${stages[i - 1].label.toLowerCase()}` : 'new intake'}
+              </text>
+              {conv != null && (
+                <text x={cx} y={y0 - gapH / 2 + 5} className="rp-fn-conv" textAnchor="middle">
+                  ↓ {Math.round(conv)}% of {stages[i - 1].label.toLowerCase()}
+                </text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
     </div>
   )
 }
 
 // ---------- radar (N axes, one or more overlaid series) ----------
-export function Radar({ axes, series, size = 240 }: {
+export function Radar({ axes, series, size = 240, axisRaw }: {
   axes: string[]
   series: Array<{ name: string; values: number[]; color?: string }> // values 0..100 aligned to axes
   size?: number
+  // raw (un-normalized) value per axis, printed under the axis name - the polygon is
+  // relative to the team best, which alone never tells you the actual number
+  axisRaw?: string[]
 }) {
   const [hi, setHi] = useState<number | null>(null)
   if (axes.length < 3) return <Empty />
-  const cx = size / 2, cy = size / 2, R = size / 2 - 46
+  // Axis captions live in their own horizontal gutter inside the viewBox. They used
+  // to be drawn with overflow:visible and spilled over the neighbouring legend.
+  const GX = 86, GT = axisRaw ? 26 : 10, GB = axisRaw ? 34 : 22
+  const cx = size / 2, cy = size / 2, R = size / 2 - 34
   const ang = (i: number) => (i / axes.length) * 2 * Math.PI - Math.PI / 2
   const pt = (i: number, r: number) => [cx + r * Math.cos(ang(i)), cy + r * Math.sin(ang(i))]
   const rings = [0.25, 0.5, 0.75, 1]
   return (
     <div className="rp-radar-wrap">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow: 'visible' }}>
+      <svg width={size + GX * 2} height={size + GT + GB} viewBox={`${-GX} ${-GT} ${size + GX * 2} ${size + GT + GB}`}>
         {/* grid rings */}
         {rings.map((g) => (
           <polygon key={g} className="rp-radar-grid"
@@ -598,13 +733,18 @@ export function Radar({ axes, series, size = 240 }: {
         {/* spokes + labels */}
         {axes.map((a, i) => {
           const [x, y] = pt(i, R)
-          const [lx, ly] = pt(i, R + 16)
+          const [lx, ly] = pt(i, R + 15)
+          const below = ly > cy + 6
+          const anchor = Math.abs(lx - cx) < 6 ? 'middle' : lx > cx ? 'start' : 'end'
           return (
             <g key={a}>
               <line className="rp-radar-spoke" x1={cx} y1={cy} x2={x} y2={y} />
-              <text x={lx} y={ly} className="rp-radar-axis"
-                textAnchor={Math.abs(lx - cx) < 6 ? 'middle' : lx > cx ? 'start' : 'end'}
-                dominantBaseline={Math.abs(ly - cy) < 6 ? 'middle' : ly > cy ? 'hanging' : 'auto'}>{a}</text>
+              <text x={lx} y={ly} className="rp-radar-axis" textAnchor={anchor}
+                dominantBaseline={Math.abs(ly - cy) < 6 ? 'middle' : below ? 'hanging' : 'auto'}>{a}</text>
+              {axisRaw?.[i] && (
+                <text x={lx} y={ly + (below ? 15 : 12)} className="rp-radar-raw" textAnchor={anchor}
+                  dominantBaseline={below ? 'hanging' : 'auto'}>{axisRaw[i]}</text>
+              )}
             </g>
           )
         })}
@@ -635,24 +775,56 @@ export function Radar({ axes, series, size = 240 }: {
   )
 }
 
-// ---------- team health bars (green/amber/red thresholds) ----------
+// ---------- team health gauges ----------
+// Each row is a metric read against a benchmark, not a bar of arbitrary length: the
+// track is scaled so the TARGET sits at a fixed position, the fill shows where the
+// team actually is, and the row states the raw counts behind the ratio plus the
+// change against the previous period. A bare percentage bar told the reader nothing
+// about whether 18% was good.
 export function HealthBars({ rows }: {
-  rows: Array<{ label: string; value: string; pct: number; status: 'good' | 'warn' | 'bad' }>
+  rows: Array<{
+    label: string; value: string
+    detail?: string            // raw counts behind the ratio ("198 of 1,130 assigned")
+    pct: number                // fill position 0-100, already scaled against the target
+    target?: number            // target marker position 0-100 (omit for "no benchmark")
+    targetLabel?: string       // what the marker means ("target 10%")
+    delta?: number | null      // change vs previous period, in the metric's own unit
+    deltaLabel?: string        // e.g. "pts vs prev week"
+    status: 'good' | 'warn' | 'bad'
+  }>
 }) {
   const col = { good: 'var(--good)', warn: 'var(--warn)', bad: 'var(--bad)' }
   return (
-    <div className="rp-health">
-      {rows.map((r) => (
-        <div className="rp-health-row" key={r.label}>
-          <div className="rp-health-top">
-            <span className="rp-health-label">{r.label}</span>
-            <span className="rp-health-val" style={{ color: col[r.status] }}>{r.value}</span>
+    <div className="rp-hb">
+      {rows.map((r) => {
+        const up = r.delta != null && r.delta > 0
+        const flat = r.delta == null || Math.abs(r.delta) < 1e-9
+        return (
+          <div className="rp-hb-row" key={r.label}>
+            <div className="rp-hb-top">
+              <span className="rp-hb-label">{r.label}</span>
+              <span className="rp-hb-val" style={{ color: col[r.status] }}>{r.value}</span>
+            </div>
+            <div className="rp-hb-track">
+              <div className="rp-hb-fill" style={{ width: `${Math.max(1.5, Math.min(100, r.pct))}%`, background: col[r.status] }} />
+              {r.target != null && (
+                <span className="rp-hb-target" style={{ left: `${Math.min(99, r.target)}%` }} title={r.targetLabel} />
+              )}
+            </div>
+            <div className="rp-hb-foot">
+              <span className="rp-hb-detail">{r.detail}</span>
+              <span className="rp-hb-meta">
+                {r.targetLabel && <span className="rp-hb-tgt">{r.targetLabel}</span>}
+                {!flat && (
+                  <span className={'rp-hb-delta ' + (up ? 'up' : 'down')}>
+                    {up ? '▲' : '▼'} {Math.abs(r.delta!) < 10 ? Math.abs(r.delta!).toFixed(1) : Math.round(Math.abs(r.delta!))} {r.deltaLabel}
+                  </span>
+                )}
+              </span>
+            </div>
           </div>
-          <div className="rp-health-track">
-            <div className="rp-health-fill" style={{ width: `${Math.max(2, Math.min(100, r.pct))}%`, background: col[r.status] }} />
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

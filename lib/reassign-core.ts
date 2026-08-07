@@ -69,7 +69,10 @@ export async function loadRoster(opts: {
 }
 
 // Persist an assignment (game_evaluations.id -> evaluator name), stamping
-// assigned_date = today (VN). Returns the per-evaluator game_id lists for history.
+// assigned_date = today (VN). first_assigned_date is stamped only the first time
+// a game is ever assigned (COALESCE) — reassign/handover restamp assigned_date but
+// must not inflate team intake, which is counted on first_assigned_date
+// (migration 033). Returns the per-evaluator game_id lists for history.
 export async function commitAssignment(
   assignment: Map<number, string>,
   idToGameId: Map<number, string>,
@@ -85,6 +88,7 @@ export async function commitAssignment(
       UPDATE game_evaluations
       SET initial_evaluator = ${name},
           assigned_date = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
+          first_assigned_date = COALESCE(first_assigned_date, (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date),
           updated_at = NOW()
       WHERE id IN ${sql(ids)}
     `

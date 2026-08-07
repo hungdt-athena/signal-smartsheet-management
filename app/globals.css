@@ -1686,9 +1686,10 @@ input:checked + .slider:before {
   font-size: 11px; padding: 5px 8px; border-radius: 6px; pointer-events: none; white-space: nowrap; z-index: 5; line-height: 1.4; }
 
 .rp-rank { display: flex; flex-direction: column; gap: 8px; }
-.rp-rank-row { display: grid; grid-template-columns: 18px 80px 1fr 78px; align-items: center; gap: 10px; }
+.rp-rank-row { display: grid; grid-template-columns: 18px 128px 1fr 78px; align-items: center; gap: 10px; }
 .rp-rank-i { font-size: 11px; font-weight: 700; color: var(--faint); text-align: center; }
 .rp-rank-name { font-size: 12.5px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-rank-sub { display: block; font-size: 10px; font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; }
 .rp-rank-track { height: 9px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
 .rp-rank-fill { display: block; height: 100%; border-radius: 99px; transition: width .5s cubic-bezier(.2,.7,.3,1); }
 .rp-rank-val { font-size: 12.5px; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
@@ -1720,34 +1721,61 @@ input:checked + .slider:before {
 .rp-chip-title { opacity: .65; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin-left: 5px; }
 
 .rp-readnote { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--border); }
+/* Config tab: roster checkboxes + all-rounder weight sliders */
+.rp-cfg-list { display: flex; flex-direction: column; gap: 2px; }
+.rp-cfg-row { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 10px;
+  padding: 7px 8px; border-radius: 7px; cursor: pointer; }
+.rp-cfg-row:hover { background: var(--surface-2); }
+.rp-cfg-row.off .rp-cfg-name { color: var(--faint); text-decoration: line-through; }
+.rp-cfg-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.rp-cfg-name { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.rp-cfg-meta { font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.rp-cfg-w { display: grid; grid-template-columns: 92px 1fr 38px; align-items: center; gap: 10px; padding: 5px 8px; }
+.rp-cfg-w input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+.rp-cfg-share { font-size: 12px; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.rp-cfg-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.rp-cfg-state { font-size: 11px; color: var(--muted); }
+
+/* actionable takeaway computed from the chart's own data */
+.rp-act { font-size: 11.5px; color: var(--text); line-height: 1.5; margin: 8px 0 0; padding: 8px 11px;
+  background: var(--surface-2); border-left: 2px solid var(--accent); border-radius: 0 7px 7px 0; }
+.rp-act-tag { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--accent); margin-right: 7px; vertical-align: 1px; }
 .rp-empty { padding: 30px; text-align: center; color: var(--faint); font-size: 13px; }
 
 /* ===== Report tab — funnel / radar / health / stacks ===== */
 .rp-section-title { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -.01em; margin: 6px 2px -2px; }
 .rp-section-title::before { content: ''; width: 3px; height: 15px; border-radius: 2px; background: var(--accent); }
 
-.rp-funnel { display: flex; flex-direction: column; gap: 14px; }
-.rp-funnel-row { display: flex; flex-direction: column; gap: 5px; }
-.rp-funnel-head { display: flex; justify-content: space-between; align-items: baseline; }
-.rp-funnel-label { font-size: 12.5px; font-weight: 600; color: var(--text); }
-.rp-funnel-val { font-size: 13px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
-.rp-funnel-pct { font-size: 11px; font-weight: 500; color: var(--faint); }
-.rp-funnel-bar-track { height: 22px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
-.rp-funnel-bar { height: 100%; border-radius: 6px; transition: width .6s cubic-bezier(.2,.7,.3,1); box-shadow: inset 0 -1px 0 rgba(0,0,0,.06); }
-.rp-funnel-conv { font-size: 10.5px; color: var(--faint); padding-left: 2px; }
+/* funnel is drawn as an SVG shape — these style its captions */
+.rp-funnel-svg { display: block; }
+.rp-fn-label { font-size: 12px; font-weight: 700; fill: var(--text); }
+.rp-fn-val { font-size: 14px; font-weight: 700; fill: var(--text); font-variant-numeric: tabular-nums; }
+.rp-fn-sub { font-size: 9px; fill: var(--faint); }
+.rp-fn-conv { font-size: 10px; font-weight: 600; fill: var(--muted); }
 
 .rp-radar-wrap { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: center; }
 .rp-radar-grid { fill: none; stroke: var(--border); stroke-width: 1; }
 .rp-radar-spoke { stroke: var(--border); stroke-width: 1; }
 .rp-radar-axis { font-size: 10.5px; font-weight: 600; fill: var(--muted); }
+.rp-radar-raw { font-size: 10px; font-weight: 700; fill: var(--text); font-variant-numeric: tabular-nums; }
 
-.rp-health { display: flex; flex-direction: column; gap: 15px; }
-.rp-health-row { display: flex; flex-direction: column; gap: 6px; }
-.rp-health-top { display: flex; justify-content: space-between; align-items: baseline; }
-.rp-health-label { font-size: 12.5px; font-weight: 600; color: var(--text); }
-.rp-health-val { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.rp-health-track { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
-.rp-health-fill { height: 100%; border-radius: 99px; transition: width .5s ease; }
+/* team health gauges: value + target marker + raw counts + delta vs previous period */
+.rp-hb { display: flex; flex-direction: column; gap: 16px; }
+.rp-hb-row { display: flex; flex-direction: column; gap: 5px; }
+.rp-hb-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.rp-hb-label { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.rp-hb-val { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.rp-hb-track { position: relative; height: 9px; background: var(--surface-2); border-radius: 99px; }
+.rp-hb-fill { height: 100%; border-radius: 99px; transition: width .5s ease; }
+.rp-hb-target { position: absolute; top: -3px; width: 2px; height: 15px; border-radius: 1px; background: var(--text); opacity: .55; }
+.rp-hb-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 10.5px; }
+.rp-hb-detail { color: var(--muted); font-variant-numeric: tabular-nums; }
+.rp-hb-meta { display: flex; gap: 8px; align-items: baseline; white-space: nowrap; }
+.rp-hb-tgt { color: var(--faint); }
+.rp-hb-delta { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rp-hb-delta.up { color: var(--good); }
+.rp-hb-delta.down { color: var(--bad); }
 
 .rp-legend-horiz { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 12px; }
 .rp-stack { display: flex; flex-direction: column; gap: 7px; }
@@ -1769,7 +1797,11 @@ input:checked + .slider:before {
 @media (max-width: 1100px) { .rp-grid-3 { grid-template-columns: 1fr; } }
 .rp-grid-2-1 { display: grid; grid-template-columns: 1.4fr 1fr; gap: var(--gap); align-items: stretch; }
 @media (max-width: 1100px) { .rp-grid-2-1 { grid-template-columns: 1fr; } }
-.rp-barval { font-size: 12px; font-weight: 700; fill: var(--muted); text-anchor: middle; }
+/* halo so an overlay line crossing the bar top can't cut through the value */
+.rp-barval { font-size: 12px; font-weight: 700; fill: var(--muted); text-anchor: middle;
+  paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+/* value printed at a line's data point — halo keeps it legible over the area fill */
+.rp-dotval { font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
 .rp-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); align-items: stretch; }
 @media (max-width: 1100px) { .rp-grid-2 { grid-template-columns: 1fr; } }
 .rp-stale-note { font-size: 12px; color: var(--warn); background: var(--warn-weak); border: 1px solid transparent; border-radius: 8px; padding: 8px 12px; }
@@ -1830,6 +1862,15 @@ input:checked + .slider:before {
 
 /* ---- individual recording queue table ---- */
 .rp-vid-wrap { overflow-x: auto; }
+/* five rows tall (header + 5 × ~33px); scrolling renders the next slice */
+.rp-vid-scroll { max-height: 218px; overflow-y: auto; }
+.rp-vid-scroll thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.rp-vid-foot { font-size: 10.5px; color: var(--faint); padding: 7px 2px 0; display: flex; align-items: center; gap: 8px; }
+.rp-vid-more { font-family: var(--font); font-size: 10.5px; font-weight: 700; color: var(--accent);
+  background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
+.rp-vid-odd { background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.rp-vid-flag { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;
+  margin-left: 6px; border-radius: 50%; background: var(--warn); color: #fff; font-size: 9px; font-weight: 800; vertical-align: 1px; }
 .rp-vidtable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .rp-vidtable th { text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .rp-vidtable td { padding: 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); color: var(--text); white-space: nowrap; }
