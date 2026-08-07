@@ -27,18 +27,16 @@ export default function TeamOpsPage() {
 
 function TeamOpsInner() {
   const searchParams = useSearchParams()
-  const { data: session, status } = useSession()
-  // Evaluators see all three ops tabs, but Reassign is read-only for them (history
-  // scoped to runs they're involved in — see ReassignPanel). Performance (the
-  // evaluator report) is admin-only — /api/report enforces the same guard;
-  // 'unauthenticated' only happens under SKIP_AUTH local dev.
-  const allowed: Tab[] = ['assign', 'reassign', 'handover']
-  if (session?.user?.role === 'admin' || status === 'unauthenticated') allowed.push('performance')
+  // Every role that reaches this page sees all four tabs. Reassign is read-only for
+  // evaluators (history scoped to runs they're involved in — see ReassignPanel), and
+  // Performance is self-scoped for them: /api/report returns only their own row for
+  // that role and ReportView then shows the Individual tab alone. No role check is
+  // needed here — and none should be added, it would only be a third copy of a rule
+  // the API already enforces.
+  const allowed: Tab[] = ['assign', 'reassign', 'handover', 'performance']
   const tab = (searchParams.get('tab') as Tab) || 'assign'
   const active: Tab = allowed.includes(tab) ? tab : 'assign'
 
-  // don't flash the wrong tab while the session (and thus the role) is loading
-  if (tab === 'performance' && status === 'loading') return null
   // Performance renders its own page chrome (header, filters, sub-tabs)
   if (active === 'performance') return <ReportView />
 

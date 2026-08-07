@@ -37,7 +37,8 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/team-ops?tab=assign',   label: 'Assign' },
     { href: '/team-ops?tab=reassign', label: 'Reassign' },
     { href: '/team-ops?tab=handover', label: 'Handover' },
-    { href: '/team-ops?tab=performance', label: 'Performance', roles: ['admin'] },
+    // Evaluators see Performance too, scoped to their own Individual view.
+    { href: '/team-ops?tab=performance', label: 'Performance', roles: ['admin', 'evaluator'] },
   ]},
   // Arcade/Simulation hidden from non-admins while still in development.
   { href: '/evaluations',     label: 'Evaluations', icon: 'clipboard', children: [

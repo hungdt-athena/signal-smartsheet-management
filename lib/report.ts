@@ -188,3 +188,70 @@ export function mergeConclusions(rows: RollupRow[]): Array<{ name: string; count
   for (const r of rows) for (const [k, v] of Object.entries(r.conclusions || {})) m[k] = (m[k] || 0) + (v || 0)
   return Object.entries(m).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
 }
+
+/* ---------------- team benchmarks (Individual tab "vs team" lines) ---------------- */
+
+/** The per-person shape the benchmark needs. Structural, so both the report route's
+ *  evaluator rows and test fixtures satisfy it. */
+export interface BenchPerson {
+  assigned: number
+  evaluated: number
+  activeDays: number
+  turnaround: number | null
+  shortlisted: number
+  finalPriority: number
+  noted: number
+  initialConclusions: Record<string, number>
+}
+
+export interface BenchStats {
+  /** people with at least one evaluation - below 2 there is nothing to compare against */
+  people: number
+  assigned: number
+  evaluated: number
+  throughput: number
+  turnaround: number | null
+  survivalRate: number
+  signalRate: number
+  noteRate: number
+  perDay: Record<string, number>
+}
+
+/** Team benchmarks, computed with the SAME formula as each person's own number so the
+ *  pair is directly comparable:
+ *    counts → average over the people who actually did that work in the window
+ *             (averaging over idle rows too would fake a low bar)
+ *    rates  → weighted team rate (total ÷ total), never a mean of per-person means,
+ *             so a heavy contributor moves the bar in proportion to their volume
+ *  Denominators mirror the per-person ones: evaluated for survival/signal/notes,
+ *  active person-days for throughput and the per-day tempo metrics.
+ *
+ *  Computed server-side because an evaluator's own report is stripped of every other
+ *  person's row - the client cannot derive this from what it receives. */
+export function teamBench(evs: BenchPerson[]): BenchStats {
+  const sum = (f: (e: BenchPerson) => number) => evs.reduce((s, e) => s + f(e), 0)
+  const avgOf = (f: (e: BenchPerson) => number, active: (e: BenchPerson) => boolean) => {
+    const xs = evs.filter(active)
+    return xs.length ? xs.reduce((s, e) => s + f(e), 0) / xs.length : 0
+  }
+  const worked = (e: BenchPerson) => e.evaluated > 0
+  const activeDays = sum((e) => e.activeDays)
+  const evaluated = sum((e) => e.evaluated)
+  const tas = evs.map((e) => e.turnaround).filter((t): t is number => t != null)
+  const perDay: Record<string, number> = {}
+  if (activeDays > 0) {
+    for (const e of evs) for (const [c, n] of Object.entries(e.initialConclusions)) perDay[c] = (perDay[c] || 0) + n
+    for (const c of Object.keys(perDay)) perDay[c] /= activeDays
+  }
+  return {
+    people: evs.filter(worked).length,
+    assigned: avgOf((e) => e.assigned, (e) => e.assigned > 0),
+    evaluated: avgOf((e) => e.evaluated, worked),
+    throughput: activeDays > 0 ? evaluated / activeDays : 0,
+    turnaround: tas.length ? tas.reduce((a, b) => a + b, 0) / tas.length : null,
+    survivalRate: evaluated > 0 ? sum((e) => e.shortlisted) / evaluated : 0,
+    signalRate: evaluated > 0 ? sum((e) => e.finalPriority) / evaluated : 0,
+    noteRate: evaluated > 0 ? sum((e) => e.noted) / evaluated : 0,
+    perDay,
+  }
+}

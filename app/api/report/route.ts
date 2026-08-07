@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
-import { weekLabel } from '@/lib/report'
+import { teamBench, weekLabel } from '@/lib/report'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 import { allRounderScore } from '@/lib/report-config'
 import { loadReportConfig } from '@/lib/report-config-db'
@@ -66,10 +68,22 @@ function resolveWindow(view: View, key: string, from: string, to: string): {
 }
 
 export async function GET(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireRole(['admin', 'evaluator'])
   if (guard) return guard
 
   try {
+    // Evaluators may read this endpoint, but only their OWN performance: the response
+    // is rebuilt below with every other person's row removed. Team AGGREGATES stay
+    // (the "vs team" benchmark lines and the funnel counts) - user's call: an
+    // evaluator should know where they sit against the team, without seeing who is
+    // who. Their key is their display name, lowercased, exactly like every other
+    // self-scoped route (see quick-stats).
+    const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
+    // SKIP_AUTH local dev has no session and gets the full admin view on purpose.
+    const scoped = !!session && session.user?.role !== 'admin'
+    const selfKey = (session?.user?.name || '').toLowerCase()
+    if (scoped && !selfKey) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
     const { searchParams } = req.nextUrl
     const view = (['week', 'month', 'quarter', 'batch', 'custom'].includes(searchParams.get('view') || '')
       ? searchParams.get('view') : 'month') as View
@@ -78,14 +92,18 @@ export async function GET(req: NextRequest) {
     const to = (searchParams.get('to') || '').trim()
     const category = (searchParams.get('category') || 'all').toLowerCase()
     // Title lens: narrow every people-based aggregate to one job classification
-    // (dashboard_users.title). Only Fulltime/Freelancer are exposed as filters.
-    const title = (['fulltime', 'freelancer'].includes((searchParams.get('title') || '').toLowerCase())
-      ? (searchParams.get('title') || '').toLowerCase() : 'all')
+    // (dashboard_users.title). Only Fulltime/Freelancer are exposed as filters, and
+    // only to admins - it is a team lens, and honouring it for a scoped request would
+    // let an evaluator probe team benchmarks sliced by job type.
+    const titleParam = (searchParams.get('title') || '').toLowerCase()
+    const title = !scoped && ['fulltime', 'freelancer'].includes(titleParam) ? titleParam : 'all'
 
     // Admin settings (who counts + all-rounder weights). Its updated_at is part of
     // the cache key so saving the Config tab invalidates every cached bundle.
     const { config: rcfg, updatedAt: cfgAt } = await loadReportConfig()
-    const cacheKey = JSON.stringify({ view, key, from, to, category, title, cfgAt })
+    // `scope` MUST be part of the key: without it an admin's full bundle could be
+    // served straight out of the cache to an evaluator asking for the same window.
+    const cacheKey = JSON.stringify({ view, key, from, to, category, title, cfgAt, scope: scoped ? selfKey : 'all' })
     const hit = CACHE.get(cacheKey)
     if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.body)
 
@@ -812,25 +830,59 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const body = {
-      empty: evaluators.length === 0,
-      canSeeTeam: true,
-      view, category, title, window: win, bucketUnit: unit,
-      options: { week: weekLabels, month: monthLabels, quarter: quarterLabels, batch: batchLabels },
-      teamTotals, funnel,
-      initialConclusions: mergeMap((e) => e.initialConclusions),
-      finalConclusions: mergeMap((e) => e.finalConclusions),
-      series: seriesLabeled,
-      metricSeries,
-      heatmap,
-      scoreRank,
-      config: rcfg,
-      personSeries,
-      videos,
-      dailyMix,
-      evaluators, radar,
-      pipeline,
+    // Benchmarks are computed here, over the FULL evaluator list, because an
+    // evaluator's bundle is stripped of every other row below - the client could not
+    // derive them from what it receives.
+    const bench = teamBench(evaluators)
+
+    const options = { week: weekLabels, month: monthLabels, quarter: quarterLabels, batch: batchLabels }
+    const shell = {
+      view, category, title, window: win, bucketUnit: unit, options,
+      teamTotals, funnel, bench,
     }
+
+    // An evaluator gets ONLY their own person-level rows. Everything keyed by person
+    // is filtered to `selfKey`; the team-wide charts (trend series, heatmap, rank
+    // boards, conclusion mixes, pipeline) are emptied rather than filtered, because
+    // their tabs are not reachable for this role - see the middleware and the tab
+    // gate in ReportView. `config` is replaced with a neutral value: the real one
+    // carries the excluded-people list.
+    const body = scoped
+      ? {
+        ...shell,
+        empty: !evaluators.some((e) => e.key === selfKey),
+        canSeeTeam: false,
+        self: selfKey,
+        initialConclusions: [], finalConclusions: [],
+        series: [], metricSeries: [],
+        heatmap: { periods: [], rows: [] },
+        scoreRank: { periods: [], rows: [] },
+        config: { ...rcfg, excluded: [] },
+        personSeries: personSeries[selfKey] ? { [selfKey]: personSeries[selfKey] } : {},
+        videos: videos[selfKey] ? { [selfKey]: videos[selfKey] } : {},
+        dailyMix: dailyMix[selfKey] ? { [selfKey]: dailyMix[selfKey] } : {},
+        evaluators: evaluators.filter((e) => e.key === selfKey),
+        radar: radar.filter((r) => r.key === selfKey),
+        pipeline: null,
+      }
+      : {
+        ...shell,
+        empty: evaluators.length === 0,
+        canSeeTeam: true,
+        self: null,
+        initialConclusions: mergeMap((e) => e.initialConclusions),
+        finalConclusions: mergeMap((e) => e.finalConclusions),
+        series: seriesLabeled,
+        metricSeries,
+        heatmap,
+        scoreRank,
+        config: rcfg,
+        personSeries,
+        videos,
+        dailyMix,
+        evaluators, radar,
+        pipeline,
+      }
     CACHE.set(cacheKey, { at: Date.now(), body })
     return NextResponse.json(body)
   } catch (err) {

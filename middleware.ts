@@ -24,10 +24,12 @@ export default withAuth(
     }
 
     // Team Operations: managers get every tab. Evaluators get the (scoped) Assign
-    // and Handover tabs only — Reassign redirects to Assign. Mirrors the sidebar
-    // child gating and the per-role API scoping. Non-evaluators → home.
+    // and Handover tabs, plus Performance — which renders ONLY their own Individual
+    // view, because /api/report strips every other person's row for that role.
+    // Reassign redirects to Assign. Mirrors the sidebar child gating and the
+    // per-role API scoping. Non-evaluators → home.
     const isEvaluator = role === 'evaluator'
-    const evaluatorTabs = ['assign', 'handover']
+    const evaluatorTabs = ['assign', 'handover', 'performance']
     if (pathname === '/team-ops' || pathname.startsWith('/team-ops/')) {
       if (!isManager) {
         if (!isEvaluator) return NextResponse.redirect(new URL(NON_MANAGER_HOME, req.url))

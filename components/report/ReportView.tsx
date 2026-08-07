@@ -5,6 +5,7 @@ import {
   Kpi, ColumnChart, RankBars, Donut, Heatmap, Funnel, Radar, HealthBars, StackedBars,
   LineChart, Scatter, BumpChart, Empty, fmt, CAT, InfoTip, Insight, type Bench,
 } from '@/components/report/charts'
+import type { BenchStats } from '@/lib/report'
 
 type View = 'week' | 'month' | 'quarter' | 'batch' | 'custom'
 const RADAR_AXES = ['Volume', 'Consistency', 'Signal', 'Survival', 'Recording'] as const
@@ -99,6 +100,11 @@ interface Bundle {
   bucketUnit: 'day' | 'week' | 'month'
   options: { week: Opt[]; month: Opt[]; quarter: Opt[]; batch: Opt[] }
   teamTotals: { evaluators: number; totalAssigned: number; totalEvaluated: number; avgThroughput: number; personDayThroughput: number; avgTurnaround: number | null; signalRate: number; survivalRate: number; totalRecorded: number; linkDead: number; noteRate: number }
+  // Team benchmarks for the Individual "vs team" lines. Computed server-side (see
+  // lib/report.ts) because an evaluator's bundle carries no other person's row.
+  bench: BenchStats
+  // set for an evaluator reading their own report; null for admins
+  self: string | null
   funnel: { assigned: number; evaluated: number; shortlisted: number; priorityIV: number; insight: number; finalPriority: number }
   initialConclusions: Cnt[]; finalConclusions: Cnt[]
   series: Array<{ label: string; value: number; people: number }>
@@ -137,7 +143,9 @@ const ageParts = (r: { a0: number; a1: number; a2: number; a3: number }) =>
   Object.fromEntries(AGE_BANDS.map((b) => [b.label, r[b.k]]))
 const ageTotal = (r: { a0: number; a1: number; a2: number; a3: number }) => r.a0 + r.a1 + r.a2 + r.a3
 
-// Report is admin-only (nav + middleware + /api/report guard) - no evaluator variant.
+// Admins get every tab. An evaluator gets Individual ONLY, scoped to themselves -
+// enforced in three places that must stay in sync: the nav/middleware gate on
+// /team-ops?tab=performance, the payload stripping in /api/report, and this list.
 const TABS = [
   { id: 'overview', label: 'Team Overview' },
   { id: 'leaderboard', label: 'Leaderboard' },
@@ -145,6 +153,7 @@ const TABS = [
   { id: 'pipeline', label: 'Pipeline' },
   { id: 'config', label: 'Config' },
 ]
+const SELF_TABS = TABS.filter((t) => t.id === 'individual')
 
 // Embedded as the "Performance" sub-tab of Team Operations. Internal tabs are
 // plain state (the ?tab= URL param belongs to Team Ops).
@@ -153,7 +162,9 @@ export function ReportView() {
 }
 
 function ReportInner() {
-  const [tab, setTab] = useState('overview')
+  // '' = not chosen yet; the landing tab depends on the role, which only the payload
+  // knows (Team Overview for an admin, Individual for an evaluator).
+  const [tab, setTab] = useState('')
   const [view, setView] = useState<View>('week')
   const [selKey, setSelKey] = useState(() => currentKey('week'))  // adaptive bucket key ('' = all); defaults to the current period
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
@@ -196,6 +207,12 @@ function ReportInner() {
     } else setSelKey(currentKey(nv))
   }
 
+  // The payload decides what this user may see - not the client. Until it arrives we
+  // show the self-only view, so an evaluator never sees a team tab flash.
+  const teamView = !!data?.canSeeTeam
+  const tabs = teamView ? TABS : SELF_TABS
+  const activeTab = tabs.some((t) => t.id === tab) ? tab : (teamView ? 'overview' : 'individual')
+
   const optList: Opt[] = data ? (data.options[view as 'week' | 'month' | 'quarter' | 'batch'] || []) : []
   // current period may not have data yet - surface it in the dropdown anyway
   const optListShown: Opt[] = selKey && view !== 'batch' && view !== 'custom' && !optList.some((o) => o.key === selKey)
@@ -206,7 +223,10 @@ function ReportInner() {
       <div className="page-head">
         <div>
           <h1 className="h-title">Performance</h1>
-          <p className="h-sub">Evaluator performance · initial evaluation, recording & shortlist funnel {data && <>· <b>{data.window.label}</b></>}</p>
+          <p className="h-sub">{teamView
+            ? <>Evaluator performance · initial evaluation, recording &amp; shortlist funnel</>
+            : <>Your performance · initial evaluation, recording &amp; pick quality, compared with the team average</>}
+            {data && <>· <b>{data.window.label}</b></>}</p>
         </div>
         <div className="head-actions">
           <button className="btn btn-sm" onClick={fetchData} disabled={loading}>{loading ? 'Loading…' : '↻ Refresh'}</button>
@@ -234,28 +254,30 @@ function ReportInner() {
           </div>
         )}
         <div className="rp-filter-spacer" />
-        <Seg label="Title" value={title} onChange={setTitle}
-          options={[['all', 'All'], ['fulltime', 'Fulltime'], ['freelancer', 'Freelancer']]} />
+        {teamView && <Seg label="Title" value={title} onChange={setTitle}
+          options={[['all', 'All'], ['fulltime', 'Fulltime'], ['freelancer', 'Freelancer']]} />}
         <Seg label="Category" value={category} onChange={setCategory}
           options={[['all', 'All'], ['puzzle', 'Puzzle'], ['arcade', 'Arcade'], ['simulation', 'Sim']]} />
       </div>
 
-      <div className="rp-tabs">
-        {TABS.map((t) => <button key={t.id} className={'rp-tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>{t.label}</button>)}
-      </div>
+      {tabs.length > 1 && (
+        <div className="rp-tabs">
+          {tabs.map((t) => <button key={t.id} className={'rp-tab' + (activeTab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>{t.label}</button>)}
+        </div>
+      )}
 
       {err && !data && <div className="card" style={{ color: 'var(--bad)' }}>Couldn’t load report: {err}. The database may be waking up - try Refresh.</div>}
       {err && data && <div className="rp-stale-note">Couldn’t refresh ({err}) - showing last loaded data.</div>}
       {loading && !data && <div className="card"><Empty text="Loading…" /></div>}
-      {!loading && data && data.empty && <div className="card"><Empty text="No data for this selection." /></div>}
+      {!loading && data && data.empty && <div className="card"><Empty text={teamView ? 'No data for this selection.' : 'You have no evaluations or recordings in this window.'} /></div>}
 
       {!loading && data && !data.empty && (
         <>
-          {tab === 'overview' && <Overview d={data} />}
-          {tab === 'leaderboard' && <Leaderboard d={data} />}
-          {tab === 'individual' && <Individual d={data} />}
-          {tab === 'pipeline' && <Pipeline d={data} />}
-          {tab === 'config' && <ConfigTab d={data} onSaved={fetchData} />}
+          {activeTab === 'overview' && <Overview d={data} />}
+          {activeTab === 'leaderboard' && <Leaderboard d={data} />}
+          {activeTab === 'individual' && <Individual d={data} />}
+          {activeTab === 'pipeline' && <Pipeline d={data} />}
+          {activeTab === 'config' && <ConfigTab d={data} onSaved={fetchData} />}
         </>
       )}
     </div>
@@ -689,38 +711,6 @@ function Leaderboard({ d }: { d: Bundle }) {
 }
 
 /* ---------------- Individual ---------------- */
-// Team benchmarks for the Individual tab. Each bench uses the SAME formula as the
-// person's own number so the two are directly comparable:
-//   counts  → average over the people who actually did that kind of work in the
-//             window (dragging in idle rows would fake a low bar)
-//   rates   → weighted team rate (total ÷ total), not a mean of per-person means,
-//             so a heavy contributor moves the bar as much as their volume says
-// Denominators mirror the per-person ones (evaluated for survival/signal, active
-// person-days for throughput and the per-day tempo metrics).
-function teamBench(evs: Ev[]) {
-  const sum = (f: (e: Ev) => number) => evs.reduce((s, e) => s + f(e), 0)
-  const avgOf = (f: (e: Ev) => number, active: (e: Ev) => boolean) => {
-    const xs = evs.filter(active)
-    return xs.length ? xs.reduce((s, e) => s + f(e), 0) / xs.length : 0
-  }
-  const worked = (e: Ev) => e.evaluated > 0
-  const activeDays = sum((e) => e.activeDays)
-  const evaluated = sum((e) => e.evaluated)
-  const tas = evs.map((e) => e.turnaround).filter((t): t is number => t != null)
-  // Deliberately NOT benchmarked (user call): the conclusion-mix donuts, Recorded and
-  // Link dead. Recording is assigned work, not something an evaluator competes on, and
-  // dead links are source quality - a team average there invites the wrong conclusion.
-  return {
-    assigned: avgOf((e) => e.assigned, (e) => e.assigned > 0),
-    evaluated: avgOf((e) => e.evaluated, worked),
-    throughput: activeDays > 0 ? evaluated / activeDays : 0,
-    turnaround: tas.length ? tas.reduce((a, b) => a + b, 0) / tas.length : null,
-    survivalRate: evaluated > 0 ? sum((e) => e.shortlisted) / evaluated : 0,
-    signalRate: evaluated > 0 ? sum((e) => e.finalPriority) / evaluated : 0,
-    noteRate: evaluated > 0 ? sum((e) => e.noted) / evaluated : 0,
-    perDay: (c: string) => (activeDays > 0 ? sum((e) => e.initialConclusions[c] || 0) / activeDays : 0),
-  }
-}
 // Anything inside ±5% of the team reads as "on par" - narrower than that is noise
 // on a window this small, and colouring it green/red invites false coaching.
 const BENCH_DEADZONE = 0.05
@@ -923,8 +913,10 @@ function Individual({ d }: { d: Bundle }) {
   const deadShare = e.evaluated + e.linkDead > 0 ? e.linkDead / (e.evaluated + e.linkDead) : 0
   const t = d.teamTotals
   // ---- team benchmarks: only meaningful with someone to compare against ----
-  const tb = teamBench(d.evaluators)
-  const multi = d.evaluators.length >= 2
+  // Comes from the server (lib/report.ts teamBench) - an evaluator's payload holds
+  // only their own row, so the client cannot compute it.
+  const tb = d.bench
+  const multi = tb.people >= 2
   // `ok` gates metrics whose own denominator is empty for this person: a rate over
   // zero assigned (or a recording count for someone who records nothing) is not a
   // 100% shortfall, it is "not applicable" - showing it red would be a false signal.
@@ -932,37 +924,55 @@ function Individual({ d }: { d: Bundle }) {
     multi && ok ? vsTeam(value, bench, format, dir) : null
   const hasAssigned = e.assigned > 0
   const hasDays = e.activeDays > 0
+  // Same panel, two readers: a manager looking at someone else, or the evaluator
+  // looking at their own row. The numbers and charts are identical - only the
+  // callouts and Act lines change voice, because half of the manager's moves
+  // (reassign the queue, run a calibration session) are not this person's to make.
+  const self = !d.canSeeTeam
   const pInsights: React.ReactNode[] = []
   if (e.assigned > 0 && e.evaluated === 0) pInsights.push(
-    <Insight key="idle" level="bad"><span><b>{e.name} hasn&apos;t evaluated anything this window</b> despite {fmt.int(e.assigned)} assigned → check availability or reassign the queue.</span></Insight>)
+    <Insight key="idle" level="bad"><span><b>{self ? 'You have not' : `${e.name} hasn't`} evaluated anything this window</b> despite {fmt.int(e.assigned)} assigned → {self ? 'if something is blocking the queue, say so now rather than at the end of the window.' : 'check availability or reassign the queue.'}</span></Insight>)
   else if (e.assigned > 0 && e.evaluated < e.assigned * 0.8) pInsights.push(
-    <Insight key="behind" level="warn"><span><b>Falling behind:</b> {fmt.int(e.assigned)} assigned vs {fmt.int(e.evaluated)} evaluated ({fmt.pct(e.evaluated / e.assigned)} cleared) → their queue is growing; rebalance if it persists.</span></Insight>)
+    <Insight key="behind" level="warn"><span><b>Falling behind:</b> {fmt.int(e.assigned)} assigned vs {fmt.int(e.evaluated)} evaluated ({fmt.pct(e.evaluated / e.assigned)} cleared) → {self ? 'your queue is growing faster than you are clearing it; ask for a rebalance if it keeps up.' : 'their queue is growing; rebalance if it persists.'}</span></Insight>)
   if (e.evaluated >= 100 && t.survivalRate > 0 && e.survivalRate < t.survivalRate * 0.5) pInsights.push(
-    <Insight key="lowsurv" level="warn"><span><b>Shortlist rate {fmt.pct(e.survivalRate)}</b> - under half the team&apos;s {fmt.pct(t.survivalRate)} → review a sample of their bypasses together (calibration), or their assignments are low-quality sources.</span></Insight>)
+    <Insight key="lowsurv" level="warn"><span><b>Shortlist rate {fmt.pct(e.survivalRate)}</b> - under half the team&apos;s {fmt.pct(t.survivalRate)} → {self ? 'either the games you were given were weaker, or your bypass bar is stricter than the team’s. Worth walking through a few of your bypasses with a moderator.' : 'review a sample of their bypasses together (calibration), or their assignments are low-quality sources.'}</span></Insight>)
   if (e.evaluated > 0 && e.noteRate < 0.9) pInsights.push(
-    <Insight key="note" level="warn"><span><b>Note coverage {fmt.pct(e.noteRate)}</b> (target ≥90%) → ask for a note on every non-bypass at minimum.</span></Insight>)
+    <Insight key="note" level="warn"><span><b>Note coverage {fmt.pct(e.noteRate)}</b> (target ≥90%) → {self ? 'leave a note on every non-bypass at minimum - it is what makes a pick reviewable.' : 'ask for a note on every non-bypass at minimum.'}</span></Insight>)
   if (deadShare > 0.08) pInsights.push(
-    <Insight key="dead" level="info"><span><b>{fmt.pct(deadShare)} of their throughput is dead links</b> ({fmt.int(e.linkDead)} games) - that&apos;s source quality, not their filtering; volume numbers undercount their effort.</span></Insight>)
+    <Insight key="dead" level="info"><span><b>{fmt.pct(deadShare)} of {self ? 'your' : 'their'} throughput is dead links</b> ({fmt.int(e.linkDead)} games) - that is source quality, not {self ? 'your' : 'their'} filtering; volume numbers undercount {self ? 'your' : 'their'} effort.</span></Insight>)
   return (
     <>
-      <Guide title="Individual - one evaluator's workload, tempo and pick quality"
+      <Guide title={self ? 'Your workload, tempo and pick quality' : "Individual - one evaluator's workload, tempo and pick quality"}
         read={[
-          <span key="1"><b>Chips</b> switch person - every card below re-renders for them.</span>,
+          self
+            ? <span key="1"><b>Every card below is your own work</b> in the selected window. <b>Daily breakdown</b> gives the same numbers day by day.</span>
+            : <span key="1"><b>Chips</b> switch person - every card below re-renders for them.</span>,
           <span key="1b"><b>Most KPIs carry a &quot;team ...&quot; line</b>: the team&apos;s number on the same metric and the gap in %. Green/red only appears past ±5% and only where one direction is genuinely better - Assigned and the per-day mix are gray because more or less is not automatically better, and Recorded, Link dead and the two mix donuts carry no team number at all (assigned work and source quality, not something to rank people on).</span>,
           <span key="2"><b>Activity over time</b>: red (Assigned) above blue (Evaluated) = work piling up on them; blue above red = clearing older queue. Gray = dead links.</span>,
           <span key="3"><b>Bypass / P&amp;B / List_Idea per day</b>: filtering tempo, divided by their active days - compare mix, not just totals.</span>,
           <span key="4"><b>Radar + funnel</b>: a balanced polygon and a funnel that converts = healthy; big volume with a flat funnel = fast but low-signal.</span>,
         ]}
-        act={[
+        act={self ? [
+          <span key="1"><b>Assigned ≫ Evaluated</b> → your queue is outgrowing your pace; ask for a rebalance early, not at the deadline.</span>,
+          <span key="2"><b>Survival far below team</b> → walk a few of your bypasses through with a moderator; the bar may be drifting, in either direction.</span>,
+          <span key="3"><b>Note coverage under 90%</b> → the fastest thing on this page to fix, and the one that makes your picks reviewable.</span>,
+        ] : [
           <span key="1"><b>Assigned ≫ Evaluated</b> → reassign part of their queue before it compounds.</span>,
           <span key="2"><b>Survival far below team</b> → calibration session on a sample of their bypasses.</span>,
           <span key="3"><b>List_Idea/day ≈ 0 while others find signal</b> → pair-review; maybe their category slice is dry, maybe the bar is too high.</span>,
         ]} />
       <div className="rp-people">
         {d.evaluators.map((x) => (
-          <button key={x.key} className={'rp-chip' + (x.key === e.key ? ' active' : '')} onClick={() => { setSel(x.key); setDaily(false) }}>
-            {x.name}{x.title && <span className="rp-chip-title">{x.title}</span>} <span className="rp-chip-n">{x.evaluated || x.recorded}</span>
-          </button>
+          d.canSeeTeam ? (
+            <button key={x.key} className={'rp-chip' + (x.key === e.key ? ' active' : '')} onClick={() => { setSel(x.key); setDaily(false) }}>
+              {x.name}{x.title && <span className="rp-chip-title">{x.title}</span>} <span className="rp-chip-n">{x.evaluated || x.recorded}</span>
+            </button>
+          ) : (
+            // scoped view: their own name, as a label - there is nobody to switch to
+            <span key={x.key} className="rp-chip active" aria-current="true">
+              {x.name}{x.title && <span className="rp-chip-title">{x.title}</span>} <span className="rp-chip-n">{x.evaluated || x.recorded}</span>
+            </span>
+          )
         ))}
         <button className="rp-daily-btn" onClick={() => setDaily(true)}
           title={`Day-by-day numbers for ${e.name}: Bypass · Playtest & Bypass · List_Idea · 5min & 20min videos`}>
@@ -973,7 +983,7 @@ function Individual({ d }: { d: Bundle }) {
         <DailyBreakdown person={e.name} mix={d.dailyMix?.[e.key] || {}} vids={vids} win={d.window} onClose={() => setDaily(false)} />
       )}
       <div className="rp-kpi-row rp-kpi-row-dense">
-        <Kpi label="Assigned" value={fmt.int(e.assigned)} sub="games on their plate" tip={TIP.assignedPerson}
+        <Kpi label="Assigned" value={fmt.int(e.assigned)} sub={self ? 'games on your plate' : 'games on their plate'} tip={TIP.assignedPerson}
           bench={cmp(e.assigned, tb.assigned, fmt.int, 'flat', hasAssigned)} />
         <Kpi label="Evaluated" value={fmt.int(e.evaluated)} hi spark={personSpark.length >= 2 ? personSpark : undefined} tip={TIP.evaluated}
           bench={cmp(e.evaluated, tb.evaluated, fmt.int, 'up')} />
@@ -986,11 +996,11 @@ function Individual({ d }: { d: Bundle }) {
         <Kpi label="Signal rate" value={fmt.pct(e.signalRate)} sub={`${fmt.int(e.finalPriority)} of ${fmt.int(e.evaluated)} evaluated`} tip={TIP.signal}
           bench={cmp(e.signalRate, tb.signalRate, fmt.pct, 'up', e.evaluated > 0)} />
         <Kpi label="Bypass / day" value={fmt.dec(perDay('Bypass'))} sub={`${fmt.int(e.initialConclusions['Bypass'] || 0)} total`} tip={TIP.perDay('Bypass')}
-          bench={cmp(perDay('Bypass'), tb.perDay('Bypass'), (n) => fmt.dec(n), 'flat', hasDays)} />
+          bench={cmp(perDay('Bypass'), tb.perDay['Bypass'] || 0, (n) => fmt.dec(n), 'flat', hasDays)} />
         <Kpi label="P&B / day" value={fmt.dec(perDay('Playtest & Bypass'))} sub={`${fmt.int(e.initialConclusions['Playtest & Bypass'] || 0)} playtest & bypass`} tip={TIP.perDay('Playtest & Bypass')}
-          bench={cmp(perDay('Playtest & Bypass'), tb.perDay('Playtest & Bypass'), (n) => fmt.dec(n), 'flat', hasDays)} />
+          bench={cmp(perDay('Playtest & Bypass'), tb.perDay['Playtest & Bypass'] || 0, (n) => fmt.dec(n), 'flat', hasDays)} />
         <Kpi label="List_Idea / day" value={fmt.dec(perDay('List_Idea'))} sub={`${fmt.int(e.initialConclusions['List_Idea'] || 0)} total`} tip={TIP.perDay('List_Idea')}
-          bench={cmp(perDay('List_Idea'), tb.perDay('List_Idea'), (n) => fmt.dec(n), 'flat', hasDays)} />
+          bench={cmp(perDay('List_Idea'), tb.perDay['List_Idea'] || 0, (n) => fmt.dec(n), 'flat', hasDays)} />
         <Kpi label="Note coverage" value={fmt.pct(e.noteRate)} sub={`${fmt.int(e.noted)} of ${fmt.int(e.evaluated)} evaluated`} tip={TIP.noteCoverage}
           bench={cmp(e.noteRate, tb.noteRate, fmt.pct, 'up', e.evaluated > 0)} />
         <Kpi label="Link dead" value={fmt.int(e.linkDead)} sub="dead links caught" tip={TIP.linkDead} />
@@ -998,34 +1008,40 @@ function Individual({ d }: { d: Bundle }) {
       </div>
       {pInsights}
       <div className="rp-grid-2-1">
-        <Card label={`${e.name} - performance shape`} note="5 axes, normalized to team best · raw value under each axis" tip={TIP.radar}>
+        <Card label={self ? 'Your performance shape' : `${e.name} - performance shape`} note="5 axes, normalized to team best · raw value under each axis" tip={TIP.radar}>
           <Radar axes={[...RADAR_AXES]} series={[{ name: e.name, values: radarValues }]} axisRaw={radarRaw} size={260} />
           <ReadNote>Balanced polygon = well-rounded; spiky = imbalanced. The number under each axis is the real value behind the normalized shape.</ReadNote>
           {weakAxis && (
-            <Act>Their shortest axis is <b>{weakAxis}</b> ({rad?.axes[weakAxis] ?? 0} vs 100 for the team best){strongAxis ? <>, their longest is <b>{strongAxis}</b></> : null} → set one concrete target on {weakAxis.toLowerCase()} for the next window rather than asking for &quot;more overall&quot;.</Act>
+            <Act>{self ? 'Your' : 'Their'} shortest axis is <b>{weakAxis}</b> ({rad?.axes[weakAxis] ?? 0} vs 100 for the team best){strongAxis ? <>, {self ? 'your' : 'their'} longest is <b>{strongAxis}</b></> : null} → {self ? <>pick one concrete target on {weakAxis.toLowerCase()} for the next window instead of trying to lift everything.</> : <>set one concrete target on {weakAxis.toLowerCase()} for the next window rather than asking for &quot;more overall&quot;.</>}</Act>
           )}
         </Card>
         <Card label="Pick funnel" note="assigned → final priority (Priority IV + Insight)"
           tip={<><F>shortlist = initial ≠ bypass · final = Priority IV + Insight</F></>}>
           <Funnel stages={funnelStages} />
           {pWorstStep && (
-            <Act>They lose the most at <b>{pWorstStep.from} → {pWorstStep.to}</b> ({fmt.pct(pWorstStep.b / pWorstStep.a)} through, team {fmt.pct(pWorstStep.team)}) → {pWorstStep.b / pWorstStep.a < pWorstStep.team ? 'review that step with them specifically' : 'this step is ahead of the team, so coach elsewhere'}.</Act>
+            <Act>{self ? 'You lose' : 'They lose'} the most at <b>{pWorstStep.from} → {pWorstStep.to}</b> ({fmt.pct(pWorstStep.b / pWorstStep.a)} through, team {fmt.pct(pWorstStep.team)}) → {pWorstStep.b / pWorstStep.a < pWorstStep.team
+              ? (self ? 'that is the step to look at first, not your volume' : 'review that step with them specifically')
+              : (self ? 'this step is ahead of the team, so the gap is elsewhere' : 'this step is ahead of the team, so coach elsewhere')}.</Act>
           )}
         </Card>
       </div>
       {ps.length >= 2 && (
-        <Card label={`${e.name} - activity over time`} note="assigned · evaluated · link dead per bucket"
+        <Card label={self ? 'Your activity over time' : `${e.name} - activity over time`} note="assigned · evaluated · link dead per bucket"
           tip={<><F>assigned by assigned_date · evaluated & link dead by evaluate_date</F>Buckets = union of both axes.</>}>
           <LineChart series={actSeries} area />
           <ReadNote>Red above blue = work piling up; blue above red = clearing older queue. Gray = dead links.</ReadNote>
           {psTotals && (
             <Act>{psTotals.assigned > psTotals.evaluated * 1.15
-              ? <>They took {fmt.int(psTotals.assigned)} and cleared {fmt.int(psTotals.evaluated)} across these buckets → move {fmt.int(psTotals.assigned - psTotals.evaluated)} games to someone with slack now, not at the end of the window.</>
-              : <>They cleared {fmt.int(psTotals.evaluated)} against {fmt.int(psTotals.assigned)} assigned → their queue is keeping up, so they can absorb more of the next push.</>}</Act>
+              ? (self
+                ? <>You took {fmt.int(psTotals.assigned)} and cleared {fmt.int(psTotals.evaluated)} across these buckets → {fmt.int(psTotals.assigned - psTotals.evaluated)} games are stacking up; raise it now rather than at the end of the window.</>
+                : <>They took {fmt.int(psTotals.assigned)} and cleared {fmt.int(psTotals.evaluated)} across these buckets → move {fmt.int(psTotals.assigned - psTotals.evaluated)} games to someone with slack now, not at the end of the window.</>)
+              : (self
+                ? <>You cleared {fmt.int(psTotals.evaluated)} against {fmt.int(psTotals.assigned)} assigned → your queue is keeping up, so you have room for more of the next push.</>
+                : <>They cleared {fmt.int(psTotals.evaluated)} against {fmt.int(psTotals.assigned)} assigned → their queue is keeping up, so they can absorb more of the next push.</>)}</Act>
           )}
         </Card>
       )}
-      <Card label={`${e.name} - recording queue`} note="videos assigned & recorded in this window · pending always shown"
+      <Card label={self ? 'Your recording queue' : `${e.name} - recording queue`} note="videos assigned & recorded in this window · pending always shown"
         tip={<><F>rows where they are the 5min/20min assignee</F>Status is the manual <b>Confirm</b> in the Record tab (record_confirmed_at); the link is whatever the YouTube sync wrote back. They are stamped by different steps, so they can disagree - mismatches are flagged.</>}>
         <VideoQueue vids={vids} />
         {mismatch.total > 0 && (

@@ -4,8 +4,8 @@
 import {
   weekLabel, monthLabel, quarterLabel, periodKey, periodLabel, periodOrder,
   sumComponents, deriveMetrics, groupByEvaluator, groupByPeriod, weeksInRange,
-  pctChange, mergeConclusions, emptyComponents, addComponents,
-  type RollupRow,
+  pctChange, mergeConclusions, emptyComponents, addComponents, teamBench,
+  type RollupRow, type BenchPerson,
 } from '@/lib/report'
 
 function row(over: Partial<RollupRow>): RollupRow {
@@ -144,5 +144,57 @@ describe('mergeConclusions', () => {
       { name: 'Bypass', count: 5 },
       { name: 'Priority IV', count: 1 },
     ])
+  })
+})
+
+describe('teamBench', () => {
+  const p = (over: Partial<BenchPerson>): BenchPerson => ({
+    assigned: 0, evaluated: 0, activeDays: 0, turnaround: null,
+    shortlisted: 0, finalPriority: 0, noted: 0, initialConclusions: {}, ...over,
+  })
+
+  it('weights rates by volume instead of averaging per-person rates', () => {
+    // 100 games at 10% + 10 games at 100% -> 20/110, NOT the 55% a mean of means gives
+    const b = teamBench([
+      p({ evaluated: 100, shortlisted: 10, activeDays: 5 }),
+      p({ evaluated: 10, shortlisted: 10, activeDays: 5 }),
+    ])
+    expect(b.survivalRate).toBeCloseTo(20 / 110)
+    expect(b.people).toBe(2)
+  })
+
+  it('averages counts over the people who did that work, not over everyone', () => {
+    const b = teamBench([
+      p({ evaluated: 100, assigned: 100, activeDays: 4 }),
+      p({ evaluated: 50, assigned: 50, activeDays: 2 }),
+      p({}), // idle row: must not drag the bar down
+    ])
+    expect(b.evaluated).toBe(75)
+    expect(b.assigned).toBe(75)
+    expect(b.people).toBe(2)
+  })
+
+  it('divides throughput and per-day tempo by total active person-days', () => {
+    const b = teamBench([
+      p({ evaluated: 60, activeDays: 3, initialConclusions: { Bypass: 30, List_Idea: 6 } }),
+      p({ evaluated: 40, activeDays: 2, initialConclusions: { Bypass: 20 } }),
+    ])
+    expect(b.throughput).toBeCloseTo(100 / 5)
+    expect(b.perDay.Bypass).toBeCloseTo(50 / 5)
+    expect(b.perDay.List_Idea).toBeCloseTo(6 / 5)
+    expect(b.perDay.Nope).toBeUndefined()
+  })
+
+  it('ignores missing turnarounds rather than counting them as zero', () => {
+    const b = teamBench([p({ turnaround: 2 }), p({ turnaround: 4 }), p({ turnaround: null })])
+    expect(b.turnaround).toBe(3)
+  })
+
+  it('returns zeroed stats for an empty window instead of NaN', () => {
+    const b = teamBench([])
+    expect(b).toEqual({
+      people: 0, assigned: 0, evaluated: 0, throughput: 0, turnaround: null,
+      survivalRate: 0, signalRate: 0, noteRate: 0, perDay: {},
+    })
   })
 })
