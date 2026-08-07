@@ -3,7 +3,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { ALL_ROUNDER_AXES, allRounderScore, DEFAULT_REPORT_CONFIG, type AxisName, type ReportConfig } from '@/lib/report-config'
 import {
   Kpi, ColumnChart, RankBars, Donut, Heatmap, Funnel, Radar, HealthBars, StackedBars,
-  LineChart, Scatter, BumpChart, Empty, fmt, CAT, InfoTip, Insight,
+  LineChart, Scatter, BumpChart, Empty, fmt, CAT, InfoTip, Insight, type Bench,
 } from '@/components/report/charts'
 
 type View = 'week' | 'month' | 'quarter' | 'batch' | 'custom'
@@ -65,8 +65,8 @@ const TIP = {
   gppd: <><F>= Σ evaluated ÷ Σ active days</F>Weighted team velocity - heavy contributors move it.</>,
   throughput: <><F>= avg( evaluatedᵢ ÷ active daysᵢ )</F>Everyone weighs the same, part-timers not penalized.</>,
   turnaround: <><F>= avg( evaluate date − assigned date )</F>Rising = queues sitting.</>,
-  survival: <><F>= shortlist ÷ assigned</F>Shortlist = initial conclusion not bypass. Reads high in Batch view by design.</>,
-  signal: <><F>= (Priority IV + Insight) ÷ assigned</F>End-to-end yield, usually &lt;1% - watch the trend.</>,
+  survival: <><F>= shortlist ÷ evaluated</F>Shortlist = initial conclusion not bypass. Denominator is what they actually judged in this window, so the two numbers come from the same rows - a growing or shrinking queue no longer moves the rate.</>,
+  signal: <><F>= (Priority IV + Insight) ÷ evaluated</F>Yield on what they judged, usually &lt;1% - watch the trend. Reads low on a fresh window: the final conclusion is stamped later by a moderator, so recent evaluations have not been judged yet.</>,
   finalPriority: <><F>= count(final ∈ {'{'}Priority IV, Insight{'}'})</F>Priority V not counted (team convention).</>,
   noteCoverage: <><F>= noted ÷ evaluated</F>Target ≥90%.</>,
   linkDead: <><F>= count(initial_conclusion = Link_dead)</F>Housekeeping volume, not pick quality.</>,
@@ -75,7 +75,7 @@ const TIP = {
   netChange: <><F>= new games in − evaluated</F>Positive = stock grew this window.</>,
   recorded: <><F>= count(5min) + count(20min)</F>Matched by actual uploader.</>,
   consistency: <><F>= active days ÷ weekdays in window (Mon–Fri)</F>Weekend work counts into active days as a bonus; capped at 100%.</>,
-  radar: <><F>axis = value ÷ team best × 100</F>Volume = games evaluated · Consistency = active days ÷ weekdays (weekend counts as bonus) · Signal & Survival = rates ÷ assigned · Recording = videos. Every axis normalized to the best person.</>,
+  radar: <><F>axis = value ÷ team best × 100</F>Volume = games evaluated · Consistency = active days ÷ weekdays (weekend counts as bonus) · Signal & Survival = rates ÷ evaluated · Recording = videos. Every axis normalized to the best person.</>,
   allRounder: <><F>= 0.4×Volume + 0.6×avg(Consistency, Signal, Survival, Recording)×credibility</F>Axes are normalized to the team best. Credibility = min(1, their games ÷ median team games), so quality earned on a small sample counts proportionally - a light workload can no longer outrank sustained output on a lucky rate.</>,
 }
 
@@ -94,7 +94,8 @@ function orderedKeys(rows: Array<Record<string, number>>, order: string[], tail:
 }
 interface Bundle {
   empty: boolean; canSeeTeam: boolean; view: View; category: string
-  window: { label: string }
+  // from/to are the resolved window bounds (to is EXCLUSIVE); absent on batch / all-time
+  window: { label: string; from?: string; to?: string; batch?: string }
   bucketUnit: 'day' | 'week' | 'month'
   options: { week: Opt[]; month: Opt[]; quarter: Opt[]; batch: Opt[] }
   teamTotals: { evaluators: number; totalAssigned: number; totalEvaluated: number; avgThroughput: number; personDayThroughput: number; avgTurnaround: number | null; signalRate: number; survivalRate: number; totalRecorded: number; linkDead: number; noteRate: number }
@@ -107,6 +108,8 @@ interface Bundle {
   config: ReportConfig
   personSeries: Record<string, Array<{ key: string; label: string; assigned: number; evaluated: number; linkDead: number }>>
   videos: Record<string, Array<{ gameId: string; title: string | null; os: string | null; slot: string; batch: string | null; recordedOn: string | null; youtube: string | null }>>
+  // person → 'YYYY-MM-DD' → initial conclusion → count (Link_dead excluded)
+  dailyMix: Record<string, Record<string, Record<string, number>>>
   evaluators: Ev[]
   radar: Array<{ key: string; name: string; axes: Record<string, number> }>
   pipeline: null | {
@@ -277,23 +280,24 @@ function Overview({ d }: { d: Bundle }) {
   // Day buckets show the exact headcount that day; coarser buckets show the average
   // per active day (a week's distinct-people count would overstate daily capacity).
   const peopleName = d.bucketUnit === 'day' ? 'Evaluators active' : 'Avg evaluators / day'
-  // Compare the last two buckets that actually received work. Taking the final two
-  // blindly reads today's partial bucket (often 0 assigned → rate 0) as a collapse.
+  // Compare the last two buckets that actually produced evaluations. Taking the
+  // final two blindly reads today's partial bucket (often 0 evaluated → rate 0) as
+  // a collapse. Filter follows the rate denominator, which is `evaluated`.
   const msAll = d.metricSeries || []
-  const rated = msAll.filter((m) => m.assigned > 0)
+  const rated = msAll.filter((m) => m.evaluated > 0)
   const last = rated[rated.length - 1], prevB = rated[rated.length - 2]
   const gauge = (v: number, target: number) => Math.min(100, (v / target) * 66)
   const SURV_T = 0.08, SIG_T = 0.015, TPUT_T = 100
   const health = [
     {
-      label: 'Survival (assigned → shortlist)', value: fmt.pct(t.survivalRate),
+      label: 'Survival (evaluated → shortlist)', value: fmt.pct(t.survivalRate),
       detail: `${fmt.int(d.funnel.shortlisted)} shortlisted of ${fmt.int(d.funnel.assigned)} assigned`,
       pct: gauge(t.survivalRate, SURV_T), target: 66, targetLabel: `target ${fmt.pct(SURV_T)}`,
       delta: last && prevB ? (last.survivalRate - prevB.survivalRate) * 100 : null, deltaLabel: 'pts vs prev bucket',
       status: band(t.survivalRate, 0.04, SURV_T),
     },
     {
-      label: 'Signal (assigned → final priority)', value: fmt.pct(t.signalRate),
+      label: 'Signal (evaluated → final priority)', value: fmt.pct(t.signalRate),
       detail: `${fmt.int(d.funnel.finalPriority)} final priority of ${fmt.int(d.funnel.assigned)} assigned`,
       pct: gauge(t.signalRate, SIG_T), target: 66, targetLabel: `target ${fmt.pct(SIG_T)}`,
       delta: last && prevB ? (last.signalRate - prevB.signalRate) * 100 : null, deltaLabel: 'pts vs prev bucket',
@@ -407,8 +411,8 @@ function Overview({ d }: { d: Bundle }) {
         <Kpi label="Games / person / day" value={fmt.dec(t.personDayThroughput)} sub="team velocity, per active day" tip={TIP.gppd} />
         <Kpi label="Avg throughput" value={fmt.dec(t.avgThroughput)} sub="games / active day" tip={TIP.throughput} />
         <Kpi label="Avg turnaround" value={fmt.days(t.avgTurnaround)} sub="assign → evaluate" tip={TIP.turnaround} />
-        <Kpi label="Survival rate" value={fmt.pct(t.survivalRate)} sub={`${fmt.int(d.funnel.shortlisted)} of ${fmt.int(d.funnel.assigned)} assigned`} spark={survSpark} sparkColor={CAT[3]} tip={TIP.survival} />
-        <Kpi label="Signal rate" value={fmt.pct(t.signalRate)} sub={`${fmt.int(d.funnel.finalPriority)} of ${fmt.int(d.funnel.assigned)} assigned`} spark={sigSpark} sparkColor={CAT[1]} tip={TIP.signal} />
+        <Kpi label="Survival rate" value={fmt.pct(t.survivalRate)} sub={`${fmt.int(d.funnel.shortlisted)} of ${fmt.int(d.funnel.evaluated)} evaluated`} spark={survSpark} sparkColor={CAT[3]} tip={TIP.survival} />
+        <Kpi label="Signal rate" value={fmt.pct(t.signalRate)} sub={`${fmt.int(d.funnel.finalPriority)} of ${fmt.int(d.funnel.evaluated)} evaluated`} spark={sigSpark} sparkColor={CAT[1]} tip={TIP.signal} />
         <Kpi label="Final priority" value={fmt.int(d.funnel.finalPriority)} sub={`${fmt.int(d.funnel.priorityIV)} Priority IV · ${fmt.int(d.funnel.insight)} Insight`} spark={fpSpark} sparkColor={CAT[4]} tip={TIP.finalPriority} />
         <Kpi label="Note coverage" value={fmt.pct(t.noteRate)} sub={`${fmt.int(Math.round(t.noteRate * d.funnel.evaluated))} of ${fmt.int(d.funnel.evaluated)} evaluated`} tip={TIP.noteCoverage} />
       </div>
@@ -434,7 +438,7 @@ function Overview({ d }: { d: Bundle }) {
           )}
         </Card>
         <Card label="Team health" note="leading indicators"
-          tip={<><F>survival = shortlist ÷ assigned · signal = final ÷ assigned</F>Throughput = avg games/active day · Active = evaluators with ≥1 evaluation.</>}>
+          tip={<><F>survival = shortlist ÷ evaluated · signal = final ÷ evaluated</F>Throughput = avg games/active day · Active = evaluators with ≥1 evaluation.</>}>
           <HealthBars rows={health} />
           {worstHealth && worstHealth.short > 6 && (
             <Act><b>{worstHealth.label.split(' (')[0]}</b> is the furthest below target → fix that one before tuning anything else on this card; the rest are at or near benchmark.</Act>
@@ -444,11 +448,11 @@ function Overview({ d }: { d: Bundle }) {
 
       <div className="rp-grid-2">
         <Card label="Quality rates over time" note="survival & signal %, per bucket"
-          tip={<><F>survival = shortlist ÷ assigned · signal = final priority ÷ assigned</F>Both computed per bucket; assigned bucketed by first-assign date (new intake only).</>}>
+          tip={<><F>survival = shortlist ÷ evaluated · signal = final priority ÷ evaluated</F>Both computed per bucket, on the games evaluated in that bucket - so the line reads pick quality, not how much intake happened to land that week.</>}>
           {ms.length >= 2 ? <LineChart series={rateSeries} format={(v) => `${v.toFixed(1)}%`} /> : <Empty text="Need more than one period" />}
           {rated.length >= 2 && (Math.abs(survDir) >= 2
-            ? <Act>Survival moved {survDir > 0 ? 'up' : 'down'} {Math.abs(survDir).toFixed(1)} points across this window ({fmt.pct(rateFirst.survivalRate)} → {fmt.pct(rateLast.survivalRate)}) → {survDir > 0 ? 'find out what changed in the push filters and keep it' : 'check the scraper window and source types: the intake is getting worse, not the evaluators'}.</Act>
-            : <Act>Survival is flat around {fmt.pct(rateLast.survivalRate)} → the intake quality is stable, so any change in output this window came from capacity, not from what was pushed.</Act>)}
+            ? <Act>Survival moved {survDir > 0 ? 'up' : 'down'} {Math.abs(survDir).toFixed(1)} points across this window ({fmt.pct(rateFirst.survivalRate)} → {fmt.pct(rateLast.survivalRate)}) → {survDir > 0 ? 'find out what changed in the push filters and keep it' : 'two candidates now that the rate is measured on what was judged: the pushed games got worse (check scraper window and source types) or the bypass bar quietly got stricter - ask before assuming either'}.</Act>
+            : <Act>Survival is flat around {fmt.pct(rateLast.survivalRate)} → source quality and the bypass bar are both holding steady, so any change in output this window came from capacity, not from what was pushed or how it was judged.</Act>)}
         </Card>
         <Card label="Volume over time" note={`games evaluated per bucket · ${peopleName.toLowerCase()}`}
           tip={<><F>= count(evaluated) per bucket</F>{d.bucketUnit === 'day'
@@ -623,8 +627,8 @@ function Leaderboard({ d }: { d: Bundle }) {
             : allRound.length >= 2 && <Act>Top score is <b>{allRound[0].name}</b> at {fmt.dec(allRound[0].value, 0)} vs {fmt.dec(allRound[allRound.length - 1].value, 0)} at the bottom → pair the bottom of this list with the top for one calibration session.</Act>}
         </Card>
       </div>
-      <Card label="Volume vs survival rate" note="x = games evaluated · y = survival % (assigned → shortlist) · bubble = throughput"
-        tip={<><F>x = evaluated · y = shortlist ÷ assigned · bubble = games ÷ active day</F></>}>
+      <Card label="Volume vs survival rate" note="x = games evaluated · y = survival % (evaluated → shortlist) · bubble = throughput"
+        tip={<><F>x = evaluated · y = shortlist ÷ evaluated · bubble = games ÷ active day</F></>}>
         {scatterPts.length ? <Scatter points={scatterPts} xLabel="Volume" yLabel="Survival %"
           xFormat={(v) => fmt.int(v)} yFormat={(v) => `${Math.round(v)}%`} /> : <Empty />}
         <ReadNote>Top-right = high volume <i>and</i> high signal. Bottom-right = fast but almost all bypassed.</ReadNote>
@@ -674,8 +678,8 @@ function Leaderboard({ d }: { d: Bundle }) {
       <Card label="Volume" note="games evaluated" tip={TIP.evaluated}><RankBars rows={rank((e) => e.evaluated)} unit="games" color={CAT[0]} /></Card>
       <Card label="Throughput" note="games / active day" tip={TIP.perDay('games evaluated')}><RankBars rows={rank((e) => e.throughput, (e) => `${fmt.int(e.evaluated)} in ${e.activeDays}d`)} color={CAT[1]} format={(v) => fmt.dec(v)} /></Card>
       <Card label="Turnaround (fastest first)" note="days assign → evaluate" tip={TIP.turnaround}><RankBars rows={byTurn} color={CAT[2]} format={(v) => `${v.toFixed(1)}d`} /></Card>
-      <Card label="Survival rate" note="assigned → shortlist" tip={TIP.survival}><RankBars rows={rank((e) => e.survivalRate, (e) => `${fmt.int(e.shortlisted)} of ${fmt.int(e.assigned)}`)} color={CAT[3]} format={fmt.pct} /></Card>
-      <Card label="Signal rate" note="assigned → final priority (Priority IV + Insight)" tip={TIP.signal}><RankBars rows={rank((e) => e.signalRate, (e) => `${fmt.int(e.finalPriority)} of ${fmt.int(e.assigned)}`)} color={CAT[4]} format={fmt.pct} /></Card>
+      <Card label="Survival rate" note="evaluated → shortlist" tip={TIP.survival}><RankBars rows={rank((e) => e.survivalRate, (e) => `${fmt.int(e.shortlisted)} of ${fmt.int(e.evaluated)}`)} color={CAT[3]} format={fmt.pct} /></Card>
+      <Card label="Signal rate" note="evaluated → final priority (Priority IV + Insight)" tip={TIP.signal}><RankBars rows={rank((e) => e.signalRate, (e) => `${fmt.int(e.finalPriority)} of ${fmt.int(e.evaluated)}`)} color={CAT[4]} format={fmt.pct} /></Card>
       <Card label="Final priority" note="Priority IV + Insight picks" tip={TIP.finalPriority}><RankBars rows={rank((e) => e.finalPriority, (e) => `${fmt.int(e.priorityIV)} P-IV · ${fmt.int(e.insight)} Insight`)} unit="games" color={CAT[6]} /></Card>
       <Card label="Note coverage" note="% evaluations with a note" tip={TIP.noteCoverage}><RankBars rows={rank((e) => e.noteRate, (e) => `${fmt.int(e.noted)} of ${fmt.int(e.evaluated)}`)} color={CAT[5]} format={fmt.pct} /></Card>
       <Card label="Recording" note="videos recorded (5/20min)" tip={TIP.recorded}>{byRec.length ? <RankBars rows={byRec} unit="rec" color={CAT[7]} /> : <Empty text="No recordings in this window" />}</Card>
@@ -685,8 +689,185 @@ function Leaderboard({ d }: { d: Bundle }) {
 }
 
 /* ---------------- Individual ---------------- */
+// Team benchmarks for the Individual tab. Each bench uses the SAME formula as the
+// person's own number so the two are directly comparable:
+//   counts  → average over the people who actually did that kind of work in the
+//             window (dragging in idle rows would fake a low bar)
+//   rates   → weighted team rate (total ÷ total), not a mean of per-person means,
+//             so a heavy contributor moves the bar as much as their volume says
+// Denominators mirror the per-person ones (evaluated for survival/signal, active
+// person-days for throughput and the per-day tempo metrics).
+function teamBench(evs: Ev[]) {
+  const sum = (f: (e: Ev) => number) => evs.reduce((s, e) => s + f(e), 0)
+  const avgOf = (f: (e: Ev) => number, active: (e: Ev) => boolean) => {
+    const xs = evs.filter(active)
+    return xs.length ? xs.reduce((s, e) => s + f(e), 0) / xs.length : 0
+  }
+  const worked = (e: Ev) => e.evaluated > 0
+  const activeDays = sum((e) => e.activeDays)
+  const evaluated = sum((e) => e.evaluated)
+  const tas = evs.map((e) => e.turnaround).filter((t): t is number => t != null)
+  // Deliberately NOT benchmarked (user call): the conclusion-mix donuts, Recorded and
+  // Link dead. Recording is assigned work, not something an evaluator competes on, and
+  // dead links are source quality - a team average there invites the wrong conclusion.
+  return {
+    assigned: avgOf((e) => e.assigned, (e) => e.assigned > 0),
+    evaluated: avgOf((e) => e.evaluated, worked),
+    throughput: activeDays > 0 ? evaluated / activeDays : 0,
+    turnaround: tas.length ? tas.reduce((a, b) => a + b, 0) / tas.length : null,
+    survivalRate: evaluated > 0 ? sum((e) => e.shortlisted) / evaluated : 0,
+    signalRate: evaluated > 0 ? sum((e) => e.finalPriority) / evaluated : 0,
+    noteRate: evaluated > 0 ? sum((e) => e.noted) / evaluated : 0,
+    perDay: (c: string) => (activeDays > 0 ? sum((e) => e.initialConclusions[c] || 0) / activeDays : 0),
+  }
+}
+// Anything inside ±5% of the team reads as "on par" - narrower than that is noise
+// on a window this small, and colouring it green/red invites false coaching.
+const BENCH_DEADZONE = 0.05
+// dir = which direction is better; 'flat' = no better/worse (mix & tempo metrics)
+function vsTeam(value: number | null, bench: number | null, format: (n: number) => string, dir: 'up' | 'down' | 'flat'): Bench | null {
+  if (value == null || bench == null || !isFinite(bench)) return null
+  const delta = bench > 0 ? (value - bench) / bench : null
+  let tone: Bench['tone'] = 'flat'
+  if (delta != null && dir !== 'flat' && Math.abs(delta) >= BENCH_DEADZONE) {
+    tone = (delta > 0) === (dir === 'up') ? 'good' : 'bad'
+  }
+  return { text: `team ${format(bench)}`, delta, tone }
+}
+/* Daily breakdown: one row per calendar DAY, plain numbers, no chart. The three
+   named conclusions are the ones the team steers by; anything else the Config tab
+   allows is folded into "Other" (hover it for the split). Video counts come from
+   the recording queue rows (confirmed date + slot), so this panel and the queue
+   card below can never disagree. */
+const DAILY_COLS = ['Bypass', 'Playtest & Bypass', 'List_Idea'] as const
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// Longest span we will enumerate day-by-day. Past this (a wide custom range) the
+// table falls back to days that actually have activity - a 400-row table of mostly
+// zeros is not a breakdown, and the caller says so on screen.
+const DAILY_MAX_DAYS = 120
+
+function dailyRows(mix: Record<string, Record<string, number>>, vids: Bundle['videos'][string], win: Bundle['window']) {
+  const rec5: Record<string, number> = {}
+  const rec20: Record<string, number> = {}
+  for (const v of vids) {
+    if (!v.recordedOn) continue
+    const t = v.slot === '20min' ? rec20 : rec5
+    t[v.recordedOn] = (t[v.recordedOn] || 0) + 1
+  }
+  // day axis: every day in the window when we know its bounds (so idle days show as
+  // zeros), otherwise only the days with something on them
+  let days: string[] = []
+  let filled = false
+  if (win.from && win.to) {
+    const start = new Date(win.from + 'T00:00:00Z')
+    const end = new Date(win.to + 'T00:00:00Z')
+    const span = Math.round((end.getTime() - start.getTime()) / 86400000)
+    if (span > 0 && span <= DAILY_MAX_DAYS) {
+      filled = true
+      for (const dt = new Date(start); dt < end; dt.setUTCDate(dt.getUTCDate() + 1)) days.push(dt.toISOString().slice(0, 10))
+    }
+  }
+  if (!filled) {
+    days = Array.from(new Set([...Object.keys(mix), ...Object.keys(rec5), ...Object.keys(rec20)])).sort()
+  }
+  const rows = days.map((day) => {
+    const m = mix[day] || {}
+    const named = DAILY_COLS.map((c) => m[c] || 0)
+    const otherEntries = Object.entries(m).filter(([c]) => !DAILY_COLS.includes(c as typeof DAILY_COLS[number]))
+    const other = otherEntries.reduce((s, [, n]) => s + n, 0)
+    const dow = new Date(day + 'T00:00:00Z').getUTCDay()
+    return {
+      day, dow, named, other,
+      otherTitle: otherEntries.map(([c, n]) => `${c}: ${n}`).join(' · '),
+      evaluated: named.reduce((a, b) => a + b, 0) + other,
+      r5: rec5[day] || 0, r20: rec20[day] || 0,
+    }
+  })
+  return { rows, filled }
+}
+
+function DailyBreakdown({ person, mix, vids, win, onClose }: {
+  person: string
+  mix: Record<string, Record<string, number>>
+  vids: Bundle['videos'][string]
+  win: Bundle['window']
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const h = (ev: KeyboardEvent) => { if (ev.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+  const { rows, filled } = dailyRows(mix, vids, win)
+  const hasOther = rows.some((r) => r.other > 0)
+  const tot = rows.reduce((a, r) => ({
+    named: a.named.map((n, i) => n + r.named[i]),
+    other: a.other + r.other, evaluated: a.evaluated + r.evaluated, r5: a.r5 + r.r5, r20: a.r20 + r.r20,
+  }), { named: DAILY_COLS.map(() => 0), other: 0, evaluated: 0, r5: 0, r20: 0 })
+  const workedDays = rows.filter((r) => r.evaluated > 0 || r.r5 > 0 || r.r20 > 0).length
+  // '·' instead of 0 so the eye lands on the days that actually have numbers
+  const num = (n: number, key: string, title?: string) => <td key={key} className={n ? '' : 'zero'} title={title}>{n || '·'}</td>
+  return (
+    <div className="rp-modal-backdrop" onClick={onClose}>
+      <div className="rp-modal card rp-daily-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="card-head">
+          <span className="card-label">{person} - daily breakdown</span>
+          <span className="card-head-right">
+            <span className="card-note">{win.label} · {workedDays} active {workedDays === 1 ? 'day' : 'days'} of {rows.length}</span>
+            <button className="rp-expand" onClick={onClose} aria-label="Close" title="Close (Esc)">✕</button>
+          </span>
+        </div>
+        <div className="rp-daily-wrap">
+          <table className="rp-daily">
+            <thead>
+              <tr>
+                <th className="l">Day</th>
+                <th>Bypass</th>
+                <th>P&amp;B</th>
+                <th>List_Idea</th>
+                {hasOther && <th>Other</th>}
+                <th className="sep">Evaluated</th>
+                <th>5min</th>
+                <th>20min</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.day} className={(r.dow === 0 || r.dow === 6 ? 'we' : '') + (r.evaluated || r.r5 || r.r20 ? '' : ' idle')}>
+                  <td className="l">{DAY_NAMES[r.dow]} {r.day.slice(8)}/{r.day.slice(5, 7)}</td>
+                  {r.named.map((n, i) => num(n, 'c' + i))}
+                  {hasOther && num(r.other, 'other', r.otherTitle || undefined)}
+                  <td className="sep strong">{r.evaluated || '·'}</td>
+                  {num(r.r5, 'r5')}
+                  {num(r.r20, 'r20')}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td className="l">Total</td>
+                {tot.named.map((n, i) => <td key={i}>{n}</td>)}
+                {hasOther && <td>{tot.other}</td>}
+                <td className="sep">{tot.evaluated}</td>
+                <td>{tot.r5}</td>
+                <td>{tot.r20}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <ReadNote>
+          Conclusions are counted on <b>evaluate date</b>, videos on the date the recording was <b>confirmed</b> in the Record tab - so a video can land on a different day than the evaluation. <b>Evaluated</b> excludes dead links, same as everywhere else in this report.
+          {!filled && <> Only days with activity are listed here (the window is too wide to enumerate every calendar day).</>}
+          {filled && <> Every day in the window is listed; dimmed rows are days with no activity, shaded rows are weekends.</>}
+        </ReadNote>
+      </div>
+    </div>
+  )
+}
+
 function Individual({ d }: { d: Bundle }) {
   const [selKey, setSel] = useState('')
+  const [daily, setDaily] = useState(false)
   const selected = useMemo(() => {
     if (!d.evaluators.length) return null
     return d.evaluators.find((e) => e.key === selKey) || d.evaluators[0]
@@ -741,6 +922,16 @@ function Individual({ d }: { d: Bundle }) {
   // person-level callouts for this window
   const deadShare = e.evaluated + e.linkDead > 0 ? e.linkDead / (e.evaluated + e.linkDead) : 0
   const t = d.teamTotals
+  // ---- team benchmarks: only meaningful with someone to compare against ----
+  const tb = teamBench(d.evaluators)
+  const multi = d.evaluators.length >= 2
+  // `ok` gates metrics whose own denominator is empty for this person: a rate over
+  // zero assigned (or a recording count for someone who records nothing) is not a
+  // 100% shortfall, it is "not applicable" - showing it red would be a false signal.
+  const cmp = (value: number | null, bench: number | null, format: (n: number) => string, dir: 'up' | 'down' | 'flat', ok = true): Bench | null =>
+    multi && ok ? vsTeam(value, bench, format, dir) : null
+  const hasAssigned = e.assigned > 0
+  const hasDays = e.activeDays > 0
   const pInsights: React.ReactNode[] = []
   if (e.assigned > 0 && e.evaluated === 0) pInsights.push(
     <Insight key="idle" level="bad"><span><b>{e.name} hasn&apos;t evaluated anything this window</b> despite {fmt.int(e.assigned)} assigned → check availability or reassign the queue.</span></Insight>)
@@ -757,6 +948,7 @@ function Individual({ d }: { d: Bundle }) {
       <Guide title="Individual - one evaluator's workload, tempo and pick quality"
         read={[
           <span key="1"><b>Chips</b> switch person - every card below re-renders for them.</span>,
+          <span key="1b"><b>Most KPIs carry a &quot;team ...&quot; line</b>: the team&apos;s number on the same metric and the gap in %. Green/red only appears past ±5% and only where one direction is genuinely better - Assigned and the per-day mix are gray because more or less is not automatically better, and Recorded, Link dead and the two mix donuts carry no team number at all (assigned work and source quality, not something to rank people on).</span>,
           <span key="2"><b>Activity over time</b>: red (Assigned) above blue (Evaluated) = work piling up on them; blue above red = clearing older queue. Gray = dead links.</span>,
           <span key="3"><b>Bypass / P&amp;B / List_Idea per day</b>: filtering tempo, divided by their active days - compare mix, not just totals.</span>,
           <span key="4"><b>Radar + funnel</b>: a balanced polygon and a funnel that converts = healthy; big volume with a flat funnel = fast but low-signal.</span>,
@@ -768,22 +960,39 @@ function Individual({ d }: { d: Bundle }) {
         ]} />
       <div className="rp-people">
         {d.evaluators.map((x) => (
-          <button key={x.key} className={'rp-chip' + (x.key === e.key ? ' active' : '')} onClick={() => setSel(x.key)}>
+          <button key={x.key} className={'rp-chip' + (x.key === e.key ? ' active' : '')} onClick={() => { setSel(x.key); setDaily(false) }}>
             {x.name}{x.title && <span className="rp-chip-title">{x.title}</span>} <span className="rp-chip-n">{x.evaluated || x.recorded}</span>
           </button>
         ))}
+        <button className="rp-daily-btn" onClick={() => setDaily(true)}
+          title={`Day-by-day numbers for ${e.name}: Bypass · Playtest & Bypass · List_Idea · 5min & 20min videos`}>
+          ▦ Daily breakdown
+        </button>
       </div>
+      {daily && (
+        <DailyBreakdown person={e.name} mix={d.dailyMix?.[e.key] || {}} vids={vids} win={d.window} onClose={() => setDaily(false)} />
+      )}
       <div className="rp-kpi-row rp-kpi-row-dense">
-        <Kpi label="Assigned" value={fmt.int(e.assigned)} sub="games on their plate" tip={TIP.assignedPerson} />
-        <Kpi label="Evaluated" value={fmt.int(e.evaluated)} hi spark={personSpark.length >= 2 ? personSpark : undefined} tip={TIP.evaluated} />
-        <Kpi label="Throughput" value={fmt.dec(e.throughput)} sub="games / active day" tip={TIP.perDay('Games evaluated')} />
-        <Kpi label="Turnaround" value={fmt.days(e.turnaround)} sub="assign → evaluate" tip={TIP.turnaround} />
-        <Kpi label="Survival rate" value={fmt.pct(e.survivalRate)} sub={`${fmt.int(e.shortlisted)} of ${fmt.int(e.assigned)} assigned`} tip={TIP.survival} />
-        <Kpi label="Signal rate" value={fmt.pct(e.signalRate)} sub={`${fmt.int(e.finalPriority)} of ${fmt.int(e.assigned)} assigned`} tip={TIP.signal} />
-        <Kpi label="Bypass / day" value={fmt.dec(perDay('Bypass'))} sub={`${fmt.int(e.initialConclusions['Bypass'] || 0)} total`} tip={TIP.perDay('Bypass')} />
-        <Kpi label="P&B / day" value={fmt.dec(perDay('Playtest & Bypass'))} sub={`${fmt.int(e.initialConclusions['Playtest & Bypass'] || 0)} playtest & bypass`} tip={TIP.perDay('Playtest & Bypass')} />
-        <Kpi label="List_Idea / day" value={fmt.dec(perDay('List_Idea'))} sub={`${fmt.int(e.initialConclusions['List_Idea'] || 0)} total`} tip={TIP.perDay('List_Idea')} />
-        <Kpi label="Note coverage" value={fmt.pct(e.noteRate)} sub={`${fmt.int(e.noted)} of ${fmt.int(e.evaluated)} evaluated`} tip={TIP.noteCoverage} />
+        <Kpi label="Assigned" value={fmt.int(e.assigned)} sub="games on their plate" tip={TIP.assignedPerson}
+          bench={cmp(e.assigned, tb.assigned, fmt.int, 'flat', hasAssigned)} />
+        <Kpi label="Evaluated" value={fmt.int(e.evaluated)} hi spark={personSpark.length >= 2 ? personSpark : undefined} tip={TIP.evaluated}
+          bench={cmp(e.evaluated, tb.evaluated, fmt.int, 'up')} />
+        <Kpi label="Throughput" value={fmt.dec(e.throughput)} sub="games / active day" tip={TIP.perDay('Games evaluated')}
+          bench={cmp(e.throughput, tb.throughput, (n) => fmt.dec(n), 'up', hasDays)} />
+        <Kpi label="Turnaround" value={fmt.days(e.turnaround)} sub="assign → evaluate" tip={TIP.turnaround}
+          bench={cmp(e.turnaround, tb.turnaround, (n) => fmt.days(n), 'down')} />
+        <Kpi label="Survival rate" value={fmt.pct(e.survivalRate)} sub={`${fmt.int(e.shortlisted)} of ${fmt.int(e.evaluated)} evaluated`} tip={TIP.survival}
+          bench={cmp(e.survivalRate, tb.survivalRate, fmt.pct, 'up', e.evaluated > 0)} />
+        <Kpi label="Signal rate" value={fmt.pct(e.signalRate)} sub={`${fmt.int(e.finalPriority)} of ${fmt.int(e.evaluated)} evaluated`} tip={TIP.signal}
+          bench={cmp(e.signalRate, tb.signalRate, fmt.pct, 'up', e.evaluated > 0)} />
+        <Kpi label="Bypass / day" value={fmt.dec(perDay('Bypass'))} sub={`${fmt.int(e.initialConclusions['Bypass'] || 0)} total`} tip={TIP.perDay('Bypass')}
+          bench={cmp(perDay('Bypass'), tb.perDay('Bypass'), (n) => fmt.dec(n), 'flat', hasDays)} />
+        <Kpi label="P&B / day" value={fmt.dec(perDay('Playtest & Bypass'))} sub={`${fmt.int(e.initialConclusions['Playtest & Bypass'] || 0)} playtest & bypass`} tip={TIP.perDay('Playtest & Bypass')}
+          bench={cmp(perDay('Playtest & Bypass'), tb.perDay('Playtest & Bypass'), (n) => fmt.dec(n), 'flat', hasDays)} />
+        <Kpi label="List_Idea / day" value={fmt.dec(perDay('List_Idea'))} sub={`${fmt.int(e.initialConclusions['List_Idea'] || 0)} total`} tip={TIP.perDay('List_Idea')}
+          bench={cmp(perDay('List_Idea'), tb.perDay('List_Idea'), (n) => fmt.dec(n), 'flat', hasDays)} />
+        <Kpi label="Note coverage" value={fmt.pct(e.noteRate)} sub={`${fmt.int(e.noted)} of ${fmt.int(e.evaluated)} evaluated`} tip={TIP.noteCoverage}
+          bench={cmp(e.noteRate, tb.noteRate, fmt.pct, 'up', e.evaluated > 0)} />
         <Kpi label="Link dead" value={fmt.int(e.linkDead)} sub="dead links caught" tip={TIP.linkDead} />
         <Kpi label="Recorded" value={fmt.int(e.recorded)} sub={`${e.rec5} × 5min · ${e.rec20} × 20min`} tip={TIP.recorded} />
       </div>

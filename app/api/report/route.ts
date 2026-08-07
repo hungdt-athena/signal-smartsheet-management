@@ -253,7 +253,7 @@ export async function GET(req: NextRequest) {
         GROUP BY 1 ORDER BY 1`,
     ])
 
-    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, actAsgSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, pipelineRaw] = await Promise.all([
+    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, dailyMixRows, pipelineRaw] = await Promise.all([
       // per-evaluator core + funnel. Shortlist = initial not bypassed (List_Idea);
       // Final Priority = moderator judged 'Priority IV' or 'Insight' (user-defined -
       // Priority V intentionally NOT counted).
@@ -344,22 +344,10 @@ export async function GET(req: NextRequest) {
       // actUnit grain, with the quality counts the per-period all-rounder needs.
       sql`SELECT lower(ge.initial_evaluator) AS k, date_trunc(${actUnit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b,
           count(*)::int AS n,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead')::int AS evaluated,
           count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
           count(*) FILTER (WHERE ge.final_conclusion IN ('Priority IV', 'Insight'))::int AS final_priority
         ${evalBase}
-        GROUP BY 1, 2`,
-      // per-evaluator assigned on the same actUnit grain - the denominator of the
-      // per-period signal/survival axes (assigned_date: this is a per-person stat,
-      // so a game received via reassign counts for its new owner)
-      sql`
-        SELECT lower(ge.initial_evaluator) AS k, date_trunc(${actUnit}, ge.assigned_date)::date::text AS b, count(*)::int AS n
-        FROM game_evaluations ge
-        WHERE ge.assigned_date IS NOT NULL
-          AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
-          ${notSystem} ${catF}
-          ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
-            ${win.from ? sql`AND ge.assigned_date >= ${win.from}::date` : sql``}
-            ${win.to ? sql`AND ge.assigned_date < ${win.to}::date` : sql``}`}
         GROUP BY 1, 2`,
       // per-evaluator time series (heatmap cells + individual activity chart)
       sql`SELECT lower(ge.initial_evaluator) AS k, date_trunc(${unit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b, count(*)::int AS n,
@@ -442,6 +430,15 @@ export async function GET(req: NextRequest) {
             ${win.from ? sql`AND (record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
             ${win.to ? sql`AND (record_confirmed_at AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}))`}
         ORDER BY record_confirmed_at DESC NULLS FIRST, slot`,
+      // per-evaluator per-DAY initial conclusion counts (Individual → Daily breakdown).
+      // Always day grain, whatever the view's bucket unit is: the point of the
+      // breakdown is "what did they do on each calendar day". Link_dead excluded to
+      // match every other conclusion-mix number in this file.
+      sql`SELECT lower(ge.initial_evaluator) AS k,
+          (ge.evaluate_date AT TIME ZONE ${VN})::date::text AS d,
+          ge.initial_conclusion AS c, count(*)::int AS n
+        ${evalBase} AND ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead'
+        GROUP BY 1, 2, 3`,
       pipelinePromise,
     ])
 
@@ -474,9 +471,17 @@ export async function GET(req: NextRequest) {
     }
     expectedDays = Math.max(1, expectedDays)
 
-    // Rates are anchored on ASSIGNED (user-defined): survival = how much of the
-    // assigned work reaches shortlist; signal = how much reaches Final Priority
-    // (Priority IV + Insight) - the end-to-end yield of what was handed to them.
+    // Rates are anchored on EVALUATED, not assigned (changed 2026-08-07 - the
+    // assigned denominator was comparing two different cohorts: shortlisted and
+    // finalPriority only exist on rows with an evaluate_date IN the window, while
+    // assigned counts rows stamped by assigned_date, which mostly are NOT the same
+    // games. That punished anyone whose queue grew mid-window and flattered anyone
+    // clearing an older backlog; on real August data it read mitt at 6.8% survival
+    // instead of 11.4%, and a system row with 7 evaluations against 1 assignment
+    // came out at 700%. Same rows top and bottom now:
+    //   survival = shortlist ÷ evaluated  - how much of what they judged got past bypass
+    //   signal   = (Priority IV + Insight) ÷ evaluated - how much became real signal
+    // Assigned is still reported as a COUNT (workload) and still drives turnaround.
     const evaluators = perEval.map((e) => {
       const evaluated = e.evaluated
       const rec = recBy.get(e.k) || { recorded: 0, rec5: 0, rec20: 0 }
@@ -493,13 +498,13 @@ export async function GET(req: NextRequest) {
         activeDays: e.active_days,
         throughput: e.active_days > 0 ? evaluated / e.active_days : 0,
         turnaround: e.ta_count > 0 ? Number(e.ta_sum) / e.ta_count : null,
-        signalRate: assigned > 0 ? finalPriority / assigned : 0,
+        signalRate: evaluated > 0 ? finalPriority / evaluated : 0,
         consistency,
         shortlisted: e.shortlisted,
         priorityIV: e.priority_iv,
         insight: e.insight,
         finalPriority,
-        survivalRate: assigned > 0 ? e.shortlisted / assigned : 0,
+        survivalRate: evaluated > 0 ? e.shortlisted / evaluated : 0,
         linkDead: e.link_dead,
         noted: e.noted,
         noteRate: evaluated > 0 ? e.noted / evaluated : 0,
@@ -555,8 +560,8 @@ export async function GET(req: NextRequest) {
       avgThroughput: tput.length ? tput.reduce((a, b) => a + b, 0) / tput.length : 0,
       personDayThroughput: totalActiveDays > 0 ? funnel.evaluated / totalActiveDays : 0,
       avgTurnaround: tas.length ? tas.reduce((a, b) => a + b, 0) / tas.length : null,
-      signalRate: funnel.assigned ? funnel.finalPriority / funnel.assigned : 0,
-      survivalRate: funnel.assigned ? funnel.shortlisted / funnel.assigned : 0,
+      signalRate: funnel.evaluated ? funnel.finalPriority / funnel.evaluated : 0,
+      survivalRate: funnel.evaluated ? funnel.shortlisted / funnel.evaluated : 0,
       totalRecorded: sum((e) => e.recorded),
       linkDead: sum((e) => e.linkDead),
       noteRate: funnel.evaluated ? sum((e) => e.noted) / funnel.evaluated : 0,
@@ -627,6 +632,7 @@ export async function GET(req: NextRequest) {
     const metricSeries = allBuckets.map((b) => {
       const s = evalSeriesBy.get(b)
       const assigned = asgSeriesBy.get(b) || 0
+      const evaluated = s?.evaluated || 0
       const shortlisted = s?.shortlisted || 0
       const finalPriority = (s?.priority_iv || 0) + (s?.insight || 0)
       return {
@@ -634,13 +640,16 @@ export async function GET(req: NextRequest) {
         label: bucketLabel(b),
         volume: s?.n || 0,
         assigned,
-        evaluated: s?.evaluated || 0,
+        evaluated,
         shortlisted,
         priorityIV: s?.priority_iv || 0,
         insight: s?.insight || 0,
         finalPriority,
-        signalRate: assigned > 0 ? finalPriority / assigned : 0,
-        survivalRate: assigned > 0 ? shortlisted / assigned : 0,
+        // same-bucket cohort: numerator and denominator both come from the rows
+        // evaluated in this bucket (see the note above `evaluators`). Assigned stays
+        // as its own line/count - it is intake volume, not a rate denominator.
+        signalRate: evaluated > 0 ? finalPriority / evaluated : 0,
+        survivalRate: evaluated > 0 ? shortlisted / evaluated : 0,
       }
     })
 
@@ -666,25 +675,27 @@ export async function GET(req: NextRequest) {
     // something inside one bucket: Consistency (active days) is degenerate at day
     // grain and Recording is too sparse to rank on, so both are dropped and the
     // remaining weights re-normalize between themselves.
+    // Denominator is the bucket's own evaluated count, matching the window-level
+    // rates. Dividing by assigned-in-bucket was badly wrong at day grain: someone who
+    // evaluated 200 games on a day they happened to receive no new assignments scored
+    // 0 on both quality axes.
     const perPeriodW = { ...rcfg.weights, Consistency: 0, Recording: 0 }
-    const asgAct = new Map<string, number>()
-    for (const r of actAsgSeries) asgAct.set(`${r.k}|${r.b}`, r.n)
     const scoreCells = new Map<string, Record<string, number>>()
     for (const b of bucketKeys) {
       const rows = actSeries.filter((r) => r.b === b)
       if (!rows.length) continue
-      const rate = (num: number, k: string) => { const a = asgAct.get(`${k}|${b}`) || 0; return a > 0 ? num / a : 0 }
+      const rate = (num: number, ev: number) => (ev > 0 ? num / ev : 0)
       const maxVol = Math.max(1e-9, ...rows.map((r) => r.n))
-      const maxSig = Math.max(1e-9, ...rows.map((r) => rate(r.final_priority, r.k)))
-      const maxSur = Math.max(1e-9, ...rows.map((r) => rate(r.shortlisted, r.k)))
+      const maxSig = Math.max(1e-9, ...rows.map((r) => rate(r.final_priority, r.evaluated)))
+      const maxSur = Math.max(1e-9, ...rows.map((r) => rate(r.shortlisted, r.evaluated)))
       const vols = rows.map((r) => r.n).sort((a, b2) => a - b2)
       const med = vols[Math.floor(vols.length / 2)] || 0
       for (const r of rows) {
         const cred = rcfg.credibility ? (med > 0 ? Math.min(1, r.n / med) : 1) : 1
         const score = allRounderScore({
           Volume: (r.n / maxVol) * 100,
-          Signal: (rate(r.final_priority, r.k) / maxSig) * 100,
-          Survival: (rate(r.shortlisted, r.k) / maxSur) * 100,
+          Signal: (rate(r.final_priority, r.evaluated) / maxSig) * 100,
+          Survival: (rate(r.shortlisted, r.evaluated) / maxSur) * 100,
         }, perPeriodW, cred)
         const m = scoreCells.get(r.k) || {}
         m[b] = Math.round(score * 10) / 10
@@ -752,6 +763,17 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    // per-person daily conclusion counts, keyed person → day → conclusion → n.
+    // Video counts per day are NOT duplicated here - the client derives them from
+    // `videos` (recordedOn + slot), which is already the source of truth for the
+    // recording queue, so the two panels can never disagree.
+    const dailyMix: Record<string, Record<string, Record<string, number>>> = {}
+    for (const r of dailyMixRows) {
+      const byDay = (dailyMix[r.k] ||= {})
+      const day = (byDay[r.d] ||= {})
+      day[r.c] = (day[r.c] || 0) + r.n
+    }
+
     // pipeline payload (null on batch view)
     type AgeRow = { key: string; label: string; a0: number; a1: number; a2: number; a3: number }
     let pipeline: null | {
@@ -805,6 +827,7 @@ export async function GET(req: NextRequest) {
       config: rcfg,
       personSeries,
       videos,
+      dailyMix,
       evaluators, radar,
       pipeline,
     }

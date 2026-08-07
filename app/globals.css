@@ -1676,6 +1676,13 @@ input:checked + .slider:before {
 .rp-trend { font-weight: 700; font-variant-numeric: tabular-nums; }
 .rp-trend.up { color: var(--good); }
 .rp-trend.down { color: var(--bad); }
+/* "vs team" benchmark line on Individual KPIs */
+.rp-kpi-bench { font-size: 11px; color: var(--faint); display: flex; align-items: center; gap: 6px;
+  border-top: 1px dashed var(--border); padding-top: 5px; margin-top: 1px; font-variant-numeric: tabular-nums; }
+.rp-bench-delta { font-weight: 700; margin-left: auto; }
+.rp-bench-delta.good { color: var(--good); }
+.rp-bench-delta.bad { color: var(--bad); }
+.rp-bench-delta.flat { color: var(--muted); }
 .rp-spark { flex-shrink: 0; opacity: .95; }
 
 .rp-chart-wrap { position: relative; width: 100%; }
@@ -1719,6 +1726,29 @@ input:checked + .slider:before {
 .rp-chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
 .rp-chip-n { opacity: .7; font-weight: 700; }
 .rp-chip-title { opacity: .65; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin-left: 5px; }
+/* opens the day-by-day table for the selected person - pushed to the far right of
+   the chip row so it never reads as one of the people */
+.rp-daily-btn { margin-left: auto; border: 1px solid var(--accent-border); background: var(--accent-weak);
+  font-family: var(--font); font-size: 12px; font-weight: 700; color: var(--accent-strong);
+  padding: 5px 12px; border-radius: 99px; cursor: pointer; transition: all .12s; white-space: nowrap; }
+.rp-daily-btn:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+
+/* Individual → Daily breakdown table */
+.rp-daily-modal { max-width: 720px; }
+.rp-daily-wrap { max-height: min(62vh, 620px); overflow: auto; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.rp-daily { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.rp-daily th, .rp-daily td { padding: 6px 10px; text-align: right; white-space: nowrap; }
+.rp-daily th.l, .rp-daily td.l { text-align: left; }
+.rp-daily thead th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); color: var(--muted);
+  font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+.rp-daily tbody td { border-top: 1px solid var(--border); color: var(--text); }
+.rp-daily tbody tr:hover td { background: var(--surface-2); }
+.rp-daily tbody tr.we td { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+.rp-daily tbody tr.idle td, .rp-daily td.zero { color: var(--faint); }
+.rp-daily td.strong { font-weight: 700; }
+.rp-daily .sep { border-left: 1px solid var(--border); }
+.rp-daily tfoot td { position: sticky; bottom: 0; background: var(--surface-2); border-top: 2px solid var(--border-strong);
+  font-weight: 800; color: var(--text); }
 
 .rp-readnote { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--border); }
 /* Config tab: roster checkboxes + all-rounder weight sliders */

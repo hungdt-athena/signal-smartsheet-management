@@ -77,9 +77,14 @@ export function Insight({ level = 'info', children }: { level?: 'info' | 'warn' 
 }
 
 // ---------- KPI card (optional inline sparkline) ----------
-export function Kpi({ label, value, sub, trend, hi, spark, sparkColor, tip }: {
+// A benchmark line under a KPI: what the team does on the same metric, and how far
+// this value sits from it. `tone` is passed in because "better" is metric-specific
+// (higher throughput is good, higher turnaround is not).
+export type Bench = { text: string; delta: number | null; tone: 'good' | 'bad' | 'flat' }
+
+export function Kpi({ label, value, sub, trend, hi, spark, sparkColor, tip, bench }: {
   label: string; value: string; sub?: string; trend?: number | null; hi?: boolean
-  spark?: number[]; sparkColor?: string; tip?: ReactNode
+  spark?: number[]; sparkColor?: string; tip?: ReactNode; bench?: Bench | null
 }) {
   const tclass = trend == null ? '' : trend > 0 ? 'up' : trend < 0 ? 'down' : ''
   // derive a trend from the sparkline tail if none was supplied
@@ -103,6 +108,12 @@ export function Kpi({ label, value, sub, trend, hi, spark, sparkColor, tip }: {
           ? <span className={'rp-trend ' + tclass}>{fmt.signed(trend)}</span>
           : autoTrend != null && at && <span className={'rp-trend ' + at}>{fmt.signed(autoTrend)}</span>}
       </div>
+      {bench && (
+        <div className="rp-kpi-bench">
+          <span>{bench.text}</span>
+          {bench.delta != null && <span className={'rp-bench-delta ' + bench.tone}>{fmt.signed(bench.delta)}</span>}
+        </div>
+      )}
     </div>
   )
 }
