@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { readYtbUploaded } from '@/lib/google-sheets'
-import { buildYtMap, ytKey, normalizeName, type Bucket } from '@/lib/ytb-match'
+import { buildYtMap, ytLookup, normalizeName, type Bucket } from '@/lib/ytb-match'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,6 +63,7 @@ interface LinkChange {
 }
 
 const BUCKETS: Bucket[] = ['5min', '20min']
+const VN = 'Asia/Ho_Chi_Minh'
 
 // Bare 11-char YouTube id from any stored form (youtu.be/…, watch?v=…, embed,
 // shorts, or already-bare id) — used to compare stored links by identity so a
@@ -105,7 +106,7 @@ export async function POST(req: NextRequest) {
       : sql``
     const rows = await sql`
       SELECT ge.id, ge.game_id, ge.batch, gi.title,
-        ge.record_5min_assignee, ge.record_20min_assignee, ge.youtube_link
+        ge.record_5min_assignee, ge.record_20min_assignee, ge.youtube_link, ge.youtube_uploaded_at
       FROM game_evaluations ge
       JOIN game_info gi ON ge.game_id = gi.game_id
       WHERE (ge.record_bucket IN ('5min','20min')
@@ -122,10 +123,13 @@ export async function POST(req: NextRequest) {
       // Persist the matched upload's YouTube link (20min preferred — the full
       // gameplay record beats the 5-min clip as a demo). Skip when the stored
       // link already points at the same video, whatever its URL format.
-      const yt20 = ytMap.get(ytKey(row.title, '20min'))
-      const yt5 = ytMap.get(ytKey(row.title, '5min'))
+      const yt20 = ytLookup(ytMap, row.title, '20min')
+      const yt5 = ytLookup(ytMap, row.title, '5min')
       const ytLink = yt20 || yt5
-      if (ytLink?.id && extractYtId(row.youtube_link || '') !== ytLink.id) {
+      // Also re-write when the link is already right but the upload timestamp is
+      // missing — that column arrived after the links did (migration 034), and
+      // only a link CHANGE would otherwise ever backfill it.
+      if (ytLink?.id && (extractYtId(row.youtube_link || '') !== ytLink.id || !row.youtube_uploaded_at)) {
         linkChanges.push({
           id: row.id, game_id: row.game_id, title: row.title, batch: row.batch,
           bucket: yt20 ? '20min' : '5min',
@@ -135,7 +139,7 @@ export async function POST(req: NextRequest) {
         })
       }
       for (const bucket of BUCKETS) {
-        const yt = ytMap.get(ytKey(row.title, bucket))
+        const yt = ytLookup(ytMap, row.title, bucket)
         if (!yt) continue                       // no upload in this bucket
         const pic = (yt.pic || '').trim()
         if (!pic) continue                       // upload with no owner recorded
@@ -191,9 +195,17 @@ export async function POST(req: NextRequest) {
     const appliedLinks: LinkChange[] = []
     for (const lc of linkChanges) {
       if (idFilter && !idFilter.has(lc.id)) continue
+      // The sheet `time` is a bare local timestamp ("2026-08-07 15:52:41", hour
+      // sometimes unpadded) in VN time. Anything that doesn't look like one is
+      // stored as NULL rather than guessed — a wrong completion date would move
+      // the row into the wrong Report window.
+      const uploadedAt = /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(:\d{2})?$/.test((lc.uploaded_at || '').trim())
+        ? lc.uploaded_at.trim().replace('T', ' ')
+        : null
       const res = await sql`
         UPDATE game_evaluations
-        SET youtube_link = ${lc.to}
+        SET youtube_link = ${lc.to},
+            youtube_uploaded_at = ${uploadedAt}::timestamp AT TIME ZONE ${VN}
         WHERE id = ${lc.id}`
       linksApplied += res.count
       if (res.count > 0) appliedLinks.push(lc)

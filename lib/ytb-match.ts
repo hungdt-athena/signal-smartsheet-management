@@ -23,17 +23,34 @@ export interface YtMatch {
   pic: string
 }
 
+// Typographic punctuation → ASCII. Store titles and sheet titles are typed by
+// different people from different sources, so the same game arrives as
+// "Rotate'n Match" in one and "Rotate’n Match" in the other; without folding
+// these the exact key misses and the row looks like it was never uploaded.
+const PUNCT_FOLD: Array<[RegExp, string]> = [
+  [/[‘’‚‛′＇]/g, "'"],   // curly / prime / fullwidth apostrophes
+  [/[“”„‟″＂]/g, '"'],   // curly / fullwidth quotes
+  [/[‐-―−－]/g, '-'],              // en/em dash, minus, fullwidth hyphen
+  [/[！]/g, '!'], [/[？]/g, '?'], [/[：]/g, ':'],
+  [/[（]/g, '('], [/[）]/g, ')'], [/[　 ]/g, ' '],
+]
+
 export function normalizeTitle(s: string): string {
   // NFD decomposes accented chars into base + combining marks; the range
   // U+0300–U+036F is the Combining Diacritical Marks block. Explicit range
   // avoids the \p{Diacritic} escape (needs the `u` flag / es6+ tsc target;
   // this project's tsconfig has no `target`).
-  return (s || '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ' ')
+  let out = (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+  for (const [re, to] of PUNCT_FOLD) out = out.replace(re, to)
+  return out.toLowerCase().trim().replace(/\s+/g, ' ')
+}
+
+// Punctuation-insensitive key, used ONLY as a fallback when the exact key misses
+// (see ytLookup). Folding alone does not save "Cube Pop 3D" vs "Cube Pop 3D!" —
+// one side simply dropped a character. Returns '' when nothing alphanumeric
+// survives (non-latin titles), which disables the fallback for that title.
+export function looseTitle(s: string): string {
+  return normalizeTitle(s).replace(/[^a-z0-9]+/g, '')
 }
 
 // Sheet `duration` is hand-entered ("5", "5mins", "20", "20mins"). Parse the
@@ -54,6 +71,13 @@ export function ytKey(title: string, bucket: Bucket): string {
   return `${normalizeTitle(title)}|${bucket}`
 }
 
+// Loose keys live in the same map behind a prefix that can never collide with an
+// exact key (an exact key is a normalized title, which never starts with '~').
+function looseKey(title: string, bucket: Bucket): string | null {
+  const l = looseTitle(title)
+  return l ? `~${l}|${bucket}` : null
+}
+
 // Parse the sheet `time` to a sortable timestamp; unparseable times sort last so
 // a real date always wins over a blank/garbage one.
 function timeRank(time: string): number {
@@ -68,18 +92,34 @@ export function buildYtMap(rows: YtbMatchRow[]): Map<string, YtMatch> {
   // (sheet row order), so a blank-time row can't displace an earlier one.
   const m = new Map<string, YtMatch>()
   const rank = new Map<string, number>()
+  // Distinct exact titles seen behind each loose key. More than one means the
+  // loose key is ambiguous (two genuinely different games collapsing together),
+  // and we drop it rather than guess — a wrong link is worse than no link.
+  const looseTitles = new Map<string, Set<string>>()
   for (const row of rows) {
     if (!row.gameTitle || !row.youtubeId) continue
-    const key = ytKey(row.gameTitle, durationBucket(row.duration))
+    const bucket = durationBucket(row.duration)
+    const match: YtMatch = { id: row.youtubeId, time: row.time || '', pic: row.pic || '' }
     const r = timeRank(row.time)
-    if (!m.has(key) || r < rank.get(key)!) {
-      m.set(key, { id: row.youtubeId, time: row.time || '', pic: row.pic || '' })
-      rank.set(key, r)
+    for (const key of [ytKey(row.gameTitle, bucket), looseKey(row.gameTitle, bucket)]) {
+      if (!key) continue
+      if (!m.has(key) || r < rank.get(key)!) { m.set(key, match); rank.set(key, r) }
+    }
+    const lk = looseKey(row.gameTitle, bucket)
+    if (lk) {
+      const seen = looseTitles.get(lk) || new Set<string>()
+      seen.add(normalizeTitle(row.gameTitle))
+      looseTitles.set(lk, seen)
     }
   }
+  for (const [lk, titles] of looseTitles) if (titles.size > 1) m.delete(lk)
   return m
 }
 
 export function ytLookup(map: Map<string, YtMatch>, title: string, bucket: Bucket): YtMatch | undefined {
-  return map.get(ytKey(title, bucket))
+  const exact = map.get(ytKey(title, bucket))
+  if (exact) return exact
+  // Fallback: same game, punctuation typed differently on one side.
+  const lk = looseKey(title, bucket)
+  return lk ? map.get(lk) : undefined
 }

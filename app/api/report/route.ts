@@ -153,6 +153,14 @@ export async function GET(req: NextRequest) {
       ? sql`AND lower(ge.${sql.unsafe(col)}) = ANY(${roster})`
       : sql`AND lower(ge.${sql.unsafe(col)}) <> ALL(${EXCLUDED})`
 
+    // When a recording is DONE. The Record tab treats a matching YouTube upload
+    // as the truth and the manual Confirm as a weaker "recording" state; Report
+    // used to read only the Confirm, so the same game showed Recorded on one
+    // screen and Pending on the other. Both now resolve to the same moment: the
+    // upload if we have one (migration 034), otherwise the Confirm click.
+    const recAt = sql`COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at)`
+    const recAtDate = sql`(COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at) AT TIME ZONE ${VN})::date`
+
     const evalBase = sql`
       FROM game_evaluations ge
       WHERE ge.evaluate_date IS NOT NULL
@@ -384,26 +392,27 @@ export async function GET(req: NextRequest) {
             ${win.from ? sql`AND ge.assigned_date >= ${win.from}::date` : sql``}
             ${win.to ? sql`AND ge.assigned_date < ${win.to}::date` : sql``}`}
         GROUP BY 1, 2`,
-      // recording per recorder (5min + 20min slots), same window on record_confirmed_at (or batch)
+      // recording per recorder (5min + 20min slots), same window on the completion
+      // moment (upload, else manual Confirm) or batch
       sql`
         WITH rec AS (
           SELECT lower(ge.record_5min_assignee) AS k, ge.record_5min_assignee AS name, '5min' AS slot
           FROM game_evaluations ge
-          WHERE ge.record_confirmed_at IS NOT NULL AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
+          WHERE ${recAt} IS NOT NULL AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
             ${recOk('record_5min_assignee')}
             ${catF}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
-              ${win.from ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
-              ${win.to ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}`}
+              ${win.from ? sql`AND ${recAtDate} >= ${win.from}::date` : sql``}
+              ${win.to ? sql`AND ${recAtDate} < ${win.to}::date` : sql``}`}
           UNION ALL
           SELECT lower(ge.record_20min_assignee), ge.record_20min_assignee, '20min'
           FROM game_evaluations ge
-          WHERE ge.record_confirmed_at IS NOT NULL AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
+          WHERE ${recAt} IS NOT NULL AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
             ${recOk('record_20min_assignee')}
             ${catF}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
-              ${win.from ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
-              ${win.to ? sql`AND (ge.record_confirmed_at AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}`}
+              ${win.from ? sql`AND ${recAtDate} >= ${win.from}::date` : sql``}
+              ${win.to ? sql`AND ${recAtDate} < ${win.to}::date` : sql``}`}
         )
         SELECT k, mode() WITHIN GROUP (ORDER BY name) AS name,
           count(*)::int AS recorded,
@@ -426,28 +435,33 @@ export async function GET(req: NextRequest) {
         UNION ALL
         SELECT 'batch', batch FROM game_evaluations WHERE batch IS NOT NULL AND batch <> '' ${category !== 'all' ? sql`AND category_group=${category}` : sql``}
         GROUP BY 1,2`,
-      // recording queue per assignee: recorded-in-window rows + still-pending rows
-      // (pending has no timestamp to window on; batch view windows on the batch label)
+      // recording queue per assignee: done-in-window rows + still-open rows
+      // (an open row has no timestamp to window on; batch view windows on the
+      // batch label). `confirmed_on` and the link are carried separately so the
+      // client can tell Recorded (video exists) from Recording (Confirm clicked,
+      // no video yet) - the same three states the Record tab shows.
       sql`
         WITH rec AS (
           SELECT lower(ge.record_5min_assignee) AS k, '5min' AS slot, ge.game_id, gi.title, gi.os,
-                 ge.batch, ge.record_confirmed_at, ge.youtube_link
+                 ge.batch, ge.record_confirmed_at, ge.youtube_link, ${recAt} AS rec_at
           FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
           WHERE ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> '' ${recOk('record_5min_assignee')} ${catF}
           UNION ALL
           SELECT lower(ge.record_20min_assignee), '20min', ge.game_id, gi.title, gi.os,
-                 ge.batch, ge.record_confirmed_at, ge.youtube_link
+                 ge.batch, ge.record_confirmed_at, ge.youtube_link, ${recAt}
           FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
           WHERE ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> '' ${recOk('record_20min_assignee')} ${catF}
         )
         SELECT k, slot, game_id, title, os, batch,
-          (record_confirmed_at AT TIME ZONE ${VN})::date::text AS recorded_on, youtube_link
+          (rec_at AT TIME ZONE ${VN})::date::text AS recorded_on,
+          (record_confirmed_at AT TIME ZONE ${VN})::date::text AS confirmed_on,
+          youtube_link
         FROM rec
         WHERE TRUE ${win.batch ? sql`AND batch = ${win.batch}` : sql`
-          AND (record_confirmed_at IS NULL OR (TRUE
-            ${win.from ? sql`AND (record_confirmed_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
-            ${win.to ? sql`AND (record_confirmed_at AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}))`}
-        ORDER BY record_confirmed_at DESC NULLS FIRST, slot`,
+          AND (rec_at IS NULL OR (TRUE
+            ${win.from ? sql`AND (rec_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
+            ${win.to ? sql`AND (rec_at AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}))`}
+        ORDER BY rec_at DESC NULLS FIRST, slot`,
       // per-evaluator per-DAY initial conclusion counts (Individual → Daily breakdown).
       // Always day grain, whatever the view's bucket unit is: the point of the
       // breakdown is "what did they do on each calendar day". Link_dead excluded to
@@ -773,11 +787,11 @@ export async function GET(req: NextRequest) {
     const batchLabels = opts.batch.map((k) => ({ key: k, label: k }))
 
     // recording queue per assignee (only people already in the evaluator list)
-    const videos: Record<string, Array<{ gameId: string; title: string | null; os: string | null; slot: string; batch: string | null; recordedOn: string | null; youtube: string | null }>> = {}
+    const videos: Record<string, Array<{ gameId: string; title: string | null; os: string | null; slot: string; batch: string | null; recordedOn: string | null; confirmedOn: string | null; youtube: string | null }>> = {}
     for (const v of videoRows) {
       (videos[v.k] ||= []).push({
         gameId: v.game_id, title: v.title, os: v.os, slot: v.slot,
-        batch: v.batch, recordedOn: v.recorded_on, youtube: v.youtube_link,
+        batch: v.batch, recordedOn: v.recorded_on, confirmedOn: v.confirmed_on, youtube: v.youtube_link,
       })
     }
 

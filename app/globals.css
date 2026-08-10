@@ -1909,6 +1909,9 @@ input:checked + .slider:before {
 .rp-vid-game { white-space: normal; min-width: 220px; font-weight: 600; }
 .rp-vid-os { color: var(--faint); font-weight: 400; text-transform: uppercase; font-size: 11px; }
 .rp-vid-done { color: var(--good); font-weight: 600; }
+/* Confirm pressed, upload not matched yet - between done and untouched, so it
+   borrows the accent rather than the good/warn pair either side of it. */
+.rp-vid-wip { color: var(--accent-strong, var(--accent)); font-weight: 600; }
 .rp-vid-pending { color: var(--warn); font-weight: 600; }
 .rp-vidtable a { color: var(--accent); text-decoration: none; }
 .rp-vidtable a:hover { text-decoration: underline; }

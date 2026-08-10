@@ -113,7 +113,7 @@ interface Bundle {
   scoreRank: { periods: Array<{ key: string; label: string }>; rows: Array<{ name: string; cells: Record<string, number> }> }
   config: ReportConfig
   personSeries: Record<string, Array<{ key: string; label: string; assigned: number; evaluated: number; linkDead: number }>>
-  videos: Record<string, Array<{ gameId: string; title: string | null; os: string | null; slot: string; batch: string | null; recordedOn: string | null; youtube: string | null }>>
+  videos: Record<string, Array<{ gameId: string; title: string | null; os: string | null; slot: string; batch: string | null; recordedOn: string | null; confirmedOn: string | null; youtube: string | null }>>
   // person → 'YYYY-MM-DD' → initial conclusion → count (Link_dead excluded)
   dailyMix: Record<string, Record<string, Record<string, number>>>
   evaluators: Ev[]
@@ -901,13 +901,10 @@ function Individual({ d }: { d: Bundle }) {
   ].filter((s) => s.a > 0)
   const pWorstStep = pSteps.sort((x, y) => x.b / x.a - y.b / y.a)[0]
   const psTotals = ps.length ? ps.reduce((acc, p) => ({ assigned: acc.assigned + p.assigned, evaluated: acc.evaluated + p.evaluated }), { assigned: 0, evaluated: 0 }) : null
-  // Recording status and the YouTube link are written by two different steps - the
-  // manual Confirm in the Record tab vs the upload sync - so they drift apart.
-  const mismatch = {
-    pendingWithLink: vids.filter((v) => !v.recordedOn && v.youtube).length,
-    recordedNoLink: vids.filter((v) => v.recordedOn && !v.youtube).length,
-    get total() { return this.pendingWithLink + this.recordedNoLink },
-  }
+  // Rows stuck in Recording: someone pressed Confirm but no upload has ever been
+  // matched to them. Under a week that is just the normal gap between recording
+  // and uploading; past that the video is missing or the sheet title drifted.
+  const stuck = vids.filter((v) => vidStatus(v) === 'recording' && daysSince(v.confirmedOn) > STUCK_DAYS)
 
   // person-level callouts for this window
   const deadShare = e.evaluated + e.linkDead > 0 ? e.linkDead / (e.evaluated + e.linkDead) : 0
@@ -1041,14 +1038,13 @@ function Individual({ d }: { d: Bundle }) {
           )}
         </Card>
       )}
-      <Card label={self ? 'Your recording queue' : `${e.name} - recording queue`} note="videos assigned & recorded in this window · pending always shown"
-        tip={<><F>rows where they are the 5min/20min assignee</F>Status is the manual <b>Confirm</b> in the Record tab (record_confirmed_at); the link is whatever the YouTube sync wrote back. They are stamped by different steps, so they can disagree - mismatches are flagged.</>}>
+      <Card label={self ? 'Your recording queue' : `${e.name} - recording queue`} note="videos assigned & recorded in this window · open rows always shown"
+        tip={<><F>rows where they are the 5min/20min assignee</F>Same three states as the Record tab, and the video is what settles them: <b>Recorded</b> = an upload was matched to this game, <b>Recording</b> = Confirm was pressed but no upload yet, <b>Pending</b> = neither (the Record tab calls this Draft). A row confirmed over {STUCK_DAYS} days ago with still no upload is flagged.</>}>
         <VideoQueue vids={vids} />
-        {mismatch.total > 0 && (
+        {stuck.length > 0 && (
           <Act>
-            {mismatch.pendingWithLink > 0 && <><b>{mismatch.pendingWithLink}</b> row{mismatch.pendingWithLink > 1 ? 's are' : ' is'} still <i>Pending</i> but already {mismatch.pendingWithLink > 1 ? 'have' : 'has'} a YouTube link - the video exists, nobody pressed Confirm in the Record tab. </>}
-            {mismatch.recordedNoLink > 0 && <><b>{mismatch.recordedNoLink}</b> row{mismatch.recordedNoLink > 1 ? 's were' : ' was'} confirmed <i>Recorded</i> with no link - either the upload never happened or the YouTube sync missed it. </>}
-            → reconcile these before reading the recording numbers; the two states are stamped by different steps and neither corrects the other.
+            <b>{stuck.length}</b> row{stuck.length > 1 ? 's have' : ' has'} sat in <i>Recording</i> for over {STUCK_DAYS} days - Confirm was pressed but no upload has ever matched.
+            → check the upload actually happened, and that the game title in the <i>ytb_uploaded</i> sheet matches the store title; a drifting title makes a real video invisible here.
           </Act>
         )}
       </Card>
@@ -1181,6 +1177,28 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
 }
 
 /* ---------------- recording queue table (5 rows tall, scrolls for more) ---------------- */
+// One definition of "done", shared with the Record tab (app/(manager)/youtube
+// recordStatus): the VIDEO settles it. A matched upload is Recorded whatever the
+// Confirm says; Confirm alone only means Recording. Before this the Report read
+// record_confirmed_at only, so the same game could be Recorded on one screen and
+// Pending on the other. (Record tab's fourth state, `pending` = no assignee, cannot
+// occur here - every queue row has one - so its `draft` is this table's Pending.)
+type VidRow = Bundle['videos'][string][number]
+type VidStatus = 'recorded' | 'recording' | 'pending'
+function vidStatus(v: VidRow): VidStatus {
+  if (v.youtube) return 'recorded'
+  if (v.confirmedOn) return 'recording'
+  return 'pending'
+}
+const STUCK_DAYS = 7
+function daysSince(day: string | null): number {
+  if (!day) return 0
+  const ms = Date.parse(day + 'T00:00:00Z')
+  return Number.isFinite(ms) ? Math.floor((Date.now() - ms) / 86400000) : 0
+}
+// ISO day → d/m (module scope already has a Date-based `dm`)
+const dmISO = (day: string) => day.split('-').reverse().slice(0, 2).map(Number).join('/')
+
 // The queue can run to dozens of rows and used to push every card below it off the
 // screen. It now shows five and grows as you scroll: the data is already in the
 // bundle, so "loading" is just rendering the next slice - no extra requests.
@@ -1204,9 +1222,11 @@ function VideoQueue({ vids }: { vids: Bundle['videos'][string] }) {
           <thead><tr><th>#</th><th>Game</th><th>Slot</th><th>Batch</th><th>Status</th><th>Link</th></tr></thead>
           <tbody>
             {rows.map((v, i) => {
-              // flag the two states that disagree, so a wrong number is visible in place
-              const odd = (!v.recordedOn && v.youtube) ? 'Uploaded but never confirmed'
-                : (v.recordedOn && !v.youtube) ? 'Confirmed but no link' : null
+              const st = vidStatus(v)
+              // The only state left that needs chasing: confirmed long ago, still no
+              // video. Everything else is a normal point in the recording lifecycle.
+              const age = st === 'recording' ? daysSince(v.confirmedOn) : 0
+              const odd = age > STUCK_DAYS ? `Confirmed ${age} days ago, no upload matched yet` : null
               return (
                 <tr key={`${v.gameId}-${v.slot}`} className={odd ? 'rp-vid-odd' : undefined}>
                   <td className="rp-vid-i">{i + 1}</td>
@@ -1214,9 +1234,11 @@ function VideoQueue({ vids }: { vids: Bundle['videos'][string] }) {
                     {odd && <span className="rp-vid-flag" title={odd}>!</span>}</td>
                   <td>{v.slot}</td>
                   <td>{v.batch || '-'}</td>
-                  <td>{v.recordedOn
-                    ? <span className="rp-vid-done">Recorded {v.recordedOn.split('-').reverse().slice(0, 2).map(Number).join('/')}</span>
-                    : <span className="rp-vid-pending">Pending</span>}</td>
+                  <td>{st === 'recorded'
+                    ? <span className="rp-vid-done">Recorded{v.recordedOn ? ` ${dmISO(v.recordedOn)}` : ''}</span>
+                    : st === 'recording'
+                      ? <span className="rp-vid-wip" title="Confirm pressed in the Record tab; no upload matched yet">Recording{v.confirmedOn ? ` · ${dmISO(v.confirmedOn)}` : ''}</span>
+                      : <span className="rp-vid-pending">Pending</span>}</td>
                   <td>{v.youtube ? <a href={v.youtube} target="_blank" rel="noreferrer">YouTube ↗</a> : '-'}</td>
                 </tr>
               )

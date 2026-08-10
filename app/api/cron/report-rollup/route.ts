@@ -134,30 +134,33 @@ export async function POST(req: NextRequest) {
       // Recorders live in record_5min_assignee / record_20min_assignee (the flat
       // record_assignee column is unused in prod). A game can in principle be
       // recorded in both slots, so we UNION the two — each filled slot is one
-      // credited record. Completion is record_confirmed_at; there is no assign-date
-      // for recording, so turnaround is left null (0/0). bucket = the slot.
+      // credited record. Completion is the upload if one was matched, else the
+      // manual Confirm (same rule as /api/report and the Record tab — migration
+      // 034); there is no assign-date for recording, so turnaround is left null
+      // (0/0). bucket = the slot.
+      const recAt = sql`COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at)`
       await tx`DELETE FROM report_rollup WHERE domain = 'recording' AND ${rowPred()}`
       const recRows = await tx`
         WITH base AS (
-          SELECT (ge.record_confirmed_at AT TIME ZONE ${VN})::date AS ev_date,
-            ${weekOf(sql`ge.record_confirmed_at`)} AS wk,
+          SELECT (${recAt} AT TIME ZONE ${VN})::date AS ev_date,
+            ${weekOf(recAt)} AS wk,
             lower(ge.record_5min_assignee) AS ekey, ge.record_5min_assignee AS ename,
             ge.category_group AS cat, '5min' AS bucket
           FROM game_evaluations ge
-          WHERE ge.record_confirmed_at IS NOT NULL
+          WHERE ${recAt} IS NOT NULL
             AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
             AND lower(ge.record_5min_assignee) <> ALL(${EXCLUDED})
-            AND ${sourcePred(sql`ge.record_confirmed_at`)}
+            AND ${sourcePred(recAt)}
           UNION ALL
-          SELECT (ge.record_confirmed_at AT TIME ZONE ${VN})::date AS ev_date,
-            ${weekOf(sql`ge.record_confirmed_at`)} AS wk,
+          SELECT (${recAt} AT TIME ZONE ${VN})::date AS ev_date,
+            ${weekOf(recAt)} AS wk,
             lower(ge.record_20min_assignee) AS ekey, ge.record_20min_assignee AS ename,
             ge.category_group AS cat, '20min' AS bucket
           FROM game_evaluations ge
-          WHERE ge.record_confirmed_at IS NOT NULL
+          WHERE ${recAt} IS NOT NULL
             AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
             AND lower(ge.record_20min_assignee) <> ALL(${EXCLUDED})
-            AND ${sourcePred(sql`ge.record_confirmed_at`)}
+            AND ${sourcePred(recAt)}
         ),
         buck AS (
           SELECT wk, cat, ekey, bucket, count(*)::int AS n
