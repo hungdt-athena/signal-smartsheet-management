@@ -1,3 +1,4 @@
+import type postgres from 'postgres'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
@@ -53,10 +54,10 @@ export async function POST(req: NextRequest) {
   }
 
   // A predicate over the week-start derived from the given timestamp column.
-  const weekOf = (col: ReturnType<typeof sql>) =>
+  const weekOf = (col: postgres.Fragment) =>
     sql`date_trunc('week', ${col} AT TIME ZONE ${VN})::date`
 
-  const sourcePred = (col: ReturnType<typeof sql>) => {
+  const sourcePred = (col: postgres.Fragment) => {
     if (mode === 'all') return sql`TRUE`
     if (mode === 'week') return sql`${weekOf(col)} = ${week}::date`
     // current: this week + last week
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 'YYYY-Qn' from a DATE column.
-  const quarterExpr = (col: ReturnType<typeof sql>) =>
+  const quarterExpr = (col: postgres.Fragment) =>
     sql`to_char(${col}, 'YYYY') || '-Q' || EXTRACT(QUARTER FROM ${col})::int`
 
   try {

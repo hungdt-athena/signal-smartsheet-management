@@ -112,7 +112,7 @@ export function buildYtMap(rows: YtbMatchRow[]): Map<string, YtMatch> {
       looseTitles.set(lk, seen)
     }
   }
-  for (const [lk, titles] of looseTitles) if (titles.size > 1) m.delete(lk)
+  for (const [lk, titles] of Array.from(looseTitles)) if (titles.size > 1) m.delete(lk)
   return m
 }
 
