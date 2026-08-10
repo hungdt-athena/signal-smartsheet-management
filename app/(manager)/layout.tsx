@@ -36,6 +36,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/team-ops',        label: 'Team Operations', icon: 'users', roles: ['admin', 'evaluator'], children: [
     { href: '/team-ops?tab=assign',   label: 'Assign' },
     { href: '/team-ops?tab=reassign', label: 'Reassign' },
+    // Rescue compares every teammate's backlog on one screen — admin only.
+    { href: '/team-ops?tab=rescue', label: 'Rescue', roles: ['admin'] },
     { href: '/team-ops?tab=handover', label: 'Handover' },
     // Evaluators see Performance too, scoped to their own Individual view.
     { href: '/team-ops?tab=performance', label: 'Performance', roles: ['admin', 'evaluator'] },

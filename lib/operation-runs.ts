@@ -9,7 +9,11 @@ import type { Candidate } from '@/lib/reassign-core'
 // The values we store are plainly JSON-serializable; this narrows to what sql.json wants.
 type Json = postgres.JSONValue
 
-export type RunKind = 'reassign' | 'handover'
+// 'rescue' is a reassign whose source/target sets were chosen by the stale-backlog
+// rules (lib/rescue-core.ts) rather than by hand. It gets its own kind so the Rescue
+// tab's history stays separate from manual reassigns, while the game movement it
+// records in assignment_history is written as a plain 'reassign'.
+export type RunKind = 'reassign' | 'handover' | 'rescue'
 export type RunStatus = 'committed' | 'pending' | 'approved' | 'rejected'
 
 // Mirrors DistResult in components/DistributionResult.tsx — stored verbatim as the

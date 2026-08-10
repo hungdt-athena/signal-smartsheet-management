@@ -22,8 +22,8 @@ export async function GET(req: NextRequest) {
   const category = p.get('category')?.trim().toLowerCase() || null
   const limit = Math.min(Math.max(Number(p.get('limit')) || 100, 1), 500)
 
-  if (kind !== 'reassign' && kind !== 'handover') {
-    return NextResponse.json({ error: "kind must be 'reassign' or 'handover'" }, { status: 400 })
+  if (kind !== 'reassign' && kind !== 'handover' && kind !== 'rescue') {
+    return NextResponse.json({ error: "kind must be 'reassign', 'rescue' or 'handover'" }, { status: 400 })
   }
 
   const session = await getServerSession(authOptions)
@@ -31,10 +31,11 @@ export async function GET(req: NextRequest) {
   const isEvaluator = session?.user?.role === 'evaluator'
 
   // Evaluators get a scoped, read-only view (never the whole team's history):
-  //   handover → only their OWN requests (from_evaluator = them).
-  //   reassign → only runs they are involved in — as the source (from) OR as a
-  //              recipient (a key in the resulting per_evaluator split, or picked in
-  //              params.selected_evaluators).
+  //   handover        → only their OWN requests (from_evaluator = them).
+  //   reassign/rescue → only runs they are involved in — as the source (from) OR as a
+  //                     recipient (a key in the resulting per_evaluator split, or picked
+  //                     in params.selected_evaluators). The Rescue tab itself is
+  //                     admin-only, but the scoping holds if that ever changes.
   const scopeName = isEvaluator ? (session?.user?.name || '__no_such_evaluator__') : null
 
   try {
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
           ${scopeName}::text IS NULL
           OR from_evaluator = ${scopeName}
           OR (
-            ${kind} = 'reassign' AND (
+            ${kind} <> 'handover' AND (
               jsonb_exists(COALESCE(result -> 'per_evaluator', snapshot -> 'per_evaluator', '{}'::jsonb), ${scopeName})
               OR jsonb_exists(COALESCE(params -> 'selected_evaluators', '[]'::jsonb), ${scopeName})
             )

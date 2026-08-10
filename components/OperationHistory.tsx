@@ -12,10 +12,13 @@ import { OperationDetailModal } from '@/components/OperationDetailModal'
 
 export interface OperationRun {
   id: number
-  kind: 'reassign' | 'handover'
+  kind: 'reassign' | 'handover' | 'rescue'
   category_group: string
   from_evaluator: string
-  params: { start_date?: string; end_date?: string; count?: number; mode?: string; selected_evaluators?: string[] }
+  params: {
+    start_date?: string; end_date?: string; count?: number; mode?: string; selected_evaluators?: string[]
+    stale_days?: number; source_pending?: number | null; source_stale?: number | null // rescue
+  }
   snapshot: DistResult
   result: DistResult | null
   status: 'committed' | 'pending' | 'approved' | 'rejected'
@@ -43,9 +46,11 @@ function targetCount(run: OperationRun): number {
 }
 
 // How the run's game set was picked: by a date window, by a quantity cap, or both.
-// Handover is always date-windowed; reassign stores it in params.mode
-// ('range' | 'quantity' | 'range+quantity'), with a shape-based fallback for old rows.
-function runMode(r: OperationRun): 'date' | 'quantity' | 'date+qty' {
+// Handover is always date-windowed; rescue is always rule-picked (games past the stale
+// threshold); reassign stores it in params.mode ('range' | 'quantity' |
+// 'range+quantity'), with a shape-based fallback for old rows.
+function runMode(r: OperationRun): 'date' | 'quantity' | 'date+qty' | 'stale' {
+  if (r.kind === 'rescue') return 'stale'
   if (r.kind === 'handover') return 'date'
   const m = r.params?.mode
   if (m === 'range+quantity') return 'date+qty'
@@ -56,13 +61,18 @@ function runMode(r: OperationRun): 'date' | 'quantity' | 'date+qty' {
 }
 
 const MODE_LABEL: Record<ReturnType<typeof runMode>, string> = {
-  date: 'Date', quantity: 'Quantity', 'date+qty': 'Date + Qty',
+  date: 'Date', quantity: 'Quantity', 'date+qty': 'Date + Qty', stale: 'Stale',
 }
 
 function modeValue(r: OperationRun): string {
   const mode = runMode(r)
   const window = `${fmtDate(r.params?.start_date)} → ${fmtDate(r.params?.end_date)}`
   const qty = r.params?.count != null ? String(r.params.count) : '—'
+  // Rescue: the rule that selected the games, plus the backlog the source held then.
+  if (mode === 'stale') {
+    const held = r.params?.source_pending != null ? ` of ${r.params.source_pending} pending` : ''
+    return `>${r.params?.stale_days ?? '?'}d${held}`
+  }
   if (mode === 'date') return window
   if (mode === 'quantity') return qty
   return `${window} · ${qty}`
@@ -72,7 +82,7 @@ function modeValue(r: OperationRun): string {
 const PAGE = 5
 
 export function OperationHistory({ kind, category, reloadToken, onChanged }: {
-  kind: 'reassign' | 'handover'
+  kind: 'reassign' | 'handover' | 'rescue'
   category: Bucket
   reloadToken?: number
   onChanged?: () => void
