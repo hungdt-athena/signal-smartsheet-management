@@ -98,13 +98,18 @@ export async function PUT(req: NextRequest) {
   }
 
   // Replace: only pending rows are touched, so confirmed/rejected history stays.
-  await sql`DELETE FROM playtest_tags WHERE game_id = ${gameId} AND status = 'pending'`
-  for (const t of unique) {
-    await sql`
-      INSERT INTO playtest_tags (game_id, field_value, sub_value_id, tagged_by)
-      VALUES (${gameId}, ${t.field_value}, ${t.sub_value_id}, ${email})
-    `
-  }
+  // Wrapped in a transaction so a mid-loop failure (e.g. a bad sub_value_id FK)
+  // can't leave the DELETE committed with a partial INSERT set.
+  await sql.begin(async txRaw => {
+    const tx = txRaw as unknown as typeof sql
+    await tx`DELETE FROM playtest_tags WHERE game_id = ${gameId} AND status = 'pending'`
+    for (const t of unique) {
+      await tx`
+        INSERT INTO playtest_tags (game_id, field_value, sub_value_id, tagged_by)
+        VALUES (${gameId}, ${t.field_value}, ${t.sub_value_id}, ${email})
+      `
+    }
+  })
 
   return NextResponse.json({ ok: true, count: unique.length })
 }

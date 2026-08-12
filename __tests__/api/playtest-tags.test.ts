@@ -4,8 +4,9 @@
 import { NextRequest } from 'next/server'
 
 jest.mock('@/lib/db', () => {
-  const fn = jest.fn() as jest.Mock & { json: jest.Mock }
+  const fn = jest.fn() as jest.Mock & { json: jest.Mock; begin: jest.Mock }
   fn.json = jest.fn((v: unknown) => v)
+  fn.begin = jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(fn)))
   return { sql: fn }
 })
 jest.mock('next-auth', () => ({ getServerSession: jest.fn() }))
@@ -14,7 +15,7 @@ import { GET, PUT } from '@/app/api/playtest-tags/route'
 import { sql } from '@/lib/db'
 import { getServerSession } from 'next-auth'
 
-const sqlMock = sql as unknown as jest.Mock
+const sqlMock = sql as unknown as jest.Mock & { begin: jest.Mock }
 const sessionMock = getServerSession as unknown as jest.Mock
 
 function putReq(body: unknown) {
@@ -36,6 +37,10 @@ function routeSql(handlers: { match: RegExp; rows: unknown[] }[]) {
     calls.push({ text, binds })
     return Promise.resolve(h ? h.rows : [])
   })
+  // mockReset() above wipes the .begin implementation too — re-establish it so
+  // the transaction wrapper in the route still runs its callback against the
+  // same routed mock.
+  sqlMock.begin = jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(sqlMock)))
 }
 let calls: { text: string; binds: unknown[] }[] = []
 
@@ -104,5 +109,31 @@ describe('/api/playtest-tags', () => {
     expect(await r.json()).toEqual({ ok: true, count: 0 })
     expect(calls.some(c => /DELETE FROM playtest_tags/.test(c.text))).toBe(true)
     expect(calls.some(c => /INSERT INTO playtest_tags/.test(c.text))).toBe(false)
+  })
+
+  it('surfaces a failed insert instead of reporting success (transaction propagation)', async () => {
+    // This proves the route's `sql.begin(...)` callback propagates a mid-loop
+    // failure up to the HTTP response rather than swallowing it. With a mocked
+    // `sql`, `.begin` just invokes its callback inline (see the mock above) --
+    // it does not exercise real Postgres rollback semantics. It only shows the
+    // route does not report `{ ok: true }` when a write inside the transaction
+    // rejects; it is not proof that the DELETE is actually rolled back on a
+    // real database.
+    sessionMock.mockResolvedValue({ user: { role: 'admin', name: 'VinhTD', email: 'vinhtd@athena.studio' } })
+    sqlMock.mockReset()
+    sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
+      if (!Array.isArray(strings)) return Promise.resolve([])
+      const text = (strings as string[]).join(' ')
+      calls.push({ text, binds })
+      if (/FROM game_evaluations/.test(text)) return Promise.resolve([{ initial_evaluator: 'Mitt' }])
+      if (/field_value = ANY/.test(text)) return Promise.resolve([{ field_value: 'Balatro' }])
+      if (/INSERT INTO playtest_tags/.test(text)) return Promise.reject(new Error('constraint violation'))
+      return Promise.resolve([])
+    })
+    sqlMock.begin = jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(sqlMock)))
+
+    await expect(PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: null }] })))
+      .rejects.toThrow('constraint violation')
+    expect(calls.some(c => /DELETE FROM playtest_tags/.test(c.text))).toBe(true)
   })
 })
