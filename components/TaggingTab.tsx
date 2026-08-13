@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
+import { TrendValuePicker } from './TrendValuePicker'
 
 interface PendingRow {
   id: number
@@ -61,6 +62,12 @@ function PendingView() {
   const [busy, setBusy] = useState<string | null>(null)
   const [overwrite, setOverwrite] = useState<Set<number>>(new Set())
   const [msg, setMsg] = useState<string | null>(null)
+  // Catalog for the inline value/sub-value editors. A failed load leaves the
+  // rows readable but not editable, rather than offering an empty picker.
+  const [options, setOptions] = useState<string[]>([])
+  const [subValues, setSubValues] = useState<{ id: number; name: string }[]>([])
+  const [optionsError, setOptionsError] = useState(false)
+  const [editing, setEditing] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,7 +79,35 @@ function PendingView() {
     setLoading(false)
   }, [])
 
+  const loadOptions = useCallback(() => {
+    setOptionsError(false)
+    fetch('/api/trends/options')
+      .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
+      .then(d => { setOptions(d.values || []); setSubValues(d.subValues || []) })
+      .catch(() => { setOptionsError(true) })
+  }, [])
+
   useEffect(() => { void load() }, [load])
+  useEffect(() => { loadOptions() }, [loadOptions])
+
+  // Correct one pending proposal in place. Reloads on success so the conflict
+  // flag and the Signal Sense comparison are recomputed server-side rather than
+  // guessed here.
+  const patchTag = async (id: number, patch: { field_value?: string; sub_value_id?: number | null }) => {
+    setEditing(id)
+    try {
+      const r = await fetch(`/api/playtest-tags/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setMsg(d.error || 'Could not update that tag'); return }
+      setMsg(null)
+      await load()
+    } catch { setMsg('Network error') }
+    finally { setEditing(null) }
+  }
 
   const toggleOverwrite = (id: number) => setOverwrite(prev => {
     const next = new Set(prev)
@@ -100,7 +135,14 @@ function PendingView() {
           acc[x.result] = (acc[x.result] || 0) + 1
           return acc
         }, {})
-        setMsg(`${g.title}: ${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ')}`)
+        // `skipped` names the tags that did not reach Signal Sense (retired
+        // value, or the row moved underneath us) so a summary line like
+        // "1 inactive" is actionable rather than cryptic.
+        const skipped = (d.skipped || []) as { field_value: string; reason: string }[]
+        const detail = skipped.length
+          ? ` — not written: ${skipped.map(s => `${s.field_value} (${s.reason})`).join('; ')}`
+          : ''
+        setMsg(`${g.title}: ${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ')}${detail}`)
       }
       // Clear any overwrite selections for this game's tags now that they're resolved,
       // so a stale checked id can't leak into a later confirm for a different game.
@@ -155,6 +197,12 @@ function PendingView() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {msg && <div style={{ fontSize: 12, color: 'var(--faint)' }}>{msg}</div>}
+      {optionsError && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--warn, #b45309)' }}>
+          <span>Trends list failed to load — tags below can be confirmed or rejected, but not edited.</span>
+          <button className="btn btn-sm btn-ghost" onClick={loadOptions}>Retry</button>
+        </div>
+      )}
       {cleanCount > 1 && (
         <button className="btn btn-sm" style={{ alignSelf: 'flex-start' }} onClick={confirmClean}>
           Confirm all {cleanCount} games without conflicts
@@ -174,8 +222,35 @@ function PendingView() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 0' }}>
             {g.tags.map(t => (
               <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 13 }}>
-                <strong>{t.field_value}</strong>
-                <span style={{ color: 'var(--faint)' }}>{t.sub_value_name || 'no sub-value'}</span>
+                {optionsError ? (
+                  <strong>{t.field_value}</strong>
+                ) : (
+                  <span style={{ minWidth: 200 }}>
+                    <TrendValuePicker
+                      options={options}
+                      exclude={new Set(g.tags.map(x => x.field_value))}
+                      label={`${t.field_value} ▾`}
+                      title="Change the trend value"
+                      triggerClassName="btn btn-sm btn-ghost"
+                      disabled={editing === t.id || busy === g.game_id}
+                      onPick={v => patchTag(t.id, { field_value: v })}
+                    />
+                  </span>
+                )}
+                {optionsError ? (
+                  <span style={{ color: 'var(--faint)' }}>{t.sub_value_name || 'no sub-value'}</span>
+                ) : (
+                  <select
+                    className="input"
+                    style={{ width: 170, fontSize: 12 }}
+                    value={t.sub_value_id ?? ''}
+                    disabled={editing === t.id || busy === g.game_id}
+                    onChange={e => patchTag(t.id, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
+                  >
+                    <option value="">-- None --</option>
+                    {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                )}
                 <span style={{ color: 'var(--faint)', fontSize: 11 }}>
                   by {t.tagged_by_name || 'unknown'} · {fmt(t.tagged_at)}
                 </span>
