@@ -41,7 +41,9 @@ export async function GET(_req: NextRequest) {
     FROM playtest_tags pt
     JOIN game_info gi ON gi.game_id = pt.game_id
     LEFT JOIN developer dev ON gi.publisher_id = dev.id
-    LEFT JOIN game_evaluations ge ON ge.game_id = pt.game_id
+    LEFT JOIN LATERAL (
+      SELECT initial_evaluator FROM game_evaluations WHERE game_id = pt.game_id LIMIT 1
+    ) ge ON true
     LEFT JOIN dashboard_users du ON du.email = pt.tagged_by
     LEFT JOIN sub_value_definitions sv ON sv.id = pt.sub_value_id
     LEFT JOIN custom_field_values cfv
