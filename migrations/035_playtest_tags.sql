@@ -18,11 +18,18 @@ CREATE TABLE IF NOT EXISTS playtest_tags (
   sub_value_id  integer REFERENCES sub_value_definitions(id),
   status        varchar(16) NOT NULL DEFAULT 'pending',
   tagged_by     varchar(255) NOT NULL,
-  tagged_at     timestamp NOT NULL DEFAULT now(),
+  tagged_at     timestamptz NOT NULL DEFAULT now(),
   confirmed_by  varchar(255),
-  confirmed_at  timestamp,
+  confirmed_at  timestamptz,
   sync_result   varchar(16)
 );
+
+-- timestamptz, not timestamp: every surface renders these in Asia/Ho_Chi_Minh
+-- (UTC+7), and a bare timestamp would show the wrong date near midnight.
+--
+-- sync_result values: inserted | duplicate | enriched | overwritten | kept |
+-- inactive ('inactive' = the value stopped being an active Trends definition
+-- between proposal and confirm, so nothing was written).
 
 -- One live proposal per (game, value); history for the same pair may repeat.
 CREATE UNIQUE INDEX IF NOT EXISTS playtest_tags_pending_uniq

@@ -30,7 +30,11 @@ export type TagAction =
   | { kind: 'enrich' }
   | { kind: 'conflict'; theirSubValueId: number }
 
-export type SyncResult = 'inserted' | 'duplicate' | 'enriched' | 'overwritten' | 'kept'
+/** `inactive`: the value stopped being an active Trends definition between
+ *  proposal and confirm, so nothing was written and the row is rejected. The
+ *  definition list is Signal Sense's to own. */
+export type SyncResult =
+  | 'inserted' | 'duplicate' | 'enriched' | 'overwritten' | 'kept' | 'inactive'
 
 export interface ConfirmOutcome {
   /** What to do to custom_field_values. */
