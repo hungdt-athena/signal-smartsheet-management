@@ -1,6 +1,6 @@
 'use client'
-import { useMemo } from 'react'
-import { TrendValuePicker } from './TrendValuePicker'
+import { useMemo, useState } from 'react'
+import { TrendTagsDialog } from './TrendTagsDialog'
 
 export interface TrendTag {
   field_value: string
@@ -34,35 +34,53 @@ interface Props {
   onRetryLoad?: () => void
 }
 
-// Trends tagging for one game. Proposals only: nothing here reaches Signal Sense
-// until an admin confirms in Evaluations > Tagging. New Trends values are never
-// created from this app, so the combobox filters a fixed list.
-export function TrendTagsField({ value, existing, options, subValues, onChange, disabled, optionsError, onRetryOptions, loadError, onRetryLoad }: Props) {
+// Trends tagging for one game: a summary of what is tagged plus a button that
+// opens the editor. Proposals only — nothing here reaches Signal Sense until an
+// admin confirms in Evaluations > Tagging.
+export function TrendTagsField({
+  value, existing, options, subValues, onChange, disabled,
+  optionsError, onRetryOptions, loadError, onRetryLoad,
+}: Props) {
+  const [open, setOpen] = useState(false)
   const tags = value || []
   // A failed load means what is on screen is not the saved set, so nothing here
   // is editable until it succeeds.
   const ro = disabled || !!loadError
 
-  const taken = useMemo(() => new Set(tags.map(t => t.field_value)), [tags])
+  const subName = useMemo(
+    () => new Map(subValues.map(s => [s.id, s.name])), [subValues])
   const existingByValue = useMemo(
     () => new Map(existing.map(e => [e.field_value, e])), [existing])
-
-  const add = (fieldValue: string) => {
-    onChange([...tags, { field_value: fieldValue, sub_value_id: null }])
-  }
-  const remove = (i: number) => onChange(tags.filter((_, x) => x !== i))
-  const setSub = (i: number, subId: number | null) =>
-    onChange(tags.map((t, x) => (x === i ? { ...t, sub_value_id: subId } : t)))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {loadError && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="wf-hint">
-            This game&apos;s tags failed to load — the list below is not what is saved, so it
-            is read-only and saving will leave the existing proposals untouched
+            This game&apos;s tags failed to load — nothing is shown below and saving will leave
+            the existing proposals untouched
           </span>
           <button type="button" className="btn btn-sm btn-ghost" onClick={onRetryLoad}>Retry</button>
+        </div>
+      )}
+
+      {!loadError && tags.length > 0 && (
+        <div>
+          <span style={{ fontSize: 11, color: 'var(--faint)' }}>Pending</span>
+          <ul className="wf-chips">
+            {tags.map((t, i) => {
+              const theirs = existingByValue.get(t.field_value)
+              const sub = t.sub_value_id != null ? subName.get(t.sub_value_id) : null
+              return (
+                <li key={`${t.field_value}-${i}`} className="wf-chip"
+                  title={theirs ? 'Already in Signal Sense — an admin will see this as a duplicate or a conflict' : undefined}>
+                  <span>{t.field_value}</span>
+                  {sub && <span style={{ fontSize: 11, color: 'var(--faint)' }}>· {sub}</span>}
+                  {theirs && <span style={{ fontSize: 11, color: 'var(--warn, #b45309)' }}>· in SS</span>}
+                </li>
+              )
+            })}
+          </ul>
         </div>
       )}
 
@@ -82,50 +100,28 @@ export function TrendTagsField({ value, existing, options, subValues, onChange, 
         </div>
       )}
 
-      {tags.length === 0 && ro && !loadError && (
+      {!loadError && tags.length === 0 && existing.length === 0 && (
         <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>
       )}
 
-      {tags.map((t, i) => {
-        const theirs = existingByValue.get(t.field_value)
-        return (
-          <div key={`${t.field_value}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span className="wf-chip" style={{ margin: 0 }}>
-              <span>{t.field_value}</span>
-              {!ro && (
-                <button type="button" title="Remove tag" onClick={() => remove(i)}>✕</button>
-              )}
-            </span>
-            <select
-              className="input"
-              style={{ width: 170, fontSize: 12 }}
-              value={t.sub_value_id ?? ''}
-              disabled={ro}
-              onChange={e => setSub(i, e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">-- None --</option>
-              {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            {theirs && (
-              <span style={{ fontSize: 11, color: 'var(--warn, #b45309)' }}>
-                already in Signal Sense{theirs.sub_value_name ? ` · ${theirs.sub_value_name}` : ''}
-              </span>
-            )}
-          </div>
-        )
-      })}
-
-      {!ro && optionsError && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="wf-hint">Trends list failed to load — not that this value doesn&apos;t exist</span>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={onRetryOptions}>Retry</button>
-        </div>
+      {!ro && (
+        <button type="button" className="btn btn-sm" style={{ alignSelf: 'flex-start' }}
+          onClick={() => setOpen(true)}>
+          {tags.length > 0 ? `Manage Trends Tags (${tags.length})` : 'Manage Trends Tags'}
+        </button>
       )}
 
-      {!ro && !optionsError && (
-        <div style={{ alignSelf: 'flex-start', minWidth: 220 }}>
-          <TrendValuePicker options={options} exclude={taken} onPick={add} label="+ Add trend" />
-        </div>
+      {open && (
+        <TrendTagsDialog
+          value={tags}
+          existing={existing}
+          options={options}
+          subValues={subValues}
+          optionsError={optionsError}
+          onRetryOptions={onRetryOptions}
+          onSave={onChange}
+          onClose={() => setOpen(false)}
+        />
       )}
     </div>
   )
