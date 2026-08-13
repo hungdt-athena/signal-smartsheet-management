@@ -51,8 +51,12 @@ export function TrendTagsDialog({
   }
 
   return (
-    // Nested above the evaluation modal, which sits at z-index 900.
-    <div className="eval-modal-backdrop" style={{ zIndex: 950 }} onClick={onClose}>
+    // Nested above the evaluation modal, which sits at z-index 900. The scrim is
+    // darker than the shared one so the evaluation modal's white panel recedes
+    // instead of reading as a second container behind this dialog.
+    <div className="eval-modal-backdrop"
+      style={{ zIndex: 950, background: 'rgba(10, 12, 18, 0.68)' }}
+      onClick={onClose}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}
         style={{ maxWidth: 560, width: '94vw', maxHeight: '86vh', display: 'flex', flexDirection: 'column' }}>
 

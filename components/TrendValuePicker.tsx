@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 interface Props {
   /** Active Trends values; the only values that may be picked. */
@@ -17,17 +18,25 @@ interface Props {
   placeholder?: boolean
 }
 
+interface MenuPos { top?: number; bottom?: number; left: number; width: number; maxHeight: number }
+
 // The one Trends value combobox, shared by the evaluation modal's tag dialog and
-// the admin review queue. Opening it shows the whole catalog to browse; typing
+// the admin review queue. Opening it lists the whole catalog to browse; typing
 // filters it. New Trends values are never created from this app, so a query with
 // no hits means no such active definition — never "type it in anyway".
+//
+// The menu is portalled to <body> with fixed positioning, like StyledSelect: both
+// callers sit inside scrollable, overflow-clipped containers that would otherwise
+// cut the list off.
 export function TrendValuePicker({
   options, exclude, onPick, label, title, triggerClassName, triggerStyle, disabled, placeholder,
 }: Props) {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<MenuPos | null>(null)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
-  const wrapRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
 
   // Browsable by default: an empty query lists the whole catalog.
@@ -38,6 +47,36 @@ export function TrendValuePicker({
     return pool.filter(o => o.toLowerCase().includes(q))
   }, [query, options, exclude])
 
+  const updatePos = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (!r) return
+    const spaceBelow = window.innerHeight - r.bottom
+    const spaceAbove = r.top
+    const flipUp = spaceBelow < 260 && spaceAbove > spaceBelow
+    const width = Math.max(r.width, 240)
+    setPos(flipUp
+      ? { bottom: window.innerHeight - r.top + 5, left: r.left, width, maxHeight: Math.min(320, spaceAbove - 12) }
+      : { top: r.bottom + 5, left: r.left, width, maxHeight: Math.min(320, spaceBelow - 12) })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    updatePos()
+    const onDocClick = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false); setQuery('')
+    }
+    document.addEventListener('mousedown', onDocClick)
+    window.addEventListener('scroll', updatePos, true)
+    window.addEventListener('resize', updatePos)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      window.removeEventListener('scroll', updatePos, true)
+      window.removeEventListener('resize', updatePos)
+    }
+  }, [open, updatePos])
+
   useEffect(() => { setActive(0) }, [query])
 
   // Keep the highlighted row in view while arrowing through a long catalog.
@@ -46,29 +85,29 @@ export function TrendValuePicker({
     listRef.current?.children[active]?.scrollIntoView({ block: 'nearest' })
   }, [active, open])
 
-  useEffect(() => {
-    if (!open) return
-    const onDocClick = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) { setOpen(false); setQuery('') }
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [open])
-
   const pick = (v: string) => {
     setQuery('')
     setOpen(false)
     onPick(v)
   }
 
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') { e.preventDefault(); setOpen(false); setQuery('') }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(a + 1, hits.length - 1)) }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(a - 1, 0)) }
+    if (e.key === 'Enter') { e.preventDefault(); if (hits[active]) pick(hits[active]) }
+  }
+
   return (
-    <div ref={wrapRef} style={{ position: 'relative' }}>
+    <>
       <button
+        ref={btnRef}
         type="button"
         className={triggerClassName ?? 'btn btn-sm btn-ghost'}
         title={title}
         disabled={disabled}
-        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        onClick={() => !disabled && setOpen(o => !o)}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           gap: 8, width: '100%', textAlign: 'left', cursor: disabled ? 'default' : 'pointer',
@@ -83,24 +122,21 @@ export function TrendValuePicker({
         <span aria-hidden style={{ color: 'var(--faint)', fontSize: 10, flexShrink: 0 }}>▾</span>
       </button>
 
-      {open && (
-        <div style={{
-          position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, right: 0,
+      {open && pos && createPortal(
+        <div ref={menuRef} style={{
+          position: 'fixed', zIndex: 1000,
+          top: pos.top ?? 'auto', bottom: pos.bottom ?? 'auto', left: pos.left, width: pos.width,
+          maxHeight: pos.maxHeight, display: 'flex', flexDirection: 'column',
           background: 'var(--surface)', border: '1px solid var(--border-strong)',
-          borderRadius: 10, boxShadow: 'var(--shadow-md)', overflow: 'hidden',
+          borderRadius: 10, boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
         }}>
-          <div style={{ padding: 8, borderBottom: '1px solid var(--border)' }}>
+          <div style={{ padding: 8, borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
             <input
               autoFocus
               className="input"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Escape') { e.preventDefault(); setOpen(false); setQuery('') }
-                if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(a + 1, hits.length - 1)) }
-                if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(a - 1, 0)) }
-                if (e.key === 'Enter') { e.preventDefault(); if (hits[active]) pick(hits[active]) }
-              }}
+              onKeyDown={onKey}
               placeholder="Search trends"
               style={{ width: '100%', fontSize: 13 }}
             />
@@ -115,7 +151,7 @@ export function TrendValuePicker({
           ) : (
             <>
               <ul ref={listRef} style={{
-                listStyle: 'none', margin: 0, padding: 4, maxHeight: 230, overflowY: 'auto',
+                listStyle: 'none', margin: 0, padding: 4, overflowY: 'auto', flex: 1,
               }}>
                 {hits.map((h, i) => (
                   <li key={h}>
@@ -135,15 +171,16 @@ export function TrendValuePicker({
                 ))}
               </ul>
               <div style={{
-                padding: '6px 10px', borderTop: '1px solid var(--border)',
+                padding: '6px 10px', borderTop: '1px solid var(--border)', flexShrink: 0,
                 fontSize: 11, color: 'var(--faint)', background: 'var(--surface-2)',
               }}>
                 {query.trim() ? `${hits.length} of ${options.length} trends` : `${hits.length} trends`}
               </div>
             </>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   )
 }
