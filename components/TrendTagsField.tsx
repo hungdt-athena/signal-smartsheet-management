@@ -34,6 +34,20 @@ interface Props {
   onRetryLoad?: () => void
 }
 
+// Trend values are catalog identifiers owned by Signal Sense, not prose, so they
+// are set in the utility face wherever they appear — here and in the dialog.
+const CHIP_LABEL: React.CSSProperties = {
+  fontSize: 10.5, fontWeight: 600, color: 'var(--faint)',
+  textTransform: 'uppercase', letterSpacing: '0.04em',
+}
+const CHIP_ROW: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }
+const CHIP: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'baseline', gap: 5,
+  padding: '4px 9px', borderRadius: 7, background: 'var(--surface-2)',
+  border: '1px solid var(--border)', fontSize: 12, fontFamily: 'var(--num)',
+}
+const CHIP_SUB: React.CSSProperties = { fontSize: 10.5, color: 'var(--faint)', fontFamily: 'var(--font)' }
+
 // Trends tagging for one game: a summary of what is tagged plus a button that
 // opens the editor. Proposals only — nothing here reaches Signal Sense until an
 // admin confirms in Evaluations > Tagging.
@@ -66,37 +80,35 @@ export function TrendTagsField({
 
       {!loadError && tags.length > 0 && (
         <div>
-          <span style={{ fontSize: 11, color: 'var(--faint)' }}>Pending</span>
-          <ul className="wf-chips">
+          <span style={CHIP_LABEL}>Waiting for review</span>
+          <div style={CHIP_ROW}>
             {tags.map((t, i) => {
               const theirs = existingByValue.get(t.field_value)
               const sub = t.sub_value_id != null ? subName.get(t.sub_value_id) : null
               return (
-                <li key={`${t.field_value}-${i}`} className="wf-chip"
-                  title={theirs ? 'Already in Signal Sense — an admin will see this as a duplicate or a conflict' : undefined}>
-                  <span>{t.field_value}</span>
-                  {sub && <span style={{ fontSize: 11, color: 'var(--faint)' }}>· {sub}</span>}
-                  {theirs && <span style={{ fontSize: 11, color: 'var(--warn, #b45309)' }}>· in SS</span>}
-                </li>
+                <span key={`${t.field_value}-${i}`}
+                  style={{ ...CHIP, ...(theirs ? { borderColor: 'var(--warn)', background: 'var(--warn-weak)' } : null) }}
+                  title={theirs ? 'Signal Sense already has this trend — the admin will see a duplicate or a conflict' : undefined}>
+                  {t.field_value}
+                  {sub && <span style={CHIP_SUB}>{sub}</span>}
+                </span>
               )
             })}
-          </ul>
+          </div>
         </div>
       )}
 
       {existing.length > 0 && (
         <div>
-          <span style={{ fontSize: 11, color: 'var(--faint)' }}>Already in Signal Sense</span>
-          <ul className="wf-chips">
+          <span style={CHIP_LABEL}>Already in Signal Sense</span>
+          <div style={CHIP_ROW}>
             {existing.map(e => (
-              <li key={e.field_value} className="wf-chip">
-                <span>{e.field_value}</span>
-                {e.sub_value_name && (
-                  <span style={{ fontSize: 11, color: 'var(--faint)' }}>· {e.sub_value_name}</span>
-                )}
-              </li>
+              <span key={e.field_value} style={CHIP}>
+                {e.field_value}
+                {e.sub_value_name && <span style={CHIP_SUB}>{e.sub_value_name}</span>}
+              </span>
             ))}
-          </ul>
+          </div>
         </div>
       )}
 

@@ -229,7 +229,7 @@ function PendingView() {
                     <TrendValuePicker
                       options={options}
                       exclude={new Set(g.tags.map(x => x.field_value))}
-                      label={`${t.field_value} ▾`}
+                      label={t.field_value}
                       title="Change the trend value"
                       triggerClassName="btn btn-sm btn-ghost"
                       disabled={editing === t.id || busy === g.game_id}

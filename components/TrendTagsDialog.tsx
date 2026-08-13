@@ -3,8 +3,8 @@ import { useMemo, useState } from 'react'
 import { TrendValuePicker } from './TrendValuePicker'
 import type { TrendTag, ExistingTrendTag } from './TrendTagsField'
 
-// A draft row. `field_value` is '' for a block the user added but has not filled
-// in yet — those are dropped on Save rather than blocking it.
+// A draft row. `field_value` is '' for a row the user added but has not filled in
+// yet — those are dropped on Save rather than blocking it.
 type Draft = { field_value: string; sub_value_id: number | null }
 
 interface Props {
@@ -18,15 +18,13 @@ interface Props {
   onRetryOptions?: () => void
 }
 
-// Trends tagging popup, laid out like Signal Sense's own "Custom Field Tags"
-// dialog so the two feel like one tool: a card per tag with Tag Name / Tag Value /
-// Sub-Value, an "Add New Tag" affordance, and a tips box. Two deliberate
-// differences: Tag Name is locked to Trends (this app tags nothing else), and one
-// card holds exactly one value so each can carry its own sub-value — Signal
-// Sense's multi-select shares one sub-value across a whole card.
+// Trends tagging popup for one game. Tag name is not shown: this app tags nothing
+// but Trends, so a locked field for it is noise. Each row is one value plus its
+// own optional sub-value — Signal Sense shares one sub-value across a multi-select
+// card, which cannot express "this trend by theme, that one by gameplay".
 //
-// Save only commits to the evaluation form's state; the evaluation's own Save (or
-// auto-save) is what persists it, same as every other field in that modal.
+// Save commits to the evaluation form's state; the evaluation's own Save (or
+// auto-save) persists it, exactly like every other field in that modal.
 export function TrendTagsDialog({
   value, existing, options, subValues, onSave, onClose, optionsError, onRetryOptions,
 }: Props) {
@@ -41,8 +39,8 @@ export function TrendTagsDialog({
   const removeRow = (i: number) => setDraft(d => d.filter((_, x) => x !== i))
   const addRow = () => setDraft(d => [...d, { field_value: '', sub_value_id: null }])
 
-  // Values already spoken for elsewhere in the draft, so the picker cannot
-  // produce a duplicate the server would silently collapse.
+  // Values spoken for elsewhere in the draft, so the picker cannot produce a
+  // duplicate the server would silently collapse.
   const takenBy = (i: number) =>
     new Set(draft.filter((_, x) => x !== i).map(r => r.field_value).filter(Boolean))
 
@@ -53,130 +51,140 @@ export function TrendTagsDialog({
   }
 
   return (
-    // Nested above the evaluation modal (which sits at z-index 900).
+    // Nested above the evaluation modal, which sits at z-index 900.
     <div className="eval-modal-backdrop" style={{ zIndex: 950 }} onClick={onClose}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{ padding: '20px 24px 20px', maxWidth: 640, width: '96vw', maxHeight: '88vh', overflowY: 'auto' }}>
+        style={{ maxWidth: 560, width: '94vw', maxHeight: '86vh', display: 'flex', flexDirection: 'column' }}>
 
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+        <header style={{
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+          gap: 12, padding: '18px 20px 14px', borderBottom: '1px solid var(--border)',
+        }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Trends Tags</h2>
-            <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--faint)' }}>
-              Tag this game with Trends values. Nothing reaches Signal Sense until an admin confirms.
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 650, letterSpacing: '-0.01em' }}>Trends tags</h2>
+            <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--muted)' }}>
+              An admin reviews these before they reach Signal Sense.
             </p>
           </div>
-          <button className="btn btn-ghost" onClick={onClose} style={{ padding: '4px 10px', fontSize: 12 }}>✕</button>
-        </div>
+          <button className="btn btn-sm btn-ghost" onClick={onClose} title="Close">✕</button>
+        </header>
 
-        {existing.length > 0 && (
-          <div style={{ marginTop: 14 }}>
-            <span style={{ fontSize: 11, color: 'var(--faint)' }}>Already in Signal Sense</span>
-            <ul className="wf-chips">
-              {existing.map(e => (
-                <li key={e.field_value} className="wf-chip">
-                  <span>{e.field_value}</span>
-                  {e.sub_value_name && (
-                    <span style={{ fontSize: 11, color: 'var(--faint)' }}>· {e.sub_value_name}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
-          {draft.map((r, i) => {
-            const theirs = r.field_value ? existingByValue.get(r.field_value) : undefined
-            return (
-              <div key={i} style={{
-                border: '1px solid var(--border, rgba(255,255,255,0.10))',
-                borderRadius: 12, padding: 14,
-                display: 'flex', flexDirection: 'column', gap: 10,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-                  <div style={{ flex: 1 }}>
-                    <span className="label">Tag Name</span>
-                    {/* Locked: this app only ever tags Trends. */}
-                    <input className="input" value="Trends" readOnly disabled style={{ width: '100%' }} />
-                  </div>
-                  <button type="button" className="btn btn-sm btn-ghost" title="Remove this tag"
-                    onClick={() => removeRow(i)}
-                    style={{ color: 'var(--bad, #d23b3b)', borderColor: 'var(--bad, #d23b3b)' }}>✕</button>
-                </div>
-
-                <div>
-                  <span className="label">Tag Value</span>
-                  {optionsError ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span className="wf-hint">Trends list failed to load — not that this value doesn&apos;t exist</span>
-                      <button type="button" className="btn btn-sm btn-ghost" onClick={onRetryOptions}>Retry</button>
-                    </div>
-                  ) : (
-                    <TrendValuePicker
-                      options={options}
-                      exclude={takenBy(i)}
-                      onPick={v => setRow(i, { field_value: v })}
-                      label={r.field_value || 'Enter tag value…'}
-                      title={r.field_value ? 'Change this value' : 'Search Trends values'}
-                      triggerClassName="input"
-                    />
-                  )}
-                </div>
-
-                <div>
-                  <span className="label">Sub-Value <span style={{ color: 'var(--faint)', fontWeight: 400 }}>(optional)</span></span>
-                  <select
-                    className="input"
-                    style={{ width: '100%' }}
-                    value={r.sub_value_id ?? ''}
-                    onChange={e => setRow(i, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
-                  >
-                    <option value="">-- None --</option>
-                    {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-
-                {theirs && (
-                  <span style={{ fontSize: 11, color: 'var(--warn, #b45309)' }}>
-                    Already in Signal Sense{theirs.sub_value_name ? ` · ${theirs.sub_value_name}` : ''} — an admin
-                    will see this as a duplicate{theirs.sub_value_name ? ' or a conflict' : ''}
+        <div style={{ padding: '14px 20px', overflowY: 'auto', flex: 1 }}>
+          {existing.length > 0 && (
+            <section style={{ marginBottom: 16 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Already in Signal Sense
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
+                {existing.map(e => (
+                  <span key={e.field_value} style={{
+                    display: 'inline-flex', alignItems: 'baseline', gap: 5,
+                    padding: '4px 9px', borderRadius: 7, background: 'var(--surface-2)',
+                    border: '1px solid var(--border)', fontSize: 12, fontFamily: 'var(--num)',
+                  }}>
+                    {e.field_value}
+                    {e.sub_value_name && (
+                      <span style={{ fontSize: 10.5, color: 'var(--faint)', fontFamily: 'var(--font)' }}>
+                        {e.sub_value_name}
+                      </span>
+                    )}
                   </span>
-                )}
+                ))}
               </div>
-            )
-          })}
+            </section>
+          )}
+
+          {optionsError ? (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: 12,
+              borderRadius: 10, background: 'var(--bad-weak)', border: '1px solid var(--bad)',
+            }}>
+              <span style={{ fontSize: 12.5, color: 'var(--text)' }}>
+                The trends list didn&apos;t load, so there&apos;s nothing to pick from yet.
+              </span>
+              <button type="button" className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={onRetryOptions}>
+                Try again
+              </button>
+            </div>
+          ) : (
+            <>
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 168px 30px', gap: 8,
+                fontSize: 11, fontWeight: 600, color: 'var(--faint)',
+                textTransform: 'uppercase', letterSpacing: '0.04em', padding: '0 0 6px',
+              }}>
+                <span>Trend</span>
+                <span>Sub-value</span>
+                <span />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                {draft.map((r, i) => {
+                  const theirs = r.field_value ? existingByValue.get(r.field_value) : undefined
+                  return (
+                    <div key={i}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 168px 30px', gap: 8, alignItems: 'center' }}>
+                        <TrendValuePicker
+                          options={options}
+                          exclude={takenBy(i)}
+                          onPick={v => setRow(i, { field_value: v })}
+                          label={r.field_value || 'Pick a trend'}
+                          placeholder={!r.field_value}
+                          title={r.field_value ? 'Change this trend' : 'Browse or search trends'}
+                          triggerClassName="input"
+                          triggerStyle={{ fontSize: 13 }}
+                        />
+                        <select
+                          className="input"
+                          style={{ fontSize: 13 }}
+                          value={r.sub_value_id ?? ''}
+                          onChange={e => setRow(i, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
+                        >
+                          <option value="">None</option>
+                          {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <button type="button" className="btn btn-sm btn-ghost"
+                          onClick={() => removeRow(i)} title="Remove this trend"
+                          style={{ padding: '6px 0', justifyContent: 'center', color: 'var(--faint)' }}>✕</button>
+                      </div>
+                      {theirs && (
+                        <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--warn)' }}>
+                          Signal Sense already has this
+                          {theirs.sub_value_name ? ` as ${theirs.sub_value_name}` : ' without a sub-value'} —
+                          the admin will see a {theirs.sub_value_name ? 'conflict' : 'duplicate'}.
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              <button type="button" onClick={addRow}
+                style={{
+                  marginTop: 10, width: '100%', padding: '9px 0',
+                  border: '1px dashed var(--border-strong)', borderRadius: 9,
+                  background: 'transparent', color: 'var(--accent)',
+                  fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
+                }}>+ Add another trend</button>
+
+              <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--faint)', lineHeight: 1.6 }}>
+                Pick from the {options.length} trends already in Signal Sense — an admin adds new ones there.
+                Sub-value says how this game relates to the trend.
+              </p>
+            </>
+          )}
         </div>
 
-        <button type="button" onClick={addRow}
-          style={{
-            marginTop: 12, width: '100%', padding: '10px 0',
-            border: '1px dashed var(--border, rgba(255,255,255,0.18))',
-            borderRadius: 12, background: 'transparent',
-            color: 'var(--accent)', fontSize: 13, cursor: 'pointer',
-          }}>+ Add New Tag</button>
-
-        <div style={{
-          marginTop: 14, padding: 12, borderRadius: 12,
-          border: '1px solid rgba(245, 130, 32, 0.22)', background: 'rgba(245, 130, 32, 0.07)',
+        <footer style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '12px 20px 16px', borderTop: '1px solid var(--border)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-            <span aria-hidden>💡</span>
-            <strong style={{ fontSize: 12.5 }}>Quick Tips:</strong>
-          </div>
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--faint)', lineHeight: 1.7 }}>
-            <li>Pick from the existing Trends list — new values are created in Signal Sense by an admin</li>
-            <li>Sub-Value says how this game relates to the trend: Change Theme or Gameplay Variant</li>
-            <li>One tag per value; add another tag to give a different value its own Sub-Value</li>
-          </ul>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <span style={{ fontSize: 11.5, color: 'var(--faint)', marginRight: 'auto' }}>
             {filled.length} tag{filled.length === 1 ? '' : 's'} · saved with the evaluation
           </span>
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" onClick={save}>Save</button>
-        </div>
+        </footer>
       </div>
     </div>
   )
