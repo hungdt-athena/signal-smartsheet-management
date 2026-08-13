@@ -52,7 +52,7 @@ export default withAuth(
     if (role !== 'admin') {
       const cat = searchParams.get('cat') ?? ''
       const tab = searchParams.get('tab') ?? ''
-      if (pathname.startsWith('/evaluations') && (cat === 'arcade' || cat === 'simulation')) {
+      if (pathname.startsWith('/evaluations') && (cat === 'arcade' || cat === 'simulation' || cat === 'tagging')) {
         return NextResponse.redirect(new URL('/evaluations?cat=puzzle', req.url))
       }
       if (pathname.startsWith('/youtube') && (tab === 'short_list' || tab === 'record_video')) {

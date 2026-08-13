@@ -80,8 +80,11 @@ function PendingView() {
     return next
   })
 
-  const confirmGame = async (g: PendingGame) => {
+  // Returns whether the confirm succeeded, so batch callers can report the
+  // truth instead of assuming every game in a batch went through.
+  const confirmGame = async (g: PendingGame): Promise<boolean> => {
     setBusy(g.game_id)
+    let ok = false
     try {
       const ids = g.tags.map(t => t.id).filter(id => overwrite.has(id))
       const r = await fetch('/api/playtest-tags/confirm', {
@@ -92,6 +95,7 @@ function PendingView() {
       const d = await r.json()
       if (!r.ok) setMsg(d.error || 'Confirm failed')
       else {
+        ok = true
         const counts = (d.results || []).reduce((acc: Record<string, number>, x: { result: string }) => {
           acc[x.result] = (acc[x.result] || 0) + 1
           return acc
@@ -108,6 +112,7 @@ function PendingView() {
       await load()
     } catch { setMsg('Network error') }
     setBusy(null)
+    return ok
   }
 
   const rejectTag = async (id: number) => {
@@ -129,9 +134,17 @@ function PendingView() {
     // clobbered and only the last game's summary would remain visible.
     // confirmGame() swallows its own errors (network/HTTP) rather than
     // throwing, so a mid-loop failure still lets the remaining games run;
-    // replace the final per-game msg with one aggregate summary instead.
-    for (const g of clean) await confirmGame(g)
-    if (clean.length > 1) setMsg(`Confirmed ${clean.length} games without conflicts`)
+    // track each outcome so the final message reflects reality rather than
+    // asserting success regardless of what actually happened.
+    let succeeded = 0
+    for (const g of clean) {
+      if (await confirmGame(g)) succeeded++
+    }
+    if (clean.length > 1) {
+      setMsg(succeeded === clean.length
+        ? `Confirmed ${clean.length} games without conflicts`
+        : `Confirmed ${succeeded} of ${clean.length} games (${clean.length - succeeded} failed)`)
+    }
   }
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>Loading...</div>
@@ -169,7 +182,7 @@ function PendingView() {
                 {t.conflict && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--warn, #b45309)' }}>
                     <input type="checkbox" checked={overwrite.has(t.id)} onChange={() => toggleOverwrite(t.id)} />
-                    Signal Sense has {t.their_sub_value_name} — overwrite
+                    Signal Sense has {t.their_sub_value_name} — check to overwrite, otherwise this tag is rejected
                   </label>
                 )}
                 <button className="btn btn-sm btn-ghost" onClick={() => rejectTag(t.id)}>✕</button>
