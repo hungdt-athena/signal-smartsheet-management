@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
-import { TRENDS_FIELD } from '@/lib/playtest-tags'
+import { classifyTag, TRENDS_FIELD } from '@/lib/playtest-tags'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,6 +17,11 @@ interface Row {
   sub_value_name: string | null
   tagged_by_name: string | null
   tagged_at: string
+  /** True when Signal Sense already has a row for this (game, value). Needed on
+   *  its own because a joined row with a NULL sub-value and no joined row at all
+   *  both leave `their_sub_value_id` NULL, and `classifyTag` treats them
+   *  differently. */
+  their_exists: boolean
   their_sub_value_id: number | null
   their_sub_value_name: string | null
 }
@@ -36,6 +41,7 @@ export async function GET(_req: NextRequest) {
       ge.initial_evaluator,
       du.name AS tagged_by_name,
       sv.name AS sub_value_name,
+      (cfv.field_value IS NOT NULL) AS their_exists,
       cfv.sub_value_id AS their_sub_value_id,
       their_sv.name AS their_sub_value_name
     FROM playtest_tags pt
@@ -67,11 +73,16 @@ export async function GET(_req: NextRequest) {
       }
       games.set(r.game_id, g)
     }
-    // A conflict needs both sides to carry a sub-value and to disagree; the
-    // fill-an-empty-sub-value case is applied silently on confirm.
-    const conflict = r.their_sub_value_id !== null
-      && r.sub_value_id !== null
-      && r.their_sub_value_id !== r.sub_value_id
+    // One definition of "conflict" only: the same pure function the confirm
+    // route runs. Recomputing the rule here would let the queue's badges drift
+    // away from what Confirm actually does.
+    const action = classifyTag(
+      { id: r.id, field_value: r.field_value, sub_value_id: r.sub_value_id },
+      r.their_exists
+        ? { field_value: r.field_value, sub_value_id: r.their_sub_value_id }
+        : undefined,
+    )
+    const conflict = action.kind === 'conflict'
     g.tags.push({
       id: r.id, field_value: r.field_value, sub_value_id: r.sub_value_id,
       sub_value_name: r.sub_value_name, tagged_by_name: r.tagged_by_name,

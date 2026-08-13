@@ -74,12 +74,19 @@ export async function PUT(req: NextRequest) {
   const { isManager, name, email } = await resolveSession()
 
   // Own-only: an evaluator may tag their own game, an admin any game.
+  // game_evaluations is UNIQUE(game_id, category_group), so a game can hold rows
+  // in two groups — test EXISTS across all of them instead of picking one row,
+  // which would make authorisation depend on the planner.
   const evRows = await sql`
-    SELECT initial_evaluator FROM game_evaluations WHERE game_id = ${gameId} LIMIT 1
+    SELECT
+      EXISTS (SELECT 1 FROM game_evaluations WHERE game_id = ${gameId}) AS found,
+      EXISTS (
+        SELECT 1 FROM game_evaluations
+        WHERE game_id = ${gameId} AND initial_evaluator ILIKE ${name}
+      ) AS owned
   `
-  if (evRows.length === 0) return NextResponse.json({ error: 'Game not found' }, { status: 404 })
-  const owner = (evRows[0].initial_evaluator as string | null) || ''
-  if (!isManager && owner.toLowerCase() !== name.toLowerCase()) {
+  if (!evRows[0]?.found) return NextResponse.json({ error: 'Game not found' }, { status: 404 })
+  if (!isManager && !(name && evRows[0].owned)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -98,16 +105,34 @@ export async function PUT(req: NextRequest) {
   }
 
   // Replace: only pending rows are touched, so confirmed/rejected history stays.
+  // A row that survives the replace keeps its original tagged_by / tagged_at --
+  // provenance is the whole reason this table exists, and this PUT fires on every
+  // eval save, including saves that never touched a tag. So: drop the pending
+  // rows whose value is gone from the payload, then upsert the rest on the
+  // partial unique index, updating only the sub-value.
   // Wrapped in a transaction so a mid-loop failure (e.g. a bad sub_value_id FK)
   // can't leave the DELETE committed with a partial INSERT set.
+  const values = unique.map(t => t.field_value)
   await sql.begin(async txRaw => {
     const tx = txRaw as unknown as typeof sql
-    await tx`DELETE FROM playtest_tags WHERE game_id = ${gameId} AND status = 'pending'`
-    for (const t of unique) {
+    if (values.length === 0) {
+      await tx`DELETE FROM playtest_tags WHERE game_id = ${gameId} AND status = 'pending'`
+    } else {
       await tx`
-        INSERT INTO playtest_tags (game_id, field_value, sub_value_id, tagged_by)
-        VALUES (${gameId}, ${t.field_value}, ${t.sub_value_id}, ${email})
+        DELETE FROM playtest_tags
+        WHERE game_id = ${gameId} AND status = 'pending'
+          AND NOT (field_value = ANY(${values}))
       `
+      for (const t of unique) {
+        // The conflict target repeats the index predicate because
+        // playtest_tags_pending_uniq is a PARTIAL unique index.
+        await tx`
+          INSERT INTO playtest_tags (game_id, field_value, sub_value_id, tagged_by)
+          VALUES (${gameId}, ${t.field_value}, ${t.sub_value_id}, ${email})
+          ON CONFLICT (game_id, field_value) WHERE status = 'pending'
+          DO UPDATE SET sub_value_id = EXCLUDED.sub_value_id
+        `
+      }
     }
   })
 
