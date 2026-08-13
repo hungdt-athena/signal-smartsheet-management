@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { requireManager } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
+import { logCfvChanges, type CfvChange } from '@/lib/cfv-change-log'
 import {
   classifyTag, resolveConfirm, TRENDS_FIELD, SYNC_USER,
   type ExistingTag, type PendingTag, type SyncResult,
@@ -32,6 +33,8 @@ export async function POST(req: NextRequest) {
   // Tags that never reached Signal Sense and why, so the admin sees more than a
   // count of results they did not ask for.
   const skipped: { id: number; field_value: string; reason: string }[] = []
+  // Entries for Signal Sense's change log, appended only for writes that landed.
+  const log: CfvChange[] = []
 
   await sql.begin(async tx => {
     const pending = await tx`
@@ -110,6 +113,11 @@ export async function POST(req: NextRequest) {
             id: p.id, field_value: p.field_value,
             reason: 'Signal Sense already had this value',
           })
+        } else {
+          log.push({
+            gameId, fieldValue: p.field_value,
+            action: 'add', newSubValueId: p.sub_value_id,
+          })
         }
       } else if (outcome.write === 'update') {
         // Guarded so we never clobber a sub-value Signal Sense set after we read
@@ -152,6 +160,15 @@ export async function POST(req: NextRequest) {
               ? 'Signal Sense changed this tag while it was under review'
               : 'the Signal Sense row for this value disappeared while it was under review',
           })
+        } else {
+          // The row stayed and its sub-value moved — Signal Sense's own term for
+          // this. enrich came from NULL; overwrite replaced their value.
+          log.push({
+            gameId, fieldValue: p.field_value,
+            action: 'sub_value_change',
+            oldSubValueId: theirSubValueId,
+            newSubValueId: p.sub_value_id,
+          })
         }
       }
 
@@ -163,6 +180,11 @@ export async function POST(req: NextRequest) {
       `
       results.push({ id: p.id, result })
     }
+
+    // Signal Sense derives tag history from the value rows, so a write we make
+    // without logging is invisible over there. Logged last, inside the same
+    // transaction: every entry describes a write that has already succeeded.
+    await logCfvChanges(tx, log)
   })
 
   return NextResponse.json({ ok: true, results, skipped })

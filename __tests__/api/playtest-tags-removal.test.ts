@@ -4,9 +4,11 @@
 import { NextRequest } from 'next/server'
 
 jest.mock('@/lib/db', () => {
-  const fn = jest.fn() as jest.Mock & { json: jest.Mock; begin: jest.Mock }
+  const fn = jest.fn() as jest.Mock & { json: jest.Mock; begin: jest.Mock; savepoint: jest.Mock }
   fn.json = jest.fn((v: unknown) => v)
   fn.begin = jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(fn)))
+  // logCfvChanges isolates each log row in a savepoint.
+  fn.savepoint = jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(fn)))
   return { sql: fn }
 })
 jest.mock('next-auth', () => ({ getServerSession: jest.fn() }))
@@ -24,6 +26,8 @@ let calls: { text: string; binds: unknown[] }[] = []
 function routeSql(handlers: { match: RegExp; rows: unknown[] }[]) {
   sqlMock.mockReset()
   ;(sqlMock as unknown as { begin: jest.Mock }).begin =
+    jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(sqlMock)))
+  ;(sqlMock as unknown as { savepoint: jest.Mock }).savepoint =
     jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(sqlMock)))
   sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
     if (!Array.isArray(strings)) return Promise.resolve([])
@@ -157,10 +161,10 @@ describe('POST /api/playtest-tags/remove', () => {
     // Signal Sense's history would show a tag that vanished with no Remove.
     expect(iDel).toBeGreaterThan(iLog)
     const log = calls[iLog]
-    expect(log.text).toMatch(/'remove'/)
-    // changed_by is a users(id) FK; the admin has no row there, so the app is
-    // the actor. old_sub_value_id carries what the tag had at removal time.
-    expect(log.binds).toEqual(expect.arrayContaining(['g1', 'Trends', 'Animal Driver', 2, 'playtest_sync']))
+    // action is a bind, not inline SQL. changed_by is a users(id) FK; the admin
+    // has no row there, so the app is the actor. old_sub_value_id carries what
+    // the tag had at removal time.
+    expect(log.binds).toEqual(expect.arrayContaining(['g1', 'Trends', 'Animal Driver', 'remove', 2, 'playtest_sync']))
     expect(log.binds).not.toContain('vinhtd@athena.studio')
   })
 

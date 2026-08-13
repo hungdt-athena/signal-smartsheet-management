@@ -4,11 +4,13 @@
 import { NextRequest } from 'next/server'
 
 jest.mock('@/lib/db', () => {
-  const fn = jest.fn() as jest.Mock & { json: jest.Mock; begin: jest.Mock }
+  const fn = jest.fn() as jest.Mock & { json: jest.Mock; begin: jest.Mock; savepoint: jest.Mock }
   fn.json = jest.fn((v: unknown) => v)
   // begin(cb) runs the callback with the same mock, so a transaction behaves
   // like the plain client in tests.
   fn.begin = jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(fn)))
+  // logCfvChanges isolates each log row in a savepoint.
+  fn.savepoint = jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(fn)))
   return { sql: fn }
 })
 jest.mock('next-auth', () => ({ getServerSession: jest.fn() }))
@@ -26,6 +28,8 @@ let calls: { text: string; binds: unknown[] }[] = []
 function routeSql(handlers: { match: RegExp; rows: unknown[] }[]) {
   sqlMock.mockReset()
   ;(sqlMock as unknown as { begin: jest.Mock }).begin =
+    jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(sqlMock)))
+  ;(sqlMock as unknown as { savepoint: jest.Mock }).savepoint =
     jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(sqlMock)))
   sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
     if (!Array.isArray(strings)) return Promise.resolve([])
@@ -270,4 +274,75 @@ describe('POST /api/playtest-tags/reject', () => {
     routeSql([])
     expect((await REJECT(req('/api/playtest-tags/reject', { ids: [] }))).status).toBe(400)
   })
+
+  // Signal Sense derives tag history from the value rows themselves, so a write
+  // we make without a log entry is invisible in its history (their migration 020
+  // moved every tag event into that one table).
+  describe('Signal Sense change log', () => {
+    const LOG = /INSERT INTO custom_field_value_changes/
+
+    it("logs an 'add' for a tag it inserted, carrying the sub-value", async () => {
+      routeSql([
+        { match: /FROM playtest_tags/, rows: [{ id: 1, field_value: 'New Trend', sub_value_id: 2 }] },
+        { match: /FROM custom_field_values/, rows: [] },
+        activeDefs('New Trend'),
+        insertWrote(true),
+      ])
+      await CONFIRM(req('/api/playtest-tags/confirm', { game_id: 'g1' }))
+      const log = calls.find(c => LOG.test(c.text))!
+      expect(log).toBeDefined()
+      // action, the tag, the sub-value it was given, and the app as the actor.
+      expect(log.binds).toEqual(expect.arrayContaining(['g1', 'Trends', 'New Trend', 'add', 2, 'playtest_sync']))
+    })
+
+    it("logs a 'sub_value_change' for an enrich, from NULL to ours", async () => {
+      routeSql([
+        { match: /FROM playtest_tags/, rows: [{ id: 3, field_value: 'Empty Sub', sub_value_id: 2 }] },
+        { match: /FROM custom_field_values/, rows: [{ field_value: 'Empty Sub', sub_value_id: null }] },
+        activeDefs('Empty Sub'),
+        updateWrote(true),
+      ])
+      await CONFIRM(req('/api/playtest-tags/confirm', { game_id: 'g1' }))
+      const log = calls.find(c => LOG.test(c.text))!
+      expect(log.binds).toEqual(expect.arrayContaining(['Empty Sub', 'sub_value_change', 2, 'playtest_sync']))
+      // old_sub_value_id is NULL for an enrich: there was nothing there before.
+      expect(log.binds).toContain(null)
+    })
+
+    it("logs a 'sub_value_change' for an overwrite, naming what it replaced", async () => {
+      routeSql([
+        { match: /FROM playtest_tags/, rows: [{ id: 4, field_value: 'Clash', sub_value_id: 1 }] },
+        { match: /FROM custom_field_values/, rows: [{ field_value: 'Clash', sub_value_id: 2 }] },
+        activeDefs('Clash'),
+        updateWrote(true),
+      ])
+      await CONFIRM(req('/api/playtest-tags/confirm', { game_id: 'g1', overwrite: [4] }))
+      const log = calls.find(c => LOG.test(c.text))!
+      expect(log.binds).toEqual(expect.arrayContaining(['Clash', 'sub_value_change', 2, 1, 'playtest_sync']))
+    })
+
+    it('logs nothing when no write landed', async () => {
+      // duplicate: the value is already there, we wrote nothing to log.
+      routeSql([
+        { match: /FROM playtest_tags/, rows: [{ id: 2, field_value: 'Same', sub_value_id: 1 }] },
+        { match: /FROM custom_field_values/, rows: [{ field_value: 'Same', sub_value_id: 1 }] },
+        activeDefs('Same'),
+      ])
+      const body = await (await CONFIRM(req('/api/playtest-tags/confirm', { game_id: 'g1' }))).json()
+      expect(body.results).toEqual([{ id: 2, result: 'duplicate' }])
+      expect(calls.some(c => LOG.test(c.text))).toBe(false)
+    })
+
+    it('never logs an inactive value, which is refused before any write', async () => {
+      routeSql([
+        { match: /FROM playtest_tags/, rows: [{ id: 9, field_value: 'Retired', sub_value_id: 1 }] },
+        { match: /FROM custom_field_values/, rows: [] },
+        activeDefs(),  // no longer an active definition
+      ])
+      const body = await (await CONFIRM(req('/api/playtest-tags/confirm', { game_id: 'g1' }))).json()
+      expect(body.results).toEqual([{ id: 9, result: 'inactive' }])
+      expect(calls.some(c => LOG.test(c.text))).toBe(false)
+    })
+  })
+
 })

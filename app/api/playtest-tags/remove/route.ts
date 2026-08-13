@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { requireManager } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
+import { logCfvChanges } from '@/lib/cfv-change-log'
 import { TRENDS_FIELD, SYNC_USER } from '@/lib/playtest-tags'
 
 export const dynamic = 'force-dynamic'
@@ -69,16 +70,17 @@ export async function POST(req: NextRequest) {
         }
         return
       }
-      // Log before deleting, in the same transaction, so Signal Sense's own tag
-      // history shows a Remove rather than a tag that silently vanished.
-      // changed_by is a users(id) FK: the removing admin usually has no row
-      // there, so it records the playtest app as the actor. Which admin it was
-      // is already in playtest_tags.removed_by below.
-      await tx`
-        INSERT INTO custom_field_value_changes
-          (game_id, field_name, field_value, action, old_sub_value_id, changed_by)
-        VALUES (${tag.game_id}, ${TRENDS_FIELD}, ${tag.field_value}, 'remove', ${row.sub_value_id}, ${SYNC_USER})
-      `
+      // Log before deleting: afterwards the sub-value is gone and cannot be
+      // recorded as old_sub_value_id. Signal Sense's history reads this log for
+      // removals, so without it the tag just vanishes over there. The helper
+      // isolates each entry in a savepoint, so a log failure cannot turn a
+      // successful removal into a 500.
+      await logCfvChanges(tx, [{
+        gameId: tag.game_id,
+        fieldValue: tag.field_value,
+        action: 'remove',
+        oldSubValueId: row.sub_value_id,
+      }])
       await tx`
         DELETE FROM custom_field_values
         WHERE game_id = ${tag.game_id}
