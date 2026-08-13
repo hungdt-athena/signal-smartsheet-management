@@ -40,16 +40,28 @@ interface HistoryRow {
 const fmt = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 
+// Written into Signal Sense → green; already there or deliberately left alone →
+// muted; refused because the value is retired → red.
+const RESULT_PILL: Record<string, string> = {
+  inserted: 'on', enriched: 'on', overwritten: 'on',
+  duplicate: 'muted', kept: 'muted', inactive: 'off',
+}
+
 // Admin review of Trends tags proposed during playtest. A tag only reaches
 // Signal Sense's custom_field_values when it is confirmed here.
 export function TaggingTab() {
   const [view, setView] = useState<'pending' | 'history'>('pending')
   return (
     <div>
-      <h1 className="h-title">Tagging</h1>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <button className={`btn btn-sm ${view === 'pending' ? 'btn-primary' : ''}`} onClick={() => setView('pending')}>Pending</button>
-        <button className={`btn btn-sm ${view === 'history' ? 'btn-primary' : ''}`} onClick={() => setView('history')}>History</button>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+        <div>
+          <h1 className="h-title">Tagging</h1>
+          <p className="h-sub">Trends proposed while playtesting. Confirming writes them into Signal Sense.</p>
+        </div>
+        <div className="seg">
+          <button className={'seg-btn' + (view === 'pending' ? ' active' : '')} onClick={() => setView('pending')}>Pending</button>
+          <button className={'seg-btn' + (view === 'history' ? ' active' : '')} onClick={() => setView('history')}>History</button>
+        </div>
       </div>
       {view === 'pending' ? <PendingView /> : <HistoryView />}
     </div>
@@ -189,86 +201,159 @@ function PendingView() {
     }
   }
 
-  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>Loading...</div>
-  if (games.length === 0) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>No tags waiting for review.</div>
+  if (loading) return <div className="card"><p className="empty">Loading…</p></div>
+  if (games.length === 0) {
+    return (
+      <div className="card">
+        <p className="empty">
+          Nothing waiting for review. Trends tagged during playtest show up here.
+        </p>
+      </div>
+    )
+  }
 
   const cleanCount = games.filter(g => !g.tags.some(t => t.conflict)).length
+  const tagCount = games.reduce((n, g) => n + g.tags.length, 0)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {msg && <div style={{ fontSize: 12, color: 'var(--faint)' }}>{msg}</div>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          {tagCount} tag{tagCount === 1 ? '' : 's'} across {games.length} game{games.length === 1 ? '' : 's'}
+        </span>
+        {cleanCount > 1 && (
+          <button className="btn btn-sm" onClick={confirmClean}>
+            Confirm {cleanCount} games without conflicts
+          </button>
+        )}
+      </div>
+
       {optionsError && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--warn, #b45309)' }}>
-          <span>Trends list failed to load — tags below can be confirmed or rejected, but not edited.</span>
-          <button className="btn btn-sm btn-ghost" onClick={loadOptions}>Retry</button>
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--warn)' }}>
+            The trends list didn&apos;t load, so tags can be confirmed or rejected but not edited.
+          </span>
+          <button className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={loadOptions}>Try again</button>
         </div>
       )}
-      {cleanCount > 1 && (
-        <button className="btn btn-sm" style={{ alignSelf: 'flex-start' }} onClick={confirmClean}>
-          Confirm all {cleanCount} games without conflicts
-        </button>
-      )}
-      {games.map(g => (
-        <div key={g.game_id} className="card" style={{ margin: 0 }}>
-          <div className="card-head">
-            <span className="card-label">
-              {g.icon_url && <img src={g.icon_url} alt="" width={20} height={20} style={{ verticalAlign: 'middle', marginRight: 6, borderRadius: 4 }} />}
-              {g.title}
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--faint)' }}>
-              {g.publisher_name || '—'} · {g.initial_evaluator || 'unassigned'}
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 0' }}>
-            {g.tags.map(t => (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 13 }}>
-                {optionsError ? (
-                  <strong>{t.field_value}</strong>
-                ) : (
-                  <span style={{ minWidth: 200 }}>
-                    <TrendValuePicker
-                      options={options}
-                      exclude={new Set(g.tags.map(x => x.field_value))}
-                      label={t.field_value}
-                      title="Change the trend value"
-                      triggerClassName="btn btn-sm btn-ghost"
-                      disabled={editing === t.id || busy === g.game_id}
-                      onPick={v => patchTag(t.id, { field_value: v })}
-                    />
+
+      {msg && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
+
+      {games.map(g => {
+        const conflicts = g.tags.filter(t => t.conflict).length
+        return (
+          <div key={g.game_id} className="card">
+            <div className="card-head" style={{ alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                {g.icon_url && (
+                  <img src={g.icon_url} alt="" width={26} height={26}
+                    style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
+                )}
+                <span style={{ fontSize: 14.5, fontWeight: 650, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {g.title}
+                </span>
+                {conflicts > 0 && (
+                  <span className="pill off" style={{ fontSize: 10, flexShrink: 0 }}>
+                    {conflicts} conflict{conflicts === 1 ? '' : 's'}
                   </span>
                 )}
-                {optionsError ? (
-                  <span style={{ color: 'var(--faint)' }}>{t.sub_value_name || 'no sub-value'}</span>
-                ) : (
-                  <select
-                    className="input"
-                    style={{ width: 170, fontSize: 12 }}
-                    value={t.sub_value_id ?? ''}
-                    disabled={editing === t.id || busy === g.game_id}
-                    onChange={e => patchTag(t.id, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
-                  >
-                    <option value="">-- None --</option>
-                    {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                )}
-                <span style={{ color: 'var(--faint)', fontSize: 11 }}>
-                  by {t.tagged_by_name || 'unknown'} · {fmt(t.tagged_at)}
-                </span>
-                {t.conflict && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--warn, #b45309)' }}>
-                    <input type="checkbox" checked={overwrite.has(t.id)} onChange={() => toggleOverwrite(t.id)} />
-                    Signal Sense has {t.their_sub_value_name} — check to overwrite, otherwise this tag is rejected
-                  </label>
-                )}
-                <button className="btn btn-sm btn-ghost" onClick={() => rejectTag(t.id)}>✕</button>
-              </div>
-            ))}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--faint)', whiteSpace: 'nowrap' }}>
+                {g.publisher_name || '—'} · {g.initial_evaluator || 'unassigned'}
+              </span>
+            </div>
+
+            <div className="tbl-wrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Trend</th>
+                    <th style={{ width: 180 }}>Sub-value</th>
+                    <th style={{ width: 190 }}>Proposed by</th>
+                    <th>In Signal Sense</th>
+                    <th style={{ width: 44 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.tags.map(t => (
+                    <tr key={t.id}>
+                      <td style={{ minWidth: 200 }}>
+                        {optionsError ? (
+                          <span className="num">{t.field_value}</span>
+                        ) : (
+                          <TrendValuePicker
+                            options={options}
+                            exclude={new Set(g.tags.map(x => x.field_value))}
+                            label={t.field_value}
+                            title="Change the trend value"
+                            triggerClassName="input"
+                            triggerStyle={{ fontSize: 12.5, padding: '6px 9px' }}
+                            disabled={editing === t.id || busy === g.game_id}
+                            onPick={v => patchTag(t.id, { field_value: v })}
+                          />
+                        )}
+                      </td>
+                      <td>
+                        {optionsError ? (
+                          <span style={{ color: 'var(--faint)' }}>{t.sub_value_name || 'None'}</span>
+                        ) : (
+                          <select
+                            className="input"
+                            style={{ fontSize: 12.5, padding: '6px 9px' }}
+                            value={t.sub_value_id ?? ''}
+                            disabled={editing === t.id || busy === g.game_id}
+                            onChange={e => patchTag(t.id, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
+                          >
+                            <option value="">None</option>
+                            {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          </select>
+                        )}
+                      </td>
+                      <td style={{ fontSize: 12, color: 'var(--muted)' }}>
+                        {t.tagged_by_name || 'unknown'}
+                        <span style={{ color: 'var(--faint)' }}> · {fmt(t.tagged_at)}</span>
+                      </td>
+                      <td>
+                        {t.conflict ? (
+                          <label style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 6, fontSize: 11.5, color: 'var(--warn)', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={overwrite.has(t.id)} onChange={() => toggleOverwrite(t.id)}
+                              style={{ marginTop: 2 }} />
+                            <span>
+                              Has <strong>{t.their_sub_value_name}</strong> — tick to overwrite,
+                              otherwise this tag is rejected
+                            </span>
+                          </label>
+                        ) : t.their_sub_value_id !== null || t.their_sub_value_name ? (
+                          <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>
+                            already tagged{t.their_sub_value_name ? ` · ${t.their_sub_value_name}` : ''}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>new</span>
+                        )}
+                      </td>
+                      <td>
+                        <button className="btn btn-sm btn-ghost" title="Reject this tag"
+                          onClick={() => rejectTag(t.id)}
+                          style={{ color: 'var(--faint)' }}>✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+              <button className="btn btn-primary btn-sm" disabled={busy === g.game_id} onClick={() => confirmGame(g)}>
+                {busy === g.game_id ? 'Confirming…' : 'Confirm game'}
+              </button>
+              <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>
+                Writes {g.tags.length} tag{g.tags.length === 1 ? '' : 's'} into Signal Sense
+                {conflicts > 0 && ` · ${conflicts} conflict${conflicts === 1 ? '' : 's'} rejected unless ticked`}
+              </span>
+            </div>
           </div>
-          <button className="btn btn-primary btn-sm" disabled={busy === g.game_id} onClick={() => confirmGame(g)}>
-            {busy === g.game_id ? 'Confirming...' : 'Confirm game'}
-          </button>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -294,41 +379,71 @@ function HistoryView() {
   const pages = Math.max(1, Math.ceil(total / limit))
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, fontSize: 12 }}>
-        <label>From <input className="input" type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1) }} /></label>
-        <label>To <input className="input" type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1) }} /></label>
-        <span style={{ color: 'var(--faint)' }}>{total} rows</span>
+    <div className="card">
+      <div className="card-head" style={{ alignItems: 'flex-end' }}>
+        <span className="card-label">
+          Reviewed
+          <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>{total}</span>
+        </span>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+          <div className="field">
+            <span className="label">From</span>
+            <input className="input" type="date" style={{ width: 150 }}
+              value={from} onChange={e => { setFrom(e.target.value); setPage(1) }} />
+          </div>
+          <div className="field">
+            <span className="label">To</span>
+            <input className="input" type="date" style={{ width: 150 }}
+              value={to} onChange={e => { setTo(e.target.value); setPage(1) }} />
+          </div>
+          {(from || to) && (
+            <button className="btn btn-sm btn-ghost" onClick={() => { setFrom(''); setTo(''); setPage(1) }}>Clear</button>
+          )}
+        </div>
       </div>
-      <table className="table" style={{ fontSize: 13 }}>
-        <thead>
-          <tr>
-            <th>Game</th><th>Trend</th><th>Sub-value</th><th>Tagged by</th>
-            <th>Tagged</th><th>Confirmed by</th><th>Confirmed</th><th>Result</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(r => (
-            <tr key={r.id}>
-              <td>{r.title}</td>
-              <td>{r.field_value}</td>
-              <td>{r.sub_value_name || '—'}</td>
-              <td>{r.tagged_by_name || '—'}</td>
-              <td>{fmt(r.tagged_at)}</td>
-              <td>{r.confirmed_by_name || '—'}</td>
-              <td>{fmt(r.confirmed_at)}</td>
-              <td>{r.sync_result || r.status}</td>
+
+      <div className="tbl-wrap">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Game</th>
+              <th>Trend</th>
+              <th style={{ width: 130 }}>Sub-value</th>
+              <th style={{ width: 110 }}>Proposed by</th>
+              <th style={{ width: 105 }}>Proposed</th>
+              <th style={{ width: 110 }}>Reviewed by</th>
+              <th style={{ width: 105 }}>Reviewed</th>
+              <th style={{ width: 105 }}>Result</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length === 0 && (
-        <div style={{ padding: 30, textAlign: 'center', color: 'var(--faint)' }}>Nothing confirmed or rejected yet.</div>
-      )}
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={8} className="empty">Nothing reviewed yet.</td></tr>
+            )}
+            {rows.map(r => (
+              <tr key={r.id}>
+                <td className="cell-name">{r.title}</td>
+                <td className="num">{r.field_value}</td>
+                <td style={{ color: r.sub_value_name ? undefined : 'var(--faint)' }}>{r.sub_value_name || '—'}</td>
+                <td>{r.tagged_by_name || '—'}</td>
+                <td className="num" style={{ fontSize: 12, color: 'var(--muted)' }}>{fmt(r.tagged_at)}</td>
+                <td>{r.confirmed_by_name || '—'}</td>
+                <td className="num" style={{ fontSize: 12, color: 'var(--muted)' }}>{fmt(r.confirmed_at)}</td>
+                <td>
+                  <span className={`pill ${RESULT_PILL[r.sync_result ?? ''] ?? 'tag'}`} style={{ fontSize: 10 }}>
+                    {r.sync_result || r.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       {pages > 1 && (
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 12 }}>
           <button className="btn btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</button>
-          <span style={{ fontSize: 12, alignSelf: 'center' }}>{page} / {pages}</span>
+          <span style={{ fontSize: 12, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>{page} / {pages}</span>
           <button className="btn btn-sm" disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Next</button>
         </div>
       )}
