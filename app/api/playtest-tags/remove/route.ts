@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     const tag = rows[0] as { id: number; game_id: string; field_value: string }
 
     const theirs = await tx`
-      SELECT cfv.created_by, u.first_name, u.last_name, u.email
+      SELECT cfv.created_by, cfv.sub_value_id, u.first_name, u.last_name, u.email
       FROM custom_field_values cfv
       LEFT JOIN users u ON u.id = cfv.created_by
       WHERE cfv.game_id = ${tag.game_id}
@@ -57,7 +57,10 @@ export async function POST(req: NextRequest) {
     `
 
     if (theirs.length > 0) {
-      const row = theirs[0] as { created_by: string | null; first_name: string | null; last_name: string | null; email: string | null }
+      const row = theirs[0] as {
+        created_by: string | null; sub_value_id: number | null
+        first_name: string | null; last_name: string | null; email: string | null
+      }
       if (row.created_by !== SYNC_USER) {
         const who = [row.first_name, row.last_name].filter(Boolean).join(' ') || row.email || 'someone in Signal Sense'
         refusal = {
@@ -66,6 +69,16 @@ export async function POST(req: NextRequest) {
         }
         return
       }
+      // Log before deleting, in the same transaction, so Signal Sense's own tag
+      // history shows a Remove rather than a tag that silently vanished.
+      // changed_by is a users(id) FK: the removing admin usually has no row
+      // there, so it records the playtest app as the actor. Which admin it was
+      // is already in playtest_tags.removed_by below.
+      await tx`
+        INSERT INTO custom_field_value_changes
+          (game_id, field_name, field_value, action, old_sub_value_id, changed_by)
+        VALUES (${tag.game_id}, ${TRENDS_FIELD}, ${tag.field_value}, 'remove', ${row.sub_value_id}, ${SYNC_USER})
+      `
       await tx`
         DELETE FROM custom_field_values
         WHERE game_id = ${tag.game_id}

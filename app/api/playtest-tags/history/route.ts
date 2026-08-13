@@ -35,7 +35,11 @@ export async function GET(req: NextRequest) {
         tagger.name AS tagged_by_name, confirmer.name AS confirmed_by_name,
         remover.name AS removed_by_name,
         (cfv.field_value IS NOT NULL) AS in_signal_sense,
-        (cfv.created_by = ${SYNC_USER}) AS ours
+        (cfv.created_by = ${SYNC_USER}) AS ours,
+        subchg.changed_at AS sub_changed_at,
+        subchg.was AS sub_changed_from,
+        subchg.now_is AS sub_changed_to,
+        subchg.email AS sub_changed_by
       FROM playtest_tags pt
       JOIN game_info gi ON gi.game_id = pt.game_id
       LEFT JOIN sub_value_definitions sv ON sv.id = pt.sub_value_id
@@ -44,6 +48,23 @@ export async function GET(req: NextRequest) {
       LEFT JOIN dashboard_users remover ON remover.email = pt.removed_by
       LEFT JOIN custom_field_values cfv
         ON cfv.game_id = pt.game_id AND cfv.field_name = ${TRENDS_FIELD} AND cfv.field_value = pt.field_value
+      -- Latest sub-value overwrite made in Signal Sense AFTER our confirm. The
+      -- row still exists, so the absence sweep cannot see this: without the
+      -- change log, history would keep claiming the sub-value we wrote.
+      LEFT JOIN LATERAL (
+        SELECT c.changed_at, osv.name AS was, nsv.name AS now_is, cu.email
+        FROM custom_field_value_changes c
+        LEFT JOIN sub_value_definitions osv ON osv.id = c.old_sub_value_id
+        LEFT JOIN sub_value_definitions nsv ON nsv.id = c.new_sub_value_id
+        LEFT JOIN users cu ON cu.id = c.changed_by
+        WHERE c.game_id = pt.game_id
+          AND c.field_name = ${TRENDS_FIELD}
+          AND c.field_value = pt.field_value
+          AND c.action = 'sub_value_change'
+          AND c.changed_at > pt.confirmed_at
+        ORDER BY c.changed_at DESC
+        LIMIT 1
+      ) subchg ON true
       WHERE pt.status <> 'pending'
         ${taggerFilter} ${fromFilter} ${toFilter}
       ORDER BY pt.confirmed_at DESC NULLS LAST, pt.id DESC

@@ -45,6 +45,12 @@ interface HistoryRow {
   in_signal_sense: boolean
   /** Did playtest_sync create that row? Only then may this app remove it. */
   ours: boolean | null
+  /** Latest sub-value overwrite made in Signal Sense after our confirm. The row
+   *  still exists in that case, so only the change log reveals it. */
+  sub_changed_at: string | null
+  sub_changed_from: string | null
+  sub_changed_to: string | null
+  sub_changed_by: string | null
 }
 
 const fmt = (d: string | null) =>
@@ -519,9 +525,18 @@ function HistoryView() {
                       </span>
                     </>
                   ) : (
-                    <span className={`pill ${RESULT_PILL[r.sync_result ?? ''] ?? 'tag'}`} style={{ fontSize: 10 }}>
-                      {r.sync_result || r.status}
-                    </span>
+                    <>
+                      <span className={`pill ${RESULT_PILL[r.sync_result ?? ''] ?? 'tag'}`} style={{ fontSize: 10 }}>
+                        {r.sync_result || r.status}
+                      </span>
+                      {r.sub_changed_at && (
+                        <span style={{ display: 'block', fontSize: 10.5, color: 'var(--warn)', marginTop: 3 }}>
+                          sub-value now {r.sub_changed_to || 'None'}
+                          {r.sub_changed_from ? ` (was ${r.sub_changed_from})` : ''} · {fmt(r.sub_changed_at)}
+                          {r.sub_changed_by ? ` · ${r.sub_changed_by}` : ''}
+                        </span>
+                      )}
+                    </>
                   )}
                 </td>
                 <td>

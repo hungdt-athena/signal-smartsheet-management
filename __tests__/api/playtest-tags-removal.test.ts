@@ -55,28 +55,66 @@ describe('POST /api/playtest-tags/reconcile', () => {
     expect((await RECONCILE(req('/api/playtest-tags/reconcile'))).status).toBe(403)
   })
 
-  it('stamps only synced rows that are gone from Signal Sense and not already stamped', async () => {
-    routeSql([{ match: /UPDATE playtest_tags/, rows: [{ id: 4, game_id: 'g1', field_value: 'Artwork-Canvas' }] }])
+  // Pass 1 reads Signal Sense's change log; pass 2 is the absence sweep. Both
+  // are UPDATE playtest_tags, so route on the log table to tell them apart.
+  const LOGGED = /custom_field_value_changes/
+  const ABSENCE = /NOT EXISTS/
+
+  it('takes attribution from the change log, only for removals after our confirm', async () => {
+    routeSql([
+      { match: LOGGED, rows: [{ id: 7, game_id: 'g1', field_value: 'Animal Driver', removed_by: 'minhlq@athena.studio', removed_at: '2026-08-13T04:00:00Z' }] },
+      { match: ABSENCE, rows: [] },
+    ])
     const body = await (await RECONCILE(req('/api/playtest-tags/reconcile'))).json()
-    expect(body).toEqual({ ok: true, removed: 1, rows: [{ id: 4, game_id: 'g1', field_value: 'Artwork-Canvas' }] })
-    const upd = calls.find(c => /UPDATE playtest_tags/.test(c.text))!
-    // Guards that keep the sweep once-only and scoped to confirmed tags.
-    expect(upd.text).toMatch(/status = 'synced'/)
-    expect(upd.text).toMatch(/removed_at IS NULL/)
-    expect(upd.text).toMatch(/NOT EXISTS/)
-    expect(upd.text).toMatch(/removed_by = 'signal_sense'/)
+    expect(body.attributed).toBe(1)
+    expect(body.unattributed).toBe(0)
+    expect(body.removed).toBe(1)
+    expect(body.rows[0].removed_by).toBe('minhlq@athena.studio')
+
+    const pass1 = calls.find(c => LOGGED.test(c.text))!
+    expect(pass1.text).toMatch(/action = 'remove'/)
+    // A removal predating our confirm belongs to an earlier tag of the same trend.
+    expect(pass1.text).toMatch(/ev\.changed_at > pt\.confirmed_at/)
+    // Latest event per (game, value) — the pair can be removed and re-tagged.
+    expect(pass1.text).toMatch(/DISTINCT ON \(c\.game_id, c\.field_value\)/)
+    // Real email, falling back to the sentinel only when the actor is unknown.
+    expect(pass1.text).toMatch(/COALESCE\(ev\.email, 'signal_sense'\)/)
+    expect(pass1.text).toMatch(/status = 'synced'/)
+    expect(pass1.text).toMatch(/removed_at IS NULL/)
   })
 
-  it('never writes to custom_field_values', async () => {
-    routeSql([{ match: /UPDATE playtest_tags/, rows: [] }])
+  it('keeps the absence sweep as a net for deletions the log never records', async () => {
+    routeSql([
+      { match: LOGGED, rows: [] },
+      { match: ABSENCE, rows: [{ id: 4, game_id: 'g1', field_value: 'Artwork-Canvas' }] },
+    ])
+    const body = await (await RECONCILE(req('/api/playtest-tags/reconcile'))).json()
+    expect(body).toMatchObject({ ok: true, removed: 1, attributed: 0, unattributed: 1 })
+    const pass2 = calls.find(c => ABSENCE.test(c.text))!
+    expect(pass2.text).toMatch(/removed_by = 'signal_sense'/)
+    expect(pass2.text).toMatch(/removed_at IS NULL/)
+  })
+
+  it('runs the log pass before the absence sweep, so attribution wins', async () => {
+    routeSql([{ match: LOGGED, rows: [] }, { match: ABSENCE, rows: [] }])
+    await RECONCILE(req('/api/playtest-tags/reconcile'))
+    const iLog = calls.findIndex(c => LOGGED.test(c.text))
+    const iAbs = calls.findIndex(c => ABSENCE.test(c.text))
+    expect(iLog).toBeGreaterThanOrEqual(0)
+    expect(iAbs).toBeGreaterThan(iLog)
+  })
+
+  it('never writes to custom_field_values or to the change log', async () => {
+    routeSql([{ match: LOGGED, rows: [] }, { match: ABSENCE, rows: [] }])
     await RECONCILE(req('/api/playtest-tags/reconcile'))
     expect(calls.some(c => /(DELETE FROM|INSERT INTO|UPDATE) custom_field_values/.test(c.text))).toBe(false)
+    expect(calls.some(c => /INSERT INTO custom_field_value_changes/.test(c.text))).toBe(false)
   })
 
   it('reports zero when nothing has gone missing', async () => {
-    routeSql([{ match: /UPDATE playtest_tags/, rows: [] }])
+    routeSql([{ match: LOGGED, rows: [] }, { match: ABSENCE, rows: [] }])
     expect(await (await RECONCILE(req('/api/playtest-tags/reconcile'))).json())
-      .toEqual({ ok: true, removed: 0, rows: [] })
+      .toMatchObject({ ok: true, removed: 0, attributed: 0, unattributed: 0, rows: [] })
   })
 })
 
@@ -106,10 +144,30 @@ describe('POST /api/playtest-tags/remove', () => {
     expect(calls.some(c => /DELETE FROM custom_field_values/.test(c.text))).toBe(false)
   })
 
+  it('writes a Remove into Signal Sense\'s change log before deleting the row', async () => {
+    routeSql([
+      SYNCED,
+      { match: /FROM custom_field_values/, rows: [{ created_by: 'playtest_sync', sub_value_id: 2, first_name: 'Signal Playtest', last_name: 'Sync', email: null }] },
+    ])
+    await REMOVE(req('/api/playtest-tags/remove', { id: 7 }))
+    const iLog = calls.findIndex(c => /INSERT INTO custom_field_value_changes/.test(c.text))
+    const iDel = calls.findIndex(c => /DELETE FROM custom_field_values/.test(c.text))
+    expect(iLog).toBeGreaterThanOrEqual(0)
+    // Logged first: after the delete we could no longer read the sub-value, and
+    // Signal Sense's history would show a tag that vanished with no Remove.
+    expect(iDel).toBeGreaterThan(iLog)
+    const log = calls[iLog]
+    expect(log.text).toMatch(/'remove'/)
+    // changed_by is a users(id) FK; the admin has no row there, so the app is
+    // the actor. old_sub_value_id carries what the tag had at removal time.
+    expect(log.binds).toEqual(expect.arrayContaining(['g1', 'Trends', 'Animal Driver', 2, 'playtest_sync']))
+    expect(log.binds).not.toContain('vinhtd@athena.studio')
+  })
+
   it('deletes the Signal Sense row when playtest_sync created it, and stamps the removal', async () => {
     routeSql([
       SYNCED,
-      { match: /FROM custom_field_values/, rows: [{ created_by: 'playtest_sync', first_name: 'Signal Playtest', last_name: 'Sync', email: null }] },
+      { match: /FROM custom_field_values/, rows: [{ created_by: 'playtest_sync', sub_value_id: 1, first_name: 'Signal Playtest', last_name: 'Sync', email: null }] },
     ])
     const body = await (await REMOVE(req('/api/playtest-tags/remove', { id: 7 }))).json()
     expect(body).toEqual({ ok: true, outcome: 'deleted' })
@@ -125,12 +183,14 @@ describe('POST /api/playtest-tags/remove', () => {
   it('refuses to delete a row a Signal Sense user created, naming them', async () => {
     routeSql([
       SYNCED,
-      { match: /FROM custom_field_values/, rows: [{ created_by: 'LCU6y3GtrRRoqHYyOn_tE', first_name: 'Tran', last_name: 'Vinh', email: 'vinhtd@athena.studio' }] },
+      { match: /FROM custom_field_values/, rows: [{ created_by: 'LCU6y3GtrRRoqHYyOn_tE', sub_value_id: 1, first_name: 'Tran', last_name: 'Vinh', email: 'vinhtd@athena.studio' }] },
     ])
     const r = await REMOVE(req('/api/playtest-tags/remove', { id: 7 }))
     expect(r.status).toBe(409)
     expect((await r.json()).error).toContain('Tran Vinh')
     expect(calls.some(c => /DELETE FROM custom_field_values/.test(c.text))).toBe(false)
+    // Nor a log entry: nothing happened, so the log must not claim a removal.
+    expect(calls.some(c => /INSERT INTO custom_field_value_changes/.test(c.text))).toBe(false)
     // Nothing is stamped either: the tag is still there, so history must not
     // claim it was removed.
     expect(calls.some(c => /UPDATE playtest_tags/.test(c.text))).toBe(false)
