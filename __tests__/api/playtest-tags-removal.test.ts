@@ -154,7 +154,8 @@ describe('POST /api/playtest-tags/remove', () => {
       { match: /FROM custom_field_values/, rows: [{ created_by: 'playtest_sync', sub_value_id: 2, first_name: 'Signal Playtest', last_name: 'Sync', email: null }] },
     ])
     await REMOVE(req('/api/playtest-tags/remove', { id: 7 }))
-    const iLog = calls.findIndex(c => /INSERT INTO custom_field_value_changes/.test(c.text))
+    // The plain INSERT ... VALUES, not the backfill's INSERT ... SELECT cfv.
+    const iLog = calls.findIndex(c => /INSERT INTO custom_field_value_changes/.test(c.text) && !/SELECT cfv\./.test(c.text))
     const iDel = calls.findIndex(c => /DELETE FROM custom_field_values/.test(c.text))
     expect(iLog).toBeGreaterThanOrEqual(0)
     // Logged first: after the delete we could no longer read the sub-value, and
@@ -166,6 +167,40 @@ describe('POST /api/playtest-tags/remove', () => {
     // the tag had at removal time.
     expect(log.binds).toEqual(expect.arrayContaining(['g1', 'Trends', 'Animal Driver', 'remove', 2, 'playtest_sync']))
     expect(log.binds).not.toContain('vinhtd@athena.studio')
+  })
+
+  it('rescues the missing add line from the row itself, before deleting it', async () => {
+    routeSql([
+      SYNCED,
+      { match: /FROM custom_field_values/, rows: [{ created_by: 'playtest_sync', sub_value_id: 2, first_name: 'Signal Playtest', last_name: 'Sync', email: null }] },
+    ])
+    await REMOVE(req('/api/playtest-tags/remove', { id: 7 }))
+    const backfill = calls.find(c => /INSERT INTO custom_field_value_changes[\s\S]*SELECT cfv\./.test(c.text))
+    expect(backfill).toBeDefined()
+    // Attribution comes from the row, not from this app.
+    expect(backfill!.text).toMatch(/cfv\.created_by/)
+    // One add per tag, so a tag already logged is left alone.
+    expect(backfill!.text).toMatch(/NOT EXISTS/)
+    expect(backfill!.text).toMatch(/a\.action = 'add'/)
+    // A plain ::timestamptz cast would read the naive created_at in the
+    // session's TimeZone — seven hours out under Asia/Ho_Chi_Minh.
+    expect(backfill!.text).toMatch(/AT TIME ZONE 'UTC'/)
+    // changed_at is NOT NULL, and created_at is nullable.
+    expect(backfill!.text).toMatch(/COALESCE/)
+
+    // Ordering: rescue the add, then log the remove, then delete.
+    const iAdd = calls.findIndex(c => /SELECT cfv\./.test(c.text))
+    const iRemoveLog = calls.findIndex(c => /INSERT INTO custom_field_value_changes/.test(c.text) && !/SELECT cfv\./.test(c.text))
+    const iDel = calls.findIndex(c => /DELETE FROM custom_field_values/.test(c.text))
+    expect(iAdd).toBeLessThan(iRemoveLog)
+    expect(iRemoveLog).toBeLessThan(iDel)
+  })
+
+  it('does not attempt a backfill when the row is already gone', async () => {
+    routeSql([SYNCED, { match: /FROM custom_field_values/, rows: [] }])
+    await REMOVE(req('/api/playtest-tags/remove', { id: 7 }))
+    // Nothing to read provenance from, and nothing to remove — so no log at all.
+    expect(calls.some(c => /INSERT INTO custom_field_value_changes/.test(c.text))).toBe(false)
   })
 
   it('deletes the Signal Sense row when playtest_sync created it, and stamps the removal', async () => {

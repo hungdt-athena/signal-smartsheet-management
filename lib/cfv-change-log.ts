@@ -41,6 +41,64 @@ export interface CfvChange {
  *
  * Returns how many rows were written.
  */
+/**
+ * Give a tag its missing `add` line, from the value row's own provenance.
+ *
+ * Tags created before Signal Sense's log existed — or through a path of theirs
+ * that does not log, such as the Custom Field Tags dialog's replace-all save —
+ * have no `add` entry. Once the row is deleted that provenance is unrecoverable,
+ * so this runs while the row is still there, immediately before a removal: the
+ * result is a complete chain (added → changed → removed) instead of a tag whose
+ * history starts at its removal.
+ *
+ * Attribution and time come from the row (`created_by`, `created_at`), not from
+ * this app — the point is to record who really added it. `NOT EXISTS` keeps it to
+ * one `add` per tag, so a tag already logged is left alone.
+ *
+ * `created_at` is a naive `timestamp` while `changed_at` is `timestamptz`. The
+ * conversion is written as `AT TIME ZONE 'UTC'` rather than a plain cast, because
+ * a plain cast reads the naive value in the session's TimeZone: verified on prod,
+ * the same row yields `03:54:44+00` under GMT and `03:54:44+07` under
+ * Asia/Ho_Chi_Minh — a seven-hour error in the recorded instant. `COALESCE` on
+ * `now()` covers a NULL `created_at`, which would otherwise violate NOT NULL.
+ *
+ * Returns how many rows were written (0 or 1).
+ */
+export async function backfillMissingAdd(
+  tx: typeof Sql,
+  gameId: string,
+  fieldValue: string,
+): Promise<number> {
+  try {
+    const rows = await (tx as unknown as { savepoint: (cb: (sp: typeof Sql) => Promise<unknown>) => Promise<unknown> })
+      .savepoint(async sp => sp`
+        INSERT INTO custom_field_value_changes
+          (game_id, field_name, field_value, action, new_sub_value_id, changed_by, changed_at)
+        SELECT cfv.game_id, cfv.field_name, cfv.field_value, 'add', cfv.sub_value_id, cfv.created_by,
+               COALESCE(cfv.created_at AT TIME ZONE 'UTC', now())
+        FROM custom_field_values cfv
+        WHERE cfv.game_id = ${gameId}
+          AND cfv.field_name = ${TRENDS_FIELD}
+          AND cfv.field_value = ${fieldValue}
+          AND NOT EXISTS (
+            SELECT 1 FROM custom_field_value_changes a
+            WHERE a.game_id = cfv.game_id
+              AND a.field_name = cfv.field_name
+              AND a.field_value = cfv.field_value
+              AND a.action = 'add'
+          )
+        RETURNING id
+      `)
+    return (rows as unknown[]).length
+  } catch (err) {
+    console.error(
+      `[playtest-tags] failed to backfill add for ${gameId} / ${fieldValue}:`,
+      (err as Error).message,
+    )
+    return 0
+  }
+}
+
 export async function logCfvChanges(
   tx: typeof Sql,
   changes: CfvChange[],

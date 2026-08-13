@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { requireManager } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
-import { logCfvChanges } from '@/lib/cfv-change-log'
+import { backfillMissingAdd, logCfvChanges } from '@/lib/cfv-change-log'
 import { TRENDS_FIELD, SYNC_USER } from '@/lib/playtest-tags'
 
 export const dynamic = 'force-dynamic'
@@ -70,6 +70,13 @@ export async function POST(req: NextRequest) {
         }
         return
       }
+      // Rescue the tag's `add` line first, while the row still carries who
+      // created it and when. Tags predating Signal Sense's log — or added
+      // through a path of theirs that does not log — have none, and after the
+      // delete that provenance is gone for good. Without this the log would
+      // show a removal of something that was never recorded as added.
+      await backfillMissingAdd(tx, tag.game_id, tag.field_value)
+
       // Log before deleting: afterwards the sub-value is gone and cannot be
       // recorded as old_sub_value_id. Signal Sense's history reads this log for
       // removals, so without it the tag just vanishes over there. The helper
