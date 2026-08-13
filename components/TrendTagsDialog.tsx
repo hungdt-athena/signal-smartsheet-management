@@ -51,14 +51,22 @@ export function TrendTagsDialog({
   }
 
   return (
-    // Nested above the evaluation modal, which sits at z-index 900. The scrim is
-    // darker than the shared one so the evaluation modal's white panel recedes
-    // instead of reading as a second container behind this dialog.
+    // Nested above the evaluation modal, which sits at z-index 900. No scrim: a
+    // second layer of dimming made the evaluation modal read as another container
+    // behind this one. The layer stays to catch click-outside, so it must be
+    // transparent rather than absent. Shadow and a real border do the separating
+    // — the shared container's border is a white alpha that vanishes on this
+    // light theme, which is invisible against the white panel behind it.
     <div className="eval-modal-backdrop"
-      style={{ zIndex: 950, background: 'rgba(10, 12, 18, 0.68)' }}
+      style={{ zIndex: 950, background: 'transparent', backdropFilter: 'none' }}
       onClick={onClose}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{ maxWidth: 560, width: '94vw', maxHeight: '86vh', display: 'flex', flexDirection: 'column' }}>
+        style={{
+          maxWidth: 560, width: '94vw', maxHeight: '86vh',
+          display: 'flex', flexDirection: 'column',
+          border: '1px solid var(--border-strong)',
+          boxShadow: '0 30px 70px rgba(20, 24, 40, 0.28)',
+        }}>
 
         <header style={{
           display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
