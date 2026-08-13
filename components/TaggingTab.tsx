@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import EvalDetailPanel, { type EvalListItem } from './EvalDetailPanel'
 import { TrendValuePicker } from './TrendValuePicker'
@@ -103,7 +103,7 @@ export function TaggingTab() {
   const openGame: OpenGame = (gameId, list) => setDetail({ gameId, list })
 
   return (
-    <div className="page">
+    <div className="page tag-page">
       <div className="page-head">
         <div>
           <h1 className="h-title">Tagging</h1>
@@ -440,30 +440,64 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
   const [busy, setBusy] = useState<number | null>(null)
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const sentinelRef = useRef<HTMLTableRowElement>(null)
   const limit = 50
 
-  const load = useCallback(() => {
-    const qs = new URLSearchParams({ page: String(page), limit: String(limit) })
+  // One page at a time, appended. `append` distinguishes "next page" from a
+  // fresh read after the filters changed, which must replace what is on screen.
+  const fetchPage = useCallback(async (p: number, append: boolean) => {
+    const qs = new URLSearchParams({ page: String(p), limit: String(limit) })
     if (from) qs.set('from', from)
     if (to) qs.set('to', to)
-    return fetch(`/api/playtest-tags/history?${qs}`)
-      .then(r => r.ok ? r.json() : { rows: [], total: 0 })
-      .then(d => { setRows(d.rows || []); setTotal(d.total || 0) })
-      .catch(() => { setRows([]); setTotal(0) })
-  }, [page, from, to])
+    setLoading(true)
+    try {
+      const r = await fetch(`/api/playtest-tags/history?${qs}`)
+      const d = r.ok ? await r.json() : { rows: [], total: 0 }
+      const next = (d.rows || []) as HistoryRow[]
+      if (append && next.length === 0) {
+        // An empty page while total still claims more would leave the observer
+        // asking forever. Trust what actually arrived and stop.
+        setRows(prev => { setTotal(prev.length); return prev })
+      } else {
+        setRows(prev => (append ? [...prev, ...next] : next))
+        setTotal(d.total || 0)
+      }
+      setPage(p)
+    } catch {
+      if (!append) { setRows([]); setTotal(0) }
+    }
+    setLoading(false)
+  }, [from, to])
 
-  // Sweep for tags deleted in Signal Sense before reading, so the stamp exists
-  // by the time the rows render. Signal Sense keeps no deletion log of its own,
-  // so this is the only chance to notice.
+  // Sweep for tags deleted in Signal Sense, then read. Signal Sense keeps no
+  // deletion log of its own, so this is the only chance to notice, and the sweep
+  // has to finish first or the first paint would miss the stamps it writes.
+  //
+  // Keyed on reloadKey alone: a date tweak or a scroll must not re-run a
+  // database sweep, and this leaves the first page load to this effect rather
+  // than the filter one below.
   useEffect(() => {
     let live = true
     fetch('/api/playtest-tags/reconcile', { method: 'POST' })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (live && d?.removed > 0) setMsg(`${d.removed} tag${d.removed === 1 ? '' : 's'} no longer in Signal Sense — recorded as removed.`) })
       .catch(() => {})
-      .finally(() => { if (live) void load() })
+      .finally(() => { if (live) void fetchPage(1, false) })
     return () => { live = false }
-  }, [load, reloadKey])
+    // fetchPage is intentionally omitted: including it would re-sweep on every
+    // date change, and the filter effect below already handles those.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey])
+
+  // Filter changes re-read from page 1 without sweeping. Skipped on mount, where
+  // the sweep effect above does the first read.
+  const mounted = useRef(false)
+  useEffect(() => {
+    if (!mounted.current) { mounted.current = true; return }
+    void fetchPage(1, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to])
 
   // Two-click confirm, the same shape as the evaluation panel's Clear all. This
   // deletes a row out of Signal Sense's table, so a stray click must not do it.
@@ -495,7 +529,20 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
     setBusy(null)
   }
 
-  const pages = Math.max(1, Math.ceil(total / limit))
+  const hasMore = rows.length < total
+
+  // Load the next page when the sentinel row scrolls into the list's viewport.
+  // `root` is the scrolling card, not the window — the observer would never fire
+  // against the window since the list scrolls inside its own box.
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore || loading) return
+    const io = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting) void fetchPage(page + 1, true)
+    }, { root: el.closest('.tag-scroll'), rootMargin: '200px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, loading, page, fetchPage])
 
   // One Game cell per game, spanning its tags. Rows arrive newest-first, so a
   // game's group takes the position of its most recent tag and keeps that order
@@ -526,28 +573,28 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
           <div className="field">
             <span className="label">From</span>
             <input className="input" type="date" style={{ width: 150 }}
-              value={from} onChange={e => { setFrom(e.target.value); setPage(1) }} />
+              value={from} onChange={e => setFrom(e.target.value)} />
           </div>
           <div className="field">
             <span className="label">To</span>
             <input className="input" type="date" style={{ width: 150 }}
-              value={to} onChange={e => { setTo(e.target.value); setPage(1) }} />
+              value={to} onChange={e => setTo(e.target.value)} />
           </div>
           {/* The range starts at this month, so "Clear" would be a lie — name what
               each button actually selects. */}
           {(from || to) && (
-            <button className="btn btn-sm btn-ghost" onClick={() => { setFrom(''); setTo(''); setPage(1) }}>All time</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => { setFrom(''); setTo('') }}>All time</button>
           )}
           {(from !== monthStartLocal() || to !== todayLocal()) && (
             <button className="btn btn-sm btn-ghost"
-              onClick={() => { setFrom(monthStartLocal()); setTo(todayLocal()); setPage(1) }}>This month</button>
+              onClick={() => { setFrom(monthStartLocal()); setTo(todayLocal()) }}>This month</button>
           )}
         </div>
       </div>
 
       {msg && <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
 
-      <div className="tbl-wrap">
+      <div className="tbl-wrap tag-scroll">
         <table className="tbl">
           <thead>
             <tr>
@@ -649,17 +696,21 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
                 </td>
               </tr>
             )))}
+            {/* Watched by the observer above: crossing into view loads the next
+                page. Kept inside the table so it scrolls with the rows. */}
+            {(hasMore || loading) && (
+              <tr ref={sentinelRef}>
+                <td colSpan={8} className="tag-sentinel">
+                  {loading ? 'Loading…' : `${rows.length} of ${total} — scroll for more`}
+                </td>
+              </tr>
+            )}
+            {!hasMore && !loading && rows.length > 0 && (
+              <tr><td colSpan={8} className="tag-sentinel">All {total} shown</td></tr>
+            )}
           </tbody>
         </table>
       </div>
-
-      {pages > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 12 }}>
-          <button className="btn btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</button>
-          <span style={{ fontSize: 12, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>{page} / {pages}</span>
-          <button className="btn btn-sm" disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Next</button>
-        </div>
-      )}
     </div>
   )
 }
