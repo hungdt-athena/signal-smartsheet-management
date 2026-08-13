@@ -23,8 +23,19 @@ export async function GET(req: NextRequest) {
   const to = (sp.get('to') || '').trim()
 
   const taggerFilter = tagger ? sql`AND pt.tagged_by = ${tagger}` : sql``
-  const fromFilter = from ? sql`AND pt.tagged_at >= ${from}::date` : sql``
-  const toFilter = to ? sql`AND pt.tagged_at < (${to}::date + 1)` : sql``
+  // tagged_at is timestamptz and the picker means UTC+7 dates, so each bound is
+  // anchored in that zone. A bare `::date` bound is read in the session's
+  // TimeZone (GMT on Neon), which puts both ends seven hours out: verified on
+  // prod, a tag made 03:00 on 1 Aug UTC+7 fell outside "from 1 Aug", and one
+  // made 05:00 on 14 Aug fell inside "to 13 Aug". `::timestamp` first is
+  // required — `date AT TIME ZONE` resolves through timestamptz and hands back a
+  // naive timestamp, converting the wrong way.
+  const fromFilter = from
+    ? sql`AND pt.tagged_at >= (${from}::date)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'`
+    : sql``
+  const toFilter = to
+    ? sql`AND pt.tagged_at < (${to}::date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'`
+    : sql``
 
   const [rows, totals] = await Promise.all([
     sql`

@@ -58,6 +58,13 @@ interface HistoryRow {
 const fmt = (d: string | null) =>
   d ? new Date(d).toLocaleDateString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 
+// Today and the first of this month as YYYY-MM-DD in UTC+7, the only timezone
+// this dashboard reckons dates in. en-CA formats as ISO, which is what a
+// <input type="date"> and the API's ?from/?to expect.
+const todayLocal = () =>
+  new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' })
+const monthStartLocal = () => `${todayLocal().slice(0, 7)}-01`
+
 // Written into Signal Sense → green; already there or deliberately left alone →
 // muted; refused because the value is retired → red.
 const RESULT_PILL: Record<string, string> = {
@@ -425,10 +432,13 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
   const [rows, setRows] = useState<HistoryRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  // Defaults to this month: the queue is reviewed continuously, so the useful
+  // question is "what did we do lately", not "everything ever".
+  const [from, setFrom] = useState(monthStartLocal)
+  const [to, setTo] = useState(todayLocal)
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
+  const [confirmRemove, setConfirmRemove] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const limit = 50
 
@@ -454,6 +464,18 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
       .finally(() => { if (live) void load() })
     return () => { live = false }
   }, [load, reloadKey])
+
+  // Two-click confirm, the same shape as the evaluation panel's Clear all. This
+  // deletes a row out of Signal Sense's table, so a stray click must not do it.
+  const askRemove = (r: HistoryRow) => {
+    if (confirmRemove !== r.id) {
+      setConfirmRemove(r.id)
+      setTimeout(() => setConfirmRemove(c => (c === r.id ? null : c)), 4000)
+      return
+    }
+    setConfirmRemove(null)
+    void removeTag(r)
+  }
 
   const removeTag = async (r: HistoryRow) => {
     setBusy(r.id)
@@ -511,8 +533,14 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
             <input className="input" type="date" style={{ width: 150 }}
               value={to} onChange={e => { setTo(e.target.value); setPage(1) }} />
           </div>
+          {/* The range starts at this month, so "Clear" would be a lie — name what
+              each button actually selects. */}
           {(from || to) && (
-            <button className="btn btn-sm btn-ghost" onClick={() => { setFrom(''); setTo(''); setPage(1) }}>Clear</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => { setFrom(''); setTo(''); setPage(1) }}>All time</button>
+          )}
+          {(from !== monthStartLocal() || to !== todayLocal()) && (
+            <button className="btn btn-sm btn-ghost"
+              onClick={() => { setFrom(monthStartLocal()); setTo(todayLocal()); setPage(1) }}>This month</button>
           )}
         </div>
       </div>
@@ -603,10 +631,14 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
                   {r.status === 'synced' && r.in_signal_sense && (
                     r.ours ? (
                       <button className="btn btn-sm btn-ghost" disabled={busy === r.id}
-                        title="Delete this tag from Signal Sense and record the removal"
-                        onClick={() => removeTag(r)}
-                        style={{ color: 'var(--bad)' }}>
-                        {busy === r.id ? '…' : 'Remove'}
+                        title={confirmRemove === r.id
+                          ? `Deletes ${r.field_value} from Signal Sense — click again to confirm`
+                          : 'Delete this tag from Signal Sense and record the removal'}
+                        onClick={() => askRemove(r)}
+                        style={confirmRemove === r.id
+                          ? { color: 'var(--bad)', borderColor: 'var(--bad)', background: 'var(--bad-weak)', fontWeight: 600 }
+                          : { color: 'var(--bad)' }}>
+                        {busy === r.id ? '…' : confirmRemove === r.id ? 'Confirm?' : 'Remove'}
                       </button>
                     ) : (
                       <span style={{ fontSize: 10.5, color: 'var(--faint)' }} title="playtest sync did not create this row, so it cannot be removed from here">
