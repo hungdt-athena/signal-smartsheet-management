@@ -25,15 +25,22 @@ export async function POST(req: NextRequest) {
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
 
   const id = body.id
-  if (!Number.isInteger(id)) return NextResponse.json({ error: 'id required' }, { status: 400 })
+  // typeof first: Number.isInteger narrows nothing, so `id` would stay
+  // `number | undefined` and cannot be bound into a query.
+  if (typeof id !== 'number' || !Number.isInteger(id)) {
+    return NextResponse.json({ error: 'id required' }, { status: 400 })
+  }
 
   const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
   const admin = session?.user?.email || 'skip-auth@local'
 
+  interface Refusal { status: number; error: string }
   let outcome: 'deleted' | 'already_gone' = 'already_gone'
-  let refusal: { status: number; error: string } | null = null
 
-  await sql.begin(async txRaw => {
+  // Returned out of the transaction rather than assigned to a closure variable:
+  // TypeScript cannot see the callback's writes and narrows such a variable to
+  // `null`, so reading `.error` off it afterwards fails to compile.
+  const refusal = await sql.begin(async txRaw => {
     const tx = txRaw as unknown as typeof sql
 
     const rows = await tx`
@@ -42,8 +49,7 @@ export async function POST(req: NextRequest) {
       LIMIT 1
     `
     if (rows.length === 0) {
-      refusal = { status: 404, error: 'No synced tag with that id — only a confirmed tag can be removed.' }
-      return
+      return { status: 404, error: 'No synced tag with that id — only a confirmed tag can be removed.' } as Refusal
     }
     const tag = rows[0] as { id: number; game_id: string; field_value: string }
 
@@ -64,11 +70,10 @@ export async function POST(req: NextRequest) {
       }
       if (row.created_by !== SYNC_USER) {
         const who = [row.first_name, row.last_name].filter(Boolean).join(' ') || row.email || 'someone in Signal Sense'
-        refusal = {
+        return {
           status: 409,
           error: `That tag was created in Signal Sense by ${who}, not by playtest sync. Remove it there — this app only removes what it added.`,
-        }
-        return
+        } as Refusal
       }
       // Rescue the tag's `add` line first, while the row still carries who
       // created it and when. Tags predating Signal Sense's log — or added

@@ -36,7 +36,12 @@ export async function POST(req: NextRequest) {
   // Entries for Signal Sense's change log, appended only for writes that landed.
   const log: CfvChange[] = []
 
-  await sql.begin(async tx => {
+  await sql.begin(async txRaw => {
+    // postgres.js types a transaction handle as TransactionSql, which is not
+    // callable as a tagged template. Every other transaction in this repo casts
+    // it the same way.
+    const tx = txRaw as unknown as typeof sql
+
     const pending = await tx`
       SELECT id, field_value, sub_value_id
       FROM playtest_tags
