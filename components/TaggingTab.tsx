@@ -36,6 +36,15 @@ interface HistoryRow {
   confirmed_at: string | null
   status: string
   sync_result: string | null
+  removed_at: string | null
+  /** Email of the admin who removed it, or 'signal_sense' when the reconcile
+   *  sweep found it gone rather than someone removing it from here. */
+  removed_by: string | null
+  removed_by_name: string | null
+  /** Read live: is the tag in custom_field_values right now? */
+  in_signal_sense: boolean
+  /** Did playtest_sync create that row? Only then may this app remove it. */
+  ours: boolean | null
 }
 
 const fmt = (d: string | null) =>
@@ -365,17 +374,51 @@ function HistoryView() {
   const [page, setPage] = useState(1)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  const [msg, setMsg] = useState<string | null>(null)
+  const [busy, setBusy] = useState<number | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const limit = 50
 
-  useEffect(() => {
+  const load = useCallback(() => {
     const qs = new URLSearchParams({ page: String(page), limit: String(limit) })
     if (from) qs.set('from', from)
     if (to) qs.set('to', to)
-    fetch(`/api/playtest-tags/history?${qs}`)
+    return fetch(`/api/playtest-tags/history?${qs}`)
       .then(r => r.ok ? r.json() : { rows: [], total: 0 })
       .then(d => { setRows(d.rows || []); setTotal(d.total || 0) })
       .catch(() => { setRows([]); setTotal(0) })
   }, [page, from, to])
+
+  // Sweep for tags deleted in Signal Sense before reading, so the stamp exists
+  // by the time the rows render. Signal Sense keeps no deletion log of its own,
+  // so this is the only chance to notice.
+  useEffect(() => {
+    let live = true
+    fetch('/api/playtest-tags/reconcile', { method: 'POST' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (live && d?.removed > 0) setMsg(`${d.removed} tag${d.removed === 1 ? '' : 's'} no longer in Signal Sense — recorded as removed.`) })
+      .catch(() => {})
+      .finally(() => { if (live) void load() })
+    return () => { live = false }
+  }, [load, reloadKey])
+
+  const removeTag = async (r: HistoryRow) => {
+    setBusy(r.id)
+    try {
+      const res = await fetch('/api/playtest-tags/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: r.id }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) setMsg(d.error || 'Could not remove that tag')
+      else setMsg(d.outcome === 'deleted'
+        ? `Removed ${r.field_value} from Signal Sense.`
+        : `${r.field_value} was already gone from Signal Sense — recorded as removed.`)
+      setReloadKey(k => k + 1)
+    } catch { setMsg('Network error') }
+    setBusy(null)
+  }
 
   const pages = Math.max(1, Math.ceil(total / limit))
 
@@ -416,6 +459,8 @@ function HistoryView() {
         </div>
       </div>
 
+      {msg && <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
+
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>
@@ -427,12 +472,13 @@ function HistoryView() {
               <th style={{ width: 105 }}>Proposed</th>
               <th style={{ width: 110 }}>Reviewed by</th>
               <th style={{ width: 105 }}>Reviewed</th>
-              <th style={{ width: 105 }}>Result</th>
+              <th style={{ width: 130 }}>Result</th>
+              <th style={{ width: 100 }} />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={8} className="empty">Nothing reviewed yet.</td></tr>
+              <tr><td colSpan={9} className="empty">Nothing reviewed yet.</td></tr>
             )}
             {groups.map(g => g.rows.map((r, i) => (
               <tr key={r.id}>
@@ -462,9 +508,37 @@ function HistoryView() {
                 <td>{r.confirmed_by_name || '—'}</td>
                 <td className="num" style={{ fontSize: 12, color: 'var(--muted)' }}>{fmt(r.confirmed_at)}</td>
                 <td>
-                  <span className={`pill ${RESULT_PILL[r.sync_result ?? ''] ?? 'tag'}`} style={{ fontSize: 10 }}>
-                    {r.sync_result || r.status}
-                  </span>
+                  {r.removed_at ? (
+                    <>
+                      <span className="pill off" style={{ fontSize: 10 }}>removed</span>
+                      <span style={{ display: 'block', fontSize: 10.5, color: 'var(--faint)', marginTop: 3 }}>
+                        was {r.sync_result || r.status} · {fmt(r.removed_at)}
+                        {r.removed_by === 'signal_sense'
+                          ? ' · in Signal Sense'
+                          : r.removed_by_name ? ` · ${r.removed_by_name}` : ''}
+                      </span>
+                    </>
+                  ) : (
+                    <span className={`pill ${RESULT_PILL[r.sync_result ?? ''] ?? 'tag'}`} style={{ fontSize: 10 }}>
+                      {r.sync_result || r.status}
+                    </span>
+                  )}
+                </td>
+                <td>
+                  {r.status === 'synced' && r.in_signal_sense && (
+                    r.ours ? (
+                      <button className="btn btn-sm btn-ghost" disabled={busy === r.id}
+                        title="Delete this tag from Signal Sense and record the removal"
+                        onClick={() => removeTag(r)}
+                        style={{ color: 'var(--bad)' }}>
+                        {busy === r.id ? '…' : 'Remove'}
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 10.5, color: 'var(--faint)' }} title="playtest sync did not create this row, so it cannot be removed from here">
+                        added in Signal Sense
+                      </span>
+                    )
+                  )}
                 </td>
               </tr>
             )))}
