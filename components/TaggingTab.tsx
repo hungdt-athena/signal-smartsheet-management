@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { TrendValuePicker } from './TrendValuePicker'
 
 interface PendingRow {
@@ -27,6 +27,7 @@ interface HistoryRow {
   id: number
   game_id: string
   title: string
+  icon_url: string | null
   field_value: string
   sub_value_name: string | null
   tagged_by_name: string | null
@@ -52,8 +53,8 @@ const RESULT_PILL: Record<string, string> = {
 export function TaggingTab() {
   const [view, setView] = useState<'pending' | 'history'>('pending')
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+    <div className="page">
+      <div className="page-head">
         <div>
           <h1 className="h-title">Tagging</h1>
           <p className="h-sub">Trends proposed while playtesting. Confirming writes them into Signal Sense.</p>
@@ -378,6 +379,19 @@ function HistoryView() {
 
   const pages = Math.max(1, Math.ceil(total / limit))
 
+  // One Game cell per game, spanning its tags. Rows arrive newest-first, so a
+  // game's group takes the position of its most recent tag and keeps that order
+  // inside — grouping must not reshuffle the page into a different sort.
+  const groups = useMemo(() => {
+    const byGame = new Map<string, HistoryRow[]>()
+    for (const r of rows) {
+      const g = byGame.get(r.game_id)
+      if (g) g.push(r)
+      else byGame.set(r.game_id, [r])
+    }
+    return Array.from(byGame, ([game_id, gameRows]) => ({ game_id, rows: gameRows }))
+  }, [rows])
+
   return (
     <div className="card">
       <div className="card-head" style={{ alignItems: 'flex-end' }}>
@@ -420,9 +434,27 @@ function HistoryView() {
             {rows.length === 0 && (
               <tr><td colSpan={8} className="empty">Nothing reviewed yet.</td></tr>
             )}
-            {rows.map(r => (
+            {groups.map(g => g.rows.map((r, i) => (
               <tr key={r.id}>
-                <td className="cell-name">{r.title}</td>
+                {i === 0 && (
+                  <td className="cell-name" rowSpan={g.rows.length}
+                    style={{ verticalAlign: 'top', borderRight: '1px solid var(--border)' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      {r.icon_url && (
+                        <img src={r.icon_url} alt="" width={26} height={26}
+                          style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
+                      )}
+                      <span>
+                        {r.title}
+                        {g.rows.length > 1 && (
+                          <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--faint)' }}>
+                            {g.rows.length} tags
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                  </td>
+                )}
                 <td className="num">{r.field_value}</td>
                 <td style={{ color: r.sub_value_name ? undefined : 'var(--faint)' }}>{r.sub_value_name || '—'}</td>
                 <td>{r.tagged_by_name || '—'}</td>
@@ -435,7 +467,7 @@ function HistoryView() {
                   </span>
                 </td>
               </tr>
-            ))}
+            )))}
           </tbody>
         </table>
       </div>

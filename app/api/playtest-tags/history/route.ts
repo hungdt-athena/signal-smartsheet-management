@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
       SELECT
         pt.id, pt.game_id, pt.field_value, pt.status, pt.sync_result,
         pt.tagged_at, pt.confirmed_at,
-        gi.title, sv.name AS sub_value_name,
+        gi.title, gi.icon_url, sv.name AS sub_value_name,
         tagger.name AS tagged_by_name, confirmer.name AS confirmed_by_name
       FROM playtest_tags pt
       JOIN game_info gi ON gi.game_id = pt.game_id
