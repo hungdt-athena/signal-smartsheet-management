@@ -47,6 +47,8 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/evaluations?cat=evaluate', label: 'Evaluate' },
     { href: '/evaluations?cat=short_list', label: 'Short List' },
     { href: '/evaluations?cat=weekly_feedback', label: 'Weekly Feedback' },
+    // Reviewing tags proposed during playtest is an admin decision.
+    { href: '/evaluations?cat=tagging', label: 'Tagging', roles: ['admin'] },
   ]},
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },

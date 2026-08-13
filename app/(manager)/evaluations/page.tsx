@@ -14,6 +14,7 @@ import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { QuickStatsModal } from '@/components/QuickStatsModal'
 import { WeeklyFeedbackTab } from '@/components/weekly-feedback/WeeklyFeedbackTab'
+import { TaggingTab } from '@/components/TaggingTab'
 import { BUCKETS, prettyConclusion, type Bucket } from '@/lib/buckets'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
 import { GameAlikeChips, GameAlikeField } from '@/components/GameAlikeField'
@@ -919,6 +920,7 @@ function EvaluationsRouter() {
   const searchParams = useSearchParams()
   const category = searchParams.get('cat') || 'puzzle'
   if (category === 'weekly_feedback') return <WeeklyFeedbackTab />
+  if (category === 'tagging') return <TaggingTab />
   return category === 'short_list' ? <ShortListEvalTab /> : <EvaluationsPageInner />
 }
 
