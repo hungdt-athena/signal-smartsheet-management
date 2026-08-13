@@ -1,5 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSession } from 'next-auth/react'
+import EvalDetailPanel, { type EvalListItem } from './EvalDetailPanel'
 import { TrendValuePicker } from './TrendValuePicker'
 
 interface PendingRow {
@@ -63,10 +65,36 @@ const RESULT_PILL: Record<string, string> = {
   duplicate: 'muted', kept: 'muted', inactive: 'off',
 }
 
+/** Opens a game's evaluation panel. Both views pass the games they are showing,
+ *  so the panel's prev/next walks the list the admin is looking at. */
+type OpenGame = (gameId: string, list: EvalListItem[]) => void
+
+// A game title that opens its evaluation panel — the tag says which trend, the
+// panel says what the game is and who evaluated it.
+function GameButton({ title, gameId, onOpen, list }: {
+  title: string; gameId: string; onOpen: OpenGame; list: EvalListItem[]
+}) {
+  return (
+    <button type="button" onClick={() => onOpen(gameId, list)}
+      title="Open the evaluation"
+      style={{
+        border: 0, background: 'none', padding: 0, cursor: 'pointer',
+        font: 'inherit', color: 'var(--accent)', textAlign: 'left',
+      }}>{title}</button>
+  )
+}
+
 // Admin review of Trends tags proposed during playtest. A tag only reaches
 // Signal Sense's custom_field_values when it is confirmed here.
 export function TaggingTab() {
   const [view, setView] = useState<'pending' | 'history'>('pending')
+  const [detail, setDetail] = useState<{ gameId: string; list: EvalListItem[] } | null>(null)
+  const { data: session } = useSession()
+  const role = session?.user?.role
+  const userName = session?.user?.name || ''
+
+  const openGame: OpenGame = (gameId, list) => setDetail({ gameId, list })
+
   return (
     <div className="page">
       <div className="page-head">
@@ -79,12 +107,30 @@ export function TaggingTab() {
           <button className={'seg-btn' + (view === 'history' ? ' active' : '')} onClick={() => setView('history')}>History</button>
         </div>
       </div>
-      {view === 'pending' ? <PendingView /> : <HistoryView />}
+
+      {view === 'pending' ? <PendingView onOpenGame={openGame} /> : <HistoryView onOpenGame={openGame} />}
+
+      {detail && (
+        <div className="eval-modal-backdrop" onClick={() => setDetail(null)}>
+          <div className="eval-modal-container" onClick={e => e.stopPropagation()}
+            style={{ padding: '20px 24px 24px' }}>
+            <EvalDetailPanel
+              initialGameId={detail.gameId}
+              gameList={detail.list}
+              role={role}
+              userName={userName}
+              hideRecordSections={false}
+              onClose={() => setDetail(null)}
+              onNavigate={gameId => setDetail(d => (d ? { ...d, gameId } : d))}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function PendingView() {
+function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
   const [games, setGames] = useState<PendingGame[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -266,7 +312,8 @@ function PendingView() {
                     style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
                 )}
                 <span style={{ fontSize: 14.5, fontWeight: 650, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {g.title}
+                  <GameButton title={g.title} gameId={g.game_id} onOpen={onOpenGame}
+                    list={games.map(x => ({ game_id: x.game_id, title: x.title }))} />
                 </span>
                 {conflicts > 0 && (
                   <span className="pill off" style={{ fontSize: 10, flexShrink: 0 }}>
@@ -374,7 +421,7 @@ function PendingView() {
   )
 }
 
-function HistoryView() {
+function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
   const [rows, setRows] = useState<HistoryRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -441,6 +488,11 @@ function HistoryView() {
     return Array.from(byGame, ([game_id, gameRows]) => ({ game_id, rows: gameRows }))
   }, [rows])
 
+  // One entry per game on this page, so the panel's prev/next walks the games
+  // the admin is looking at rather than every game in the system.
+  const gameList = useMemo<EvalListItem[]>(
+    () => groups.map(g => ({ game_id: g.game_id, title: g.rows[0].title })), [groups])
+
   return (
     <div className="card">
       <div className="card-head" style={{ alignItems: 'flex-end' }}>
@@ -471,33 +523,32 @@ function HistoryView() {
         <table className="tbl">
           <thead>
             <tr>
-              <th>Game</th>
-              <th>Trend</th>
-              <th style={{ width: 130 }}>Sub-value</th>
-              <th style={{ width: 110 }}>Proposed by</th>
-              <th style={{ width: 105 }}>Proposed</th>
-              <th style={{ width: 110 }}>Reviewed by</th>
-              <th style={{ width: 105 }}>Reviewed</th>
-              <th style={{ width: 130 }}>Result</th>
-              <th style={{ width: 100 }} />
+              <th style={{ width: 172 }}>Game</th>
+              <th style={{ width: 150 }}>Trend</th>
+              <th style={{ width: 116 }}>Sub-value</th>
+              <th style={{ width: 116 }}>Proposed</th>
+              <th style={{ width: 116 }}>Reviewed</th>
+              <th style={{ width: 96 }}>Result</th>
+              <th>Note</th>
+              <th style={{ width: 84 }} />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={9} className="empty">Nothing reviewed yet.</td></tr>
+              <tr><td colSpan={8} className="empty">Nothing reviewed yet.</td></tr>
             )}
             {groups.map(g => g.rows.map((r, i) => (
               <tr key={r.id}>
                 {i === 0 && (
                   <td className="cell-name" rowSpan={g.rows.length}
                     style={{ verticalAlign: 'top', borderRight: '1px solid var(--border)' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 8 }}>
                       {r.icon_url && (
-                        <img src={r.icon_url} alt="" width={26} height={26}
+                        <img src={r.icon_url} alt="" width={24} height={24}
                           style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
                       )}
-                      <span>
-                        {r.title}
+                      <span style={{ minWidth: 0 }}>
+                        <GameButton title={r.title} gameId={r.game_id} onOpen={onOpenGame} list={gameList} />
                         {g.rows.length > 1 && (
                           <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--faint)' }}>
                             {g.rows.length} tags
@@ -509,34 +560,43 @@ function HistoryView() {
                 )}
                 <td className="num">{r.field_value}</td>
                 <td style={{ color: r.sub_value_name ? undefined : 'var(--faint)' }}>{r.sub_value_name || '—'}</td>
-                <td>{r.tagged_by_name || '—'}</td>
-                <td className="num" style={{ fontSize: 12, color: 'var(--muted)' }}>{fmt(r.tagged_at)}</td>
-                <td>{r.confirmed_by_name || '—'}</td>
-                <td className="num" style={{ fontSize: 12, color: 'var(--muted)' }}>{fmt(r.confirmed_at)}</td>
                 <td>
-                  {r.removed_at ? (
-                    <>
-                      <span className="pill off" style={{ fontSize: 10 }}>removed</span>
-                      <span style={{ display: 'block', fontSize: 10.5, color: 'var(--faint)', marginTop: 3 }}>
-                        was {r.sync_result || r.status} · {fmt(r.removed_at)}
-                        {r.removed_by === 'signal_sense'
-                          ? ' · in Signal Sense'
-                          : r.removed_by_name ? ` · ${r.removed_by_name}` : ''}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span className={`pill ${RESULT_PILL[r.sync_result ?? ''] ?? 'tag'}`} style={{ fontSize: 10 }}>
-                        {r.sync_result || r.status}
-                      </span>
-                      {r.sub_changed_at && (
-                        <span style={{ display: 'block', fontSize: 10.5, color: 'var(--warn)', marginTop: 3 }}>
-                          sub-value now {r.sub_changed_to || 'None'}
-                          {r.sub_changed_from ? ` (was ${r.sub_changed_from})` : ''} · {fmt(r.sub_changed_at)}
-                          {r.sub_changed_by ? ` · ${r.sub_changed_by}` : ''}
-                        </span>
-                      )}
-                    </>
+                  {r.tagged_by_name || '—'}
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)' }}>
+                    {fmt(r.tagged_at)}
+                  </span>
+                </td>
+                <td>
+                  {r.confirmed_by_name || '—'}
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)' }}>
+                    {fmt(r.confirmed_at)}
+                  </span>
+                </td>
+                <td>
+                  <span className={`pill ${r.removed_at ? 'off' : RESULT_PILL[r.sync_result ?? ''] ?? 'tag'}`} style={{ fontSize: 10 }}>
+                    {r.removed_at ? 'removed' : (r.sync_result || r.status)}
+                  </span>
+                </td>
+                {/* What happened to the tag after it was reviewed. Empty for a tag
+                    still sitting in Signal Sense exactly as it was synced. */}
+                <td style={{ fontSize: 11.5, lineHeight: 1.5 }}>
+                  {r.removed_at && (
+                    <span style={{ display: 'block', color: 'var(--muted)' }}>
+                      was {r.sync_result || r.status}, removed {fmt(r.removed_at)}
+                      {r.removed_by === 'signal_sense'
+                        ? ' in Signal Sense'
+                        : r.removed_by_name ? ` by ${r.removed_by_name}` : ''}
+                    </span>
+                  )}
+                  {r.sub_changed_at && (
+                    <span style={{ display: 'block', color: 'var(--warn)' }}>
+                      sub-value now {r.sub_changed_to || 'None'}
+                      {r.sub_changed_from ? ` (was ${r.sub_changed_from})` : ''}, {fmt(r.sub_changed_at)}
+                      {r.sub_changed_by ? ` by ${r.sub_changed_by}` : ''}
+                    </span>
+                  )}
+                  {!r.removed_at && !r.sub_changed_at && (
+                    <span style={{ color: 'var(--faint)' }}>—</span>
                   )}
                 </td>
                 <td>
