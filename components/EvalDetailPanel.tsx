@@ -9,6 +9,7 @@ import { useConfig } from '@/hooks/useConfig'
 import { prettyConclusion } from '@/lib/buckets'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
+import { TrendTagsField, type TrendTag, type ExistingTrendTag } from './TrendTagsField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
 
@@ -411,6 +412,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const [finalNote, setFinalNote] = useState('')
   const [finalConclusion, setFinalConclusion] = useState('')
   const [gameAlike, setGameAlike] = useState<GameAlikeGame[]>([])
+  const [trendTags, setTrendTags] = useState<TrendTag[]>([])
+  const [existingTrends, setExistingTrends] = useState<ExistingTrendTag[]>([])
+  const [trendOptions, setTrendOptions] = useState<string[]>([])
+  const [trendSubValues, setTrendSubValues] = useState<{ id: number; name: string }[]>([])
   const [conclusion, setConclusion] = useState('')
   const [batch, setBatch] = useState('')
   const [driveLink, setDriveLink] = useState('')
@@ -520,6 +525,31 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   useEffect(() => { loadGame(currentGameId) }, [currentGameId, loadGame])
 
   useEffect(() => {
+    fetch('/api/trends/options')
+      .then(r => r.ok ? r.json() : { values: [], subValues: [] })
+      .then(d => { setTrendOptions(d.values || []); setTrendSubValues(d.subValues || []) })
+      .catch(() => {})
+  }, [])
+
+  // Load this game's tags whenever the displayed game changes. The `live` guard
+  // keeps a late response for a game we navigated away from from overwriting
+  // the visible state, mirroring `updateManualShots`.
+  useEffect(() => {
+    let live = true
+    setTrendTags([]); setExistingTrends([])
+    fetch(`/api/playtest-tags?gameId=${encodeURIComponent(currentGameId)}`)
+      .then(r => r.ok ? r.json() : { pending: [], existing: [] })
+      .then(d => {
+        if (!live) return
+        setTrendTags((d.pending || []).map((p: { field_value: string; sub_value_id: number | null }) =>
+          ({ field_value: p.field_value, sub_value_id: p.sub_value_id })))
+        setExistingTrends(d.existing || [])
+      })
+      .catch(() => {})
+    return () => { live = false }
+  }, [currentGameId])
+
+  useEffect(() => {
     if (!hasNav) return
     const prefetchIdx = [
       currentIdx === 0 ? gameList.length - 1 : currentIdx - 1,
@@ -626,6 +656,21 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       // the eval PATCH below shows the single "Saved" toast; the refetch picks up
       // the new screenshot URLs from the server.
       if (canEditEval) await screenshotRef.current?.flush()
+      // Trends tags are their own resource (they stage for admin review, they are not
+      // evaluation columns), so they save alongside the eval rather than inside it.
+      if (canEditGameAlike) {
+        const tagRes = await fetch('/api/playtest-tags', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ game_id: ev.game_id, tags: trendTags }),
+        })
+        if (!tagRes.ok) {
+          const err = await tagRes.json().catch(() => ({}))
+          showToast(err.error || 'Failed to save trend tags', true)
+          setSaving(false)
+          return
+        }
+      }
       const body: Record<string, unknown> = { id: ev.id }
       if (canEditEval) {
         // Always send these so an emptied field clears the column (see PATCH handler).
@@ -715,7 +760,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 1500)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSave, needsSave, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots])
+  }, [autoSave, needsSave, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots, trendTags])
 
   const clearField = (f: 'note' | 'conclusion' | 'drive') => {
     if (!canEditEval) return
@@ -1083,6 +1128,18 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               <div className="field">
                 <span className="label">Game Alike</span>
                 <GameAlikeField value={gameAlike} onChange={g => { setGameAlike(g); setDirty(true) }} disabled={!canEditGameAlike} />
+              </div>
+
+              <div className="field">
+                <span className="label">Trends Tags</span>
+                <TrendTagsField
+                  value={trendTags}
+                  existing={existingTrends}
+                  options={trendOptions}
+                  subValues={trendSubValues}
+                  onChange={next => { setTrendTags(next); setDirty(true) }}
+                  disabled={!canEditGameAlike}
+                />
               </div>
 
               <div className="field">
