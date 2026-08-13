@@ -416,6 +416,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const [existingTrends, setExistingTrends] = useState<ExistingTrendTag[]>([])
   const [trendOptions, setTrendOptions] = useState<string[]>([])
   const [trendSubValues, setTrendSubValues] = useState<{ id: number; name: string }[]>([])
+  const [trendOptionsError, setTrendOptionsError] = useState(false)
   const [conclusion, setConclusion] = useState('')
   const [batch, setBatch] = useState('')
   const [driveLink, setDriveLink] = useState('')
@@ -524,12 +525,19 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
   useEffect(() => { loadGame(currentGameId) }, [currentGameId, loadGame])
 
-  useEffect(() => {
+  // Loads the fixed Trends catalog once, and again on demand via the retry
+  // button `TrendTagsField` shows when this fails. A failure must not look
+  // like "no trends exist" — it's surfaced as `trendOptionsError` so the field
+  // can render a distinct, retryable message instead of an empty combobox.
+  const loadTrendOptions = useCallback(() => {
+    setTrendOptionsError(false)
     fetch('/api/trends/options')
-      .then(r => r.ok ? r.json() : { values: [], subValues: [] })
+      .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
       .then(d => { setTrendOptions(d.values || []); setTrendSubValues(d.subValues || []) })
-      .catch(() => {})
+      .catch(() => { setTrendOptionsError(true) })
   }, [])
+
+  useEffect(() => { loadTrendOptions() }, [loadTrendOptions])
 
   // Load this game's tags whenever the displayed game changes. The `live` guard
   // keeps a late response for a game we navigated away from from overwriting
@@ -1139,6 +1147,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   subValues={trendSubValues}
                   onChange={next => { setTrendTags(next); setDirty(true) }}
                   disabled={!canEditGameAlike}
+                  optionsError={trendOptionsError}
+                  onRetryOptions={loadTrendOptions}
                 />
               </div>
 

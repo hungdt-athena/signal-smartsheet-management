@@ -20,12 +20,17 @@ interface Props {
   subValues: { id: number; name: string }[]
   onChange: (next: TrendTag[]) => void
   disabled?: boolean
+  /** True when the Trends catalog failed to load — must read as a load failure,
+   * never as "no trends exist" or "no matches". */
+  optionsError?: boolean
+  /** Re-fetches the Trends catalog. Only meaningful when `optionsError` is true. */
+  onRetryOptions?: () => void
 }
 
 // Trends tagging for one game. Proposals only: nothing here reaches Signal Sense
 // until an admin confirms in Evaluations > Tagging. New Trends values are never
 // created from this app, so the combobox filters a fixed list.
-export function TrendTagsField({ value, existing, options, subValues, onChange, disabled }: Props) {
+export function TrendTagsField({ value, existing, options, subValues, onChange, disabled, optionsError, onRetryOptions }: Props) {
   const tags = value || []
   const [adding, setAdding] = useState(false)
   const [query, setQuery] = useState('')
@@ -100,7 +105,14 @@ export function TrendTagsField({ value, existing, options, subValues, onChange, 
         )
       })}
 
-      {!disabled && (adding ? (
+      {!disabled && optionsError && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="wf-hint">Trends list failed to load — not that this value doesn&apos;t exist</span>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={onRetryOptions}>Retry</button>
+        </div>
+      )}
+
+      {!disabled && !optionsError && (adding ? (
         <div className="wf-gamesearch" style={{ position: 'relative' }}>
           <input
             autoFocus
