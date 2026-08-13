@@ -417,6 +417,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const [trendOptions, setTrendOptions] = useState<string[]>([])
   const [trendSubValues, setTrendSubValues] = useState<{ id: number; name: string }[]>([])
   const [trendOptionsError, setTrendOptionsError] = useState(false)
+  const [trendTagsError, setTrendTagsError] = useState(false)
+  // The game whose tags are actually on screen, set only after a successful
+  // load. save() refuses to PUT while this does not match the displayed game:
+  // the PUT is a destructive replace, so sending the empty initial state would
+  // wipe pending proposals the user never saw.
+  const trendTagsLoadedFor = useRef<string | null>(null)
+  const trendTagsGen = useRef(0)
   const [conclusion, setConclusion] = useState('')
   const [batch, setBatch] = useState('')
   const [driveLink, setDriveLink] = useState('')
@@ -539,23 +546,34 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
   useEffect(() => { loadTrendOptions() }, [loadTrendOptions])
 
-  // Load this game's tags whenever the displayed game changes. The `live` guard
-  // keeps a late response for a game we navigated away from from overwriting
-  // the visible state, mirroring `updateManualShots`.
-  useEffect(() => {
-    let live = true
-    setTrendTags([]); setExistingTrends([])
-    fetch(`/api/playtest-tags?gameId=${encodeURIComponent(currentGameId)}`)
-      .then(r => r.ok ? r.json() : { pending: [], existing: [] })
+  // Load one game's tags. The generation counter keeps a late response for a game
+  // we navigated away from from overwriting the visible state (mirroring
+  // `updateManualShots`) and also covers the retry, which re-runs this outside the
+  // effect. A failure is recorded rather than swallowed: `trendTagsLoadedFor`
+  // stays unset, which blocks the destructive PUT, and `trendTagsError` tells the
+  // user why the field went read-only.
+  const loadTrendTags = useCallback((gameId: string) => {
+    const gen = ++trendTagsGen.current
+    trendTagsLoadedFor.current = null
+    setTrendTags([]); setExistingTrends([]); setTrendTagsError(false)
+    fetch(`/api/playtest-tags?gameId=${encodeURIComponent(gameId)}`)
+      .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
       .then(d => {
-        if (!live) return
+        if (trendTagsGen.current !== gen) return
         setTrendTags((d.pending || []).map((p: { field_value: string; sub_value_id: number | null }) =>
           ({ field_value: p.field_value, sub_value_id: p.sub_value_id })))
         setExistingTrends(d.existing || [])
+        trendTagsLoadedFor.current = gameId
       })
-      .catch(() => {})
-    return () => { live = false }
-  }, [currentGameId])
+      .catch(() => { if (trendTagsGen.current === gen) setTrendTagsError(true) })
+  }, [])
+
+  useEffect(() => {
+    loadTrendTags(currentGameId)
+    // Bump the generation on unmount / game change so an in-flight response is
+    // dropped instead of landing on the next game.
+    return () => { trendTagsGen.current++ }
+  }, [currentGameId, loadTrendTags])
 
   useEffect(() => {
     if (!hasNav) return
@@ -666,7 +684,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       if (canEditEval) await screenshotRef.current?.flush()
       // Trends tags are their own resource (they stage for admin review, they are not
       // evaluation columns), so they save alongside the eval rather than inside it.
-      if (canEditGameAlike) {
+      // Only PUT what we actually loaded: the endpoint replaces the game's whole
+      // pending set, so sending the empty state of a failed or still-in-flight
+      // load would silently delete the evaluator's proposals.
+      if (canEditGameAlike && trendTagsLoadedFor.current === ev.game_id) {
         const tagRes = await fetch('/api/playtest-tags', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -1149,6 +1170,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   disabled={!canEditGameAlike}
                   optionsError={trendOptionsError}
                   onRetryOptions={loadTrendOptions}
+                  loadError={trendTagsError}
+                  onRetryLoad={() => loadTrendTags(currentGameId)}
                 />
               </div>
 

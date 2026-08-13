@@ -1,5 +1,6 @@
 'use client'
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { TrendValuePicker } from './TrendValuePicker'
 
 export interface TrendTag {
   field_value: string
@@ -25,30 +26,29 @@ interface Props {
   optionsError?: boolean
   /** Re-fetches the Trends catalog. Only meaningful when `optionsError` is true. */
   onRetryOptions?: () => void
+  /** True when THIS GAME's tags could not be loaded. The list on screen is then
+   * not the saved list, so the field must say so and stay read-only: saving must
+   * never replace pending proposals with a set the user never saw. */
+  loadError?: boolean
+  /** Re-fetches this game's tags. Only meaningful when `loadError` is true. */
+  onRetryLoad?: () => void
 }
 
 // Trends tagging for one game. Proposals only: nothing here reaches Signal Sense
 // until an admin confirms in Evaluations > Tagging. New Trends values are never
 // created from this app, so the combobox filters a fixed list.
-export function TrendTagsField({ value, existing, options, subValues, onChange, disabled, optionsError, onRetryOptions }: Props) {
+export function TrendTagsField({ value, existing, options, subValues, onChange, disabled, optionsError, onRetryOptions, loadError, onRetryLoad }: Props) {
   const tags = value || []
-  const [adding, setAdding] = useState(false)
-  const [query, setQuery] = useState('')
+  // A failed load means what is on screen is not the saved set, so nothing here
+  // is editable until it succeeds.
+  const ro = disabled || !!loadError
 
   const taken = useMemo(() => new Set(tags.map(t => t.field_value)), [tags])
   const existingByValue = useMemo(
     () => new Map(existing.map(e => [e.field_value, e])), [existing])
 
-  const hits = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (q.length < 1) return []
-    return options.filter(o => o.toLowerCase().includes(q) && !taken.has(o)).slice(0, 12)
-  }, [query, options, taken])
-
   const add = (fieldValue: string) => {
     onChange([...tags, { field_value: fieldValue, sub_value_id: null }])
-    setQuery('')
-    setAdding(false)
   }
   const remove = (i: number) => onChange(tags.filter((_, x) => x !== i))
   const setSub = (i: number, subId: number | null) =>
@@ -56,6 +56,16 @@ export function TrendTagsField({ value, existing, options, subValues, onChange, 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {loadError && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="wf-hint">
+            This game&apos;s tags failed to load — the list below is not what is saved, so it
+            is read-only and saving will leave the existing proposals untouched
+          </span>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={onRetryLoad}>Retry</button>
+        </div>
+      )}
+
       {existing.length > 0 && (
         <div>
           <span style={{ fontSize: 11, color: 'var(--faint)' }}>Already in Signal Sense</span>
@@ -72,7 +82,7 @@ export function TrendTagsField({ value, existing, options, subValues, onChange, 
         </div>
       )}
 
-      {tags.length === 0 && disabled && (
+      {tags.length === 0 && ro && !loadError && (
         <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>
       )}
 
@@ -82,7 +92,7 @@ export function TrendTagsField({ value, existing, options, subValues, onChange, 
           <div key={`${t.field_value}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span className="wf-chip" style={{ margin: 0 }}>
               <span>{t.field_value}</span>
-              {!disabled && (
+              {!ro && (
                 <button type="button" title="Remove tag" onClick={() => remove(i)}>✕</button>
               )}
             </span>
@@ -90,7 +100,7 @@ export function TrendTagsField({ value, existing, options, subValues, onChange, 
               className="input"
               style={{ width: 170, fontSize: 12 }}
               value={t.sub_value_id ?? ''}
-              disabled={disabled}
+              disabled={ro}
               onChange={e => setSub(i, e.target.value ? Number(e.target.value) : null)}
             >
               <option value="">-- None --</option>
@@ -105,45 +115,18 @@ export function TrendTagsField({ value, existing, options, subValues, onChange, 
         )
       })}
 
-      {!disabled && optionsError && (
+      {!ro && optionsError && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="wf-hint">Trends list failed to load — not that this value doesn&apos;t exist</span>
           <button type="button" className="btn btn-sm btn-ghost" onClick={onRetryOptions}>Retry</button>
         </div>
       )}
 
-      {!disabled && !optionsError && (adding ? (
-        <div className="wf-gamesearch" style={{ position: 'relative' }}>
-          <input
-            autoFocus
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Escape') { setAdding(false); setQuery('') }
-              if (e.key === 'Enter' && hits.length === 1) add(hits[0])
-            }}
-            placeholder="Type to search Trends…"
-            style={{ width: '100%' }}
-          />
-          {query.trim() && hits.length === 0 && (
-            <span className="wf-hint">no matching Trends value — ask an admin to add it in Signal Sense</span>
-          )}
-          {hits.length > 0 && (
-            <ul className="wf-hits" style={{ position: 'absolute', zIndex: 20, width: '100%' }}>
-              {hits.map(h => (
-                <li key={h}>
-                  <button type="button" onClick={() => add(h)}>
-                    <span className="wf-hit-title">{h}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+      {!ro && !optionsError && (
+        <div style={{ alignSelf: 'flex-start', minWidth: 220 }}>
+          <TrendValuePicker options={options} exclude={taken} onPick={add} label="+ Add trend" />
         </div>
-      ) : (
-        <button type="button" className="btn btn-sm btn-ghost" style={{ alignSelf: 'flex-start' }}
-          onClick={() => setAdding(true)}>+ Add trend</button>
-      ))}
+      )}
     </div>
   )
 }
