@@ -4,8 +4,15 @@ import { useSession } from 'next-auth/react'
 import EvalDetailPanel, { type EvalListItem } from './EvalDetailPanel'
 import { TrendValuePicker } from './TrendValuePicker'
 
+/** One pending proposal, carrying its game with it — the queue is a flat list of
+ *  tags, grouped only for display. Mirrors QueueTag in lib/playtest-tags-queue. */
 interface PendingRow {
   id: number
+  game_id: string
+  title: string
+  publisher_name: string | null
+  icon_url: string | null
+  initial_evaluator: string | null
   field_value: string
   sub_value_id: number | null
   sub_value_name: string | null
@@ -14,15 +21,6 @@ interface PendingRow {
   their_sub_value_id: number | null
   their_sub_value_name: string | null
   conflict: boolean
-}
-
-interface PendingGame {
-  game_id: string
-  title: string
-  publisher_name: string | null
-  icon_url: string | null
-  initial_evaluator: string | null
-  tags: PendingRow[]
 }
 
 interface HistoryRow {
@@ -137,11 +135,40 @@ export function TaggingTab() {
   )
 }
 
+// A checkbox that can also sit half-ticked, for "some of this group is picked".
+// `indeterminate` is a DOM property with no React attribute, so it goes on via a
+// ref rather than a prop.
+function TriCheckbox({ checked, indeterminate, onChange, title, disabled }: {
+  checked: boolean; indeterminate: boolean; onChange: () => void
+  title: string; disabled?: boolean
+}) {
+  return (
+    <input
+      type="checkbox"
+      ref={el => { if (el) el.indeterminate = !checked && indeterminate }}
+      checked={checked}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      onChange={onChange}
+      style={{ cursor: disabled ? 'default' : 'pointer' }}
+    />
+  )
+}
+
 function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
-  const [games, setGames] = useState<PendingGame[]>([])
+  // One row per proposed tag. Every action edits this list in place — nothing in
+  // this view refetches the queue on a change, so the admin keeps their scroll
+  // position, their selection and their place in a long list of games.
+  const [rows, setRows] = useState<PendingRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState<string | null>(null)
+  /** Ticked for review: the unit that Confirm and Reject act on. */
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  /** Conflict rows whose playtest sub-value should replace Signal Sense's. */
   const [overwrite, setOverwrite] = useState<Set<number>>(new Set())
+  const [working, setWorking] = useState(false)
+  /** Rows mid-flight on their own, so only they show as busy. */
+  const [rowBusy, setRowBusy] = useState<Set<number>>(new Set())
   const [msg, setMsg] = useState<string | null>(null)
   // Catalog for the inline value/sub-value editors. A failed load leaves the
   // rows readable but not editable, rather than offering an empty picker.
@@ -149,14 +176,38 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
   const [subValues, setSubValues] = useState<{ id: number; name: string }[]>([])
   const [optionsError, setOptionsError] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
+  /** The whole queue's size, which the loaded rows are counted against. */
+  const [total, setTotal] = useState(0)
+  const sentinelRef = useRef<HTMLTableRowElement>(null)
+  const limit = 50
 
-  const load = useCallback(async () => {
+  // One page at a time, appended — same shape as History. `append` distinguishes
+  // "next page" from a fresh read, which replaces what is on screen. The offset
+  // is how many rows are already held, so rows leaving the queue mid-scroll
+  // cannot make the next page skip anything.
+  const load = useCallback(async (offset: number, append: boolean) => {
     setLoading(true)
     try {
-      const r = await fetch('/api/playtest-tags/pending')
-      const d = r.ok ? await r.json() : { games: [] }
-      setGames(d.games || [])
-    } catch { setGames([]) }
+      const r = await fetch(`/api/playtest-tags/pending?offset=${offset}&limit=${limit}`)
+      const d = r.ok ? await r.json() : { tags: [], total: 0 }
+      const next = (d.tags || []) as PendingRow[]
+      if (append && next.length === 0) {
+        // An empty page while total still claims more would leave the observer
+        // asking forever. Trust what actually arrived and stop.
+        setRows(prev => { setTotal(prev.length); return prev })
+      } else {
+        // Appending is keyed on id: a row already held must not appear twice if
+        // the queue shifted between the two reads.
+        setRows(prev => {
+          if (!append) return next
+          const held = new Set(prev.map(r2 => r2.id))
+          return [...prev, ...next.filter(r2 => !held.has(r2.id))]
+        })
+        setTotal(d.total || 0)
+      }
+    } catch {
+      if (!append) { setRows([]); setTotal(0) }
+    }
     setLoading(false)
   }, [])
 
@@ -168,12 +219,34 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
       .catch(() => { setOptionsError(true) })
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(0, false) }, [load])
   useEffect(() => { loadOptions() }, [loadOptions])
 
-  // Correct one pending proposal in place. Reloads on success so the conflict
-  // flag and the Signal Sense comparison are recomputed server-side rather than
-  // guessed here.
+  // Rows that left the queue: drop them and forget every flag that referenced
+  // them, so a stale id cannot leak into a later confirm. `total` follows, or
+  // "12 of 40" would keep counting rows that are no longer pending.
+  const dropRows = (ids: number[]) => {
+    const gone = new Set(ids)
+    setRows(prev => prev.filter(r => !gone.has(r.id)))
+    setTotal(t => Math.max(0, t - ids.length))
+    const without = (s: Set<number>) => {
+      const next = new Set(s)
+      for (const id of ids) next.delete(id)
+      return next
+    }
+    setSelected(without)
+    setOverwrite(without)
+  }
+
+  const markBusy = (ids: number[], busy: boolean) => setRowBusy(prev => {
+    const next = new Set(prev)
+    for (const id of ids) { if (busy) next.add(id); else next.delete(id) }
+    return next
+  })
+
+  // Correct one pending proposal in place. The response carries the row as the
+  // queue would read it now, so the conflict flag and the Signal Sense
+  // comparison come from the server rather than being guessed here.
   const patchTag = async (id: number, patch: { field_value?: string; sub_value_id?: number | null }) => {
     setEditing(id)
     try {
@@ -185,7 +258,21 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
       const d = await r.json().catch(() => ({}))
       if (!r.ok) { setMsg(d.error || 'Could not update that tag'); return }
       setMsg(null)
-      await load()
+      const tag = d.tag as PendingRow | undefined
+      if (tag && typeof tag.conflict === 'boolean') {
+        setRows(prev => prev.map(row => (row.id === id ? { ...row, ...tag } : row)))
+        // The edit may have resolved the conflict it was ticked for; a tick on a
+        // row that is no longer in conflict does nothing, so clear it.
+        if (!tag.conflict) setOverwrite(prev => {
+          if (!prev.has(id)) return prev
+          const next = new Set(prev); next.delete(id); return next
+        })
+      } else {
+        // The row was resolved underneath the edit and no longer reads back as
+        // pending. Drop it rather than leaving a row that is not in the queue.
+        dropRows([id])
+        setMsg('That tag was reviewed elsewhere — removed it from the queue.')
+      }
     } catch { setMsg('Network error') }
     finally { setEditing(null) }
   }
@@ -196,84 +283,141 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
     return next
   })
 
-  // Returns whether the confirm succeeded, so batch callers can report the
-  // truth instead of assuming every game in a batch went through.
-  const confirmGame = async (g: PendingGame): Promise<boolean> => {
-    setBusy(g.game_id)
-    let ok = false
-    try {
-      const ids = g.tags.map(t => t.id).filter(id => overwrite.has(id))
-      const r = await fetch('/api/playtest-tags/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_id: g.game_id, overwrite: ids }),
-      })
-      const d = await r.json()
-      if (!r.ok) setMsg(d.error || 'Confirm failed')
-      else {
-        ok = true
-        const counts = (d.results || []).reduce((acc: Record<string, number>, x: { result: string }) => {
-          acc[x.result] = (acc[x.result] || 0) + 1
-          return acc
-        }, {})
+  const toggleRow = (id: number) => setSelected(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+
+  // Toggle a whole group: all of it selected means untick, anything else means
+  // tick the lot — the same rule for the header and for one game's cell.
+  const toggleMany = (ids: number[]) => setSelected(prev => {
+    const next = new Set(prev)
+    if (ids.every(id => next.has(id))) for (const id of ids) next.delete(id)
+    else for (const id of ids) next.add(id)
+    return next
+  })
+
+  // Confirm the ticked tags. One request per game because a confirm is atomic
+  // per game server-side; sequential so a failure on one game is reported
+  // against that game rather than racing the others' messages.
+  const confirmSelected = async () => {
+    const chosen = rows.filter(r => selected.has(r.id))
+    if (chosen.length === 0) return
+    const byGame = new Map<string, PendingRow[]>()
+    for (const r of chosen) {
+      const g = byGame.get(r.game_id)
+      if (g) g.push(r); else byGame.set(r.game_id, [r])
+    }
+
+    setWorking(true)
+    markBusy(chosen.map(r => r.id), true)
+    const counts: Record<string, number> = {}
+    const skipped: string[] = []
+    const done: number[] = []
+    const failed: string[] = []
+
+    for (const [gameId, gameRows] of Array.from(byGame)) {
+      const ids = gameRows.map(r => r.id)
+      try {
+        const res = await fetch('/api/playtest-tags/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ game_id: gameId, ids, overwrite: ids.filter(id => overwrite.has(id)) }),
+        })
+        const d = await res.json().catch(() => ({}))
+        if (!res.ok) { failed.push(`${gameRows[0].title}: ${d.error || 'confirm failed'}`); continue }
+        for (const x of (d.results || []) as { result: string }[]) {
+          counts[x.result] = (counts[x.result] || 0) + 1
+        }
         // `skipped` names the tags that did not reach Signal Sense (retired
-        // value, or the row moved underneath us) so a summary line like
-        // "1 inactive" is actionable rather than cryptic.
-        const skipped = (d.skipped || []) as { field_value: string; reason: string }[]
-        const detail = skipped.length
-          ? ` — not written: ${skipped.map(s => `${s.field_value} (${s.reason})`).join('; ')}`
-          : ''
-        setMsg(`${g.title}: ${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ')}${detail}`)
-      }
-      // Clear any overwrite selections for this game's tags now that they're resolved,
-      // so a stale checked id can't leak into a later confirm for a different game.
-      setOverwrite(prev => {
-        const next = new Set(prev)
-        for (const t of g.tags) next.delete(t.id)
-        return next
-      })
-      await load()
-    } catch { setMsg('Network error') }
-    setBusy(null)
-    return ok
+        // value, or the row moved underneath us) so the summary is actionable
+        // rather than a count of results nobody asked for.
+        for (const s of (d.skipped || []) as { field_value: string; reason: string }[]) {
+          skipped.push(`${s.field_value} (${s.reason})`)
+        }
+        // Every requested id is resolved now, whether it was written or not:
+        // ids missing from `results` were confirmed or rejected elsewhere.
+        done.push(...ids)
+      } catch { failed.push(`${gameRows[0].title}: network error`) }
+    }
+
+    markBusy(chosen.map(r => r.id), false)
+    dropRows(done)
+    setWorking(false)
+
+    const parts: string[] = []
+    if (done.length) {
+      const breakdown = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ')
+      parts.push(`Confirmed ${done.length} tag${done.length === 1 ? '' : 's'}${breakdown ? ` — ${breakdown}` : ''}`)
+    }
+    if (skipped.length) parts.push(`not written: ${skipped.join('; ')}`)
+    if (failed.length) parts.push(`failed — ${failed.join('; ')}`)
+    setMsg(parts.join(' · ') || 'Nothing to confirm')
   }
 
-  const rejectTag = async (id: number) => {
+  const rejectTags = async (ids: number[]) => {
+    if (ids.length === 0) return
+    markBusy(ids, true)
     try {
       const r = await fetch('/api/playtest-tags/reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: [id] }),
+        body: JSON.stringify({ ids }),
       })
-      if (!r.ok) { setMsg('Reject failed'); return }
-      await load()
+      if (!r.ok) { setMsg('Reject failed'); markBusy(ids, false); return }
+      dropRows(ids)
+      setMsg(`Rejected ${ids.length} tag${ids.length === 1 ? '' : 's'} — nothing was written to Signal Sense.`)
     } catch { setMsg('Network error') }
+    markBusy(ids, false)
   }
 
-  const confirmClean = async () => {
-    const clean = games.filter(g => !g.tags.some(t => t.conflict))
-    // Sequential on purpose: each confirmGame() call sets/clears the shared
-    // `busy`/`msg` state and reloads, so per-game msg text would otherwise be
-    // clobbered and only the last game's summary would remain visible.
-    // confirmGame() swallows its own errors (network/HTTP) rather than
-    // throwing, so a mid-loop failure still lets the remaining games run;
-    // track each outcome so the final message reflects reality rather than
-    // asserting success regardless of what actually happened.
-    let succeeded = 0
-    for (const g of clean) {
-      if (await confirmGame(g)) succeeded++
-    }
-    if (clean.length > 1) {
-      setMsg(succeeded === clean.length
-        ? `Confirmed ${clean.length} games without conflicts`
-        : `Confirmed ${succeeded} of ${clean.length} games (${clean.length - succeeded} failed)`)
-    }
-  }
+  const gameCount = useMemo(() => new Set(rows.map(r => r.game_id)).size, [rows])
 
-  if (loading) return <div className="card"><p className="empty">Loading…</p></div>
-  if (games.length === 0) {
+  // One entry per game, in the order the rows arrived, so the panel's prev/next
+  // walks the games the admin is looking at.
+  const gameList = useMemo<EvalListItem[]>(() => {
+    const seen = new Set<string>()
+    const list: EvalListItem[] = []
+    for (const r of rows) {
+      if (seen.has(r.game_id)) continue
+      seen.add(r.game_id)
+      list.push({ game_id: r.game_id, title: r.title })
+    }
+    return list
+  }, [rows])
+
+  // Values already proposed for a game are hidden from that game's pickers: the
+  // pending set is unique on (game, value), so renaming onto one would 409.
+  const usedByGame = useMemo(() => {
+    const m = new Map<string, Set<string>>()
+    for (const r of rows) {
+      const s = m.get(r.game_id)
+      if (s) s.add(r.field_value); else m.set(r.game_id, new Set([r.field_value]))
+    }
+    return m
+  }, [rows])
+
+  const hasMore = rows.length < total
+
+  // Load the next page when the sentinel row scrolls into the list's viewport.
+  // `root` is the scrolling card, not the window — the observer would never fire
+  // against the window since the list scrolls inside its own box.
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore || loading || working) return
+    const io = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting) void load(rows.length, true)
+    }, { root: el.closest('.tag-scroll'), rootMargin: '200px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, loading, working, rows.length, load])
+
+  if (loading && rows.length === 0) return <div className="card"><p className="empty">Loading…</p></div>
+  if (rows.length === 0) {
     return (
       <div className="card">
+        {msg && <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
         <p className="empty">
           Nothing waiting for review. Trends tagged during playtest show up here.
         </p>
@@ -281,149 +425,191 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
     )
   }
 
-  const cleanCount = games.filter(g => !g.tags.some(t => t.conflict)).length
-  const tagCount = games.reduce((n, g) => n + g.tags.length, 0)
+  const allIds = rows.map(r => r.id)
+  const selectedRows = rows.filter(r => selected.has(r.id))
+  const cleanIds = rows.filter(r => !r.conflict).map(r => r.id)
+  // Ticked conflicts left unticked for overwrite: confirming rejects them, so
+  // say so before the click rather than in the result summary.
+  const keptCount = selectedRows.filter(r => r.conflict && !overwrite.has(r.id)).length
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          {tagCount} tag{tagCount === 1 ? '' : 's'} across {games.length} game{games.length === 1 ? '' : 's'}
-        </span>
-        {cleanCount > 1 && (
-          <button className="btn btn-sm" onClick={confirmClean}>
-            Confirm {cleanCount} games without conflicts
-          </button>
-        )}
-      </div>
-
-      {optionsError && (
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' }}>
-          <span style={{ fontSize: 12.5, color: 'var(--warn)' }}>
-            The trends list didn&apos;t load, so tags can be confirmed or rejected but not edited.
+    <div className="card">
+      <div className="card-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <span className="card-label">
+          Pending
+          <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>
+            {hasMore ? `${rows.length} of ${total}` : `${total} tag${total === 1 ? '' : 's'}`}
+            {' '}· {gameCount} game{gameCount === 1 ? '' : 's'}{hasMore ? ' loaded' : ''}
           </span>
-          <button className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={loadOptions}>Try again</button>
-        </div>
-      )}
-
-      {msg && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
-
-      {games.map(g => {
-        const conflicts = g.tags.filter(t => t.conflict).length
-        return (
-          <div key={g.game_id} className="card">
-            <div className="card-head" style={{ alignItems: 'center', marginBottom: 10 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                {g.icon_url && (
-                  <img src={g.icon_url} alt="" width={26} height={26}
-                    style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
-                )}
-                <span style={{ fontSize: 14.5, fontWeight: 650, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  <GameButton title={g.title} gameId={g.game_id} onOpen={onOpenGame}
-                    list={games.map(x => ({ game_id: x.game_id, title: x.title }))} />
-                </span>
-                {conflicts > 0 && (
-                  <span className="pill off" style={{ fontSize: 10, flexShrink: 0 }}>
-                    {conflicts} conflict{conflicts === 1 ? '' : 's'}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {selected.size === 0 ? (
+            <>
+              <span style={{ fontSize: 12, color: 'var(--faint)' }}>Tick the tags to review</span>
+              {cleanIds.length > 0 && cleanIds.length < rows.length && (
+                <button className="btn btn-sm btn-ghost" onClick={() => setSelected(new Set(cleanIds))}>
+                  Select {cleanIds.length} without conflicts
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                {selected.size} selected
+                {keptCount > 0 && (
+                  <span style={{ color: 'var(--warn)' }}>
+                    {' '}· {keptCount} conflict{keptCount === 1 ? '' : 's'} will be rejected unless ticked to overwrite
                   </span>
                 )}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--faint)', whiteSpace: 'nowrap' }}>
-                {g.publisher_name || '—'} · {g.initial_evaluator || 'unassigned'}
-              </span>
-            </div>
-
-            <div className="tbl-wrap">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Trend</th>
-                    <th style={{ width: 180 }}>Sub-value</th>
-                    <th style={{ width: 190 }}>Proposed by</th>
-                    <th>In Signal Sense</th>
-                    <th style={{ width: 44 }} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {g.tags.map(t => (
-                    <tr key={t.id}>
-                      <td style={{ minWidth: 200 }}>
-                        {optionsError ? (
-                          <span className="num">{t.field_value}</span>
-                        ) : (
-                          <TrendValuePicker
-                            options={options}
-                            exclude={new Set(g.tags.map(x => x.field_value))}
-                            label={t.field_value}
-                            title="Change the trend value"
-                            triggerClassName="input"
-                            triggerStyle={{ fontSize: 12.5, padding: '6px 9px' }}
-                            disabled={editing === t.id || busy === g.game_id}
-                            onPick={v => patchTag(t.id, { field_value: v })}
-                          />
-                        )}
-                      </td>
-                      <td>
-                        {optionsError ? (
-                          <span style={{ color: 'var(--faint)' }}>{t.sub_value_name || 'None'}</span>
-                        ) : (
-                          <select
-                            className="input"
-                            style={{ fontSize: 12.5, padding: '6px 9px' }}
-                            value={t.sub_value_id ?? ''}
-                            disabled={editing === t.id || busy === g.game_id}
-                            onChange={e => patchTag(t.id, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
-                          >
-                            <option value="">None</option>
-                            {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                          </select>
-                        )}
-                      </td>
-                      <td style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        {t.tagged_by_name || 'unknown'}
-                        <span style={{ color: 'var(--faint)' }}> · {fmt(t.tagged_at)}</span>
-                      </td>
-                      <td>
-                        {t.conflict ? (
-                          <label style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 6, fontSize: 11.5, color: 'var(--warn)', cursor: 'pointer' }}>
-                            <input type="checkbox" checked={overwrite.has(t.id)} onChange={() => toggleOverwrite(t.id)}
-                              style={{ marginTop: 2 }} />
-                            <span>
-                              Has <strong>{t.their_sub_value_name}</strong> — tick to overwrite,
-                              otherwise this tag is rejected
-                            </span>
-                          </label>
-                        ) : t.their_sub_value_id !== null || t.their_sub_value_name ? (
-                          <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>
-                            already tagged{t.their_sub_value_name ? ` · ${t.their_sub_value_name}` : ''}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>new</span>
-                        )}
-                      </td>
-                      <td>
-                        <button className="btn btn-sm btn-ghost" title="Reject this tag"
-                          onClick={() => rejectTag(t.id)}
-                          style={{ color: 'var(--faint)' }}>✕</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
-              <button className="btn btn-primary btn-sm" disabled={busy === g.game_id} onClick={() => confirmGame(g)}>
-                {busy === g.game_id ? 'Confirming…' : 'Confirm game'}
+              <button className="btn btn-primary btn-sm" disabled={working}
+                onClick={confirmSelected}>
+                {working ? 'Confirming…' : `Confirm ${selected.size} tag${selected.size === 1 ? '' : 's'}`}
               </button>
-              <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>
-                Writes {g.tags.length} tag{g.tags.length === 1 ? '' : 's'} into Signal Sense
-                {conflicts > 0 && ` · ${conflicts} conflict${conflicts === 1 ? '' : 's'} rejected unless ticked`}
-              </span>
-            </div>
-          </div>
-        )
-      })}
+              <button className="btn btn-sm" disabled={working}
+                title="Discard these proposals without writing anything to Signal Sense"
+                onClick={() => rejectTags(Array.from(selected))}>
+                Reject
+              </button>
+              <button className="btn btn-sm btn-ghost" disabled={working}
+                onClick={() => setSelected(new Set())}>Clear</button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {optionsError && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span style={{ fontSize: 12.5, color: 'var(--warn)' }}>
+            The trends list didn&apos;t load, so tags can be confirmed or rejected but not edited.
+          </span>
+          <button className="btn btn-sm" onClick={loadOptions}>Try again</button>
+        </div>
+      )}
+
+      {msg && <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
+
+      <div className="tbl-wrap tag-scroll">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th style={{ width: 34 }}>
+                <TriCheckbox
+                  checked={selected.size === rows.length}
+                  indeterminate={selected.size > 0}
+                  onChange={() => toggleMany(allIds)}
+                  title="Select all loaded tags"
+                  disabled={working}
+                />
+              </th>
+              <th style={{ width: '30%' }}>Game</th>
+              <th style={{ width: '24%' }}>Trend</th>
+              <th style={{ width: '26%' }}>Sub-value</th>
+              <th style={{ width: '20%' }}>Proposed by</th>
+              <th style={{ width: 52 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(t => (
+              <tr key={t.id} style={rowBusy.has(t.id) ? { opacity: 0.5 } : undefined}>
+                <td>
+                  <input type="checkbox" checked={selected.has(t.id)}
+                    disabled={working || rowBusy.has(t.id)}
+                    aria-label={`Select ${t.field_value} on ${t.title}`}
+                    onChange={() => toggleRow(t.id)}
+                    style={{ cursor: 'pointer' }} />
+                </td>
+                <td className="cell-name">
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    {t.icon_url && (
+                      <img src={t.icon_url} alt="" width={24} height={24}
+                        style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
+                    )}
+                    <span style={{ minWidth: 0 }}>
+                      <GameButton title={t.title} gameId={t.game_id} onOpen={onOpenGame} list={gameList} />
+                      <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--faint)' }}>
+                        {t.publisher_name || '—'} · {t.initial_evaluator || 'unassigned'}
+                      </span>
+                    </span>
+                  </span>
+                </td>
+                <td>
+                  {optionsError ? (
+                    <span className="num">{t.field_value}</span>
+                  ) : (
+                    <TrendValuePicker
+                      options={options}
+                      exclude={usedByGame.get(t.game_id) ?? new Set()}
+                      label={t.field_value}
+                      title="Change the trend value"
+                      triggerClassName="input"
+                      triggerStyle={{ fontSize: 12.5, padding: '6px 9px', width: '100%' }}
+                      disabled={editing === t.id || working || rowBusy.has(t.id)}
+                      onPick={v => patchTag(t.id, { field_value: v })}
+                    />
+                  )}
+                </td>
+                <td>
+                  {optionsError ? (
+                    <span style={{ color: 'var(--faint)' }}>{t.sub_value_name || 'None'}</span>
+                  ) : (
+                    <select
+                      className="input"
+                      style={{ fontSize: 12.5, padding: '6px 9px', width: '100%' }}
+                      value={t.sub_value_id ?? ''}
+                      disabled={editing === t.id || working || rowBusy.has(t.id)}
+                      onChange={e => patchTag(t.id, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
+                    >
+                      <option value="">None</option>
+                      {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  )}
+                  {/* A conflict changes what Confirm does to this row, so it
+                      belongs on the row rather than in a column of its own:
+                      Signal Sense's sub-value stands unless this is ticked. */}
+                  {t.conflict && (
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 5, fontSize: 11, color: 'var(--warn)', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={overwrite.has(t.id)}
+                        disabled={working || rowBusy.has(t.id)}
+                        aria-label={`Overwrite ${t.their_sub_value_name} on ${t.field_value}`}
+                        onChange={() => toggleOverwrite(t.id)}
+                        style={{ marginTop: 1 }} />
+                      <span>
+                        Signal Sense has <strong>{t.their_sub_value_name}</strong> — tick to overwrite,
+                        otherwise this tag is rejected
+                      </span>
+                    </label>
+                  )}
+                </td>
+                <td style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {t.tagged_by_name || 'unknown'}
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)' }}>
+                    {fmt(t.tagged_at)}
+                  </span>
+                </td>
+                <td>
+                  <button className="btn btn-sm btn-ghost" title="Reject this tag"
+                    disabled={working || rowBusy.has(t.id)}
+                    onClick={() => rejectTags([t.id])}
+                    style={{ color: 'var(--faint)' }}>✕</button>
+                </td>
+              </tr>
+            ))}
+            {/* Watched by the observer above: crossing into view loads the next
+                page. Kept inside the table so it scrolls with the rows. */}
+            {(hasMore || loading) && (
+              <tr ref={sentinelRef}>
+                <td colSpan={6} className="tag-sentinel">
+                  {loading ? 'Loading…' : `${rows.length} of ${total} — scroll for more`}
+                </td>
+              </tr>
+            )}
+            {!hasMore && !loading && rows.length > 0 && (
+              <tr><td colSpan={6} className="tag-sentinel">All {total} shown</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

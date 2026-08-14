@@ -124,6 +124,41 @@ describe('POST /api/playtest-tags/confirm', () => {
     expect(calls.filter(c => /UPDATE custom_field_values/.test(c.text))).toHaveLength(1)
   })
 
+  // The queue confirms ticked tags, not whole games, so the pending read must be
+  // narrowed to those ids -- a run that ignored `ids` would confirm a game's
+  // other proposals behind the admin's back.
+  it('narrows the pending read to the ids the admin ticked', async () => {
+    routeSql([
+      { match: /SELECT id, field_value, sub_value_id\s+FROM playtest_tags/,
+        rows: [{ id: 1, field_value: 'New Trend', sub_value_id: null }] },
+      { match: /FROM custom_field_values/, rows: [] },
+      activeDefs('New Trend'),
+      insertWrote(),
+    ])
+    const body = await (await CONFIRM(req('/api/playtest-tags/confirm', { game_id: 'g1', ids: [1] }))).json()
+    expect(body.results).toEqual([{ id: 1, result: 'inserted' }])
+    // The filter is a nested fragment, so it reaches the client as its own
+    // tagged template rather than as text inside the SELECT.
+    const filter = calls.find(c => /AND id = ANY\(/.test(c.text))
+    expect(filter?.binds).toEqual([[1]])
+  })
+
+  it('reads the whole pending set when no ids are given', async () => {
+    routeSql([
+      { match: /SELECT id, field_value, sub_value_id\s+FROM playtest_tags/, rows: [] },
+    ])
+    await CONFIRM(req('/api/playtest-tags/confirm', { game_id: 'g1' }))
+    expect(calls.some(c => /AND id = ANY\(/.test(c.text))).toBe(false)
+  })
+
+  // An empty selection means "nothing", which must not fall through to "all".
+  it('refuses an empty ids array instead of confirming everything', async () => {
+    routeSql([])
+    const r = await CONFIRM(req('/api/playtest-tags/confirm', { game_id: 'g1', ids: [] }))
+    expect(r.status).toBe(400)
+    expect(calls.some(c => /FROM playtest_tags/.test(c.text))).toBe(false)
+  })
+
   it('stamps confirmed_by and the per-row status', async () => {
     routeSql([
       { match: /FROM playtest_tags/, rows: [{ id: 1, field_value: 'New Trend', sub_value_id: null }] },

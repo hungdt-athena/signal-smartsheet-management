@@ -11,20 +11,29 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-// POST /api/playtest-tags/confirm — sync one game's pending Trends tags into
-// Signal Sense. Runs in a transaction so a failure leaves every tag of the game
+// POST /api/playtest-tags/confirm — sync pending Trends tags of one game into
+// Signal Sense. Runs in a transaction so a failure leaves every tag it touched
 // pending rather than half-applied. `overwrite` carries the conflict ids whose
 // playtest sub-value should replace Signal Sense's.
+//
+// `ids` narrows the run to the tags the admin ticked. Omitting it confirms every
+// pending tag of the game, which is what the earlier per-game button did.
 export async function POST(req: NextRequest) {
   const guard = await requireManager()
   if (guard) return guard
 
-  let body: { game_id?: string; overwrite?: number[] }
+  let body: { game_id?: string; overwrite?: number[]; ids?: number[] }
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
 
   const gameId = (body.game_id || '').trim()
   if (!gameId) return NextResponse.json({ error: 'game_id required' }, { status: 400 })
   const overwrite = new Set((body.overwrite || []).filter(n => Number.isInteger(n)))
+  // An `ids` array that survives the filter empty asked for nothing, which is
+  // not the same as asking for everything — refuse rather than confirm the lot.
+  const only = body.ids === undefined ? null : body.ids.filter(n => Number.isInteger(n))
+  if (only !== null && only.length === 0) {
+    return NextResponse.json({ error: 'ids was empty' }, { status: 400 })
+  }
 
   const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
   const admin = session?.user?.email || 'skip-auth@local'
@@ -46,6 +55,7 @@ export async function POST(req: NextRequest) {
       SELECT id, field_value, sub_value_id
       FROM playtest_tags
       WHERE game_id = ${gameId} AND status = 'pending'
+        ${only === null ? tx`` : tx`AND id = ANY(${only})`}
       ORDER BY id
     ` as unknown as PendingTag[]
     if (pending.length === 0) return

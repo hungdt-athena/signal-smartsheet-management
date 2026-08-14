@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { TRENDS_FIELD } from '@/lib/playtest-tags'
+import { fetchQueue } from '@/lib/playtest-tags-queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,5 +116,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'That tag was already confirmed or rejected' }, { status: 409 })
   }
 
-  return NextResponse.json({ ok: true, tag: updated[0] })
+  // Answer with the row as the queue would read it now — conflict flag and
+  // Signal Sense comparison recomputed server-side — so the table can redraw
+  // this one row instead of refetching the whole queue. The raw row is the
+  // fallback if the read-back finds nothing, which would mean the row was
+  // resolved in the moment between the two statements.
+  const [fresh] = await fetchQueue({ ids: [id] })
+  return NextResponse.json({ ok: true, tag: fresh ?? updated[0] })
 }

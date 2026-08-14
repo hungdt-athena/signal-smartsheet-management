@@ -84,6 +84,28 @@ describe('PATCH /api/playtest-tags/[id]', () => {
     expect(upd.binds).toEqual(expect.arrayContaining(['Balatro', 2, 7]))
   })
 
+  // The review table redraws the edited row from this response instead of
+  // refetching the queue, so it has to carry the recomputed conflict flag rather
+  // than just the three columns the UPDATE returned.
+  it('answers with the row as the queue reads it, conflict included', async () => {
+    routeSql([theRow, activeSub, updated, {
+      match: /FROM playtest_tags pt/,
+      rows: [{
+        id: 7, game_id: 'g1', title: 'Balatro Clone', publisher_name: 'Pub',
+        icon_url: null, initial_evaluator: 'Mitt', field_value: 'Balatro',
+        sub_value_id: 2, sub_value_name: 'Deckbuilder', tagged_by_name: 'Mitt',
+        tagged_at: '2026-08-13', their_exists: true, their_sub_value_id: 5,
+        their_sub_value_name: 'Roguelike',
+      }],
+    }])
+    const d = await (await PATCH(patchReq({ sub_value_id: 2 }), params)).json()
+    expect(d.tag.conflict).toBe(true)
+    expect(d.tag.their_sub_value_name).toBe('Roguelike')
+    expect(d.tag.title).toBe('Balatro Clone')
+    // The flag is derived, never a column.
+    expect(d.tag.their_exists).toBeUndefined()
+  })
+
   it('clears the sub-value when given null', async () => {
     routeSql([
       { match: /SELECT id, game_id, field_value, sub_value_id\s+FROM playtest_tags/,
