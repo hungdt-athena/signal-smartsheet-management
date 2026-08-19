@@ -72,7 +72,9 @@ describe('Tagging > Pending', () => {
 
     await waitFor(() => expect(posts).toHaveLength(1))
     expect(posts[0].url).toBe('/api/playtest-tags/confirm')
-    expect(posts[0].body).toEqual({ game_id: 'g1', ids: [2], overwrite: [] })
+    // No note was typed, so the map is empty rather than carrying blank strings
+    // the routes would have to reject.
+    expect(posts[0].body).toEqual({ game_id: 'g1', ids: [2], overwrite: [], notes: {} })
 
     // The row leaves the table without the queue being read again — the point of
     // the rewrite is that reviewing a tag does not reload the list.
@@ -131,6 +133,25 @@ describe('Tagging > Pending', () => {
 
   // jsdom has no IntersectionObserver: stand one in that fires as soon as the
   // sentinel is observed, which is what scrolling it into view does.
+  // The note explains a decision the evaluator did not make, so it has to ride
+  // along with the request that makes it and only for the row it was typed on.
+  it('carries the per-row note along with the confirm that resolves it', async () => {
+    stubFetch({ ok: true, results: [{ id: 1, result: 'inserted' }], skipped: [] })
+    render(<TaggingTab />)
+    await waitFor(() => expect(queueRows()).toHaveLength(3))
+
+    fireEvent.change(
+      screen.getByLabelText('Note to the evaluator about Balatro on Balatro Clone'),
+      { target: { value: '  core loop is merge  ' } },
+    )
+    fireEvent.click(screen.getByLabelText('Select Balatro on Balatro Clone'))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm 1 tag' }))
+
+    await waitFor(() => expect(posts).toHaveLength(1))
+    // Trimmed, keyed by row, and carrying nothing for the rows left blank.
+    expect(posts[0].body.notes).toEqual({ 1: 'core loop is merge' })
+  })
+
   it('appends the next page when the sentinel comes into view', async () => {
     const reads: string[] = []
     const page2 = [tag({ id: 4, game_id: 'g3', title: 'Third Game', field_value: 'Idle' })]

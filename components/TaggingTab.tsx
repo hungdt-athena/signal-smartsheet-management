@@ -45,6 +45,14 @@ interface HistoryRow {
   in_signal_sense: boolean
   /** Did playtest_sync create that row? Only then may this app remove it. */
   ours: boolean | null
+  /** Set only when an admin corrected the proposal before reviewing it, and then
+   *  only once — the version the evaluator actually sent, not the previous
+   *  correction. Null here means the tag was reviewed exactly as proposed. */
+  original_captured_at: string | null
+  original_field_value: string | null
+  original_sub_value_name: string | null
+  /** The admin's optional reason, written at confirm or reject time. */
+  review_note: string | null
   /** Latest sub-value overwrite made in Signal Sense after our confirm. The row
    *  still exists in that case, so only the change log reveals it. */
   sub_changed_at: string | null
@@ -91,12 +99,18 @@ function GameButton({ title, gameId, onOpen, list }: {
 
 // Admin review of Trends tags proposed during playtest. A tag only reaches
 // Signal Sense's custom_field_values when it is confirmed here.
+//
+// Evaluators read the same two views without acting on them: their own pending
+// proposals, and the full history of what was confirmed against what was
+// proposed. Every write path is admin-only both here and in its route, so this
+// component's `isAdmin` decides what is worth rendering, never what is allowed.
 export function TaggingTab() {
   const [view, setView] = useState<'pending' | 'history'>('pending')
   const [detail, setDetail] = useState<{ gameId: string; list: EvalListItem[] } | null>(null)
   const { data: session } = useSession()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
+  const isAdmin = role === 'admin'
 
   const openGame: OpenGame = (gameId, list) => setDetail({ gameId, list })
 
@@ -105,7 +119,11 @@ export function TaggingTab() {
       <div className="page-head">
         <div>
           <h1 className="h-title">Tagging</h1>
-          <p className="h-sub">Trends proposed while playtesting. Confirming writes them into Signal Sense.</p>
+          <p className="h-sub">
+            {isAdmin
+              ? 'Trends proposed while playtesting. Confirming writes them into Signal Sense.'
+              : 'Trends you proposed while playtesting, and what the review made of them.'}
+          </p>
         </div>
         <div className="seg">
           <button className={'seg-btn' + (view === 'pending' ? ' active' : '')} onClick={() => setView('pending')}>Pending</button>
@@ -113,7 +131,9 @@ export function TaggingTab() {
         </div>
       </div>
 
-      {view === 'pending' ? <PendingView onOpenGame={openGame} /> : <HistoryView onOpenGame={openGame} />}
+      {view === 'pending'
+        ? <PendingView onOpenGame={openGame} isAdmin={isAdmin} />
+        : <HistoryView onOpenGame={openGame} isAdmin={isAdmin} />}
 
       {detail && (
         <div className="eval-modal-backdrop" onClick={() => setDetail(null)}>
@@ -156,7 +176,7 @@ function TriCheckbox({ checked, indeterminate, onChange, title, disabled }: {
   )
 }
 
-function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
+function PendingView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: boolean }) {
   // One row per proposed tag. Every action edits this list in place — nothing in
   // this view refetches the queue on a change, so the admin keeps their scroll
   // position, their selection and their place in a long list of games.
@@ -166,6 +186,10 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   /** Conflict rows whose playtest sub-value should replace Signal Sense's. */
   const [overwrite, setOverwrite] = useState<Set<number>>(new Set())
+  /** The admin's optional per-tag note, kept by row id until the row is
+   *  confirmed or rejected and carried along with that request. Local state, so
+   *  typing a note never touches the database on its own. */
+  const [notes, setNotes] = useState<Record<number, string>>({})
   const [working, setWorking] = useState(false)
   /** Rows mid-flight on their own, so only they show as busy. */
   const [rowBusy, setRowBusy] = useState<Set<number>>(new Set())
@@ -220,7 +244,9 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
   }, [])
 
   useEffect(() => { void load(0, false) }, [load])
-  useEffect(() => { loadOptions() }, [loadOptions])
+  // Only the admin edits, so only the admin needs the catalog. An evaluator
+  // fetching it would be a request whose result nothing can ever use.
+  useEffect(() => { if (isAdmin) loadOptions() }, [loadOptions, isAdmin])
 
   // Rows that left the queue: drop them and forget every flag that referenced
   // them, so a stale id cannot leak into a later confirm. `total` follows, or
@@ -236,6 +262,25 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
     }
     setSelected(without)
     setOverwrite(without)
+    // The note went with the request that resolved the row; keeping it would
+    // re-attach it to whatever row later takes that id.
+    setNotes(prev => {
+      const next = { ...prev }
+      for (const id of ids) delete next[id]
+      return next
+    })
+  }
+
+  /** The notes for one batch, as the API's `{ id: text }` map. Blank boxes are
+   *  left out entirely rather than sent as empty strings, which the routes read
+   *  as "leave whatever note this row already has". */
+  const notesFor = (ids: number[]) => {
+    const out: Record<number, string> = {}
+    for (const id of ids) {
+      const note = (notes[id] || '').trim()
+      if (note) out[id] = note
+    }
+    return out
   }
 
   const markBusy = (ids: number[], busy: boolean) => setRowBusy(prev => {
@@ -323,7 +368,11 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
         const res = await fetch('/api/playtest-tags/confirm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ game_id: gameId, ids, overwrite: ids.filter(id => overwrite.has(id)) }),
+          body: JSON.stringify({
+            game_id: gameId, ids,
+            overwrite: ids.filter(id => overwrite.has(id)),
+            notes: notesFor(ids),
+          }),
         })
         const d = await res.json().catch(() => ({}))
         if (!res.ok) { failed.push(`${gameRows[0].title}: ${d.error || 'confirm failed'}`); continue }
@@ -363,7 +412,7 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
       const r = await fetch('/api/playtest-tags/reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids }),
+        body: JSON.stringify({ ids, notes: notesFor(ids) }),
       })
       if (!r.ok) { setMsg('Reject failed'); markBusy(ids, false); return }
       dropRows(ids)
@@ -419,13 +468,18 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
       <div className="card">
         {msg && <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
         <p className="empty">
-          Nothing waiting for review. Trends tagged during playtest show up here.
+          {isAdmin
+            ? 'Nothing waiting for review. Trends tagged during playtest show up here.'
+            : 'None of your tags are waiting for review. Reviewed ones are in History.'}
         </p>
       </div>
     )
   }
 
   const allIds = rows.map(r => r.id)
+  // Checkbox, note and reject columns are admin-only, so the footer rows have to
+  // span a different number of them.
+  const cols = isAdmin ? 7 : 4
   const selectedRows = rows.filter(r => selected.has(r.id))
   const cleanIds = rows.filter(r => !r.conflict).map(r => r.id)
   // Ticked conflicts left unticked for overwrite: confirming rejects them, so
@@ -436,14 +490,18 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
     <div className="card">
       <div className="card-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <span className="card-label">
-          Pending
+          {isAdmin ? 'Pending' : 'Your pending tags'}
           <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>
             {hasMore ? `${rows.length} of ${total}` : `${total} tag${total === 1 ? '' : 's'}`}
             {' '}· {gameCount} game{gameCount === 1 ? '' : 's'}{hasMore ? ' loaded' : ''}
           </span>
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {selected.size === 0 ? (
+          {!isAdmin ? (
+            <span style={{ fontSize: 12, color: 'var(--faint)' }}>
+              Waiting for an admin to review
+            </span>
+          ) : selected.size === 0 ? (
             <>
               <span style={{ fontSize: 12, color: 'var(--faint)' }}>Tick the tags to review</span>
               {cleanIds.length > 0 && cleanIds.length < rows.length && (
@@ -478,7 +536,7 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
         </div>
       </div>
 
-      {optionsError && (
+      {isAdmin && optionsError && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
           <span style={{ fontSize: 12.5, color: 'var(--warn)' }}>
             The trends list didn&apos;t load, so tags can be confirmed or rejected but not edited.
@@ -493,32 +551,37 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width: 34 }}>
-                <TriCheckbox
-                  checked={selected.size === rows.length}
-                  indeterminate={selected.size > 0}
-                  onChange={() => toggleMany(allIds)}
-                  title="Select all loaded tags"
-                  disabled={working}
-                />
-              </th>
-              <th style={{ width: '30%' }}>Game</th>
-              <th style={{ width: '24%' }}>Trend</th>
-              <th style={{ width: '26%' }}>Sub-value</th>
-              <th style={{ width: '20%' }}>Proposed by</th>
-              <th style={{ width: 52 }} />
+              {isAdmin && (
+                <th style={{ width: 34 }}>
+                  <TriCheckbox
+                    checked={selected.size === rows.length}
+                    indeterminate={selected.size > 0}
+                    onChange={() => toggleMany(allIds)}
+                    title="Select all loaded tags"
+                    disabled={working}
+                  />
+                </th>
+              )}
+              <th style={{ width: isAdmin ? '24%' : '34%' }}>Game</th>
+              <th style={{ width: isAdmin ? '18%' : '22%' }}>Trend</th>
+              <th style={{ width: isAdmin ? '20%' : '24%' }}>Sub-value</th>
+              <th style={{ width: '16%' }}>Proposed by</th>
+              {isAdmin && <th style={{ width: '22%' }}>Note to evaluator</th>}
+              {isAdmin && <th style={{ width: 52 }} />}
             </tr>
           </thead>
           <tbody>
             {rows.map(t => (
               <tr key={t.id} style={rowBusy.has(t.id) ? { opacity: 0.5 } : undefined}>
-                <td>
-                  <input type="checkbox" checked={selected.has(t.id)}
-                    disabled={working || rowBusy.has(t.id)}
-                    aria-label={`Select ${t.field_value} on ${t.title}`}
-                    onChange={() => toggleRow(t.id)}
-                    style={{ cursor: 'pointer' }} />
-                </td>
+                {isAdmin && (
+                  <td>
+                    <input type="checkbox" checked={selected.has(t.id)}
+                      disabled={working || rowBusy.has(t.id)}
+                      aria-label={`Select ${t.field_value} on ${t.title}`}
+                      onChange={() => toggleRow(t.id)}
+                      style={{ cursor: 'pointer' }} />
+                  </td>
+                )}
                 <td className="cell-name">
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     {t.icon_url && (
@@ -534,7 +597,7 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
                   </span>
                 </td>
                 <td>
-                  {optionsError ? (
+                  {!isAdmin || optionsError ? (
                     <span className="num">{t.field_value}</span>
                   ) : (
                     <TrendValuePicker
@@ -550,7 +613,7 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
                   )}
                 </td>
                 <td>
-                  {optionsError ? (
+                  {!isAdmin || optionsError ? (
                     <span style={{ color: 'var(--faint)' }}>{t.sub_value_name || 'None'}</span>
                   ) : (
                     <select
@@ -567,7 +630,7 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
                   {/* A conflict changes what Confirm does to this row, so it
                       belongs on the row rather than in a column of its own:
                       Signal Sense's sub-value stands unless this is ticked. */}
-                  {t.conflict && (
+                  {isAdmin && t.conflict && (
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 5, fontSize: 11, color: 'var(--warn)', cursor: 'pointer' }}>
                       <input type="checkbox" checked={overwrite.has(t.id)}
                         disabled={working || rowBusy.has(t.id)}
@@ -587,25 +650,45 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
                     {fmt(t.tagged_at)}
                   </span>
                 </td>
-                <td>
-                  <button className="btn btn-sm btn-ghost" title="Reject this tag"
-                    disabled={working || rowBusy.has(t.id)}
-                    onClick={() => rejectTags([t.id])}
-                    style={{ color: 'var(--faint)' }}>✕</button>
-                </td>
+                {/* The note travels with whichever request resolves this row,
+                    confirm or reject alike. Optional: the diff in History
+                    already tells the evaluator that their tag was changed, and
+                    this says why when there is a why worth saying. */}
+                {isAdmin && (
+                  <td>
+                    <input
+                      className="input"
+                      style={{ fontSize: 12, padding: '6px 9px', width: '100%' }}
+                      placeholder="Optional — why"
+                      maxLength={500}
+                      value={notes[t.id] || ''}
+                      disabled={working || rowBusy.has(t.id)}
+                      aria-label={`Note to the evaluator about ${t.field_value} on ${t.title}`}
+                      onChange={e => setNotes(prev => ({ ...prev, [t.id]: e.target.value }))}
+                    />
+                  </td>
+                )}
+                {isAdmin && (
+                  <td>
+                    <button className="btn btn-sm btn-ghost" title="Reject this tag"
+                      disabled={working || rowBusy.has(t.id)}
+                      onClick={() => rejectTags([t.id])}
+                      style={{ color: 'var(--faint)' }}>✕</button>
+                  </td>
+                )}
               </tr>
             ))}
             {/* Watched by the observer above: crossing into view loads the next
                 page. Kept inside the table so it scrolls with the rows. */}
             {(hasMore || loading) && (
               <tr ref={sentinelRef}>
-                <td colSpan={6} className="tag-sentinel">
+                <td colSpan={cols} className="tag-sentinel">
                   {loading ? 'Loading…' : `${rows.length} of ${total} — scroll for more`}
                 </td>
               </tr>
             )}
             {!hasMore && !loading && rows.length > 0 && (
-              <tr><td colSpan={6} className="tag-sentinel">All {total} shown</td></tr>
+              <tr><td colSpan={cols} className="tag-sentinel">All {total} shown</td></tr>
             )}
           </tbody>
         </table>
@@ -614,7 +697,10 @@ function PendingView({ onOpenGame }: { onOpenGame: OpenGame }) {
   )
 }
 
-function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
+// Everything that left the queue, for admins and evaluators alike. Deliberately
+// not scoped to the reader: an evaluator learns as much from how the same trend
+// was judged on someone else's game as from their own corrections.
+function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: boolean }) {
   const [rows, setRows] = useState<HistoryRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -663,8 +749,12 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
   // Keyed on reloadKey alone: a date tweak or a scroll must not re-run a
   // database sweep, and this leaves the first page load to this effect rather
   // than the filter one below.
+  //
+  // The sweep writes, so it is admin-only in its route: an evaluator skips it
+  // and reads straight away rather than firing a request that can only 403.
   useEffect(() => {
     let live = true
+    if (!isAdmin) { void fetchPage(1, false); return }
     fetch('/api/playtest-tags/reconcile', { method: 'POST' })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (live && d?.removed > 0) setMsg(`${d.removed} tag${d.removed === 1 ? '' : 's'} no longer in Signal Sense — recorded as removed.`) })
@@ -748,6 +838,9 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
   const gameList = useMemo<EvalListItem[]>(
     () => groups.map(g => ({ game_id: g.game_id, title: g.rows[0].title })), [groups])
 
+  // The Remove column exists only for admins, so footer rows span one fewer.
+  const cols = isAdmin ? 8 : 7
+
   return (
     <div className="card">
       <div className="card-head" style={{ alignItems: 'flex-end' }}>
@@ -786,17 +879,17 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
             <tr>
               <th style={{ width: 172 }}>Game</th>
               <th style={{ width: 150 }}>Trend</th>
-              <th style={{ width: 116 }}>Sub-value</th>
+              <th style={{ width: 130 }}>Sub-value</th>
               <th style={{ width: 116 }}>Proposed</th>
               <th style={{ width: 116 }}>Reviewed</th>
               <th style={{ width: 96 }}>Result</th>
               <th>Note</th>
-              <th style={{ width: 84 }} />
+              {isAdmin && <th style={{ width: 84 }} />}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={8} className="empty">Nothing reviewed yet.</td></tr>
+              <tr><td colSpan={cols} className="empty">Nothing reviewed yet.</td></tr>
             )}
             {groups.map(g => g.rows.map((r, i) => (
               <tr key={r.id}>
@@ -819,8 +912,23 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
                     </span>
                   </td>
                 )}
-                <td className="num">{r.field_value}</td>
-                <td style={{ color: r.sub_value_name ? undefined : 'var(--faint)' }}>{r.sub_value_name || '—'}</td>
+                <td className="num">
+                  {r.field_value}
+                  {r.original_captured_at && r.original_field_value
+                    && r.original_field_value !== r.field_value && (
+                    <span className="tag-was">was {r.original_field_value}</span>
+                  )}
+                </td>
+                <td style={{ color: r.sub_value_name ? undefined : 'var(--faint)' }}>
+                  {r.sub_value_name || '—'}
+                  {/* Only meaningful once original_captured_at says the columns
+                      were filled: without it a null original sub-value cannot be
+                      told from a row nobody ever edited. */}
+                  {r.original_captured_at
+                    && (r.original_sub_value_name || null) !== (r.sub_value_name || null) && (
+                    <span className="tag-was">was {r.original_sub_value_name || 'None'}</span>
+                  )}
+                </td>
                 <td>
                   {r.tagged_by_name || '—'}
                   <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)' }}>
@@ -841,6 +949,15 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
                 {/* What happened to the tag after it was reviewed. Empty for a tag
                     still sitting in Signal Sense exactly as it was synced. */}
                 <td style={{ fontSize: 11.5, lineHeight: 1.5 }}>
+                  {/* The admin's own words come first: the columns to the left
+                      say what changed, this says why. */}
+                  {r.review_note && (
+                    <span style={{ display: 'block', color: 'var(--text)' }}>
+                      <strong style={{ color: 'var(--muted)' }}>
+                        {r.confirmed_by_name || 'Admin'}:
+                      </strong>{' '}{r.review_note}
+                    </span>
+                  )}
                   {r.removed_at && (
                     <span style={{ display: 'block', color: 'var(--muted)' }}>
                       was {r.sync_result || r.status}, removed {fmt(r.removed_at)}
@@ -856,10 +973,11 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
                       {r.sub_changed_by ? ` by ${r.sub_changed_by}` : ''}
                     </span>
                   )}
-                  {!r.removed_at && !r.sub_changed_at && (
+                  {!r.review_note && !r.removed_at && !r.sub_changed_at && (
                     <span style={{ color: 'var(--faint)' }}>—</span>
                   )}
                 </td>
+                {isAdmin && (
                 <td>
                   {r.status === 'synced' && r.in_signal_sense && (
                     r.ours ? (
@@ -880,19 +998,20 @@ function HistoryView({ onOpenGame }: { onOpenGame: OpenGame }) {
                     )
                   )}
                 </td>
+                )}
               </tr>
             )))}
             {/* Watched by the observer above: crossing into view loads the next
                 page. Kept inside the table so it scrolls with the rows. */}
             {(hasMore || loading) && (
               <tr ref={sentinelRef}>
-                <td colSpan={8} className="tag-sentinel">
+                <td colSpan={cols} className="tag-sentinel">
                   {loading ? 'Loading…' : `${rows.length} of ${total} — scroll for more`}
                 </td>
               </tr>
             )}
             {!hasMore && !loading && rows.length > 0 && (
-              <tr><td colSpan={8} className="tag-sentinel">All {total} shown</td></tr>
+              <tr><td colSpan={cols} className="tag-sentinel">All {total} shown</td></tr>
             )}
           </tbody>
         </table>

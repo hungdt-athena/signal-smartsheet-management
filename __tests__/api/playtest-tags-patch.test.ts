@@ -31,6 +31,13 @@ function routeSql(handlers: { match: RegExp; rows: unknown[] }[]) {
   })
 }
 
+/** The SET clause the route builds for the original_* snapshot, or '' when it
+ *  decided not to snapshot. It reaches sql() as a nested fragment, which the
+ *  mock records as its own call. */
+function snapshotSql() {
+  return calls.map(c => c.text).find(t => /original_field_value =/.test(t)) ?? ''
+}
+
 function patchReq(body: unknown) {
   return new NextRequest('http://localhost/api/playtest-tags/7', {
     method: 'PATCH', body: JSON.stringify(body),
@@ -38,10 +45,17 @@ function patchReq(body: unknown) {
 }
 const params = { params: { id: '7' } }
 
-// The row being corrected: pending, proposed by an evaluator days ago.
+// The row being corrected: pending, proposed by an evaluator days ago, and never
+// edited before — original_captured_at is what the route reads to decide whether
+// this correction is the one that snapshots the evaluator's version.
 const theRow = {
-  match: /SELECT id, game_id, field_value, sub_value_id\s+FROM playtest_tags/,
-  rows: [{ id: 7, game_id: 'g1', field_value: 'Balatro', sub_value_id: null }],
+  match: /SELECT id, game_id, field_value, sub_value_id, original_captured_at\s+FROM playtest_tags/,
+  rows: [{ id: 7, game_id: 'g1', field_value: 'Balatro', sub_value_id: null, original_captured_at: null }],
+}
+/** The same row after an earlier correction already captured the original. */
+const editedRow = {
+  match: theRow.match,
+  rows: [{ ...theRow.rows[0], original_captured_at: '2026-08-14T03:00:00Z' }],
 }
 const activeDef = { match: /FROM custom_field_definitions/, rows: [{ '?column?': 1 }] }
 const activeSub = { match: /FROM sub_value_definitions/, rows: [{ '?column?': 1 }] }
@@ -108,8 +122,8 @@ describe('PATCH /api/playtest-tags/[id]', () => {
 
   it('clears the sub-value when given null', async () => {
     routeSql([
-      { match: /SELECT id, game_id, field_value, sub_value_id\s+FROM playtest_tags/,
-        rows: [{ id: 7, game_id: 'g1', field_value: 'Balatro', sub_value_id: 2 }] },
+      { match: theRow.match,
+        rows: [{ id: 7, game_id: 'g1', field_value: 'Balatro', sub_value_id: 2, original_captured_at: null }] },
       { match: /UPDATE playtest_tags/, rows: [{ id: 7, game_id: 'g1', field_value: 'Balatro', sub_value_id: null }] },
     ])
     const r = await PATCH(patchReq({ sub_value_id: null }), params)
@@ -163,9 +177,7 @@ describe('PATCH /api/playtest-tags/[id]', () => {
       if (!Array.isArray(strings)) return Promise.resolve([])
       const text = (strings as string[]).join(' ')
       calls.push({ text, binds })
-      if (/SELECT id, game_id, field_value, sub_value_id\s+FROM playtest_tags/.test(text)) {
-        return Promise.resolve([{ id: 7, game_id: 'g1', field_value: 'Balatro', sub_value_id: null }])
-      }
+      if (theRow.match.test(text)) return Promise.resolve(theRow.rows)
       if (/FROM custom_field_definitions/.test(text)) return Promise.resolve([{ '?column?': 1 }])
       if (/UPDATE playtest_tags/.test(text)) {
         return Promise.reject(Object.assign(new Error('duplicate key'), { code: '23505' }))
@@ -181,6 +193,38 @@ describe('PATCH /api/playtest-tags/[id]', () => {
     const r = await PATCH(patchReq({ sub_value_id: 2 }), params)
     expect(r.status).toBe(409)
     expect((await r.json()).error).toMatch(/already confirmed or rejected/)
+  })
+
+  // What the evaluator proposed has to survive the correction, or History can
+  // only ever show them the corrected tag and never that it was corrected.
+  it('snapshots the evaluator version on the first correction', async () => {
+    routeSql([theRow, activeSub, updated])
+    const r = await PATCH(patchReq({ sub_value_id: 2 }), params)
+    expect(r.status).toBe(200)
+    // The snapshot rides in as a nested sql fragment, so it is a call of its
+    // own here rather than part of the UPDATE's own template text. Its SET
+    // expressions read the pre-UPDATE row, storing the version being replaced
+    // rather than the replacement.
+    expect(snapshotSql()).toMatch(/original_field_value = field_value/)
+    expect(snapshotSql()).toMatch(/original_sub_value_id = sub_value_id/)
+    expect(snapshotSql()).toMatch(/original_captured_at = now\(\)/)
+  })
+
+  // A third correction must still compare against the evaluator, not against
+  // the second correction.
+  it('does not re-snapshot a row that was already corrected once', async () => {
+    routeSql([editedRow, activeSub, updated])
+    expect((await PATCH(patchReq({ sub_value_id: 2 }), params)).status).toBe(200)
+    expect(snapshotSql()).toBe('')
+  })
+
+  // Picking the value that is already there is not a correction. Stamping it
+  // would tell the evaluator they were overruled when nothing about their tag
+  // changed.
+  it('does not snapshot when the edit changes nothing', async () => {
+    routeSql([theRow, activeDef, updated])
+    expect((await PATCH(patchReq({ field_value: 'Balatro' }), params)).status).toBe(200)
+    expect(snapshotSql()).toBe('')
   })
 
   it('rejects a non-numeric id', async () => {

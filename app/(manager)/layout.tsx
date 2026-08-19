@@ -47,8 +47,10 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/evaluations?cat=evaluate', label: 'Evaluate' },
     { href: '/evaluations?cat=short_list', label: 'Short List' },
     { href: '/evaluations?cat=weekly_feedback', label: 'Weekly Feedback' },
-    // Reviewing tags proposed during playtest is an admin decision.
-    { href: '/evaluations?cat=tagging', label: 'Tagging', roles: ['admin'] },
+    // Reviewing tags proposed during playtest is an admin decision, but
+    // evaluators read the tab: their own queue, and the full history of what was
+    // confirmed against what was proposed.
+    { href: '/evaluations?cat=tagging', label: 'Tagging', roles: ['admin', 'evaluator'] },
   ]},
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },

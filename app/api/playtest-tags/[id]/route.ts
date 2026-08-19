@@ -12,7 +12,8 @@ export const dynamic = 'force-dynamic'
 //
 // Only pending rows are editable: a synced or rejected row is history. The row's
 // tagged_by / tagged_at are never touched — an admin correcting a tag does not
-// become its author.
+// become its author. The first correction also snapshots what the evaluator
+// proposed into original_*, which is what History shows them the tag against.
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const guard = await requireManager()
   if (guard) return guard
@@ -46,14 +47,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   const rows = await sql`
-    SELECT id, game_id, field_value, sub_value_id
+    SELECT id, game_id, field_value, sub_value_id, original_captured_at
     FROM playtest_tags
     WHERE id = ${id} AND status = 'pending'
   `
   if (rows.length === 0) {
     return NextResponse.json({ error: 'Pending tag not found' }, { status: 404 })
   }
-  const row = rows[0] as { game_id: string; field_value: string; sub_value_id: number | null }
+  const row = rows[0] as {
+    game_id: string; field_value: string; sub_value_id: number | null
+    original_captured_at: string | null
+  }
 
   if (hasValue && fieldValue !== row.field_value) {
     // Values are Signal Sense's to own; this app never creates them.
@@ -94,11 +98,28 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const nextValue = hasValue ? fieldValue : row.field_value
   const nextSub = hasSub ? subValueId : row.sub_value_id
 
+  // Snapshot what the evaluator proposed, once, the first time an admin actually
+  // moves the row. The SET expressions read the pre-UPDATE values, so this
+  // captures the version being replaced rather than the replacement.
+  //
+  // Two guards, both load-bearing. `original_captured_at IS NULL` keeps a third
+  // correction comparing against the evaluator, not against the second
+  // correction. And an edit that lands on the value already there is not an
+  // edit: stamping it would tell the evaluator they were corrected when nothing
+  // about their tag changed.
+  const moves = nextValue !== row.field_value || nextSub !== row.sub_value_id
+  const snapshot = moves && !row.original_captured_at
+    ? sql`,
+        original_field_value = field_value,
+        original_sub_value_id = sub_value_id,
+        original_captured_at = now()`
+    : sql``
+
   let updated
   try {
     updated = await sql`
       UPDATE playtest_tags
-      SET field_value = ${nextValue}, sub_value_id = ${nextSub}
+      SET field_value = ${nextValue}, sub_value_id = ${nextSub}${snapshot}
       WHERE id = ${id} AND status = 'pending'
       RETURNING id, game_id, field_value, sub_value_id
     `

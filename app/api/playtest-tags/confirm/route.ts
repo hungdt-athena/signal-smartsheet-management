@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { logCfvChanges, type CfvChange } from '@/lib/cfv-change-log'
 import {
-  classifyTag, resolveConfirm, TRENDS_FIELD, SYNC_USER,
+  classifyTag, readNotes, resolveConfirm, TRENDS_FIELD, SYNC_USER,
   type ExistingTag, type PendingTag, type SyncResult,
 } from '@/lib/playtest-tags'
 
@@ -18,11 +18,15 @@ export const dynamic = 'force-dynamic'
 //
 // `ids` narrows the run to the tags the admin ticked. Omitting it confirms every
 // pending tag of the game, which is what the earlier per-game button did.
+//
+// `notes` is an optional `{ id: text }` map of the admin's per-tag reasoning.
+// It is stored, never acted on: History shows it to the evaluator beside the
+// diff between what they proposed and what was confirmed.
 export async function POST(req: NextRequest) {
   const guard = await requireManager()
   if (guard) return guard
 
-  let body: { game_id?: string; overwrite?: number[]; ids?: number[] }
+  let body: { game_id?: string; overwrite?: number[]; ids?: number[]; notes?: Record<string, string> }
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
 
   const gameId = (body.game_id || '').trim()
@@ -34,6 +38,8 @@ export async function POST(req: NextRequest) {
   if (only !== null && only.length === 0) {
     return NextResponse.json({ error: 'ids was empty' }, { status: 400 })
   }
+
+  const notes = readNotes(body.notes)
 
   const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
   const admin = session?.user?.email || 'skip-auth@local'
@@ -93,7 +99,8 @@ export async function POST(req: NextRequest) {
         await tx`
           UPDATE playtest_tags
           SET status = 'rejected', sync_result = 'inactive',
-              confirmed_by = ${admin}, confirmed_at = now()
+              confirmed_by = ${admin}, confirmed_at = now(),
+              review_note = COALESCE(${notes.get(p.id) ?? null}, review_note)
           WHERE id = ${p.id}
         `
         results.push({ id: p.id, result: 'inactive' })
@@ -187,10 +194,13 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // COALESCE, not a plain assignment: an admin who confirms without typing
+      // anything leaves whatever note is already on the row rather than wiping it.
       await tx`
         UPDATE playtest_tags
         SET status = ${status}, sync_result = ${result},
-            confirmed_by = ${admin}, confirmed_at = now()
+            confirmed_by = ${admin}, confirmed_at = now(),
+            review_note = COALESCE(${notes.get(p.id) ?? null}, review_note)
         WHERE id = ${p.id}
       `
       results.push({ id: p.id, result })

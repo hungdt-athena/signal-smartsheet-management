@@ -75,3 +75,25 @@ export function resolveConfirm(action: TagAction, overwrite: boolean): ConfirmOu
       return { write: null, status: 'synced', result: 'duplicate' }
   }
 }
+
+/** Longest review note we store. Long enough for a sentence of reasoning, short
+ *  enough that a paste accident cannot fill the History table with one cell. */
+export const NOTE_MAX = 500
+
+/** The admin's per-tag note from a confirm or reject body, as `{ id: text }`.
+ *
+ *  Trimmed, capped, and dropped when empty: an empty box must not overwrite a
+ *  note the row already carries, and only ids the caller is actually reviewing
+ *  are honoured — the routes look up this map, they never iterate it. */
+export function readNotes(raw: unknown): Map<number, string> {
+  const out = new Map<number, string>()
+  if (!raw || typeof raw !== 'object') return out
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const id = Number(key)
+    if (!Number.isInteger(id) || id <= 0) continue
+    if (typeof value !== 'string') continue
+    const note = value.trim().slice(0, NOTE_MAX)
+    if (note) out.set(id, note)
+  }
+  return out
+}

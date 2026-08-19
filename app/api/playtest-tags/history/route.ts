@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireManager } from '@/lib/auth-guard'
+import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { TRENDS_FIELD, SYNC_USER } from '@/lib/playtest-tags'
 
@@ -11,8 +11,14 @@ export const dynamic = 'force-dynamic'
 // still there. `in_signal_sense` is read live, so a tag deleted over there shows
 // as gone even before the reconcile sweep stamps removed_at; `ours` says whether
 // playtest_sync created that row, which is the only case this app may remove.
+//
+// Readable by any signed-in user, and deliberately not scoped to the reader:
+// this is the record evaluators learn from, and a correction is most useful when
+// you can see how the same trend was judged on other people's games. `original_*`
+// plus `review_note` are what makes that legible — what was proposed, what was
+// confirmed, and the admin's reason where they left one.
 export async function GET(req: NextRequest) {
-  const guard = await requireManager()
+  const guard = await requireAuth()
   if (guard) return guard
 
   const sp = req.nextUrl.searchParams
@@ -42,7 +48,9 @@ export async function GET(req: NextRequest) {
       SELECT
         pt.id, pt.game_id, pt.field_value, pt.status, pt.sync_result,
         pt.tagged_at, pt.confirmed_at, pt.removed_at, pt.removed_by,
+        pt.review_note, pt.original_captured_at, pt.original_field_value,
         gi.title, gi.icon_url, sv.name AS sub_value_name,
+        osv.name AS original_sub_value_name,
         tagger.name AS tagged_by_name, confirmer.name AS confirmed_by_name,
         remover.name AS removed_by_name,
         (cfv.field_value IS NOT NULL) AS in_signal_sense,
@@ -54,6 +62,11 @@ export async function GET(req: NextRequest) {
       FROM playtest_tags pt
       JOIN game_info gi ON gi.game_id = pt.game_id
       LEFT JOIN sub_value_definitions sv ON sv.id = pt.sub_value_id
+      -- The sub-value the evaluator proposed, kept only when an admin edited the
+      -- row. original_captured_at is what says whether these columns mean
+      -- anything: a NULL original_sub_value_id on an edited row is the real
+      -- answer "they proposed no sub-value", not "nothing was recorded".
+      LEFT JOIN sub_value_definitions osv ON osv.id = pt.original_sub_value_id
       LEFT JOIN dashboard_users tagger ON tagger.email = pt.tagged_by
       LEFT JOIN dashboard_users confirmer ON confirmer.email = pt.confirmed_by
       LEFT JOIN dashboard_users remover ON remover.email = pt.removed_by

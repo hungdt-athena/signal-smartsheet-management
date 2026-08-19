@@ -37,20 +37,30 @@ interface Row extends Omit<QueueTag, 'conflict'> {
   their_exists: boolean
 }
 
-/** How many tags are waiting, for the queue's paging. */
-export async function countQueue(): Promise<number> {
-  const [row] = await sql`SELECT count(*)::int AS n FROM playtest_tags WHERE status = 'pending'`
+/** How many tags are waiting, for the queue's paging. `taggedBy` scopes the
+ *  count the same way it scopes the rows -- an evaluator's "3 of 40" must count
+ *  their own queue, not the whole team's. */
+export async function countQueue(taggedBy?: string): Promise<number> {
+  const mine = taggedBy ? sql`AND tagged_by = ${taggedBy}` : sql``
+  const [row] = await sql`
+    SELECT count(*)::int AS n FROM playtest_tags WHERE status = 'pending' ${mine}
+  `
   return (row?.n as number) ?? 0
 }
 
 /** Pending tags, newest first. `ids` narrows to specific rows — used to read
  *  back a single row after an edit. `limit`/`offset` page the queue; a game's
  *  tags can therefore straddle a page boundary, which is fine now that every
- *  row carries its own game. */
+ *  row carries its own game.
+ *
+ *  `taggedBy` narrows the queue to one person's own proposals -- what an
+ *  evaluator sees. Applied here rather than in the route so the filter and the
+ *  ordering cannot drift apart. */
 export async function fetchQueue(
-  opts: { ids?: number[]; limit?: number; offset?: number } = {},
+  opts: { ids?: number[]; limit?: number; offset?: number; taggedBy?: string } = {},
 ): Promise<QueueTag[]> {
   const idFilter = opts.ids ? sql`AND pt.id = ANY(${opts.ids})` : sql``
+  const mine = opts.taggedBy ? sql`AND pt.tagged_by = ${opts.taggedBy}` : sql``
   const window = opts.limit === undefined
     ? sql``
     : sql`LIMIT ${opts.limit} OFFSET ${opts.offset ?? 0}`
@@ -76,7 +86,7 @@ export async function fetchQueue(
     LEFT JOIN custom_field_values cfv
       ON cfv.game_id = pt.game_id AND cfv.field_name = ${TRENDS_FIELD} AND cfv.field_value = pt.field_value
     LEFT JOIN sub_value_definitions their_sv ON their_sv.id = cfv.sub_value_id
-    WHERE pt.status = 'pending' ${idFilter}
+    WHERE pt.status = 'pending' ${idFilter} ${mine}
     -- Newest game first, its own tags together and newest first inside. Ordering
     -- the grouping here rather than in the client is what lets the queue be
     -- paged: a game cannot be split across two pages by a later arrival, and id

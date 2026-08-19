@@ -103,6 +103,29 @@ describe('POST /api/playtest-tags/confirm', () => {
     expect(updates[0].binds).toEqual(expect.arrayContaining([2, 'Empty Sub']))
   })
 
+  // The note explains a correction the evaluator did not make themselves, so it
+  // has to reach the row that carries the correction and no other.
+  it('stores the admin note on the tag it was written for', async () => {
+    routeSql([
+      { match: /FROM playtest_tags/, rows: [
+        { id: 1, field_value: 'New Trend', sub_value_id: 1 },
+        { id: 2, field_value: 'Other', sub_value_id: null },
+      ] },
+      { match: /FROM custom_field_values/, rows: [] },
+      activeDefs('New Trend', 'Other'),
+      insertWrote(),
+    ])
+    await CONFIRM(req('/api/playtest-tags/confirm', {
+      game_id: 'g1', notes: { 1: '  merge, not idle  ', 2: '   ' },
+    }))
+    const stamps = calls.filter(c => /UPDATE playtest_tags\s+SET status =/.test(c.text))
+    expect(stamps).toHaveLength(2)
+    // Trimmed onto tag 1; tag 2's blank box sends nothing, and COALESCE leaves
+    // whatever note that row already had rather than blanking it.
+    expect(stamps[0].binds).toContain('merge, not idle')
+    expect(stamps[1].binds).toContain(null)
+  })
+
   it('overwrites only the conflict ids the admin listed', async () => {
     routeSql([
       { match: /FROM playtest_tags/, rows: [
@@ -308,6 +331,22 @@ describe('POST /api/playtest-tags/reject', () => {
     sessionMock.mockResolvedValue({ user: { role: 'admin', name: 'VinhTD', email: 'vinhtd@athena.studio' } })
     routeSql([])
     expect((await REJECT(req('/api/playtest-tags/reject', { ids: [] }))).status).toBe(400)
+  })
+
+  // The note is the evaluator's explanation for a tag that was thrown away, so
+  // it has to land on the row rather than only in the admin's head.
+  it('stores a per-tag note, only on rows it actually rejected', async () => {
+    sessionMock.mockResolvedValue({ user: { role: 'admin', name: 'VinhTD', email: 'vinhtd@athena.studio' } })
+    // Id 2 was reviewed by someone else in the meantime, so the bulk UPDATE
+    // returns only id 1.
+    routeSql([{ match: /UPDATE playtest_tags\s+SET status = 'rejected'/, rows: [{ id: 1 }] }])
+    await REJECT(req('/api/playtest-tags/reject', {
+      ids: [1, 2], notes: { 1: '  not the core loop  ', 2: 'too late' },
+    }))
+    const notes = calls.filter(c => /SET review_note/.test(c.text))
+    expect(notes).toHaveLength(1)
+    // Trimmed, and bound to the row the UPDATE moved.
+    expect(notes[0].binds).toEqual(['not the core loop', 1])
   })
 
   // Signal Sense derives tag history from the value rows themselves, so a write
