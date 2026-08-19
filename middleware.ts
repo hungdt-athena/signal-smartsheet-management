@@ -52,7 +52,10 @@ export default withAuth(
     if (role !== 'admin') {
       const cat = searchParams.get('cat') ?? ''
       const tab = searchParams.get('tab') ?? ''
-      if (pathname.startsWith('/evaluations') && (cat === 'arcade' || cat === 'simulation' || cat === 'tagging')) {
+      // Tagging is not in this list: evaluators read it (their own pending
+      // proposals, and the history of what review made of them). Acting on a
+      // tag stays admin-only, enforced in the playtest-tags routes.
+      if (pathname.startsWith('/evaluations') && (cat === 'arcade' || cat === 'simulation')) {
         return NextResponse.redirect(new URL('/evaluations?cat=puzzle', req.url))
       }
       if (pathname.startsWith('/youtube') && (tab === 'short_list' || tab === 'record_video')) {
