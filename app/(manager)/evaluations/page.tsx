@@ -18,6 +18,7 @@ import { TaggingTab } from '@/components/TaggingTab'
 import { BUCKETS, prettyConclusion, type Bucket } from '@/lib/buckets'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
 import { GameAlikeChips, GameAlikeField } from '@/components/GameAlikeField'
+import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 
 interface Evaluation {
@@ -40,6 +41,7 @@ interface Evaluation {
   icon_url: string | null
   release_date: string | null
   publisher_name: string | null
+  tags: GameTrendTag[] | null
 }
 
 
@@ -148,6 +150,7 @@ interface ShortListItem {
   assigned_date: string | null
   evaluate_date: string | null
   category_group: string
+  tags: GameTrendTag[] | null
 }
 
 // Dashed accent pill for empty editable cells ("+ Set" / "+ Add note").
@@ -769,16 +772,17 @@ function ShortListEvalTab() {
                 <th style={{ width: 220 }}>Initial Note</th>
                 <th style={{ width: 150 }}>Final Conclusion</th>
                 <th style={{ width: 220 }}>Final Note</th>
+                <th style={{ width: 170 }}>Tagging</th>
                 <th>Game Alike</th>
               </tr>
             </thead>
             <tbody>
               {data.length === 0 && !loading && (
-                <tr><td colSpan={8} className="empty">No games found</td></tr>
+                <tr><td colSpan={9} className="empty">No games found</td></tr>
               )}
               {loading && Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i}>{Array.from({ length: 8 }).map((__, c) => (
-                  <td key={c}><span className="skeleton" style={{ width: [30, 240, 70, 60, 200, 110, 200, 140][c] || 80, height: 14 }} /></td>
+                <tr key={i}>{Array.from({ length: 9 }).map((__, c) => (
+                  <td key={c}><span className="skeleton" style={{ width: [30, 240, 70, 60, 200, 110, 200, 150, 140][c] || 80, height: 14 }} /></td>
                 ))}</tr>
               ))}
               {data.map((item, idx) => (
@@ -856,6 +860,9 @@ function ShortListEvalTab() {
                       <CopyBtn text={item.final_note} />
                     </span>
                   </td>
+                  <td>
+                    <TrendTagCell tags={item.tags} maxWidth={160} />
+                  </td>
                   <td onClick={e => e.stopPropagation()}>
                     <GameAlikeCell
                       item={item}
@@ -900,6 +907,16 @@ function conclusionBadge(c: string | null) {
 function fmtDate(d: string | null) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
+// dd/MM/YY - hh:mm in Asia/Ho_Chi_Minh (UTC+7) - the hour matters for filtering
+// and for telling apart evaluations submitted on the same day.
+function fmtDateTime(d: string | null) {
+  if (!d) return '—'
+  const dt = new Date(d)
+  const day = dt.toLocaleDateString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: '2-digit' })
+  const time = dt.toLocaleTimeString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hour12: false })
+  return `${day} - ${time}`
 }
 
 const PAGE_SIZE = 200
@@ -1252,13 +1269,14 @@ function EvaluationsPageInner() {
                 <th>Assigned</th>
                 <th>Note</th>
                 <th>Conclusion</th>
+                <th>Tagging</th>
                 <th>Evaluated</th>
                 <th>Drive</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && !loading && (
-                <tr><td colSpan={9} className="empty">{search ? 'No games match your search' : 'No evaluations found'}</td></tr>
+                <tr><td colSpan={10} className="empty">{search ? 'No games match your search' : 'No evaluations found'}</td></tr>
               )}
               {filtered.map((ev, idx) => {
                 const genres = [ev.genre_1, ev.genre_2].filter(Boolean) as string[]
@@ -1315,8 +1333,11 @@ function EvaluationsPageInner() {
                       </div>
                     </td>
                     <td>{conclusionBadge(ev.initial_conclusion)}</td>
+                    <td>
+                      <TrendTagCell tags={ev.tags} maxWidth={170} />
+                    </td>
                     <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-                      {fmtDate(ev.evaluate_date)}
+                      {fmtDateTime(ev.evaluate_date)}
                     </td>
                     <td>
                       {ev.drive_link ? (

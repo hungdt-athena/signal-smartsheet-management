@@ -97,9 +97,14 @@ export function weekBatches(year: number, month: number): string[] {
   return [1, 2, 3, 4].map(w => `W${w} ${m}, ${year}`)
 }
 
+// dd/MM/YY - hh:mm in Asia/Ho_Chi_Minh (UTC+7), same shape as the Evaluated
+// column in the evaluations table.
 function fmtDateTime(d: string | null) {
   if (!d) return '—'
-  return new Date(d).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const dt = new Date(d)
+  const day = dt.toLocaleDateString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: '2-digit' })
+  const time = dt.toLocaleTimeString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hour12: false })
+  return `${day} - ${time}`
 }
 
 export async function fetchEvalByGameId(gameId: string): Promise<EvalDetail | null> {
