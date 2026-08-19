@@ -701,6 +701,8 @@ function PendingView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
 // not scoped to the reader: an evaluator learns as much from how the same trend
 // was judged on someone else's game as from their own corrections.
 function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: boolean }) {
+  const { data: session } = useSession()
+  const myEmail = session?.user?.email || ''
   const [rows, setRows] = useState<HistoryRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -708,6 +710,13 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
   // question is "what did we do lately", not "everything ever".
   const [from, setFrom] = useState(monthStartLocal)
   const [to, setTo] = useState(todayLocal)
+  /** Email of the person whose proposals to show, '' for everyone. Email rather
+   *  than name because tagged_by is what the API filters on and two people can
+   *  share a display name. */
+  const [tagger, setTagger] = useState('')
+  /** Everyone who has ever had a tag reviewed, for the filter's options. Sent
+   *  with every page, so it survives a filter that empties the table. */
+  const [taggers, setTaggers] = useState<{ email: string; name: string | null }[]>([])
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null)
@@ -722,6 +731,7 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
     const qs = new URLSearchParams({ page: String(p), limit: String(limit) })
     if (from) qs.set('from', from)
     if (to) qs.set('to', to)
+    if (tagger) qs.set('tagger', tagger)
     setLoading(true)
     try {
       const r = await fetch(`/api/playtest-tags/history?${qs}`)
@@ -736,11 +746,12 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
         setTotal(d.total || 0)
       }
       setPage(p)
+      if (d.taggers) setTaggers(d.taggers as { email: string; name: string | null }[])
     } catch {
       if (!append) { setRows([]); setTotal(0) }
     }
     setLoading(false)
-  }, [from, to])
+  }, [from, to, tagger])
 
   // Sweep for tags deleted in Signal Sense, then read. Signal Sense keeps no
   // deletion log of its own, so this is the only chance to notice, and the sweep
@@ -773,7 +784,7 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
     if (!mounted.current) { mounted.current = true; return }
     void fetchPage(1, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to])
+  }, [from, to, tagger])
 
   // Two-click confirm, the same shape as the evaluation panel's Clear all. This
   // deletes a row out of Signal Sense's table, so a stray click must not do it.
@@ -849,6 +860,20 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
           <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>{total}</span>
         </span>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+          {/* Options come from the API rather than the loaded page: a name that
+              only appears on page 3 still has to be pickable from page 1. */}
+          <div className="field">
+            <span className="label">Proposed by</span>
+            <select className="input" style={{ width: 170 }}
+              value={tagger} onChange={e => setTagger(e.target.value)}>
+              <option value="">Everyone</option>
+              {taggers.map(t => (
+                <option key={t.email} value={t.email}>
+                  {t.name || t.email}{t.email === myEmail ? ' (you)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="field">
             <span className="label">From</span>
             <input className="input" type="date" style={{ width: 150 }}
@@ -867,6 +892,11 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
           {(from !== monthStartLocal() || to !== todayLocal()) && (
             <button className="btn btn-sm btn-ghost"
               onClick={() => { setFrom(monthStartLocal()); setTo(todayLocal()) }}>This month</button>
+          )}
+          {/* The person is cleared on its own: someone narrowing to one name and
+              then widening the dates is still asking about that name. */}
+          {tagger && (
+            <button className="btn btn-sm btn-ghost" onClick={() => setTagger('')}>Everyone</button>
           )}
         </div>
       </div>

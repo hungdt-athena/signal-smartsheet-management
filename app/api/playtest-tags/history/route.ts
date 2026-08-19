@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     ? sql`AND pt.tagged_at < (${to}::date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'`
     : sql``
 
-  const [rows, totals] = await Promise.all([
+  const [rows, totals, taggers] = await Promise.all([
     sql`
       SELECT
         pt.id, pt.game_id, pt.field_value, pt.status, pt.sync_result,
@@ -100,10 +100,20 @@ export async function GET(req: NextRequest) {
       WHERE pt.status <> 'pending'
         ${taggerFilter} ${fromFilter} ${toFilter}
     `,
+    // Who the "Proposed by" filter can offer. Deliberately unfiltered: options
+    // built from the current range would vanish as the reader narrows the dates,
+    // and picking a name would then be able to empty its own dropdown.
+    sql`
+      SELECT DISTINCT pt.tagged_by AS email, du.name
+      FROM playtest_tags pt
+      LEFT JOIN dashboard_users du ON du.email = pt.tagged_by
+      WHERE pt.status <> 'pending'
+      ORDER BY du.name NULLS LAST
+    `,
   ])
 
   return NextResponse.json(
-    { rows, total: totals[0]?.total ?? 0, page, limit },
+    { rows, total: totals[0]?.total ?? 0, page, limit, taggers },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

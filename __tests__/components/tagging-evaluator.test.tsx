@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { TaggingTab } from '@/components/TaggingTab'
 
 // The whole point of this file: the same tab, read by an evaluator.
 jest.mock('next-auth/react', () => ({
-  useSession: () => ({ data: { user: { role: 'evaluator', name: 'Mitt' } } }),
+  useSession: () => ({
+    data: { user: { role: 'evaluator', name: 'Mitt', email: 'mitt@athena.studio' } },
+  }),
 }))
 jest.mock('@/components/EvalDetailPanel', () => ({
   __esModule: true,
@@ -56,7 +58,16 @@ function stubFetch() {
       return { ok: true, json: async () => ({ tags: PENDING, total: 1 }) } as Response
     }
     if (u.startsWith('/api/playtest-tags/history')) {
-      return { ok: true, json: async () => ({ rows: HISTORY, total: HISTORY.length }) } as Response
+      return {
+        ok: true,
+        json: async () => ({
+          rows: HISTORY, total: HISTORY.length,
+          taggers: [
+            { email: 'mitt@athena.studio', name: 'Mitt' },
+            { email: 'vinhtd@athena.studio', name: 'VinhTD' },
+          ],
+        }),
+      } as Response
     }
     return { ok: true, json: async () => ({}) } as Response
   }) as unknown as typeof fetch
@@ -78,6 +89,27 @@ describe('Tagging tab as an evaluator', () => {
     expect(screen.queryAllByRole('combobox')).toHaveLength(0)
     // And the catalog the pickers would have needed is never fetched.
     expect(hits.some(u => u.startsWith('/api/trends/options'))).toBe(false)
+  })
+
+  // History is not scoped to the reader, so finding your own tags in it needs a
+  // filter -- and the filter has to send the email, not the display name.
+  it('filters history by the person who proposed the tag', async () => {
+    render(<TaggingTab />)
+    await waitFor(() => expect(screen.getByText('Balatro')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'History' }))
+    await waitFor(() => expect(screen.getByText('Merge')).toBeInTheDocument())
+
+    const pick = screen.getByRole('combobox') as HTMLSelectElement
+    // The reader's own entry is marked, since it is the one they want most.
+    expect(within(pick).getByText('Mitt (you)')).toBeInTheDocument()
+    expect(within(pick).getByText('VinhTD')).toBeInTheDocument()
+
+    fireEvent.change(pick, { target: { value: 'mitt@athena.studio' } })
+    await waitFor(() =>
+      expect(hits.some(u => u.includes('tagger=mitt%40athena.studio'))).toBe(true))
+    // Back to page 1 rather than appending onto the previous person's rows.
+    const last = hits.filter(u => u.startsWith('/api/playtest-tags/history')).pop()!
+    expect(last).toContain('page=1')
   })
 
   it('shows what was proposed beside what was confirmed, and the reason', async () => {
