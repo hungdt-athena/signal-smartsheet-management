@@ -1,7 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
 import { TrendTagsDialog } from './TrendTagsDialog'
-import { TrendTagReview, type ReviewTag } from './TrendTagReview'
+import { TrendTagReview, type ReviewChange, type ReviewTag } from './TrendTagReview'
 
 export interface TrendTag {
   field_value: string
@@ -38,8 +38,9 @@ interface Props {
   review?: ReviewTag[]
   /** True for the manager tier: the waiting tags become reviewable rows. */
   canReview?: boolean
-  /** Called with the value of a tag that has left the pending set. */
-  onReviewed?: (fieldValue: string) => void
+  /** Called with what a review action did, so the caller can apply it without
+   *  re-reading the game. */
+  onReviewed?: (change: ReviewChange) => void
 }
 
 // Trend values are catalog identifiers owned by Signal Sense, not prose, so they
@@ -98,7 +99,7 @@ export function TrendTagsField({
             options={options}
             subValues={subValues}
             optionsError={optionsError}
-            onReviewed={v => onReviewed?.(v)}
+            onReviewed={c => onReviewed?.(c)}
           />
         </div>
       )}

@@ -17,6 +17,19 @@ export interface ReviewTag {
   conflict: boolean
 }
 
+/** What a review action did, in enough detail that the caller can apply it to
+ *  its own state without re-reading the game. Re-reading is what made this feel
+ *  slow: a round trip per click, for a change already described by the response
+ *  to that click.
+ *
+ *  `landed` says the tag reached Signal Sense (inserted, enriched, overwritten,
+ *  or already there) rather than being rejected or dropped as inactive. */
+export type ReviewChange =
+  | { kind: 'resolved'; tag: ReviewTag; landed: boolean }
+  /** `previous` is the value before the edit: an edit can rename the trend, and
+   *  the caller's own list is keyed on the value, not the id. */
+  | { kind: 'edited'; previous: string; tag: ReviewTag }
+
 interface Props {
   tags: ReviewTag[]
   options: string[]
@@ -24,11 +37,11 @@ interface Props {
   /** True when the Trends catalog failed to load: a tag can still be confirmed
    *  or rejected, it just cannot be corrected first. */
   optionsError?: boolean
-  /** Called with the value of a tag that has left the pending set, so the caller
-   *  can drop it from the editable list instead of re-proposing it on the next
-   *  save. Called with '' when the tag was changed but is still pending. */
-  onReviewed: (fieldValue: string) => void
+  onReviewed: (change: ReviewChange) => void
 }
+
+/** Sync outcomes that mean the tag is in Signal Sense now. */
+const LANDED = new Set(['inserted', 'duplicate', 'enriched', 'overwritten'])
 
 const PILL: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -80,18 +93,24 @@ export function TrendTagReview({ tags, options, subValues, optionsError, onRevie
       return copy
     })
 
-  const run = async (t: ReviewTag, work: () => Promise<Response>, done: 'left' | 'stays') => {
+  /** Runs one review call and turns its response into a ReviewChange. */
+  const run = async (
+    t: ReviewTag,
+    work: () => Promise<Response>,
+    read: (body: Record<string, unknown>) => ReviewChange,
+  ) => {
     setBusy(prev => new Set(prev).add(t.id))
     setError(null)
     try {
       const res = await work()
+      const body = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        setError(body.error || 'That did not go through — nothing was changed.')
+        setError((body as { error?: string }).error || 'That did not go through — nothing was changed.')
         return
       }
-      if (done === 'left') setOpenFor(t.id, null)
-      onReviewed(done === 'left' ? t.field_value : '')
+      const change = read(body as Record<string, unknown>)
+      if (change.kind === 'resolved') setOpenFor(t.id, null)
+      onReviewed(change)
     } catch {
       setError('That did not go through — nothing was changed.')
     } finally {
@@ -102,7 +121,14 @@ export function TrendTagReview({ tags, options, subValues, optionsError, onRevie
   const patch = (t: ReviewTag, body: { field_value?: string; sub_value_id?: number | null }) =>
     run(t, () => fetch(`/api/playtest-tags/${t.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    }), 'stays')
+    }), res => ({
+      kind: 'edited',
+      previous: t.field_value,
+      // PATCH answers with the row re-read the way the queue reads it. Merged
+      // over the old one because its fallback path (the row was resolved between
+      // the write and the read-back) answers with the bare columns.
+      tag: { ...t, ...(res.tag as Partial<ReviewTag> | undefined) },
+    }))
 
   const confirm = (t: ReviewTag, overwrite: boolean) =>
     run(t, () => fetch('/api/playtest-tags/confirm', {
@@ -112,13 +138,17 @@ export function TrendTagReview({ tags, options, subValues, optionsError, onRevie
         overwrite: overwrite ? [t.id] : [],
         notes: notes[t.id] ? { [t.id]: notes[t.id] } : {},
       }),
-    }), 'left')
+    }), res => {
+      const results = (res.results as { id: number; result: string }[] | undefined) ?? []
+      const mine = results.find(r => r.id === t.id)
+      return { kind: 'resolved', tag: t, landed: !!mine && LANDED.has(mine.result) }
+    })
 
   const reject = (t: ReviewTag) =>
     run(t, () => fetch('/api/playtest-tags/reject', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: [t.id], notes: notes[t.id] ? { [t.id]: notes[t.id] } : {} }),
-    }), 'left')
+    }), () => ({ kind: 'resolved', tag: t, landed: false }))
 
   const noteBox = (t: ReviewTag, working: boolean) => (
     <input

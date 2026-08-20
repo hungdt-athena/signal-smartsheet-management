@@ -9,7 +9,7 @@ import { useConfig } from '@/hooks/useConfig'
 import { prettyConclusion } from '@/lib/buckets'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
-import { type ReviewTag } from './TrendTagReview'
+import { type ReviewChange, type ReviewTag } from './TrendTagReview'
 import { TrendTagsField, type TrendTag, type ExistingTrendTag } from './TrendTagsField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
@@ -581,32 +581,33 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   }, [])
 
   // A review action changes the pending set behind the form, so the editable
-  // list has to follow it: a confirmed tag that stayed in the list would be
-  // proposed all over again on the next save, and a corrected tag would be
-  // reverted to the version the form still remembers.
+  // list has to follow it: a confirmed tag left in the list would be proposed all
+  // over again on the next save, and a corrected tag would be reverted to the
+  // version the form still remembers.
   //
-  // So the list is rebuilt from the server, plus anything the user has staged
-  // and not yet saved -- values the server does not know about, minus the one
-  // that just left the queue. Reloading wholesale (loadTrendTags) would throw
-  // that staged work away; keeping the list untouched would fight the review.
-  //
-  // `resolved` is the value that was confirmed or rejected, or '' for an edit
-  // that leaves the tag pending.
-  const onTagReviewed = useCallback((resolved: string) => {
-    fetch(`/api/playtest-tags?gameId=${encodeURIComponent(currentGameId)}`)
-      .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
-      .then((d: { pending?: (TrendTag & { field_value: string })[]; existing?: ExistingTrendTag[] }) => {
-        const pending = d.pending || []
-        const known = new Set(pending.map(p => p.field_value))
-        setTrendTags(prev => [
-          ...pending.map(p => ({ field_value: p.field_value, sub_value_id: p.sub_value_id })),
-          ...prev.filter(t => !known.has(t.field_value) && t.field_value !== resolved),
-        ])
-        setPendingReview((d.pending || []) as unknown as ReviewTag[])
-        setExistingTrends(d.existing || [])
-      })
-      .catch(() => {})
-  }, [currentGameId])
+  // Applied from the response rather than by re-reading the game. The re-read was
+  // a second round trip on every click -- confirm, reject, and each pick inside
+  // an edit -- and the click's own response already says what changed. Anything
+  // the user has staged and not saved is untouched either way.
+  const onTagReviewed = useCallback((change: ReviewChange) => {
+    const { tag } = change
+    if (change.kind === 'edited') {
+      setPendingReview(prev => prev.map(p => (p.id === tag.id ? tag : p)))
+      setTrendTags(prev => prev.map(t => (t.field_value === change.previous
+        ? { field_value: tag.field_value, sub_value_id: tag.sub_value_id } : t)))
+      return
+    }
+    setPendingReview(prev => prev.filter(p => p.id !== tag.id))
+    setTrendTags(prev => prev.filter(t => t.field_value !== tag.field_value))
+    // A confirmed tag is now one of the game's Signal Sense trends, and the modal
+    // shows that list right below. A rejected one is simply gone.
+    if (change.landed) {
+      setExistingTrends(prev => prev.some(e => e.field_value === tag.field_value)
+        ? prev.map(e => (e.field_value === tag.field_value
+          ? { ...e, sub_value_name: tag.sub_value_name } : e))
+        : [...prev, { field_value: tag.field_value, sub_value_name: tag.sub_value_name }])
+    }
+  }, [])
 
   useEffect(() => {
     loadTrendTags(currentGameId)

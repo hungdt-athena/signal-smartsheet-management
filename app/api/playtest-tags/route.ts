@@ -4,9 +4,25 @@ import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { isManagerRole } from '@/lib/roles'
-import { TRENDS_FIELD, type PendingTag } from '@/lib/playtest-tags'
+import { classifyTag, TRENDS_FIELD, type PendingTag } from '@/lib/playtest-tags'
+
+/** One pending proposal as the evaluation modal reads it: the tag, who proposed
+ *  it, and what Signal Sense currently has for the same (game, value). */
+interface ReviewRow {
+  id: number
+  game_id: string
+  field_value: string
+  sub_value_id: number | null
+  sub_value_name: string | null
+  tagged_by: string
+  tagged_at: string
+  tagged_by_name: string | null
+  their_sub_value_id: number | null
+  their_sub_value_name: string | null
+  conflict: boolean
+}
 import { syncTags } from '@/lib/playtest-tags-sync'
-import { fetchQueue } from '@/lib/playtest-tags-queue'
+
 
 export const dynamic = 'force-dynamic'
 
@@ -30,10 +46,16 @@ async function resolveSession(): Promise<SessionInfo> {
 // Trends tags it already carries in Signal Sense (shown read-only in the modal
 // so nobody re-tags what is there).
 //
-// The pending rows come from the same fetchQueue the admin Tagging tab reads, so
-// the in-modal review sees the same `conflict` verdict the queue does. Computing
-// it separately here would let the two drift, and they decide when another
-// application's data gets overwritten.
+// One game, so this reads it directly rather than through fetchQueue: that query
+// exists for the team-wide review table and carries its weight — game_info, the
+// developer join, a LATERAL over game_evaluations, a window function to keep a
+// game's tags on one page. None of it means anything for a single game whose
+// title the modal is already showing, and the modal re-reads this on every
+// review action.
+//
+// `conflict` still comes from classifyTag, the same pure function fetchQueue and
+// the confirm route use. Sharing the rule is what matters; sharing the query was
+// never the point.
 export async function GET(req: NextRequest) {
   const guard = await requireAuth()
   if (guard) return guard
@@ -41,8 +63,24 @@ export async function GET(req: NextRequest) {
   const gameId = (req.nextUrl.searchParams.get('gameId') || '').trim()
   if (!gameId) return NextResponse.json({ error: 'gameId required' }, { status: 400 })
 
-  const [pending, existing] = await Promise.all([
-    fetchQueue({ gameId }),
+  const [rows, existing] = await Promise.all([
+    sql`
+      SELECT
+        pt.id, pt.game_id, pt.field_value, pt.sub_value_id, pt.tagged_by, pt.tagged_at,
+        du.name AS tagged_by_name, sv.name AS sub_value_name,
+        (cfv.field_value IS NOT NULL) AS their_exists,
+        cfv.sub_value_id AS their_sub_value_id,
+        their_sv.name AS their_sub_value_name
+      FROM playtest_tags pt
+      LEFT JOIN dashboard_users du ON du.email = pt.tagged_by
+      LEFT JOIN sub_value_definitions sv ON sv.id = pt.sub_value_id
+      LEFT JOIN custom_field_values cfv
+        ON cfv.game_id = pt.game_id AND cfv.field_name = ${TRENDS_FIELD}
+        AND cfv.field_value = pt.field_value
+      LEFT JOIN sub_value_definitions their_sv ON their_sv.id = cfv.sub_value_id
+      WHERE pt.game_id = ${gameId} AND pt.status = 'pending'
+      ORDER BY pt.field_value
+    `,
     sql`
       SELECT cfv.field_value, cfv.sub_value_id, sv.name AS sub_value_name
       FROM custom_field_values cfv
@@ -51,6 +89,21 @@ export async function GET(req: NextRequest) {
       ORDER BY cfv.field_value
     `,
   ])
+
+  const pending = (rows as unknown as (Omit<ReviewRow, 'conflict'> & { their_exists: boolean })[])
+    .map(r => {
+      const action = classifyTag(
+        { id: r.id, field_value: r.field_value, sub_value_id: r.sub_value_id },
+        r.their_exists
+          ? { field_value: r.field_value, sub_value_id: r.their_sub_value_id }
+          : undefined,
+      )
+      // their_exists is an artefact of the join, not part of the row the client
+      // reads: `conflict` is what it was needed for.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { their_exists, ...tag } = r
+      return { ...tag, conflict: action.kind === 'conflict' }
+    })
 
   return NextResponse.json({ pending, existing }, { headers: { 'Cache-Control': 'no-store' } })
 }
