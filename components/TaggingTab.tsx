@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import EvalDetailPanel, { type EvalListItem } from './EvalDetailPanel'
 import { TrendValuePicker } from './TrendValuePicker'
+import { TrendsCatalog } from './TrendsCatalog'
 
 /** One pending proposal, carrying its game with it — the queue is a flat list of
  *  tags, grouped only for display. Mirrors QueueTag in lib/playtest-tags-queue. */
@@ -105,7 +106,7 @@ function GameButton({ title, gameId, onOpen, list }: {
 // proposed. Every write path is admin-only both here and in its route, so this
 // component's `isAdmin` decides what is worth rendering, never what is allowed.
 export function TaggingTab() {
-  const [view, setView] = useState<'pending' | 'history'>('pending')
+  const [view, setView] = useState<'pending' | 'history' | 'trends'>('pending')
   const [detail, setDetail] = useState<{ gameId: string; list: EvalListItem[] } | null>(null)
   const { data: session } = useSession()
   const role = session?.user?.role
@@ -120,20 +121,23 @@ export function TaggingTab() {
         <div>
           <h1 className="h-title">Tagging</h1>
           <p className="h-sub">
-            {isAdmin
-              ? 'Trends proposed while playtesting. Confirming writes them into Signal Sense.'
-              : 'Trends you proposed while playtesting, and what the review made of them.'}
+            {view === 'trends'
+              ? 'Every trend you can tag, and how much the team is using each one.'
+              : isAdmin
+                ? 'Trends proposed while playtesting. Confirming writes them into Signal Sense.'
+                : 'Trends you proposed while playtesting, and what the review made of them.'}
           </p>
         </div>
         <div className="seg">
           <button className={'seg-btn' + (view === 'pending' ? ' active' : '')} onClick={() => setView('pending')}>Pending</button>
           <button className={'seg-btn' + (view === 'history' ? ' active' : '')} onClick={() => setView('history')}>History</button>
+          <button className={'seg-btn' + (view === 'trends' ? ' active' : '')} onClick={() => setView('trends')}>Trends</button>
         </div>
       </div>
 
-      {view === 'pending'
-        ? <PendingView onOpenGame={openGame} isAdmin={isAdmin} />
-        : <HistoryView onOpenGame={openGame} isAdmin={isAdmin} />}
+      {view === 'pending' && <PendingView onOpenGame={openGame} isAdmin={isAdmin} />}
+      {view === 'history' && <HistoryView onOpenGame={openGame} isAdmin={isAdmin} />}
+      {view === 'trends' && <TrendsCatalog onOpenGame={openGame} />}
 
       {detail && (
         <div className="eval-modal-backdrop" onClick={() => setDetail(null)}>
