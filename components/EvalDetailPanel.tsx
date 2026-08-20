@@ -12,6 +12,7 @@ import { GameAlikeField } from '@/components/GameAlikeField'
 import { TrendTagsField, type TrendTag, type ExistingTrendTag } from './TrendTagsField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
+import { isManagerRole } from '@/lib/roles'
 
 export interface EvalDetail {
   id: number
@@ -628,13 +629,18 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   }
 
   const isAdmin = role === 'admin'
-  const isManager = role === 'admin'
-  // Evaluation content (conclusion/note/drive) — admin or the assigned evaluator.
-  const canEditEval = !readOnly && (isAdmin || ev?.initial_evaluator === userName)
-  // Final Note + Final Conclusion are manager-only fields (admin).
-  const canEditFinalNote = !readOnly && isManager
+  const isManager = isManagerRole(role)
+  // Evaluation content (conclusion/note/drive) — a manager or the assigned evaluator.
+  const canEditEval = !readOnly && (isManager || ev?.initial_evaluator === userName)
+  // Game Alike and Trends tags are a manager's to edit on any game — this is the
+  // flag they hang off, kept separate from the final fields below. Before
+  // moderator existed the two were the same check, and folding them back
+  // together would quietly take tagging away from moderators.
+  const canEditManagerFields = !readOnly && isManager
+  // Final Note + Final Conclusion are the last word on a game: admin only.
+  const canEditFinalNote = !readOnly && isAdmin
   // Game Alike is editable by the evaluator OR a manager, in any stage.
-  const canEditGameAlike = canEditEval || canEditFinalNote
+  const canEditGameAlike = canEditEval || canEditManagerFields
   // Progress-stage locks freeze only the *conclusion decisions* — notes, game
   // alike and demo link stay editable per their base permission.
   //   final conclusion set → Initial Conclusion frozen (clear it to unlock)
@@ -643,9 +649,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const finalLocked = !!(ev?.record_5min_assignee || ev?.record_20min_assignee)
   const canEditInitialConc = canEditEval && !initialLocked
   const canEditFinalConc = canEditFinalNote && !finalLocked
-  // Recording drive links — admin or the assigned recorder for that duration.
-  const canEdit5 = !readOnly && (isAdmin || ev?.record_5min_assignee === userName)
-  const canEdit20 = !readOnly && (isAdmin || ev?.record_20min_assignee === userName)
+  // Recording drive links — a manager or the assigned recorder for that duration.
+  const canEdit5 = !readOnly && (isManager || ev?.record_5min_assignee === userName)
+  const canEdit20 = !readOnly && (isManager || ev?.record_20min_assignee === userName)
   // 5/20-min recordings are always YouTube uploads, matched live (title + duration).
   const m5 = ev ? ytLookup(ytMap, ev.title, '5min') : undefined
   const m20 = ev ? ytLookup(ytMap, ev.title, '20min') : undefined
@@ -657,10 +663,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const recordConfirmed = !!ev?.record_confirmed_at
   // Final conclusion options (managed from the Config tab).
   const { final_conclusion: finalConclusionOptions } = useConfig()
-  // Re-assigning recorders is a manager action (admin), enabled per-context.
+  // Re-assigning recorders is a manager action, enabled per-context.
   const canEditAssignee = !readOnly && isManager && !!canAssignRecords
   // Any editable surface → show the save button.
-  const canEdit = canEditEval || canEdit5 || canEdit20 || canEditAssignee || canEditFinalNote
+  const canEdit = canEditEval || canEdit5 || canEdit20 || canEditAssignee
+    || canEditManagerFields || canEditFinalNote
   // The eval editor's Save button also flushes staged screenshots, so staged
   // shots count as unsaved work for it (the card hides its own button then).
   const needsSave = dirty || (canEditEval && stagedShots > 0)
@@ -1230,9 +1237,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
             </div>
           </div>
 
-          {/* Final Conclusion — only surfaced in the Short List (moderator triage);
-              hidden in the Evaluate panel and other views. Editable by managers
-              only, read-only otherwise. */}
+          {/* Final Conclusion — only surfaced in the Short List (triage); hidden
+              in the Evaluate panel and other views. Editable by admins only:
+              moderators triage everything else but do not write the last word on
+              a game. Read-only for everyone else. */}
           {showFinalConclusion && (
           <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
@@ -1241,7 +1249,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   <SaveStatus dirty={needsSave} />
                 ) : (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--faint)' }}>
-                    <LockIcon /> Manager only
+                    <LockIcon /> Admin only
                   </span>
                 )}
               </div>
@@ -1271,7 +1279,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                     rows={3}
                     value={finalNote}
                     onChange={e => { setFinalNote(e.target.value); setDirty(true) }}
-                    placeholder={canEditFinalNote ? 'Final note (managers only)…' : 'Final note (managers only)'}
+                    placeholder={canEditFinalNote ? 'Final note (admin only)…' : 'Final note (admin only)'}
                     disabled={!canEditFinalNote}
                     style={{ resize: 'vertical', fontSize: 13 }}
                   />
