@@ -580,16 +580,29 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       .catch(() => { if (trendTagsGen.current === gen) setTrendTagsError(true) })
   }, [])
 
-  // After a tag is confirmed or rejected it is no longer pending, so it has to
-  // leave the editable list too -- otherwise the next save would propose it all
-  // over again. Everything else the user has staged but not saved stays: this
-  // deliberately does not call loadTrendTags, which would overwrite it.
-  const onTagReviewed = useCallback((fieldValue: string) => {
-    if (fieldValue) setTrendTags(prev => prev.filter(t => t.field_value !== fieldValue))
+  // A review action changes the pending set behind the form, so the editable
+  // list has to follow it: a confirmed tag that stayed in the list would be
+  // proposed all over again on the next save, and a corrected tag would be
+  // reverted to the version the form still remembers.
+  //
+  // So the list is rebuilt from the server, plus anything the user has staged
+  // and not yet saved -- values the server does not know about, minus the one
+  // that just left the queue. Reloading wholesale (loadTrendTags) would throw
+  // that staged work away; keeping the list untouched would fight the review.
+  //
+  // `resolved` is the value that was confirmed or rejected, or '' for an edit
+  // that leaves the tag pending.
+  const onTagReviewed = useCallback((resolved: string) => {
     fetch(`/api/playtest-tags?gameId=${encodeURIComponent(currentGameId)}`)
       .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
-      .then(d => {
-        setPendingReview(d.pending || [])
+      .then((d: { pending?: (TrendTag & { field_value: string })[]; existing?: ExistingTrendTag[] }) => {
+        const pending = d.pending || []
+        const known = new Set(pending.map(p => p.field_value))
+        setTrendTags(prev => [
+          ...pending.map(p => ({ field_value: p.field_value, sub_value_id: p.sub_value_id })),
+          ...prev.filter(t => !known.has(t.field_value) && t.field_value !== resolved),
+        ])
+        setPendingReview((d.pending || []) as unknown as ReviewTag[])
         setExistingTrends(d.existing || [])
       })
       .catch(() => {})

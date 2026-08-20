@@ -140,9 +140,14 @@ describe('/api/playtest-tags', () => {
     const insert = calls.find(c => /INSERT INTO playtest_tags/.test(c.text))!
     // Upsert on the partial unique index, predicate repeated in the target.
     expect(insert.text).toMatch(/ON CONFLICT \(game_id, field_value\)\s*WHERE status = 'pending'/)
-    expect(insert.text).toMatch(/DO UPDATE SET sub_value_id = EXCLUDED\.sub_value_id/)
-    // The update half touches nothing else -- provenance stays with the tagger.
-    expect(insert.text.split('DO UPDATE')[1]).not.toMatch(/tagged_by|tagged_at/)
+    expect(insert.text).toMatch(/DO UPDATE SET\s*sub_value_id = EXCLUDED\.sub_value_id/)
+    // Editing a pending tag through this dialog makes it the saver's: there is
+    // no review trail here, so the record says who is proposing it now. Guarded
+    // on a real change, because this PUT also fires on saves that never touched
+    // a tag -- see the route.
+    const update = insert.text.split('DO UPDATE')[1]
+    expect(update).toMatch(/tagged_by = CASE/)
+    expect(update).toMatch(/sub_value_id IS DISTINCT FROM EXCLUDED\.sub_value_id/)
   })
 
   it('rejects a value that is not an active Trends definition', async () => {

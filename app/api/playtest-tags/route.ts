@@ -130,11 +130,29 @@ export async function PUT(req: NextRequest) {
       for (const t of unique) {
         // The conflict target repeats the index predicate because
         // playtest_tags_pending_uniq is a PARTIAL unique index.
+        //
+        // Editing someone else's pending tag here makes it yours: this dialog
+        // has no review trail -- no original_* snapshot, no note, no separate
+        // reviewer -- so the honest record is that the saver is now the one
+        // proposing this tag. Reviewing without taking it over is what the
+        // panel's pending pills are for, and they go through PATCH + confirm.
+        //
+        // Guarded on an actual change: this PUT fires on every evaluation save,
+        // including saves that never opened the tag dialog. Without the CASE, an
+        // admin who saved a note would quietly take over every teammate's
+        // pending tag on that game.
         await tx`
           INSERT INTO playtest_tags (game_id, field_value, sub_value_id, tagged_by)
           VALUES (${gameId}, ${t.field_value}, ${t.sub_value_id}, ${email})
           ON CONFLICT (game_id, field_value) WHERE status = 'pending'
-          DO UPDATE SET sub_value_id = EXCLUDED.sub_value_id
+          DO UPDATE SET
+            sub_value_id = EXCLUDED.sub_value_id,
+            tagged_by = CASE
+              WHEN playtest_tags.sub_value_id IS DISTINCT FROM EXCLUDED.sub_value_id
+                THEN EXCLUDED.tagged_by ELSE playtest_tags.tagged_by END,
+            tagged_at = CASE
+              WHEN playtest_tags.sub_value_id IS DISTINCT FROM EXCLUDED.sub_value_id
+                THEN now() ELSE playtest_tags.tagged_at END
         `
       }
     }
