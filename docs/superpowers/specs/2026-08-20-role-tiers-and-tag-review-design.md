@@ -28,7 +28,7 @@ quyền theo từng màn hình đã từng được cân nhắc và bị bỏ v�
 | Khoản | admin | moderator | evaluator |
 |---|---|---|---|
 | Tag trong modal | sync thẳng vào Signal Sense | vào queue pending | vào queue pending |
-| Điền Final Conclusion | có | **không** | không |
+| Điền Final Conclusion / Final Note | có | **không** | không |
 | Users Management: đổi role / xoá user | có | **không** | không |
 | Users Management: invite, sửa tên/title | có | có | không |
 | Duyệt tag (confirm/reject/sửa/gỡ) | có | có | không |
@@ -43,8 +43,8 @@ Invite bị chặn leo thang: moderator chỉ mời được người ở role `
 `moderator`. Không thì "không được đổi role" vẫn lách được bằng cách mời một
 tài khoản admin mới.
 
-Final **note** vẫn là manager tier (admin + moderator). Chỉ Final **Conclusion**
-— giá trị triage được Report đọc — mới là admin-only.
+Final Conclusion và Final Note đều là admin-only: cả hai là phát ngôn cuối cùng
+về một game, Report đọc cái trước và cái sau giải thích nó.
 
 ## Thay đổi tầng auth
 
@@ -81,12 +81,25 @@ POST cho manager tier nhưng moderator bị chặn nếu `role === 'admin'`.
 
 `app/api/evaluations/route.ts`: PUT hiện có một cờ `isManager` gác cả
 `final_note`, `final_conclusion` và `batch`. Tách thành `isManager` (nay gồm
-moderator) và `isAdmin`; chỉ `final_conclusion` đọc `isAdmin`.
+moderator, gác `batch`) và `isAdmin` (gác `final_note` + `final_conclusion`).
 
-Client: `EvalDetailPanel` `canEditFinalConc = canEditFinalNote && !finalLocked`
-đổi thành `isAdmin && !finalLocked`; `TaggingTab.isAdmin` đổi thành `isManager`.
-UI chỉ quyết định cái gì đáng vẽ, quyền vẫn do route giữ — nguyên tắc đã ghi sẵn
-trong `TaggingTab.tsx:107`.
+Client: `EvalDetailPanel` đang dùng `canEditFinalNote` cho hai việc khác nhau —
+sửa Final Note, *và* mở khoá Game Alike cùng Trends tags trên game mình không
+sở hữu (`canEditGameAlike = canEditEval || canEditFinalNote`, và
+`TrendTagsField disabled={!canEditGameAlike}`). Đổi thẳng cờ đó thành admin-only
+sẽ lấy mất quyền tag của moderator, nên tách đôi:
+
+- `canEditManagerFields = !readOnly && isManager` — thay chân `canEditFinalNote`
+  trong `canEditGameAlike`, giữ Game Alike và Trends tags mở cho moderator.
+- `canEditFinalNote = !readOnly && isAdmin`, và
+  `canEditFinalConc = canEditFinalNote && !finalLocked` giữ nguyên công thức —
+  nay tự động là admin-only vì vế đầu đã đổi.
+- `canEdit` (cờ quyết định form có gì để lưu) đọc `canEditManagerFields` thay vì
+  `canEditFinalNote`, không thì moderator sửa Game Alike xong không bấm Save được.
+- Placeholder "Final note (managers only)" đổi thành "admin only" cho khớp.
+
+`TaggingTab.isAdmin` đổi thành `isManager`. UI chỉ quyết định cái gì đáng vẽ,
+quyền vẫn do route giữ — nguyên tắc đã ghi sẵn trong `TaggingTab.tsx:107`.
 
 ## Admin tag thì đi thẳng
 
@@ -153,8 +166,8 @@ Mở rộng bộ test sẵn có trong `__tests__/api/playtest-tags*.test.ts`:
 - Moderator gọi confirm/reject/PATCH → 200; evaluator → 403.
 - Moderator confirm tag do chính mình đề xuất → 200.
 - `requireManager()` nhận moderator; `requireAdmin()` từ chối moderator.
-- Evaluations PUT: moderator gửi `final_conclusion` → giá trị không đổi;
-  moderator gửi `final_note` → đổi.
+- Evaluations PUT: moderator gửi `final_conclusion` hoặc `final_note` → cả hai
+  không đổi; moderator gửi `game_alike` → đổi.
 - Users PUT có `role` bởi moderator → 403; POST invite role `admin` bởi
   moderator → 403; POST invite role `evaluator` → 200.
 
