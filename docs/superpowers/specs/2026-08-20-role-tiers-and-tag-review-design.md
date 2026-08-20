@@ -114,6 +114,12 @@ sub-value của admin ghi đè, `sync_result='overwritten'`, và ghi `cfv_change
 y như confirm route đang làm. Đây là ngoại lệ duy nhất so với đường confirm thủ
 công, nơi overwrite phải được tick.
 
+Auto-sync chỉ chạm tag do **chính admin đó** đề xuất (`tagged_by = email`).
+Modal hiển thị cả tập pending của game, nên nếu không giới hạn, một admin bấm
+Save form là duyệt luôn mọi đề xuất evaluator đang chờ — phê duyệt thứ họ chưa
+hề xem. Tag của người khác vẫn nằm chờ và được duyệt có chủ đích, ở queue hoặc ở
+khu review trong panel.
+
 Ngoại lệ giữ nguyên: value không còn là định nghĩa Trends active thì bị
 `rejected`/`inactive`, không auto hồi sinh definition Signal Sense đã retire.
 
