@@ -192,4 +192,42 @@ describe('/api/playtest-tags', () => {
       .rejects.toThrow('constraint violation')
     expect(calls.some(c => /DELETE FROM playtest_tags/.test(c.text))).toBe(true)
   })
+
+  it('syncs an admin tag straight into Signal Sense', async () => {
+    sessionMock.mockResolvedValue({ user: { role: 'admin', name: 'VinhTD', email: 'vinhtd@athena.studio' } })
+    routeSql([
+      { match: /EXISTS/, rows: [{ found: true, owned: true }] },
+      { match: /custom_field_definitions/, rows: [{ field_value: 'Balatro' }] },
+      { match: /INSERT INTO playtest_tags/, rows: [{ id: 42 }] },
+      { match: /SELECT id, field_value, sub_value_id/, rows: [{ id: 42, field_value: 'Balatro', sub_value_id: 3 }] },
+      { match: /FROM custom_field_values/, rows: [] },
+      { match: /INSERT INTO custom_field_values/, rows: [{ id: 9 }] },
+    ])
+    const res = await PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: 3 }] }))
+    expect(res.status).toBe(200)
+    expect(calls.some(c => /INSERT INTO custom_field_values/.test(c.text))).toBe(true)
+    expect(calls.some(c => /UPDATE playtest_tags/.test(c.text) && c.binds.includes('synced'))).toBe(true)
+  })
+
+  it('leaves a moderator tag pending', async () => {
+    sessionMock.mockResolvedValue({ user: { role: 'moderator', name: 'Mitt', email: 'mitt@athena.studio' } })
+    routeSql([
+      { match: /EXISTS/, rows: [{ found: true, owned: true }] },
+      { match: /custom_field_definitions/, rows: [{ field_value: 'Balatro' }] },
+      { match: /INSERT INTO playtest_tags/, rows: [{ id: 42 }] },
+    ])
+    expect((await PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: 3 }] }))).status).toBe(200)
+    expect(calls.some(c => /INSERT INTO custom_field_values/.test(c.text))).toBe(false)
+  })
+
+  it('leaves an evaluator tag pending', async () => {
+    sessionMock.mockResolvedValue({ user: { role: 'evaluator', name: 'Mitt', email: 'mitt@athena.studio' } })
+    routeSql([
+      { match: /EXISTS/, rows: [{ found: true, owned: true }] },
+      { match: /custom_field_definitions/, rows: [{ field_value: 'Balatro' }] },
+      { match: /INSERT INTO playtest_tags/, rows: [{ id: 42 }] },
+    ])
+    expect((await PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: 3 }] }))).status).toBe(200)
+    expect(calls.some(c => /INSERT INTO custom_field_values/.test(c.text))).toBe(false)
+  })
 })

@@ -3,19 +3,23 @@ import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
-import { TRENDS_FIELD } from '@/lib/playtest-tags'
+import { isManagerRole } from '@/lib/roles'
+import { TRENDS_FIELD, type PendingTag } from '@/lib/playtest-tags'
+import { syncTags } from '@/lib/playtest-tags-sync'
 
 export const dynamic = 'force-dynamic'
 
-interface SessionInfo { isManager: boolean; name: string; email: string }
+interface SessionInfo { isManager: boolean; isAdmin: boolean; name: string; email: string }
 
 async function resolveSession(): Promise<SessionInfo> {
   if (process.env.SKIP_AUTH === 'true') {
-    return { isManager: true, name: '', email: 'skip-auth@local' }
+    return { isManager: true, isAdmin: true, name: '', email: 'skip-auth@local' }
   }
   const session = await getServerSession(authOptions)
+  const role = session?.user?.role
   return {
-    isManager: session?.user?.role === 'admin',
+    isManager: isManagerRole(role),
+    isAdmin: role === 'admin',
     name: session?.user?.name || '',
     email: session?.user?.email || '',
   }
@@ -71,9 +75,9 @@ export async function PUT(req: NextRequest) {
   // than tripping the partial unique index.
   const unique = Array.from(new Map(tags.map(t => [t.field_value, t])).values())
 
-  const { isManager, name, email } = await resolveSession()
+  const { isManager, isAdmin, name, email } = await resolveSession()
 
-  // Own-only: an evaluator may tag their own game, an admin any game.
+  // Own-only: an evaluator may tag their own game, a manager any game.
   // game_evaluations is UNIQUE(game_id, category_group), so a game can hold rows
   // in two groups — test EXISTS across all of them instead of picking one row,
   // which would make authorisation depend on the planner.
@@ -133,6 +137,29 @@ export async function PUT(req: NextRequest) {
           DO UPDATE SET sub_value_id = EXCLUDED.sub_value_id
         `
       }
+    }
+
+    // An admin does not queue up to review themselves: their tags go straight
+    // into Signal Sense, in this same transaction, and their sub-value wins any
+    // conflict. Overwrite is automatic here and has to be ticked on the manual
+    // confirm path -- that difference is the whole of the admin tier's edge in
+    // this flow, and the reason a moderator's tags still queue.
+    //
+    // Read back rather than trusting the payload: the upsert above may have
+    // updated a row proposed by someone else, and it is that row's id the sync
+    // has to stamp.
+    if (isAdmin && values.length > 0) {
+      const rows = await tx`
+        SELECT id, field_value, sub_value_id
+        FROM playtest_tags
+        WHERE game_id = ${gameId} AND status = 'pending' AND field_value = ANY(${values})
+        ORDER BY id
+      ` as unknown as PendingTag[]
+      await syncTags(tx, {
+        gameId, pending: rows, actor: email,
+        overwrite: new Set(rows.map(r => r.id)),
+        notes: new Map(),
+      })
     }
   })
 
