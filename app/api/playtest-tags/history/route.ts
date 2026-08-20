@@ -48,10 +48,11 @@ export async function GET(req: NextRequest) {
       SELECT
         pt.id, pt.game_id, pt.field_value, pt.status, pt.sync_result,
         pt.tagged_at, pt.confirmed_at, pt.removed_at, pt.removed_by,
-        pt.review_note, pt.original_captured_at, pt.original_field_value,
+        pt.review_note, pt.original_captured_at, pt.original_field_value, pt.edited_at,
         gi.title, gi.icon_url, sv.name AS sub_value_name,
         osv.name AS original_sub_value_name,
         tagger.name AS tagged_by_name, confirmer.name AS confirmed_by_name,
+        editor.name AS edited_by_name,
         remover.name AS removed_by_name,
         (cfv.field_value IS NOT NULL) AS in_signal_sense,
         (cfv.created_by = ${SYNC_USER}) AS ours,
@@ -69,6 +70,8 @@ export async function GET(req: NextRequest) {
       LEFT JOIN sub_value_definitions osv ON osv.id = pt.original_sub_value_id
       LEFT JOIN dashboard_users tagger ON tagger.email = pt.tagged_by
       LEFT JOIN dashboard_users confirmer ON confirmer.email = pt.confirmed_by
+      -- Who corrected the tag, which is often neither the tagger nor the confirmer.
+      LEFT JOIN dashboard_users editor ON editor.email = pt.edited_by
       LEFT JOIN dashboard_users remover ON remover.email = pt.removed_by
       LEFT JOIN custom_field_values cfv
         ON cfv.game_id = pt.game_id AND cfv.field_name = ${TRENDS_FIELD} AND cfv.field_value = pt.field_value

@@ -114,7 +114,9 @@ describe('/api/playtest-tags', () => {
     ])
     const r = await PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: 2 }] }))
     expect(await r.json()).toEqual({ ok: true, count: 1 })
-    expect(calls.some(c => /DELETE FROM playtest_tags/.test(c.text))).toBe(true)
+    // Tags dropped from the list are rejected, never deleted -- History has to
+    // keep the episode.
+    expect(calls.some(c => /UPDATE playtest_tags\s*SET status = /.test(c.text))).toBe(true)
     const insert = calls.find(c => /INSERT INTO playtest_tags/.test(c.text))
     expect(insert?.binds).toEqual(expect.arrayContaining(['g1', 'Balatro', 2, 'mitt@athena.studio']))
   })
@@ -132,21 +134,23 @@ describe('/api/playtest-tags', () => {
     const r = await PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: 1 }] }))
     expect(r.status).toBe(200)
 
-    const del = calls.find(c => /DELETE FROM playtest_tags/.test(c.text))!
+    const drop = calls.find(c => /UPDATE playtest_tags\s*SET status = /.test(c.text))!
     // Scoped to the values that are gone, not the whole pending set.
-    expect(del.text).toMatch(/NOT \(field_value = ANY/)
-    expect(del.binds).toEqual(expect.arrayContaining([['Balatro']]))
+    expect(drop.text).toMatch(/NOT \(field_value = ANY/)
+    expect(drop.binds).toEqual(expect.arrayContaining([['Balatro']]))
 
     const insert = calls.find(c => /INSERT INTO playtest_tags/.test(c.text))!
     // Upsert on the partial unique index, predicate repeated in the target.
     expect(insert.text).toMatch(/ON CONFLICT \(game_id, field_value\)\s*WHERE status = 'pending'/)
     expect(insert.text).toMatch(/DO UPDATE SET\s*sub_value_id = EXCLUDED\.sub_value_id/)
-    // Editing a pending tag through this dialog makes it the saver's: there is
-    // no review trail here, so the record says who is proposing it now. Guarded
-    // on a real change, because this PUT also fires on saves that never touched
-    // a tag -- see the route.
+    // Editing a pending tag here leaves the review rows' trail: the tagger keeps
+    // the credit, the replaced version is snapshotted, edited_by names whoever
+    // moved it. All guarded on the sub-value actually changing, because this PUT
+    // also fires on saves that never touched a tag -- see the route.
     const update = insert.text.split('DO UPDATE')[1]
-    expect(update).toMatch(/tagged_by = CASE/)
+    expect(update).not.toMatch(/tagged_by =/)
+    expect(update).toMatch(/edited_by = CASE/)
+    expect(update).toMatch(/original_captured_at = CASE/)
     expect(update).toMatch(/sub_value_id IS DISTINCT FROM EXCLUDED\.sub_value_id/)
   })
 
@@ -166,9 +170,9 @@ describe('/api/playtest-tags', () => {
     routeSql([authz(true, false)])
     const r = await PUT(putReq({ game_id: 'g1', tags: [] }))
     expect(await r.json()).toEqual({ ok: true, count: 0 })
-    const del = calls.find(c => /DELETE FROM playtest_tags/.test(c.text))!
-    // The unscoped delete is only correct when the payload is empty.
-    expect(del.text).not.toMatch(/NOT \(field_value = ANY/)
+    const drop = calls.find(c => /UPDATE playtest_tags\s*SET status = /.test(c.text))!
+    // Rejecting the whole pending set is only correct when the payload is empty.
+    expect(drop.text).not.toMatch(/NOT \(field_value = ANY/)
     expect(calls.some(c => /INSERT INTO playtest_tags/.test(c.text))).toBe(false)
   })
 
@@ -195,7 +199,7 @@ describe('/api/playtest-tags', () => {
 
     await expect(PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: null }] })))
       .rejects.toThrow('constraint violation')
-    expect(calls.some(c => /DELETE FROM playtest_tags/.test(c.text))).toBe(true)
+    expect(calls.some(c => /UPDATE playtest_tags\s*SET status = /.test(c.text))).toBe(true)
   })
 
   it('syncs an admin tag straight into Signal Sense', async () => {

@@ -52,6 +52,10 @@ interface HistoryRow {
   original_captured_at: string | null
   original_field_value: string | null
   original_sub_value_name: string | null
+  /** Who last corrected the tag, and when. Often neither the tagger nor the
+   *  confirmer, which is exactly why it is its own column. */
+  edited_by_name: string | null
+  edited_at: string | null
   /** The admin's optional reason, written at confirm or reject time. */
   review_note: string | null
   /** Latest sub-value overwrite made in Signal Sense after our confirm. The row
@@ -968,6 +972,13 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
                   <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)' }}>
                     {fmt(r.tagged_at)}
                   </span>
+                  {/* Sits under the proposer because it reads as one sentence:
+                      X proposed this, Y edited it. */}
+                  {r.edited_by_name && (
+                    <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)' }}>
+                      edited by {r.edited_by_name}
+                    </span>
+                  )}
                 </td>
                 <td>
                   {r.confirmed_by_name || '—'}

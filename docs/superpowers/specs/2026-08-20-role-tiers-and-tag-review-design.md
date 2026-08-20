@@ -123,6 +123,17 @@ khu review trong panel.
 Ngoại lệ giữ nguyên: value không còn là định nghĩa Trends active thì bị
 `rejected`/`inactive`, không auto hồi sinh definition Signal Sense đã retire.
 
+Ba vai trên một dòng lịch sử, tách bạch: `tagged_by` đề xuất, `edited_by`
+(migration 039) sửa, `confirmed_by` chốt. Mượn `confirmed_by` để ghi người sửa
+thì tên đó biến mất ngay khi ai đó bấm Confirm. Cả hai đường sửa — PATCH ở khu
+review và upsert ở hộp thoại Manage Trends Tags — cùng ghi `edited_by` và cùng
+snapshot `original_*` một lần, để một hành động không để lại hai dấu vết khác
+nhau. Mọi nhánh đều canh trên "sub-value thật sự đổi", vì PUT bắn mỗi lần lưu
+form kể cả khi không ai mở hộp thoại tag.
+
+Bỏ một chip khỏi danh sách là **reject**, không phải xoá: row bị xoá mang theo cả
+câu chuyện, evaluator chỉ thấy tag biến mất mà không biết ai bỏ và lúc nào.
+
 Gỡ một chip đã synced trong modal **không** xoá khỏi Signal Sense. Xoá vẫn phải
 qua `POST /remove`, route duy nhất được phép xoá dữ liệu của app khác và chỉ xoá
 được row do `playtest_sync` tạo.

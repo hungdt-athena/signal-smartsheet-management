@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
 import { requireManager } from '@/lib/auth-guard'
+import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { TRENDS_FIELD } from '@/lib/playtest-tags'
 import { fetchQueue } from '@/lib/playtest-tags-queue'
@@ -115,11 +117,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         original_captured_at = now()`
     : sql``
 
+  // Who corrected it, kept apart from who confirms it later -- those are often
+  // two people, and confirmed_by would overwrite this one. Stamped on every move,
+  // not just the first: the latest correction is the one worth attributing, while
+  // original_* stays pinned to what the evaluator proposed.
+  const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
+  const editor = session?.user?.email || 'skip-auth@local'
+  const stamp = moves
+    ? sql`, edited_by = ${editor}, edited_at = now()`
+    : sql``
+
   let updated
   try {
     updated = await sql`
       UPDATE playtest_tags
-      SET field_value = ${nextValue}, sub_value_id = ${nextSub}${snapshot}
+      SET field_value = ${nextValue}, sub_value_id = ${nextSub}${snapshot}${stamp}
       WHERE id = ${id} AND status = 'pending'
       RETURNING id, game_id, field_value, sub_value_id
     `

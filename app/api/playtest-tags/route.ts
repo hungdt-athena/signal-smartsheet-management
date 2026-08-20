@@ -119,11 +119,21 @@ export async function PUT(req: NextRequest) {
   const values = unique.map(t => t.field_value)
   await sql.begin(async txRaw => {
     const tx = txRaw as unknown as typeof sql
+    // Dropping a tag from the list rejects it; it is never deleted. A deleted
+    // row takes the whole episode with it -- the evaluator who proposed the tag
+    // would find it simply gone, with nothing in History to say who dropped it
+    // or when. `rejected` keeps that line readable, and the partial unique index
+    // only covers pending rows, so the same value can be proposed again later.
     if (values.length === 0) {
-      await tx`DELETE FROM playtest_tags WHERE game_id = ${gameId} AND status = 'pending'`
+      await tx`
+        UPDATE playtest_tags
+        SET status = 'rejected', confirmed_by = ${email}, confirmed_at = now()
+        WHERE game_id = ${gameId} AND status = 'pending'
+      `
     } else {
       await tx`
-        DELETE FROM playtest_tags
+        UPDATE playtest_tags
+        SET status = 'rejected', confirmed_by = ${email}, confirmed_at = now()
         WHERE game_id = ${gameId} AND status = 'pending'
           AND NOT (field_value = ANY(${values}))
       `
@@ -131,28 +141,40 @@ export async function PUT(req: NextRequest) {
         // The conflict target repeats the index predicate because
         // playtest_tags_pending_uniq is a PARTIAL unique index.
         //
-        // Editing someone else's pending tag here makes it yours: this dialog
-        // has no review trail -- no original_* snapshot, no note, no separate
-        // reviewer -- so the honest record is that the saver is now the one
-        // proposing this tag. Reviewing without taking it over is what the
-        // panel's pending pills are for, and they go through PATCH + confirm.
+        // Editing someone else's pending tag here leaves the same trail the
+        // review rows leave: they proposed it, you edited it. Provenance stays
+        // with the tagger, the version being replaced is snapshotted once, and
+        // edited_by names whoever moved it -- so one line of History reads
+        // "proposed by X, edited by Y" instead of quietly becoming Y's tag.
         //
-        // Guarded on an actual change: this PUT fires on every evaluation save,
-        // including saves that never opened the tag dialog. Without the CASE, an
-        // admin who saved a note would quietly take over every teammate's
-        // pending tag on that game.
+        // Every branch is guarded on the sub-value actually moving. This PUT
+        // fires on every evaluation save, including saves that never opened the
+        // tag dialog; without the guards, saving a note would stamp an edit on
+        // each of a teammate's pending tags.
         await tx`
           INSERT INTO playtest_tags (game_id, field_value, sub_value_id, tagged_by)
           VALUES (${gameId}, ${t.field_value}, ${t.sub_value_id}, ${email})
           ON CONFLICT (game_id, field_value) WHERE status = 'pending'
           DO UPDATE SET
             sub_value_id = EXCLUDED.sub_value_id,
-            tagged_by = CASE
+            original_field_value = CASE
               WHEN playtest_tags.sub_value_id IS DISTINCT FROM EXCLUDED.sub_value_id
-                THEN EXCLUDED.tagged_by ELSE playtest_tags.tagged_by END,
-            tagged_at = CASE
+                AND playtest_tags.original_captured_at IS NULL
+                THEN playtest_tags.field_value ELSE playtest_tags.original_field_value END,
+            original_sub_value_id = CASE
               WHEN playtest_tags.sub_value_id IS DISTINCT FROM EXCLUDED.sub_value_id
-                THEN now() ELSE playtest_tags.tagged_at END
+                AND playtest_tags.original_captured_at IS NULL
+                THEN playtest_tags.sub_value_id ELSE playtest_tags.original_sub_value_id END,
+            original_captured_at = CASE
+              WHEN playtest_tags.sub_value_id IS DISTINCT FROM EXCLUDED.sub_value_id
+                AND playtest_tags.original_captured_at IS NULL
+                THEN now() ELSE playtest_tags.original_captured_at END,
+            edited_by = CASE
+              WHEN playtest_tags.sub_value_id IS DISTINCT FROM EXCLUDED.sub_value_id
+                THEN EXCLUDED.tagged_by ELSE playtest_tags.edited_by END,
+            edited_at = CASE
+              WHEN playtest_tags.sub_value_id IS DISTINCT FROM EXCLUDED.sub_value_id
+                THEN now() ELSE playtest_tags.edited_at END
         `
       }
     }
