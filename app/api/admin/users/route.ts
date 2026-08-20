@@ -1,18 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth-guard'
+import { getServerSession } from 'next-auth'
+import { requireAdmin, requireManager } from '@/lib/auth-guard'
+import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
 const SUPER_ADMIN_EMAIL = 'hungdt@athena.studio'
-const VALID_ROLES = ['admin', 'evaluator']
+const VALID_ROLES = ['admin', 'moderator', 'evaluator']
+
+/** True when the caller is an admin.
+ *
+ *  Moderators share this route -- they invite people and fix display names --
+ *  but must not touch a role or delete anyone. If they could, a moderator would
+ *  simply make themselves an admin, and the other two limits on the tier (no
+ *  auto-synced tags, no Final Conclusion) would mean nothing. */
+async function callerIsAdmin(): Promise<boolean> {
+  if (process.env.SKIP_AUTH === 'true') return true
+  const session = await getServerSession(authOptions)
+  return session?.user?.role === 'admin'
+}
 // Job classification, independent of the access role. Set manually per user;
 // the Report tab groups performance by it (Fulltime vs Freelancer).
 const VALID_TITLES = ['Admin', 'Fulltime', 'Freelancer', 'Recorder']
 
 // GET /api/admin/users — list all users
 export async function GET() {
-  const guard = await requireRole('admin')
+  const guard = await requireManager()
   if (guard) return guard
 
   const users = await sql`
@@ -25,7 +39,7 @@ export async function GET() {
 
 // POST /api/admin/users — add a new user
 export async function POST(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireManager()
   if (guard) return guard
 
   const { email, name, role } = await req.json()
@@ -37,6 +51,11 @@ export async function POST(req: NextRequest) {
   }
   if (!VALID_ROLES.includes(role)) {
     return NextResponse.json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` }, { status: 400 })
+  }
+  // Otherwise "a moderator cannot change a role" is answered by inviting a
+  // fresh admin account instead.
+  if (role === 'admin' && !(await callerIsAdmin())) {
+    return NextResponse.json({ error: 'Only an admin can invite an admin' }, { status: 403 })
   }
 
   const displayName = name || email.split('@')[0]
@@ -56,7 +75,7 @@ export async function POST(req: NextRequest) {
 
 // PUT /api/admin/users — update role / display name / title (any subset)
 export async function PUT(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireManager()
   if (guard) return guard
 
   const body = await req.json()
@@ -66,6 +85,11 @@ export async function PUT(req: NextRequest) {
   }
   if (role !== undefined && !VALID_ROLES.includes(role)) {
     return NextResponse.json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` }, { status: 400 })
+  }
+  // Checked before any read: a refused role change must not even look the user
+  // up, and a moderator sending name + role in one request changes neither.
+  if (role !== undefined && !(await callerIsAdmin())) {
+    return NextResponse.json({ error: 'Only an admin can change a role' }, { status: 403 })
   }
   // title: '' / null clears it, otherwise must be a known value
   if (title !== undefined && title !== null && title !== '' && !VALID_TITLES.includes(title)) {
@@ -97,7 +121,7 @@ export async function PUT(req: NextRequest) {
 
 // DELETE /api/admin/users — remove a user
 export async function DELETE(req: NextRequest) {
-  const guard = await requireRole('admin')
+  const guard = await requireAdmin()
   if (guard) return guard
 
   const { id } = await req.json()
