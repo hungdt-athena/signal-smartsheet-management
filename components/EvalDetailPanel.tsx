@@ -9,6 +9,7 @@ import { useConfig } from '@/hooks/useConfig'
 import { prettyConclusion } from '@/lib/buckets'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
+import { type ReviewTag } from './TrendTagReview'
 import { TrendTagsField, type TrendTag, type ExistingTrendTag } from './TrendTagsField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
@@ -420,6 +421,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const [gameAlike, setGameAlike] = useState<GameAlikeGame[]>([])
   const [trendTags, setTrendTags] = useState<TrendTag[]>([])
   const [existingTrends, setExistingTrends] = useState<ExistingTrendTag[]>([])
+  // The same pending tags in full (who proposed, conflict verdict), for the
+  // manager review rows. `trendTags` stays the plain editable list the save PUT
+  // replaces; these two must not be merged, or reviewing would dirty the form.
+  const [pendingReview, setPendingReview] = useState<ReviewTag[]>([])
   const [trendOptions, setTrendOptions] = useState<string[]>([])
   const [trendSubValues, setTrendSubValues] = useState<{ id: number; name: string }[]>([])
   const [trendOptionsError, setTrendOptionsError] = useState(false)
@@ -561,18 +566,34 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   const loadTrendTags = useCallback((gameId: string) => {
     const gen = ++trendTagsGen.current
     trendTagsLoadedFor.current = null
-    setTrendTags([]); setExistingTrends([]); setTrendTagsError(false)
+    setTrendTags([]); setPendingReview([]); setExistingTrends([]); setTrendTagsError(false)
     fetch(`/api/playtest-tags?gameId=${encodeURIComponent(gameId)}`)
       .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
       .then(d => {
         if (trendTagsGen.current !== gen) return
         setTrendTags((d.pending || []).map((p: { field_value: string; sub_value_id: number | null }) =>
           ({ field_value: p.field_value, sub_value_id: p.sub_value_id })))
+        setPendingReview(d.pending || [])
         setExistingTrends(d.existing || [])
         trendTagsLoadedFor.current = gameId
       })
       .catch(() => { if (trendTagsGen.current === gen) setTrendTagsError(true) })
   }, [])
+
+  // After a tag is confirmed or rejected it is no longer pending, so it has to
+  // leave the editable list too -- otherwise the next save would propose it all
+  // over again. Everything else the user has staged but not saved stays: this
+  // deliberately does not call loadTrendTags, which would overwrite it.
+  const onTagReviewed = useCallback((fieldValue: string) => {
+    if (fieldValue) setTrendTags(prev => prev.filter(t => t.field_value !== fieldValue))
+    fetch(`/api/playtest-tags?gameId=${encodeURIComponent(currentGameId)}`)
+      .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
+      .then(d => {
+        setPendingReview(d.pending || [])
+        setExistingTrends(d.existing || [])
+      })
+      .catch(() => {})
+  }, [currentGameId])
 
   useEffect(() => {
     loadTrendTags(currentGameId)
@@ -1184,6 +1205,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   onRetryOptions={loadTrendOptions}
                   loadError={trendTagsError}
                   onRetryLoad={() => loadTrendTags(currentGameId)}
+                  review={pendingReview}
+                  canReview={isManager}
+                  onReviewed={onTagReviewed}
                 />
               </div>
 

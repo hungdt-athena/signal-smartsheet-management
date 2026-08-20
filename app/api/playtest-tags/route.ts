@@ -6,6 +6,7 @@ import { sql } from '@/lib/db'
 import { isManagerRole } from '@/lib/roles'
 import { TRENDS_FIELD, type PendingTag } from '@/lib/playtest-tags'
 import { syncTags } from '@/lib/playtest-tags-sync'
+import { fetchQueue } from '@/lib/playtest-tags-queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,6 +29,11 @@ async function resolveSession(): Promise<SessionInfo> {
 // GET /api/playtest-tags?gameId=<id> — this game's pending proposals plus the
 // Trends tags it already carries in Signal Sense (shown read-only in the modal
 // so nobody re-tags what is there).
+//
+// The pending rows come from the same fetchQueue the admin Tagging tab reads, so
+// the in-modal review sees the same `conflict` verdict the queue does. Computing
+// it separately here would let the two drift, and they decide when another
+// application's data gets overwritten.
 export async function GET(req: NextRequest) {
   const guard = await requireAuth()
   if (guard) return guard
@@ -36,13 +42,7 @@ export async function GET(req: NextRequest) {
   if (!gameId) return NextResponse.json({ error: 'gameId required' }, { status: 400 })
 
   const [pending, existing] = await Promise.all([
-    sql`
-      SELECT pt.id, pt.field_value, pt.sub_value_id, pt.tagged_by, du.name AS tagged_by_name
-      FROM playtest_tags pt
-      LEFT JOIN dashboard_users du ON du.email = pt.tagged_by
-      WHERE pt.game_id = ${gameId} AND pt.status = 'pending'
-      ORDER BY pt.field_value
-    `,
+    fetchQueue({ gameId }),
     sql`
       SELECT cfv.field_value, cfv.sub_value_id, sv.name AS sub_value_name
       FROM custom_field_values cfv
@@ -145,14 +145,20 @@ export async function PUT(req: NextRequest) {
     // confirm path -- that difference is the whole of the admin tier's edge in
     // this flow, and the reason a moderator's tags still queue.
     //
+    // `tagged_by = email` is what keeps this honest. The modal shows the whole
+    // game's pending set, so without it an admin who saved the evaluation form
+    // would silently confirm every proposal an evaluator had left waiting --
+    // approving work they never looked at. Other people's tags stay pending and
+    // are reviewed deliberately, in the queue or in the panel's review rows.
+    //
     // Read back rather than trusting the payload: the upsert above may have
-    // updated a row proposed by someone else, and it is that row's id the sync
-    // has to stamp.
+    // updated an existing row, and it is that row's id the sync has to stamp.
     if (isAdmin && values.length > 0) {
       const rows = await tx`
         SELECT id, field_value, sub_value_id
         FROM playtest_tags
-        WHERE game_id = ${gameId} AND status = 'pending' AND field_value = ANY(${values})
+        WHERE game_id = ${gameId} AND status = 'pending'
+          AND field_value = ANY(${values}) AND tagged_by = ${email}
         ORDER BY id
       ` as unknown as PendingTag[]
       await syncTags(tx, {

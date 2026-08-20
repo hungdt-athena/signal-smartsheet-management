@@ -13,6 +13,9 @@ import { classifyTag, TRENDS_FIELD } from '@/lib/playtest-tags'
 export interface QueueTag {
   id: number
   game_id: string
+  /** Email of the proposer. The display name is `tagged_by_name`; this is here
+   *  so a caller can tell whether a row is the viewer's own. */
+  tagged_by: string
   title: string
   publisher_name: string | null
   icon_url: string | null
@@ -57,16 +60,17 @@ export async function countQueue(taggedBy?: string): Promise<number> {
  *  evaluator sees. Applied here rather than in the route so the filter and the
  *  ordering cannot drift apart. */
 export async function fetchQueue(
-  opts: { ids?: number[]; limit?: number; offset?: number; taggedBy?: string } = {},
+  opts: { ids?: number[]; gameId?: string; limit?: number; offset?: number; taggedBy?: string } = {},
 ): Promise<QueueTag[]> {
   const idFilter = opts.ids ? sql`AND pt.id = ANY(${opts.ids})` : sql``
+  const gameFilter = opts.gameId ? sql`AND pt.game_id = ${opts.gameId}` : sql``
   const mine = opts.taggedBy ? sql`AND pt.tagged_by = ${opts.taggedBy}` : sql``
   const window = opts.limit === undefined
     ? sql``
     : sql`LIMIT ${opts.limit} OFFSET ${opts.offset ?? 0}`
   const rows = await sql`
     SELECT
-      pt.id, pt.game_id, pt.field_value, pt.sub_value_id, pt.tagged_at,
+      pt.id, pt.game_id, pt.field_value, pt.sub_value_id, pt.tagged_at, pt.tagged_by,
       gi.title, gi.icon_url,
       COALESCE(dev.developer_name, dev.dev_company) AS publisher_name,
       ge.initial_evaluator,
@@ -86,7 +90,7 @@ export async function fetchQueue(
     LEFT JOIN custom_field_values cfv
       ON cfv.game_id = pt.game_id AND cfv.field_name = ${TRENDS_FIELD} AND cfv.field_value = pt.field_value
     LEFT JOIN sub_value_definitions their_sv ON their_sv.id = cfv.sub_value_id
-    WHERE pt.status = 'pending' ${idFilter} ${mine}
+    WHERE pt.status = 'pending' ${idFilter} ${gameFilter} ${mine}
     -- Newest game first, its own tags together and newest first inside. Ordering
     -- the grouping here rather than in the client is what lets the queue be
     -- paged: a game cannot be split across two pages by a later arrival, and id

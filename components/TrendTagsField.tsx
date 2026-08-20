@@ -1,6 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
 import { TrendTagsDialog } from './TrendTagsDialog'
+import { TrendTagReview, type ReviewTag } from './TrendTagReview'
 
 export interface TrendTag {
   field_value: string
@@ -32,6 +33,13 @@ interface Props {
   loadError?: boolean
   /** Re-fetches this game's tags. Only meaningful when `loadError` is true. */
   onRetryLoad?: () => void
+  /** The pending proposals in full, for the manager review rows. Empty for
+   *  everyone else, who sees the same tags as plain chips. */
+  review?: ReviewTag[]
+  /** True for the manager tier: the waiting tags become reviewable rows. */
+  canReview?: boolean
+  /** Called with the value of a tag that has left the pending set. */
+  onReviewed?: (fieldValue: string) => void
 }
 
 // Trend values are catalog identifiers owned by Signal Sense, not prose, so they
@@ -54,6 +62,7 @@ const CHIP_SUB: React.CSSProperties = { fontSize: 10.5, color: 'var(--faint)', f
 export function TrendTagsField({
   value, existing, options, subValues, onChange, disabled,
   optionsError, onRetryOptions, loadError, onRetryLoad,
+  review, canReview, onReviewed,
 }: Props) {
   const [open, setOpen] = useState(false)
   const tags = value || []
@@ -78,7 +87,23 @@ export function TrendTagsField({
         </div>
       )}
 
-      {!loadError && tags.length > 0 && (
+      {/* A manager reviews the waiting tags here rather than going to the
+          Tagging tab for the game they already have open. Everyone else sees
+          them as chips: proposals, and nothing they can act on. */}
+      {!loadError && canReview && (review?.length ?? 0) > 0 && (
+        <div>
+          <span style={CHIP_LABEL}>Waiting for review</span>
+          <TrendTagReview
+            tags={review ?? []}
+            options={options}
+            subValues={subValues}
+            optionsError={optionsError}
+            onReviewed={v => onReviewed?.(v)}
+          />
+        </div>
+      )}
+
+      {!loadError && !canReview && tags.length > 0 && (
         <div>
           <span style={CHIP_LABEL}>Waiting for review</span>
           <div style={CHIP_ROW}>

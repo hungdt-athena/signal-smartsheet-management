@@ -209,6 +209,23 @@ describe('/api/playtest-tags', () => {
     expect(calls.some(c => /UPDATE playtest_tags/.test(c.text) && c.binds.includes('synced'))).toBe(true)
   })
 
+  it('never auto-syncs a tag proposed by someone else', async () => {
+    sessionMock.mockResolvedValue({ user: { role: 'admin', name: 'VinhTD', email: 'vinhtd@athena.studio' } })
+    routeSql([
+      { match: /EXISTS/, rows: [{ found: true, owned: true }] },
+      { match: /custom_field_definitions/, rows: [{ field_value: 'Balatro' }] },
+      { match: /INSERT INTO playtest_tags/, rows: [{ id: 42 }] },
+      // The read-back is scoped to tagged_by = the admin, so a proposal made by
+      // an evaluator comes back empty and nothing is synced.
+      { match: /SELECT id, field_value, sub_value_id/, rows: [] },
+    ])
+    const res = await PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: 3 }] }))
+    expect(res.status).toBe(200)
+    const readBack = calls.find(c => /SELECT id, field_value, sub_value_id/.test(c.text))
+    expect(readBack?.binds).toContain('vinhtd@athena.studio')
+    expect(calls.some(c => /INSERT INTO custom_field_values/.test(c.text))).toBe(false)
+  })
+
   it('leaves a moderator tag pending', async () => {
     sessionMock.mockResolvedValue({ user: { role: 'moderator', name: 'Mitt', email: 'mitt@athena.studio' } })
     routeSql([
