@@ -8,7 +8,7 @@ export default withAuth(
 
     const { pathname, searchParams } = req.nextUrl
     const role = req.nextauth.token?.role as string | undefined
-    const isManager = role === 'admin'
+    const isManager = role === 'admin' || role === 'moderator'
 
     // Default landing for non-managers: the first page visible in their sidebar
     // (Evaluate). Keep in sync with app/page.tsx. Anything they can't see in the
@@ -44,12 +44,12 @@ export default withAuth(
       return NextResponse.redirect(new URL(NON_MANAGER_HOME, req.url))
     }
 
-    // In-development views hidden from non-admins (mirror the nav children
-    // gated with roles:['admin']). Same data endpoints stay open because they
+    // In-development views hidden from evaluators (mirror the nav children
+    // gated to the manager tier). Same data endpoints stay open because they
     // are shared with always-visible views (e.g. Short List's category filter);
     // enforcement here is at the view/query level, redirecting to the default
     // sibling tab rather than blocking.
-    if (role !== 'admin') {
+    if (!isManager) {
       const cat = searchParams.get('cat') ?? ''
       const tab = searchParams.get('tab') ?? ''
       // Tagging is not in this list: evaluators read it (their own pending

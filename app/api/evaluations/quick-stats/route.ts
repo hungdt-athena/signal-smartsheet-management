@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
+import { isManagerRole } from '@/lib/roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
     if (process.env.SKIP_AUTH !== 'true') {
       const session = await getServerSession(authOptions)
       const role = session?.user?.role
-      if (role !== 'admin') {
+      if (!isManagerRole(role)) {
         restrictTo = session?.user?.name || ''
         if (!restrictTo) return NextResponse.json({ data: [] })
       }

@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { countQueue, fetchQueue } from '@/lib/playtest-tags-queue'
+import { isManagerRole } from '@/lib/roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest) {
   // failing open here would hand one evaluator the whole team's queue. The
   // sentinel has to stay truthy as well as unmatchable: an empty string would
   // read downstream as "no scope asked for" and widen the query right back.
-  const mine = session && session.user?.role !== 'admin'
+  const mine = session && !isManagerRole(session.user?.role)
     ? session.user?.email || NO_EMAIL
     : undefined
 

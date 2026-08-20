@@ -30,34 +30,34 @@ const ICONS: Record<string, string | string[]> = {
 }
 
 interface NavChild { href: string; label: string; roles?: string[]; external?: boolean }
-interface NavItem { href: string; label: string; icon: keyof typeof ICONS; adminOnly?: boolean; roles?: string[]; external?: boolean; children?: NavChild[] }
+interface NavItem { href: string; label: string; icon: keyof typeof ICONS; roles?: string[]; external?: boolean; children?: NavChild[] }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/team-ops',        label: 'Team Operations', icon: 'users', roles: ['admin', 'evaluator'], children: [
+  { href: '/team-ops',        label: 'Team Operations', icon: 'users', roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/team-ops?tab=assign',   label: 'Assign' },
     { href: '/team-ops?tab=reassign', label: 'Reassign' },
-    // Rescue compares every teammate's backlog on one screen — admin only.
-    { href: '/team-ops?tab=rescue', label: 'Rescue', roles: ['admin'] },
+    // Rescue compares every teammate's backlog on one screen — manager tier.
+    { href: '/team-ops?tab=rescue', label: 'Rescue', roles: ['admin', 'moderator'] },
     { href: '/team-ops?tab=handover', label: 'Handover' },
     // Evaluators see Performance too, scoped to their own Individual view.
-    { href: '/team-ops?tab=performance', label: 'Performance', roles: ['admin', 'evaluator'] },
+    { href: '/team-ops?tab=performance', label: 'Performance', roles: ['admin', 'moderator', 'evaluator'] },
   ]},
-  // Arcade/Simulation hidden from non-admins while still in development.
+  // Arcade/Simulation hidden from evaluators while still in development.
   { href: '/evaluations',     label: 'Evaluations', icon: 'clipboard', children: [
     { href: '/evaluations?cat=evaluate', label: 'Evaluate' },
     { href: '/evaluations?cat=short_list', label: 'Short List' },
     { href: '/evaluations?cat=weekly_feedback', label: 'Weekly Feedback' },
-    // Reviewing tags proposed during playtest is an admin decision, but
+    // Reviewing tags proposed during playtest is a manager decision, but
     // evaluators read the tab: their own queue, and the full history of what was
     // confirmed against what was proposed.
-    { href: '/evaluations?cat=tagging', label: 'Tagging', roles: ['admin', 'evaluator'] },
+    { href: '/evaluations?cat=tagging', label: 'Tagging', roles: ['admin', 'moderator', 'evaluator'] },
   ]},
-  { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'evaluator'], children: [
+  { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
-    { href: '/youtube?tab=record_video', label: 'Record', roles: ['admin', 'evaluator'] },
+    { href: '/youtube?tab=record_video', label: 'Record', roles: ['admin', 'moderator', 'evaluator'] },
   ]},
-  { href: '/admin',           label: 'Users Management', icon: 'shield', adminOnly: true },
-  { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin'] },
+  { href: '/admin',           label: 'Users Management', icon: 'shield', roles: ['admin', 'moderator'] },
+  { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin', 'moderator'] },
   { href: '/guide',           label: 'Guide',      icon: 'book', external: true, children: [
     { href: '/evaluator-guide.html#vi', label: 'VI', external: true },
     { href: '/evaluator-guide.html#en', label: 'EN', external: true },
@@ -86,7 +86,6 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
 
   const visibleItems = NAV_ITEMS.filter(item => {
     if (item.roles) return item.roles.includes(role ?? '')
-    if (item.adminOnly) return role === 'admin'
     return true
   })
 

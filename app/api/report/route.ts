@@ -8,6 +8,7 @@ import { teamBench, weekLabel } from '@/lib/report'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 import { allRounderScore } from '@/lib/report-config'
 import { loadReportConfig } from '@/lib/report-config-db'
+import { isManagerRole } from '@/lib/roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,7 +69,7 @@ function resolveWindow(view: View, key: string, from: string, to: string): {
 }
 
 export async function GET(req: NextRequest) {
-  const guard = await requireRole(['admin', 'evaluator'])
+  const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
 
   try {
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest) {
     // self-scoped route (see quick-stats).
     const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
     // SKIP_AUTH local dev has no session and gets the full admin view on purpose.
-    const scoped = !!session && session.user?.role !== 'admin'
+    const scoped = !!session && !isManagerRole(session.user?.role)
     const selfKey = (session?.user?.name || '').toLowerCase()
     if (scoped && !selfKey) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

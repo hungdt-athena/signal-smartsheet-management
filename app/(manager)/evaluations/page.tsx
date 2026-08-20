@@ -20,6 +20,7 @@ import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
 import { GameAlikeChips, GameAlikeField } from '@/components/GameAlikeField'
 import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
+import { isManagerRole } from '@/lib/roles'
 
 interface Evaluation {
   id: number
@@ -518,7 +519,7 @@ function ShortListEvalTab() {
   const { data: session } = useSession()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
-  const isManager = role === 'admin'
+  const isManager = isManagerRole(role)
   const { final_conclusion: finalConclusionOptions } = useConfig()
 
   const [data, setData] = useState<ShortListItem[]>([])
@@ -992,7 +993,7 @@ function EvaluationsPageInner() {
     if (append) setLoadingMore(true); else setLoading(true)
     try {
       const params = new URLSearchParams({ category, page: String(page), limit: String(PAGE_SIZE) })
-      const isManager = role === 'admin'
+      const isManager = isManagerRole(role)
       if (!isManager) {
         if (userName) params.set('evaluator', userName)
       } else if (filterEvaluator) {
@@ -1098,7 +1099,7 @@ function EvaluationsPageInner() {
           <p className="h-sub">
             {total} games · {category}
             {filterStatus === 'pending' ? ' · All time' : df.value.from ? ` · ${valueLabel(df.value)}` : ''}
-            {role !== 'admin' && userName ? ` · ${userName}` : ''}
+            {!isManagerRole(role) && userName ? ` · ${userName}` : ''}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -1209,7 +1210,7 @@ function EvaluationsPageInner() {
           {sortAsc ? 'Oldest first' : 'Newest first'}
         </button>
 
-        {(role === 'admin') && (
+        {isManagerRole(role) && (
           <div style={{ width: 180 }}>
             <StyledSelect
               value={filterEvaluator}

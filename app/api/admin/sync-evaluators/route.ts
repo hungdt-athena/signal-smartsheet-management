@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth-guard'
+import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
 // POST /api/admin/sync-evaluators — import evaluators from initial+final sheets
 export async function POST() {
-  const guard = await requireRole(['admin'])
+  const guard = await requireAdmin()
   if (guard) return guard
 
   const names: string[] = []

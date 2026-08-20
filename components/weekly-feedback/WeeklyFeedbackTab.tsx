@@ -7,6 +7,7 @@ import { SectionEditor } from './SectionEditor'
 import { FeedbackView, FeedbackCell, AlikeCell } from './FeedbackView'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { Section, newSection } from './types'
+import { isManagerRole } from '@/lib/roles'
 
 interface WeeklyRecord { batch: string; evaluator: string; sections: Section[]; updated_at: string }
 interface Snapshot { id: number; sections: Section[]; saved_at: string }
@@ -79,7 +80,7 @@ function groupByCalendar(labels: string[]) {
 export function WeeklyFeedbackTab() {
   const { data: session } = useSession()
   const role = session?.user?.role
-  const isManager = role === 'admin'
+  const isManager = isManagerRole(role)
   const userName = session?.user?.name || ''
 
   // Overview / Editor toggle is local state only — NO url params.

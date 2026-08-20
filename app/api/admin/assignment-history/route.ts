@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   // Open to evaluators, but an evaluator only ever sees their own history —
   // the server forces the evaluator filter to their name, ignoring the query.
-  const guard = await requireRole(['admin', 'evaluator'])
+  const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
 
   const session = await getServerSession(authOptions)

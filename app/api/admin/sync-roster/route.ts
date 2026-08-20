@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth-guard'
+import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
@@ -15,7 +15,7 @@ function hasWebhookSecret(req: NextRequest): boolean {
 
 export async function POST(req: NextRequest) {
   if (!hasWebhookSecret(req)) {
-    const guard = await requireRole(['admin'])
+    const guard = await requireAdmin()
     if (guard) return guard
   }
 

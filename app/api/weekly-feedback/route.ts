@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { sanitizeSections, rowToSections } from '@/lib/weekly-feedback'
+import { isManagerRole } from '@/lib/roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +15,7 @@ async function resolveSession(): Promise<SessionInfo> {
   const session = await getServerSession(authOptions)
   const role = session?.user?.role
   return {
-    isManager: role === 'admin',
+    isManager: isManagerRole(role),
     name: session?.user?.name || '',
   }
 }

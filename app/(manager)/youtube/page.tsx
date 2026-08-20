@@ -10,6 +10,7 @@ import { LockIcon, UserIcon } from '@/components/icons'
 import EvalDetailPanel from '@/components/EvalDetailPanel'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
+import { isManagerRole } from '@/lib/roles'
 
 interface YtbRow {
   row_index: number
@@ -1496,7 +1497,7 @@ function RecordTab() {
   const { data: session } = useSession()
   const userName = session?.user?.name || ''
   const role = session?.user?.role
-  const isManager = role === 'admin'
+  const isManager = isManagerRole(role)
 
   const [data, setData] = useState<ShortListItem[]>([])
   const [total, setTotal] = useState(0)

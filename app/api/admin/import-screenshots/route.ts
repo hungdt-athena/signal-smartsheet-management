@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth-guard'
+import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { isStorageConfigured, uploadScreenshot } from '@/lib/supabase-storage'
 
@@ -30,7 +30,7 @@ interface Item { game_id: string; image_urls: string[] }
 
 export async function POST(req: NextRequest) {
   if (!hasWebhookSecret(req)) {
-    const guard = await requireRole(['admin'])
+    const guard = await requireAdmin()
     if (guard) return guard
   }
 

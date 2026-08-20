@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth-guard'
+import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getConfigValues } from '@/lib/config'
 import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
@@ -24,7 +24,7 @@ const FINAL_FOR_BUCKET = { '5min': 'Insight', '20min': 'Priority IV' } as const
 // The eval row is created lazily (mirroring cron/push-evaluations) so the
 // record flow can operate on it. Returns the eval `id`.
 export async function POST(req: NextRequest) {
-  const guard = await requireRole(['admin'])
+  const guard = await requireManager()
   if (guard) return guard
   try {
     const {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth-guard'
+import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import {
   readYtbUploaded,
@@ -16,7 +16,7 @@ export const maxDuration = 60
 // One-time backfill: read every Google-Sheet / n8n-managed source and load it into
 // the mirror tables created in migration 008. Idempotent — each table is cleared
 // then reloaded (these tables have no other writers yet). Admin-only + destructive,
-// so it is gated behind requireRole(['admin']). Remove this route after switch-over.
+// so it is gated behind requireAdmin(). Remove this route after switch-over.
 
 function parseTs(s?: string | null): string | null {
   if (!s || !String(s).trim()) return null
@@ -60,7 +60,7 @@ async function fetchJson(url?: string): Promise<unknown[]> {
 }
 
 export async function POST(_req: NextRequest) {
-  const guard = await requireRole(['admin'])
+  const guard = await requireAdmin()
   if (guard) return guard
 
   const errors: Record<string, string> = {}

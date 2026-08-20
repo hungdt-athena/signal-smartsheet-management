@@ -31,7 +31,7 @@ interface Body {
 
 export async function POST(req: NextRequest) {
   // Managers submit for anyone; evaluators may only submit their OWN handover.
-  const guard = await requireRole(['admin', 'evaluator'])
+  const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
 
   const session = await getServerSession(authOptions)

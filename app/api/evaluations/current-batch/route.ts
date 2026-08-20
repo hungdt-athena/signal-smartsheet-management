@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
+import { isManagerRole } from '@/lib/roles'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
   if (process.env.SKIP_AUTH !== 'true') {
     const session = await getServerSession(authOptions)
     const role = session?.user?.role
-    if (role !== 'admin') {
+    if (!isManagerRole(role)) {
       return NextResponse.json({ error: 'Forbidden: manager role required' }, { status: 403 })
     }
   }

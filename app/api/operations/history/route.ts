@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth-guard'
+import { requireManager } from '@/lib/auth-guard'
 import { readFlowLog } from '@/lib/google-sheets'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const guard = await requireRole(['admin'])
+  const guard = await requireManager()
   if (guard) return guard
 
   const limit = Number(new URL(req.url).searchParams.get('limit') ?? '50')

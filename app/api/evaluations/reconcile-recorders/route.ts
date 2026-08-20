@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth-guard'
+import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { readYtbUploaded } from '@/lib/google-sheets'
 import { buildYtMap, ytLookup, normalizeName, type Bucket } from '@/lib/ytb-match'
@@ -76,7 +76,7 @@ function extractYtId(link: string): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await requireRole(['admin'])
+  const guard = await requireManager()
   if (guard) return guard
 
   try {

@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
+import { isManagerRole } from '@/lib/roles'
 import {
   isStorageConfigured, uploadScreenshot,
   deleteScreenshotByUrl, deleteGameScreenshots,
@@ -23,7 +24,7 @@ async function checkPermission(gameId: string): Promise<NextResponse | null> {
   if (process.env.SKIP_AUTH === 'true') return null
   const session = await getServerSession(authOptions)
   const role = session?.user?.role
-  if (role === 'admin') return null
+  if (isManagerRole(role)) return null
   const rows = await sql`SELECT initial_evaluator FROM game_evaluations WHERE game_id = ${gameId}`
   if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (rows[0].initial_evaluator !== session?.user?.name) {
