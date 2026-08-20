@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
+import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 
-type Role = 'admin' | 'evaluator'
+type Role = 'admin' | 'moderator' | 'evaluator'
 
 interface User {
   id: number
@@ -17,8 +18,14 @@ const SUPER_ADMIN = 'hungdt@athena.studio'
 
 const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: 'admin', label: 'Admin' },
+  { value: 'moderator', label: 'Moderator' },
   { value: 'evaluator', label: 'Evaluator' },
 ]
+
+// What a moderator may hand out. Inviting an admin is how a moderator would
+// otherwise route around not being able to change a role; the API refuses it
+// too, this only keeps the option out of sight.
+const MOD_ROLE_OPTIONS = ROLE_OPTIONS.filter(o => o.value !== 'admin')
 
 // Job classification (independent of the access role) — drives the Report
 // title filter. '' = not set.
@@ -31,6 +38,10 @@ const TITLE_OPTIONS = [
 ]
 
 export default function AdminPage() {
+  const { data: session } = useSession()
+  // Moderators share this page: they invite people and fix display names, but
+  // role and Remove are the admin's. The API enforces both.
+  const isAdmin = session?.user?.role === 'admin'
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -187,7 +198,7 @@ export default function AdminPage() {
             <StyledSelect
               value={newRole}
               onChange={v => setNewRole(v as Role)}
-              options={ROLE_OPTIONS}
+              options={isAdmin ? ROLE_OPTIONS : MOD_ROLE_OPTIONS}
             />
           </div>
           <button type="submit" className="btn btn-primary" disabled={adding || !newEmail}>
@@ -263,9 +274,9 @@ export default function AdminPage() {
                     <td>
                       <StyledSelect
                         value={u.role}
-                        disabled={isSuper}
+                        disabled={isSuper || !isAdmin}
                         onChange={v => updateUser(u.id, { role: v })}
-                        options={ROLE_OPTIONS}
+                        options={isAdmin ? ROLE_OPTIONS : MOD_ROLE_OPTIONS}
                       />
                     </td>
                     <td>
@@ -279,7 +290,7 @@ export default function AdminPage() {
                       {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
                     </td>
                     <td>
-                      {!isSuper && (
+                      {!isSuper && isAdmin && (
                         <button className="btn btn-sm btn-danger"
                           onClick={() => handleDelete(u.id, u.email)}>
                           Remove
