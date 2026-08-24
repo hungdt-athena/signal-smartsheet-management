@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
         FROM game_evaluations ge
         WHERE ${baseWhere}
           AND ge.initial_conclusion IS NOT NULL
-          AND ge.initial_conclusion <> 'Link_dead'
+          AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
         GROUP BY lower(ge.initial_evaluator), ge.initial_conclusion
       `,
       sql`

@@ -48,6 +48,9 @@ interface Evaluation {
 
 const CONCLUSION_COLORS: Record<string, string> = {
   'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
+  // Stale_release: pushed by mistake (back-catalog game), taken out of the queue
+  // without anyone evaluating it. Not selectable — set by the prune script only.
+  'Stale_release': 'error',
   'Playtest & Bypass': 'error',
   'Good': 'success', 'Conclusion': 'success',
   'List_Idea': 'success', 'Priority I': 'success', 'Priority II': 'success',

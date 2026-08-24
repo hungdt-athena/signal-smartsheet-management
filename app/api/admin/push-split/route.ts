@@ -9,6 +9,8 @@ export const maxDuration = 60
 //
 // Ports the exact eligibility/split logic from [unified]-database-to-smartsheet:
 //   - release (COALESCE initial_release, temp_release) OR created_date within the last N days (default 30)
+//   - release (when known) no older than maxReleaseAgeDays (default 180) — guards the
+//     created_date branch against scrapers crawling old back catalogs
 //   - type IS NULL OR type ILIKE any of: %sync%, %top-pub-scraper%, %apkcombo-scraper%, %appagg-scraper%
 //   - app_link IS NOT NULL AND is_active = true
 //   - metadata->'categories' overlaps the bucket's genre list
@@ -23,6 +25,10 @@ export const maxDuration = 60
 //         unless { dryRun: true }.
 
 const DEFAULT_WINDOW_DAYS = 30
+// Release-age cap for the created_date branch of the date window. Without it a scraper
+// that starts crawling a publisher's back catalog (apkcombo did on 2026-08-19) floods
+// the queue with years-old games, since created_date alone ignores release date.
+const DEFAULT_MAX_RELEASE_AGE_DAYS = 180
 
 function hasWebhookSecret(req: NextRequest): boolean {
   const secret = process.env.WEBHOOK_SECRET
@@ -55,10 +61,16 @@ async function pairsFromTable(): Promise<Pair[]> {
 interface EligibleRow {
   game_id: string
   category_group: string
+  genre_1: string | null
+  genre_2: string | null
   already_in_db: boolean
 }
 
-async function computeEligible(pairs: Pair[], windowDays: number): Promise<EligibleRow[]> {
+async function computeEligible(
+  pairs: Pair[],
+  windowDays: number,
+  maxReleaseAgeDays: number,
+): Promise<EligibleRow[]> {
   const mappingJson = JSON.stringify(
     pairs.map((p) => ({ genre: p.genre.toLowerCase(), category_group: p.category_group })),
   )
@@ -68,7 +80,12 @@ async function computeEligible(pairs: Pair[], windowDays: number): Promise<Eligi
       FROM jsonb_to_recordset(${mappingJson}::jsonb) AS m(genre text, category_group text)
     ),
     eligible AS (
-      SELECT DISTINCT gi.game_id, m.category_group
+      -- genre_1/genre_2 mirror the first two entries of metadata->'categories', the
+      -- shape the Smartsheet-era import used. Without them the Evaluate panel shows an
+      -- empty Genre field, since it reads the columns and not game_info.
+      SELECT DISTINCT gi.game_id, m.category_group,
+             left(gi.metadata -> 'categories' ->> 0, 50) AS genre_1,
+             left(gi.metadata -> 'categories' ->> 1, 50) AS genre_2
       FROM game_info gi
       CROSS JOIN LATERAL jsonb_array_elements_text(gi.metadata -> 'categories') AS cat(name)
       JOIN mapping m ON m.genre = lower(cat.name)
@@ -79,12 +96,17 @@ async function computeEligible(pairs: Pair[], windowDays: number): Promise<Eligi
           OR gi.created_date
                 BETWEEN (CURRENT_DATE - (${windowDays} || ' days')::interval) AND CURRENT_DATE
         )
+        AND (
+          COALESCE(gi.initial_release, gi.temp_release) IS NULL
+          OR COALESCE(gi.initial_release, gi.temp_release)
+               >= (CURRENT_DATE - (${maxReleaseAgeDays} || ' days')::interval)
+        )
         AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
              OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
         AND gi.app_link IS NOT NULL
         AND gi.is_active = true
     )
-    SELECT e.game_id, e.category_group, (ge.game_id IS NOT NULL) AS already_in_db
+    SELECT e.game_id, e.category_group, e.genre_1, e.genre_2, (ge.game_id IS NOT NULL) AS already_in_db
     FROM eligible e
     LEFT JOIN game_evaluations ge
       ON ge.game_id = e.game_id AND ge.category_group = e.category_group
@@ -132,16 +154,26 @@ async function run(req: NextRequest, write: boolean) {
     )
   }
 
-  const rows = await computeEligible(pairs, windowDays)
+  const maxReleaseAgeDays =
+    Number(body.maxReleaseAgeDays) > 0 ? Number(body.maxReleaseAgeDays) : DEFAULT_MAX_RELEASE_AGE_DAYS
+
+  const rows = await computeEligible(pairs, windowDays, maxReleaseAgeDays)
   const toInsert = rows.filter((r) => !r.already_in_db)
 
   let inserted = 0
   if (!dryRun && toInsert.length > 0) {
     const res = await sql`
       INSERT INTO game_evaluations ${sql(
-        toInsert.map((r) => ({ game_id: r.game_id, category_group: r.category_group })),
+        toInsert.map((r) => ({
+          game_id: r.game_id,
+          category_group: r.category_group,
+          genre_1: r.genre_1,
+          genre_2: r.genre_2,
+        })),
         'game_id',
         'category_group',
+        'genre_1',
+        'genre_2',
       )}
       ON CONFLICT (game_id, category_group) DO NOTHING
     `
@@ -151,6 +183,7 @@ async function run(req: NextRequest, write: boolean) {
   return NextResponse.json({
     dryRun,
     windowDays,
+    maxReleaseAgeDays,
     mapping_source: pairsFromBody(body.mappings) ? 'inline' : 'category_mappings',
     total_eligible: rows.length,
     total_new: toInsert.length,

@@ -72,6 +72,15 @@ export async function POST(req: NextRequest) {
                   BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
                       AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
               )
+          -- Release-age cap: the created_date branch above ignores release date, so a
+          -- scraper that starts crawling a publisher's back catalog (apkcombo did on
+          -- 2026-08-19) floods the queue with years-old games. Games with no release
+          -- date at all stay eligible.
+          AND (
+                COALESCE(gi.initial_release, gi.temp_release) IS NULL
+                OR COALESCE(gi.initial_release, gi.temp_release)
+                     >= ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '180 days')
+              )
           AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
                OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
           AND gi.app_link IS NOT NULL
@@ -91,8 +100,13 @@ export async function POST(req: NextRequest) {
       // Both INSERT INTO game_evaluations, ON CONFLICT (game_id, category_group) DO NOTHING,
       // and INTERVAL '30 days' appear in this single sql call — satisfying test assertions.
       rows = await sql<{ game_id: string }[]>`
-        INSERT INTO game_evaluations (game_id, category_group)
-        SELECT gi.game_id, ${category}
+        INSERT INTO game_evaluations (game_id, category_group, genre_1, genre_2)
+        -- genre_1/genre_2 mirror the first two entries of metadata->'categories', the
+        -- shape the Smartsheet-era import used. Without them the Evaluate panel shows an
+        -- empty Genre field, since it reads the columns and not game_info.
+        SELECT gi.game_id, ${category},
+               left(gi.metadata -> 'categories' ->> 0, 50),
+               left(gi.metadata -> 'categories' ->> 1, 50)
         FROM game_info gi
         WHERE (
                 COALESCE(gi.initial_release, gi.temp_release)
@@ -101,6 +115,15 @@ export async function POST(req: NextRequest) {
                 OR gi.created_date
                   BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
                       AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+              )
+          -- Release-age cap: the created_date branch above ignores release date, so a
+          -- scraper that starts crawling a publisher's back catalog (apkcombo did on
+          -- 2026-08-19) floods the queue with years-old games. Games with no release
+          -- date at all stay eligible.
+          AND (
+                COALESCE(gi.initial_release, gi.temp_release) IS NULL
+                OR COALESCE(gi.initial_release, gi.temp_release)
+                     >= ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '180 days')
               )
           AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
                OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')

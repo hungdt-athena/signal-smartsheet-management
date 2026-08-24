@@ -75,6 +75,7 @@ const INITIAL_CONCLUSION_OPTIONS = ['Bypass', 'List_Idea', 'Playtest & Bypass']
 
 const CONCLUSION_COLORS: Record<string, string> = {
   'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
+  'Stale_release': 'error',
   'Playtest & Bypass': 'error',
   'Good': 'success', 'Conclusion': 'success',
   'List_Idea': 'success', 'Priority I': 'success', 'Priority II': 'success',

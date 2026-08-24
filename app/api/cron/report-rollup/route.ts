@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
         concl AS (
           SELECT wk, cat, ekey, concl, count(*)::int AS n
           FROM base
-          WHERE concl IS NOT NULL AND concl <> '' AND concl <> 'Link_dead'
+          WHERE concl IS NOT NULL AND concl <> '' AND concl NOT IN ('Link_dead', 'Stale_release')
           GROUP BY wk, cat, ekey, concl
         ),
         concl_agg AS (
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
             -- "signal_count": games the evaluator escalated rather than bypassed
             -- (List_Idea, Priority*, etc.). Initial evaluators rarely use "Priority"
             -- labels — the real positive signal is anything that isn't a bypass.
-            count(*) FILTER (WHERE concl IS NOT NULL AND concl <> '' AND concl <> 'Link_dead' AND concl NOT ILIKE '%bypass%')::int AS priority_count
+            count(*) FILTER (WHERE concl IS NOT NULL AND concl <> '' AND concl NOT IN ('Link_dead', 'Stale_release') AND concl NOT ILIKE '%bypass%')::int AS priority_count
           FROM base GROUP BY wk, cat, ekey
         )
         INSERT INTO report_rollup

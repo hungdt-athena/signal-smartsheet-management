@@ -287,15 +287,15 @@ export async function GET(req: NextRequest) {
       sql`
         SELECT lower(ge.initial_evaluator) AS k,
           mode() WITHIN GROUP (ORDER BY ge.initial_evaluator) AS name,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead')::int AS evaluated,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS evaluated,
           count(DISTINCT (ge.evaluate_date AT TIME ZONE ${VN})::date)::int AS active_days,
           COALESCE(SUM(CASE WHEN ge.assigned_date IS NOT NULL THEN GREATEST((ge.evaluate_date AT TIME ZONE ${VN})::date - ge.assigned_date, 0) END), 0)::numeric AS ta_sum,
           count(*) FILTER (WHERE ge.assigned_date IS NOT NULL)::int AS ta_count,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release') AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
           count(*) FILTER (WHERE ge.final_conclusion = 'Priority IV')::int AS priority_iv,
           count(*) FILTER (WHERE ge.final_conclusion = 'Insight')::int AS insight,
           count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead'
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
                              AND ge.initial_note IS NOT NULL AND btrim(ge.initial_note) <> '')::int AS noted
         ${evalBase}
         GROUP BY lower(ge.initial_evaluator)`,
@@ -344,7 +344,7 @@ export async function GET(req: NextRequest) {
             ${win.to ? sql`AND ge.first_assigned_date < ${win.to}::date` : sql``}`}`,
       // per-evaluator initial conclusion distribution
       sql`SELECT lower(ge.initial_evaluator) AS k, ge.initial_conclusion AS c, count(*)::int AS n
-        ${evalBase} AND ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead'
+        ${evalBase} AND ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
         GROUP BY lower(ge.initial_evaluator), ge.initial_conclusion`,
       // per-evaluator final conclusion distribution
       sql`SELECT lower(ge.initial_evaluator) AS k, ge.final_conclusion AS c, count(*)::int AS n
@@ -353,8 +353,8 @@ export async function GET(req: NextRequest) {
       // team time series (bucketed) - volume plus funnel metrics for trend/sparklines
       sql`SELECT date_trunc(${unit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b,
           count(*)::int AS n,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead')::int AS evaluated,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS evaluated,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release') AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
           count(*) FILTER (WHERE ge.final_conclusion = 'Priority IV')::int AS priority_iv,
           count(*) FILTER (WHERE ge.final_conclusion = 'Insight')::int AS insight
         ${evalBase}
@@ -371,14 +371,14 @@ export async function GET(req: NextRequest) {
       // actUnit grain, with the quality counts the per-period all-rounder needs.
       sql`SELECT lower(ge.initial_evaluator) AS k, date_trunc(${actUnit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b,
           count(*)::int AS n,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead')::int AS evaluated,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead' AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS evaluated,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release') AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
           count(*) FILTER (WHERE ge.final_conclusion IN ('Priority IV', 'Insight'))::int AS final_priority
         ${evalBase}
         GROUP BY 1, 2`,
       // per-evaluator time series (heatmap cells + individual activity chart)
       sql`SELECT lower(ge.initial_evaluator) AS k, date_trunc(${unit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b, count(*)::int AS n,
-          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead')::int AS evaluated,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS evaluated,
           count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead
         ${evalBase}
         GROUP BY 1, 2`,
@@ -465,12 +465,13 @@ export async function GET(req: NextRequest) {
         ORDER BY rec_at DESC NULLS FIRST, slot`,
       // per-evaluator per-DAY initial conclusion counts (Individual → Daily breakdown).
       // Always day grain, whatever the view's bucket unit is: the point of the
-      // breakdown is "what did they do on each calendar day". Link_dead excluded to
+      // breakdown is "what did they do on each calendar day". Link_dead and
+      // Stale_release excluded to
       // match every other conclusion-mix number in this file.
       sql`SELECT lower(ge.initial_evaluator) AS k,
           (ge.evaluate_date AT TIME ZONE ${VN})::date::text AS d,
           ge.initial_conclusion AS c, count(*)::int AS n
-        ${evalBase} AND ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion <> 'Link_dead'
+        ${evalBase} AND ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
         GROUP BY 1, 2, 3`,
       pipelinePromise,
     ])

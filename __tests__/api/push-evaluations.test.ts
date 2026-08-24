@@ -54,6 +54,17 @@ describe('POST /api/cron/push-evaluations', () => {
     expect(q).toContain('INSERT INTO game_evaluations')
     expect(q).toContain('ON CONFLICT (game_id, category_group) DO NOTHING')
     expect(q).toContain("INTERVAL '30 days'")
+    // release-age cap: the created_date branch must not let back-catalog games through
+    expect(q).toContain("INTERVAL '180 days'")
+  })
+
+  it('copies the genres from game_info metadata into the new row', async () => {
+    sqlMock.mockResolvedValue([{ game_id: 'g1' }])
+    await post({ category: 'puzzle', categories: ['puzzle'] })
+    const q = sqlMock.mock.calls.map(c => (Array.isArray(c[0]) ? c[0].join(' ') : '')).join('\n')
+    expect(q).toContain('INSERT INTO game_evaluations (game_id, category_group, genre_1, genre_2)')
+    expect(q).toContain("gi.metadata -> 'categories' ->> 0")
+    expect(q).toContain("gi.metadata -> 'categories' ->> 1")
   })
 
   it('dryRun selects without inserting', async () => {
@@ -65,5 +76,6 @@ describe('POST /api/cron/push-evaluations', () => {
     expect(json.pushed).toBe(1)
     const q = sqlMock.mock.calls.map(c => (Array.isArray(c[0]) ? c[0].join(' ') : '')).join('\n')
     expect(q).not.toContain('INSERT INTO game_evaluations')
+    expect(q).toContain("INTERVAL '180 days'")
   })
 })
