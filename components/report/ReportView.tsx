@@ -168,7 +168,7 @@ function ReportInner() {
   const [view, setView] = useState<View>('week')
   const [selKey, setSelKey] = useState(() => currentKey('week'))  // adaptive bucket key ('' = all); defaults to the current period
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
-  const [category, setCategory] = useState('all')
+  const [category, setCategory] = useState('puzzle')
   const [title, setTitle] = useState('all')  // job classification lens (dashboard_users.title)
 
   const [data, setData] = useState<Bundle | null>(null)
@@ -257,7 +257,7 @@ function ReportInner() {
         {teamView && <Seg label="Title" value={title} onChange={setTitle}
           options={[['all', 'All'], ['fulltime', 'Fulltime'], ['freelancer', 'Freelancer']]} />}
         <Seg label="Category" value={category} onChange={setCategory}
-          options={[['all', 'All'], ['puzzle', 'Puzzle'], ['arcade', 'Arcade'], ['simulation', 'Sim']]} />
+          options={[['puzzle', 'Puzzle'], ['arcade', 'Arcade'], ['simulation', 'Sim'], ['all', 'All']]} />
       </div>
 
       {tabs.length > 1 && (
