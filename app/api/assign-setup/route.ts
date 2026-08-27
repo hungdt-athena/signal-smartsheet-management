@@ -4,30 +4,32 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { requireManager, requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
-import { isBucket, isWeight, normalizeCategory } from '@/lib/buckets'
+import { isBucket, isWeight, normalizeCategory, type Bucket } from '@/lib/buckets'
 
 export const dynamic = 'force-dynamic'
 
 interface RosterRow {
-  id: number; name: string; today_available: boolean
+  id: number; name: string; category_group: string; today_available: boolean
   game_platform: string; game_category: string; weight: number; list_type: string
 }
 
 const PLATFORMS = ['all', 'ios', 'android']
 
-export async function GET(req: NextRequest) {
-  // Read is open to evaluators too, but scoped to their own Initial-list row
+export async function GET() {
+  // Read is open to evaluators too, but scoped to their own Initial-list rows
   // (no Final list). Managers see the full roster. Writes stay manager-only.
+  //
+  // One request returns every genre: the Assign tab is a single page now, so a
+  // per-bucket read would just be three round-trips for one table. Order is by
+  // person, then a fixed genre order, because the table groups rows by person.
   const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
-  const group = req.nextUrl.searchParams.get('group') ?? ''
-  if (!isBucket(group)) return NextResponse.json({ error: 'Invalid group' }, { status: 400 })
 
   const rows = await sql<RosterRow[]>`
-    SELECT id, name, today_available, game_platform, game_category, weight, list_type
+    SELECT id, name, category_group, today_available, game_platform, game_category, weight, list_type
     FROM evaluator_roster
-    WHERE category_group = ${group}
-    ORDER BY sort_order NULLS LAST, name ASC
+    ORDER BY name ASC,
+             array_position(ARRAY['puzzle','arcade','simulation']::text[], category_group)
   `
   let initial = rows.filter(r => r.list_type === 'initial')
   let final = rows.filter(r => r.list_type === 'final')
@@ -46,7 +48,11 @@ export async function POST(req: NextRequest) {
   if (guard) return guard
   const b = await req.json()
 
-  if (!isBucket(b.category_group)) return NextResponse.json({ error: 'Invalid bucket' }, { status: 400 })
+  // Một lần thêm người có thể tạo nhiều dòng, mỗi genre một dòng.
+  const groups: Bucket[] = Array.isArray(b.category_groups)
+    ? b.category_groups.filter(isBucket)
+    : isBucket(b.category_group) ? [b.category_group] : []
+  if (groups.length === 0) return NextResponse.json({ error: 'category_groups is required' }, { status: 400 })
   if (b.list_type !== 'initial' && b.list_type !== 'final') return NextResponse.json({ error: 'Invalid list_type' }, { status: 400 })
   const name = typeof b.name === 'string' ? b.name.trim() : ''
   if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 })
@@ -54,7 +60,6 @@ export async function POST(req: NextRequest) {
   const platform = PLATFORMS.includes(b.game_platform) ? b.game_platform : 'all'
   const category = normalizeCategory(b.game_category)
   const weight = isWeight(b.weight) ? b.weight : 100
-  const available = b.today_available === false ? false : true
 
   try {
     if (b.provision) {
@@ -65,12 +70,23 @@ export async function POST(req: NextRequest) {
         ON CONFLICT (email) DO NOTHING
       `
     }
+    // Available kế thừa từ dòng đã có của người này (nếu có), để thêm một genre
+    // mới cho người đang nghỉ không âm thầm bật họ trở lại.
+    const [existing] = await sql<{ today_available: boolean }[]>`
+      SELECT today_available FROM evaluator_roster
+      WHERE list_type = ${b.list_type} AND name = ${name} LIMIT 1
+    `
+    const available = existing ? existing.today_available : (b.today_available === false ? false : true)
+
+    const values = groups.map(g => ({
+      list_type: b.list_type, category_group: g, name,
+      today_available: available, game_platform: platform, game_category: category, weight,
+    }))
     await sql`
-      INSERT INTO evaluator_roster (list_type, category_group, name, today_available, game_platform, game_category, weight)
-      VALUES (${b.list_type}, ${b.category_group}, ${name}, ${available}, ${platform}, ${category}, ${weight})
+      INSERT INTO evaluator_roster ${sql(values, 'list_type', 'category_group', 'name', 'today_available', 'game_platform', 'game_category', 'weight')}
       ON CONFLICT (list_type, category_group, name) DO NOTHING
     `
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, inserted: groups.length })
   } catch (err) {
     console.error('POST /api/assign-setup error:', err)
     return NextResponse.json({ error: 'Failed to add evaluator' }, { status: 500 })
@@ -80,13 +96,29 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const guard = await requireManager()
   if (guard) return guard
-  const { id, field, value } = await req.json()
-  if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
+  const { id, field, value, name, list_type: listType } = await req.json()
 
   try {
+    // Available là dữ kiện cấp người, nên ghi theo (list_type, name) — mọi genre
+    // của người đó, một câu. Đây là chỗ duy nhất ngữ nghĩa "theo người" tồn tại;
+    // để nó ở server nên UI không thể tạo ra trạng thái lệch giữa các genre.
     if (field === 'today_available') {
-      await sql`UPDATE evaluator_roster SET today_available = ${value === true || value === 'Yes'}, updated_at = NOW() WHERE id = ${id}`
-    } else if (field === 'game_platform') {
+      const who = typeof name === 'string' ? name.trim() : ''
+      if (!who) return NextResponse.json({ error: 'name is required' }, { status: 400 })
+      if (listType !== 'initial' && listType !== 'final') {
+        return NextResponse.json({ error: 'Invalid list_type' }, { status: 400 })
+      }
+      await sql`
+        UPDATE evaluator_roster
+        SET today_available = ${value === true || value === 'Yes'}, updated_at = NOW()
+        WHERE list_type = ${listType} AND name = ${who}
+      `
+      return NextResponse.json({ ok: true })
+    }
+
+    if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
+
+    if (field === 'game_platform') {
       if (!PLATFORMS.includes(value)) return NextResponse.json({ error: 'Invalid platform' }, { status: 400 })
       await sql`UPDATE evaluator_roster SET game_platform = ${value}, updated_at = NOW() WHERE id = ${id}`
     } else if (field === 'game_category') {
