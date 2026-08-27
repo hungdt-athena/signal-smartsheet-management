@@ -40,14 +40,16 @@ export function RosterTable({
       <div className={`tbl-wrap roster-tbl${scroll ? ' roster-scroll' : ''}`}>
         <table className="tbl">
           <thead>
+            {/* Sub-genre là cột duy nhất không đặt width, nên toàn bộ chỗ dư của
+                bảng dồn vào nó thay vì phình cột tên ra như trước. */}
             <tr>
-              <th>Evaluator Name</th>
-              <th style={{ width: 110 }}>Genre</th>
+              <th style={{ width: 160 }}>Evaluator Name</th>
               <th style={{ width: 92 }}>Available</th>
-              <th style={{ width: 88 }}>Platform</th>
-              <th style={{ width: 150 }}>Sub-genre</th>
+              <th style={{ width: 110 }} className="col-split">Genre</th>
+              <th>Sub-genre</th>
+              <th style={{ width: 96 }}>Platform</th>
               <th style={{ width: 76 }}>Weight</th>
-              {!readOnly && <th style={{ width: 70 }} />}
+              {!readOnly && <th style={{ width: 80 }} />}
             </tr>
           </thead>
           <tbody>
@@ -88,20 +90,20 @@ function PersonRows({ group, span, showAdd, subGenres, readOnly, onPatchRow, onP
       {group.rows.map((r, i) => (
         <tr key={r.id} className={i === 0 ? 'person-first' : undefined}>
           {i === 0 && <td className="cell-name" rowSpan={span}>{group.name}</td>}
-          <td className="cell-genre">{BUCKET_LABELS[r.category_group]}</td>
           {i === 0 && (
             <td rowSpan={span} data-testid="avail-cell">
               <StyledSelect value={group.today_available ? 'Yes' : 'No'} options={AVAIL_OPTS} disabled={readOnly}
                 onChange={v => onPatchAvailable(group.name, v === 'Yes')} />
             </td>
           )}
-          <td>
-            <StyledSelect value={r.game_platform || 'all'} options={PLATFORM_OPTS} disabled={readOnly}
-              onChange={v => onPatchRow(r.id, 'game_platform', v)} />
-          </td>
+          <td className="cell-genre col-split">{BUCKET_LABELS[r.category_group]}</td>
           <td>
             <SubGenrePicker value={r.game_category} options={subGenres[r.category_group] ?? []} disabled={readOnly}
               onChange={v => onPatchRow(r.id, 'game_category', v)} />
+          </td>
+          <td>
+            <StyledSelect value={r.game_platform || 'all'} options={PLATFORM_OPTS} disabled={readOnly}
+              onChange={v => onPatchRow(r.id, 'game_platform', v)} />
           </td>
           <td>
             <StyledSelect value={String(r.weight ?? 100)} options={WEIGHT_OPTS} disabled={readOnly}
@@ -114,14 +116,14 @@ function PersonRows({ group, span, showAdd, subGenres, readOnly, onPatchRow, onP
       ))}
       {showAdd && (
         <tr className="person-add">
-          <td className="cell-genre">
+          <td className="cell-genre col-split">
             <span data-testid={`add-genre-${group.name}`}>
               <StyledSelect value="" placeholder="+ genre"
                 options={group.missingGenres.map(b => ({ value: b, label: BUCKET_LABELS[b] }))}
                 onChange={v => onAddGenre(group.name, v as Bucket)} />
             </span>
           </td>
-          <td colSpan={4} />
+          <td colSpan={readOnly ? 3 : 4} />
         </tr>
       )}
     </>
