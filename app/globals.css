@@ -266,11 +266,11 @@ body {
 .ht-name { font-family: var(--num); font-size: 12.5px; font-weight: 500; }
 .ht-note { font-size: 12px; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; }
 
-/* ===== Assign tab: roster trên, history matrix dưới, cả hai full width ===== */
+/* ===== Assign tab: roster on top, history matrix below, both full width ===== */
 .assign-setup { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 .roster-head { display: flex; justify-content: space-between; align-items: center; }
 
-/* Compact roster cells — bảng giờ có 7 cột (thêm Genre). */
+/* Compact roster cells — the table carries 7 columns now that Genre is one. */
 .roster-tbl .tbl th, .roster-tbl .tbl td { padding: 6px 8px; }
 .roster-tbl .tbl td { font-size: 12.5px; }
 .roster-tbl .ssel-btn { padding: 5px 8px; font-size: 12px; }
@@ -281,23 +281,37 @@ body {
   position: sticky; top: 0; z-index: 2; background: var(--surface);
 }
 
-/* Dòng đầu của mỗi người có đường kẻ đậm hơn, để mắt thấy ranh giới nhóm khi
-   cột Evaluator và Available gộp cell qua nhiều dòng genre. */
+/* A stronger rule on each person's first row, so the group boundary stays
+   visible while Evaluator and Available span several genre rows. */
 .roster-tbl .tbl tr.person-first > td { border-top: 1px solid var(--border-strong); }
 .roster-tbl .cell-name { font-weight: 600; white-space: nowrap; }
 .roster-tbl .cell-genre { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
 
-/* "Ai / có làm không" ở bên trái, "làm cái gì / bao nhiêu" ở bên phải. Vạch này
-   là ranh giới giữa hai nhóm đó, nên nó nằm ở cột Genre chứ không phải giữa bảng. */
+/* "Who, and are they in" on the left; "on what, and how much" on the right. This
+   rule is that boundary, which is why it sits on Genre and not mid-table. */
 .roster-tbl .tbl .col-split { border-left: 1px solid var(--border); padding-left: 16px; }
 
-/* + genre là hành động phụ, không nên nặng bằng các select thật trên cùng dòng. */
-.roster-tbl .person-add > td { border-top: none; padding-top: 0; padding-bottom: 8px; }
+/* "+ genre" is a secondary action: it sits centred across the Genre..Weight span
+   rather than crowding the Genre column, and it does not carry the weight of the
+   real selects above it. */
+.roster-tbl .person-add > td { border-top: none; padding-top: 0; padding-bottom: 10px; }
+.roster-tbl .person-add > td.col-split { text-align: center; }
+.roster-tbl .person-add .ssel { display: inline-block; width: 120px; text-align: left; }
 .roster-tbl .person-add .ssel-btn {
-  border-color: transparent; background: none; color: var(--faint);
-  padding-left: 0; font-size: 11.5px;
+  border-color: transparent; background: none; color: var(--faint); font-size: 11.5px;
 }
 .roster-tbl .person-add .ssel-btn:hover { color: var(--accent-strong); }
+
+/* Sub-genre as inline checkboxes. A bucket has two to five of them, so the whole
+   set fits on one line and the row's state is readable without a click. */
+.subg { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.subg-item {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: var(--muted); cursor: pointer; white-space: nowrap;
+}
+.subg-item.on { color: var(--text); font-weight: 600; }
+.subg-item input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.subg-item input:disabled { cursor: default; }
 
 .hist-card { display: flex; flex-direction: column; min-height: 0; }
 .hist-sub { color: var(--faint); font-weight: 400; margin-left: 8px; font-variant-numeric: tabular-nums; }
@@ -1927,6 +1941,7 @@ input:checked + .slider:before {
 .hist-matrix .hm-day small { display: block; font-weight: 400; font-family: var(--font); color: var(--faint); }
 .hist-matrix .hm-weekend, .hist-matrix .hm-weekend small { color: var(--faint); }
 .hist-matrix .hm-none { color: var(--faint); }
+.hist-matrix .hm-neg, .hist-matrix .hm-neg button { color: var(--bad); }
 .hist-matrix .hm-gone .hm-name { color: var(--faint); }
 .hist-matrix .hm-total { font-weight: 600; font-family: var(--num); }
 .hist-matrix .hm-foot td { border-top: 1px solid var(--border-strong); font-weight: 600; }
@@ -1935,8 +1950,8 @@ input:checked + .slider:before {
 .hist-matrix .hm-l3 { background: color-mix(in srgb, var(--accent) 36%, transparent); }
 .hist-matrix .hm-l4 { background: color-mix(in srgb, var(--accent) 52%, transparent); }
 .hist-matrix button { all: unset; cursor: pointer; display: block; width: 100%; font-family: var(--num); }
-/* Popover đi qua portal nên position: fixed và toạ độ do JS đặt. Không dùng
-   absolute trong ô: bảng nằm trong container overflow-x nên popover sẽ bị cắt. */
+/* The popover is portalled, so position: fixed with JS-supplied coordinates.
+   Absolute inside a cell gets clipped by the table's overflow-x container. */
 .hm-pop {
   position: fixed; z-index: 200; width: 380px;
   display: flex; flex-direction: column; overflow: hidden;
@@ -1975,9 +1990,16 @@ input:checked + .slider:before {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.hm-pop-foot {
-  display: flex; justify-content: space-between; gap: 8px; flex-shrink: 0;
-  padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface-2);
-  font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums;
+/* Assigned / Received / Given away / Net, above the run list. */
+.hm-pop-sum {
+  display: flex; flex-wrap: wrap; gap: 6px 16px; flex-shrink: 0;
+  padding: 9px 12px; border-bottom: 1px solid var(--border);
+  font-size: 11.5px; font-variant-numeric: tabular-nums;
 }
-.hm-pop-sums { font-weight: 600; color: var(--muted); }
+.hm-pop-sum-item { display: inline-flex; align-items: baseline; gap: 6px; font-family: var(--num); font-weight: 600; }
+.hm-pop-sum-item em {
+  font-style: normal; font-family: var(--font); font-weight: 500;
+  font-size: 10.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--faint);
+}
+.hm-pop-sum-item.net { margin-left: auto; color: var(--accent-strong); }
+.hm-pop-row.out .hm-pop-n { color: var(--bad); }

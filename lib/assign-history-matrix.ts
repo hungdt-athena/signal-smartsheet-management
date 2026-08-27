@@ -1,10 +1,16 @@
-// lib/assign-history-matrix.ts — pivot assignment_history thành matrix ngày × người.
+// lib/assign-history-matrix.ts — pivots assignment_history into a day x person
+// matrix.
 //
-// Hai luật không được vi phạm, vì vi phạm là matrix nói dối:
-//  1. Số "assign" không bao giờ gộp reassign/handover vào. Một game bị reassign
-//     đã được đếm một lần ở lần assign gốc; cộng lại là đếm hai.
-//  2. Cột là ngày liên tục theo lịch, không phải chỉ ngày có data. Giá trị của
-//     matrix nằm ở những ô trống — ngày cả team không nhận gì là thông tin.
+// The matrix is a NET ledger, not an assign counter. When a game moves from A to
+// B, B gains it and A loses it, and both sides land on the day the move happened
+// even though the game was originally assigned to A on some earlier day. That is
+// the point: "who is holding how much, and what changed today" is the question
+// the grid answers, and it cannot answer it if a move only ever shows up as a
+// gain. A day's column still nets out to the games assigned that day, because
+// every move's + and - cancel inside the column.
+//
+// The other rule: columns are consecutive calendar days, not just days that have
+// data. The empty cells are the information — a day nobody got a game is a fact.
 
 export interface HistoryRow {
   id: number
@@ -18,24 +24,46 @@ export interface HistoryRow {
   created_by: string | null
 }
 
-export interface Totals { assign: number; reassign: number; handover: number }
-export interface Cell extends Totals { rows: HistoryRow[] }
+export interface Totals {
+  assign: number
+  reassignIn: number
+  reassignOut: number
+  handoverIn: number
+  handoverOut: number
+  net: number
+}
+
+/** One history row seen from one person's side. */
+export interface Entry { row: HistoryRow; dir: 'in' | 'out' }
+
+export interface Cell extends Totals { entries: Entry[] }
 export interface MatrixRow { name: string; inRoster: boolean; cells: Cell[]; total: Totals }
 export interface Matrix { days: string[]; rows: MatrixRow[]; dayTotals: Totals[]; grandTotal: Totals }
 
 const DAY_MS = 86_400_000
 
-const zero = (): Totals => ({ assign: 0, reassign: 0, handover: 0 })
-const emptyCell = (): Cell => ({ ...zero(), rows: [] })
+const zero = (): Totals => ({
+  assign: 0, reassignIn: 0, reassignOut: 0, handoverIn: 0, handoverOut: 0, net: 0,
+})
+const emptyCell = (): Cell => ({ ...zero(), entries: [] })
 const iso = (t: number) => new Date(t).toISOString().slice(0, 10)
 const byName = (a: string, b: string) => a.localeCompare(b, 'en', { sensitivity: 'base' })
 
-function actionOf(r: HistoryRow): keyof Totals {
-  return r.action === 'reassign' || r.action === 'handover' ? r.action : 'assign'
+/** Games landing on the person named by `evaluator_name`. */
+function credit(t: Totals, r: HistoryRow): void {
+  const n = r.game_count || 0
+  if (r.action === 'reassign') t.reassignIn += n
+  else if (r.action === 'handover') t.handoverIn += n
+  else t.assign += n
+  t.net += n
 }
 
-function add(t: Totals, r: HistoryRow): void {
-  t[actionOf(r)] += r.game_count || 0
+/** Games leaving the person named by `from_evaluator`. Never an 'assign'. */
+function debit(t: Totals, r: HistoryRow): void {
+  const n = r.game_count || 0
+  if (r.action === 'handover') t.handoverOut += n
+  else t.reassignOut += n
+  t.net -= n
 }
 
 export function dayRange(from: string, to: string): string[] {
@@ -63,20 +91,19 @@ export function buildMatrix(input: {
 }): Matrix {
   const days = dayRange(input.from, input.to)
   const dayIndex = new Map(days.map((d, i) => [d, i]))
+  const inWindow = input.rows.filter(r => dayIndex.has(r.run_date.slice(0, 10)))
 
-  // Roster hiện tại trước (kể cả người 0 history — đó là thứ cần thấy), rồi
-  // những người chỉ còn tồn tại trong history.
+  // Every name that needs a row: the current roster (including people with no
+  // history at all — a row of dots is what makes them visible), plus anyone who
+  // received or gave away games inside the window.
   const inRoster = new Set(input.rosterNames)
-  const names: string[] = []
-  const seen = new Set<string>()
-  for (const n of [...input.rosterNames].sort(byName)) {
-    if (!seen.has(n)) { seen.add(n); names.push(n) }
-  }
-  for (const n of Array.from(new Set(input.rows.map(r => r.evaluator_name))).sort(byName)) {
-    if (!seen.has(n)) { seen.add(n); names.push(n) }
+  const names = new Set<string>(input.rosterNames)
+  for (const r of inWindow) {
+    names.add(r.evaluator_name)
+    if (r.from_evaluator) names.add(r.from_evaluator)
   }
 
-  const rowByName = new Map<string, MatrixRow>(names.map(n => [n, {
+  const rowByName = new Map<string, MatrixRow>(Array.from(names, n => [n, {
     name: n,
     inRoster: inRoster.has(n),
     cells: days.map(() => emptyCell()),
@@ -85,23 +112,40 @@ export function buildMatrix(input: {
   const dayTotals = days.map(() => zero())
   const grandTotal = zero()
 
-  for (const r of input.rows) {
-    const i = dayIndex.get(r.run_date.slice(0, 10))
-    if (i === undefined) continue
-    const mr = rowByName.get(r.evaluator_name)
-    if (!mr) continue
-    add(mr.cells[i], r)
-    mr.cells[i].rows.push(r)
-    add(mr.total, r)
-    add(dayTotals[i], r)
-    add(grandTotal, r)
+  for (const r of inWindow) {
+    const i = dayIndex.get(r.run_date.slice(0, 10))!
+
+    const to = rowByName.get(r.evaluator_name)
+    if (to) {
+      credit(to.cells[i], r)
+      to.cells[i].entries.push({ row: r, dir: 'in' })
+      credit(to.total, r)
+      credit(dayTotals[i], r)
+      credit(grandTotal, r)
+    }
+
+    // The giving side of a move, booked on the day of the move.
+    if (r.from_evaluator && r.action !== 'assign') {
+      const from = rowByName.get(r.from_evaluator)
+      if (from) {
+        debit(from.cells[i], r)
+        from.cells[i].entries.push({ row: r, dir: 'out' })
+        debit(from.total, r)
+        debit(dayTotals[i], r)
+        debit(grandTotal, r)
+      }
+    }
   }
 
-  return { days, rows: names.map(n => rowByName.get(n)!), dayTotals, grandTotal }
+  // Busiest first: the grid is read to find who is carrying the load.
+  const rows = Array.from(rowByName.values())
+    .sort((a, b) => (b.total.net - a.total.net) || byName(a.name, b.name))
+
+  return { days, rows, dayTotals, grandTotal }
 }
 
-// Đậm nhạt theo quantile TRONG cửa sổ đang xem, không dùng thang tuyệt đối:
-// pool mỗi ngày to nhỏ khác nhau nên một thang cố định sẽ sai liên tục.
+// Shading follows quantiles WITHIN the visible window rather than an absolute
+// scale: the daily pool size swings, so a fixed scale would be wrong most days.
 export function shadeScale(values: number[]): (n: number) => 0 | 1 | 2 | 3 | 4 {
   const nz = values.filter(v => v > 0).sort((a, b) => a - b)
   if (nz.length === 0) return () => 0

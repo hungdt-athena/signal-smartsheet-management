@@ -1,6 +1,6 @@
-// lib/assign-roster.ts — gom dòng evaluator_roster theo người cho bảng Assign
-// một trang. Một dòng DB = một cặp (người, genre); bảng hiển thị gom chúng lại
-// để cột Evaluator và Available gộp cell theo người.
+// lib/assign-roster.ts — groups evaluator_roster rows by person for the
+// single-page Assign table. One DB row is one (person, genre) pair; the table
+// groups them so the Evaluator and Available columns can span a person's rows.
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 
 export interface RosterRow {
@@ -42,9 +42,10 @@ export function groupRosterByPerson(rows: RosterRow[]): PersonGroup[] {
       const have = new Set(sorted.map(r => r.category_group))
       return {
         name,
-        // Available là dữ kiện cấp người. Nếu các dòng lệch nhau thì đó là dữ
-        // liệu cũ từ thời 3 tab; group lấy giá trị của dòng đầu và mọi lần ghi
-        // đều ghi lại toàn bộ dòng cùng tên, nên nó tự hết lệch sau lần sửa đầu.
+        // Availability is a fact about the person. Rows disagreeing with each
+        // other is leftover data from the three-tab era; the group takes the first
+        // row's value, and since every write updates all rows with that name, the
+        // disagreement clears itself on the first edit.
         today_available: sorted[0].today_available,
         rows: sorted,
         missingGenres: BUCKETS.filter(b => !have.has(b)),

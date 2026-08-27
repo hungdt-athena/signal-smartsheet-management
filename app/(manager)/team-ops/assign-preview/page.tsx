@@ -1,5 +1,5 @@
-// Page GIẢ LẬP để xem layout Assign một trang trước khi đụng API thật.
-// Không fetch, không ghi DB. Xoá page này và fixture.ts khi Assign thật xong.
+// A MOCK page for eyeballing the single-page Assign layout before the real API
+// is touched. No fetch, no writes. Delete this page and fixture.ts once done.
 'use client'
 import { useMemo, useState } from 'react'
 import { RosterTable, BUCKET_LABELS } from '@/components/RosterTable'
@@ -49,7 +49,7 @@ export default function AssignPreviewPage() {
         onPatchRow={noop} onPatchAvailable={noop} onRemoveRow={noop} onAddGenre={noop} onAddEvaluator={noop} />
       <div style={{ height: 18 }} />
       <div className="card">
-        <div className="card-head"><span className="card-label">History · 14 ngày</span></div>
+        <div className="card-head"><span className="card-label">History · 14 days</span></div>
         <AssignHistoryMatrix matrix={matrix} />
       </div>
     </div>

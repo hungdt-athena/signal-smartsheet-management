@@ -44,8 +44,8 @@ function setup(over: Partial<React.ComponentProps<typeof RosterTable>> = {}) {
   return props
 }
 
-// StyledSelect mở menu qua portal vào document.body, option là div.ssel-opt
-// (không phải role="option"), nên phải query theo class thật.
+// StyledSelect portals its menu into document.body and renders options as
+// div.ssel-opt rather than role="option", so query the real class.
 function openMenu(trigger: HTMLElement): HTMLElement {
   fireEvent.click(within(trigger).getByRole('button'))
   const menu = document.querySelector('.ssel-menu')
@@ -54,7 +54,7 @@ function openMenu(trigger: HTMLElement): HTMLElement {
 }
 
 describe('RosterTable', () => {
-  it('cột Genre hiện tên genre của từng dòng, header là Sub-genre chứ không phải Category', () => {
+  it('the Genre column names each row\'s genre, and the header reads Sub-genre', () => {
     setup()
     expect(screen.getAllByText('Puzzle')).toHaveLength(2)
     expect(screen.getAllByText('Arcade')).toHaveLength(1)
@@ -62,22 +62,22 @@ describe('RosterTable', () => {
     expect(screen.queryByRole('columnheader', { name: /^category$/i })).not.toBeInTheDocument()
   })
 
-  it('tên người xuất hiện một lần cho hai genre (gộp cell)', () => {
+  it('a name appears once across two genre rows', () => {
     setup()
     expect(screen.getAllByText('NhiLV')).toHaveLength(1)
   })
 
-  it('ô Available chỉ có một cho mỗi người, và ghi theo tên chứ không theo id dòng', () => {
+  it('there is one Available control per person, and it writes by name', () => {
     const { onPatchAvailable } = setup()
     const avail = screen.getAllByTestId('avail-cell')
-    expect(avail).toHaveLength(2) // 2 người, không phải 3 dòng
+    expect(avail).toHaveLength(2) // two people, not three rows
 
     const menu = openMenu(avail[0])
     fireEvent.click(within(menu).getByText('No'))
     expect(onPatchAvailable).toHaveBeenCalledWith('NhiLV', false)
   })
 
-  it('+ genre chỉ đề xuất genre người đó chưa có', () => {
+  it('+ genre only offers the genres that person is missing', () => {
     const { onAddGenre } = setup()
     const menu = openMenu(screen.getByTestId('add-genre-NhiLV'))
     expect(within(menu).getByText('Simulation')).toBeInTheDocument()
@@ -86,7 +86,7 @@ describe('RosterTable', () => {
     expect(onAddGenre).toHaveBeenCalledWith('NhiLV', 'simulation')
   })
 
-  it('người đủ 3 genre không có nút + genre', () => {
+  it('someone covering all three genres gets no + genre control', () => {
     setup({
       groups: [{
         name: 'Full', today_available: true, missingGenres: [],
@@ -99,14 +99,33 @@ describe('RosterTable', () => {
     expect(screen.queryByTestId('add-genre-Full')).not.toBeInTheDocument()
   })
 
-  it('readOnly bỏ cột Remove, bỏ + genre và + Add evaluator', () => {
+  it('readOnly drops Remove, + genre and + Add evaluator', () => {
     setup({ readOnly: true })
     expect(screen.queryByText('Remove')).not.toBeInTheDocument()
     expect(screen.queryByTestId('add-genre-NhiLV')).not.toBeInTheDocument()
     expect(screen.queryByText(/add evaluator/i)).not.toBeInTheDocument()
   })
 
-  it('roster rỗng hiện empty state', () => {
+  it('sub-genre is a row of checkboxes, with All checked when nothing is picked', () => {
+    setup()
+    const puzzleRow = screen.getAllByTestId('avail-cell')[0].closest('tr')!
+    expect(within(puzzleRow).getByLabelText('All')).toBeChecked()
+    expect(within(puzzleRow).getByLabelText('word')).not.toBeChecked()
+  })
+
+  it('ticking a sub-genre stores it; unticking the last one falls back to All', () => {
+    const { onPatchRow } = setup()
+    const puzzleRow = screen.getAllByTestId('avail-cell')[0].closest('tr')!
+    fireEvent.click(within(puzzleRow).getByLabelText('word'))
+    expect(onPatchRow).toHaveBeenCalledWith(1, 'game_category', 'word')
+
+    // The Arcade row holds 'action'; unticking it leaves nothing, so 'All'.
+    const arcadeRow = screen.getByText('Arcade').closest('tr')!
+    fireEvent.click(within(arcadeRow).getByLabelText('action'))
+    expect(onPatchRow).toHaveBeenCalledWith(2, 'game_category', 'All')
+  })
+
+  it('an empty roster shows the empty state', () => {
     setup({ groups: [] })
     expect(screen.getByText('No evaluators yet')).toBeInTheDocument()
   })

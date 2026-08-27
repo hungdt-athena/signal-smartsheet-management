@@ -1,6 +1,6 @@
-// components/AssignHistory.tsx — assignment_history dạng matrix ngày × người.
-// Cửa sổ 14 ngày, lùi/tiến bằng ◀ ▶. Số trong ô là assign; reassign/handover
-// không bao giờ được cộng vào (game bị reassign đã đếm ở lần assign gốc).
+// components/AssignHistory.tsx — assignment_history as a day x person matrix.
+// A 14-day window, stepped with the arrows. Cells hold the net change for that
+// day: assigned, plus received, minus given away.
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AssignHistoryMatrix } from '@/components/AssignHistoryMatrix'
@@ -9,7 +9,7 @@ import type { Bucket } from '@/lib/buckets'
 
 const WINDOW_DAYS = 14
 
-// Cửa sổ mặc định: 14 ngày tính đến hôm nay theo giờ VN.
+// Default window: the 14 days ending today, on the VN calendar.
 function defaultWindow(): { from: string; to: string } {
   const vn = new Date(Date.now() + 7 * 3_600_000)
   const to = vn.toISOString().slice(0, 10)
@@ -24,7 +24,7 @@ export function AssignHistory({ genre, rosterNames }: { genre: Bucket | 'all'; r
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Không truyền `category`: một lần đọc phục vụ cả 3 genre, filter chip lọc ở client.
+  // No `category`: one read serves all three genres and the chip filters client-side.
   const refresh = useCallback(async () => {
     setLoading(true); setError(null)
     try {

@@ -1,4 +1,4 @@
-// Fixture chỉ cho page giả lập /team-ops/assign-preview. Xoá cùng page đó.
+// Fixture for the /team-ops/assign-preview mock page only. Delete with it.
 import type { RosterRow } from '@/lib/assign-roster'
 import type { HistoryRow } from '@/lib/assign-history-matrix'
 
@@ -35,7 +35,8 @@ export const FIXTURE_SUB_GENRES = {
 
 export const FIXTURE_WINDOW = { from: '2026-08-14', to: '2026-08-27' }
 
-// 20/8 cố tình trống hết. 25/8 có một reassign. KietCD không có dòng nào.
+// The 20th is deliberately empty everywhere. The 25th carries a reassign.
+// KietCD has no history at all.
 export const FIXTURE_HISTORY: HistoryRow[] = (() => {
   const out: HistoryRow[] = []
   const days = ['2026-08-18', '2026-08-19', '2026-08-21', '2026-08-22', '2026-08-25', '2026-08-26', '2026-08-27']

@@ -1,6 +1,6 @@
-// components/RosterTable.tsx — bảng roster một trang, một dòng = một cặp
-// (người, genre). Presentational: mọi thao tác đi ra ngoài qua props, nên page
-// giả lập fixture và page thật dùng chung đúng một component.
+// components/RosterTable.tsx — the single-page roster table: one row is one
+// (person, genre) pair. Presentational, with every action leaving through props,
+// so a fixture-driven page and the live page share exactly one component.
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import { StyledSelect } from '@/components/StyledSelect'
@@ -40,8 +40,8 @@ export function RosterTable({
       <div className={`tbl-wrap roster-tbl${scroll ? ' roster-scroll' : ''}`}>
         <table className="tbl">
           <thead>
-            {/* Sub-genre là cột duy nhất không đặt width, nên toàn bộ chỗ dư của
-                bảng dồn vào nó thay vì phình cột tên ra như trước. */}
+            {/* Sub-genre is the only column without a width, so the table's slack
+                collects there instead of stretching the name column. */}
             <tr>
               <th style={{ width: 160 }}>Evaluator Name</th>
               <th style={{ width: 92 }}>Available</th>
@@ -71,9 +71,9 @@ export function RosterTable({
   )
 }
 
-// Một người ra nhiều <tr>. Cột Evaluator và Available chỉ tồn tại trên dòng đầu
-// và gộp cell xuống hết nhóm, nên ô Available vật lý chỉ có một — UI không thể
-// tạo ra trạng thái lệch giữa các genre của cùng một người.
+// A person renders as several <tr>. Evaluator and Available exist only on the
+// first row and span the rest, so there is physically one Available control per
+// person — the UI cannot put a person's genres into disagreeing states.
 function PersonRows({ group, span, showAdd, subGenres, readOnly, onPatchRow, onPatchAvailable, onRemoveRow, onAddGenre }: {
   group: PersonGroup
   span: number
@@ -116,21 +116,24 @@ function PersonRows({ group, span, showAdd, subGenres, readOnly, onPatchRow, onP
       ))}
       {showAdd && (
         <tr className="person-add">
-          <td className="cell-genre col-split">
+          <td className="col-split" colSpan={4}>
             <span data-testid={`add-genre-${group.name}`}>
               <StyledSelect value="" placeholder="+ genre"
                 options={group.missingGenres.map(b => ({ value: b, label: BUCKET_LABELS[b] }))}
                 onChange={v => onAddGenre(group.name, v as Bucket)} />
             </span>
           </td>
-          <td colSpan={readOnly ? 3 : 4} />
+          {!readOnly && <td />}
         </tr>
       )}
     </>
   )
 }
 
-// Multi-select sub-genre trong genre của chính dòng này. Rỗng ↔ 'All'.
+// Sub-genres of this row's own genre, laid out as inline checkboxes. A dropdown
+// hid the choice behind a click and read as "All" on every row; a bucket only has
+// two to five sub-genres, so they all fit on one line and the state is visible
+// without opening anything. No selection is stored as 'All'.
 function SubGenrePicker({ value, options, onChange, disabled }: {
   value: string; options: string[]; onChange: (v: string) => void; disabled?: boolean
 }) {
@@ -138,19 +141,34 @@ function SubGenrePicker({ value, options, onChange, disabled }: {
     () => (value && value.toLowerCase() !== 'all' ? value.split(',').map(s => s.trim()).filter(Boolean) : []),
     [value],
   )
+  const all = selected.length === 0
+
+  function toggle(g: string) {
+    const next = selected.includes(g) ? selected.filter(x => x !== g) : [...selected, g]
+    onChange(next.length === 0 ? 'All' : next.join(','))
+  }
+
   return (
-    <MultiSelect
-      value={selected}
-      placeholder="All"
-      disabled={disabled}
-      options={options.map(g => ({ value: g, label: g }))}
-      onChange={vals => onChange(vals.length === 0 ? 'All' : vals.join(','))}
-    />
+    <div className="subg">
+      <label className={`subg-item${all ? ' on' : ''}`}>
+        <input type="checkbox" checked={all} disabled={disabled}
+          onChange={() => onChange('All')} />
+        <span>All</span>
+      </label>
+      {options.map(g => (
+        <label key={g} className={`subg-item${selected.includes(g) ? ' on' : ''}`}>
+          <input type="checkbox" checked={selected.includes(g)} disabled={disabled}
+            onChange={() => toggle(g)} />
+          <span>{g}</span>
+        </label>
+      ))}
+    </div>
   )
 }
 
-// Add-eval input với autocomplete dashboard_users; id lạ → cờ provision.
-// Khác bản cũ: chọn được nhiều genre một lượt, mỗi genre thành một dòng roster.
+// Add-eval input with dashboard_users autocomplete; an unknown id sets the
+// provision flag. Unlike the old one it takes several genres at once, each of
+// which becomes its own roster row.
 function AddEvalRow({ onAdd }: { onAdd: RosterTableProps['onAddEvaluator'] }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')

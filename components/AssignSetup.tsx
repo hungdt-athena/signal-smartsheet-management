@@ -1,6 +1,6 @@
-// components/AssignSetup.tsx — roster một trang: một dòng = một cặp (người, genre).
-// Không còn prop bucket; genre là filter view do page truyền xuống. Render uỷ
-// cho RosterTable, ở đây chỉ còn fetch và bốn thao tác ghi.
+// components/AssignSetup.tsx — the single-page roster: one row is one
+// (person, genre) pair. No bucket prop; genre is a view filter passed down by the
+// page. Rendering is delegated to RosterTable, leaving fetch and four writes.
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RosterTable } from '@/components/RosterTable'
@@ -35,8 +35,8 @@ export function AssignSetup({ isEvaluator = false, userName = '', genre, onRoste
 
   useEffect(() => { refresh() }, [refresh])
 
-  // Tên roster của list Initial, cho matrix History biết ai đang trong roster —
-  // người 0 history vẫn phải ra một dòng, đó là thứ cần quan sát.
+  // Initial-list names, so the history matrix knows who is on the roster: a
+  // person with no history still needs a row, which is the point of looking.
   useEffect(() => {
     onRosterNames?.(Array.from(new Set(initial.map(r => r.name))))
   }, [initial, onRosterNames])
@@ -46,7 +46,7 @@ export function AssignSetup({ isEvaluator = false, userName = '', genre, onRoste
     [genre],
   )
 
-  // Evaluator chỉ thấy dòng của chính họ ở Initial (server cũng đã lọc).
+  // An evaluator only sees their own Initial rows (the server filters too).
   const initialGroups = useMemo(() => groupRosterByPerson(
     visible(isEvaluator ? initial.filter(r => r.name.toLowerCase() === userName.toLowerCase()) : initial),
   ), [visible, isEvaluator, initial, userName])

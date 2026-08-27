@@ -65,9 +65,9 @@ function TeamOpsInner() {
   )
 }
 
-// Assign tab: một trang cho cả 3 genre. Roster trên, history matrix dưới.
-// Filter chip chỉ lọc view — nó không quyết định cái gì được load, khác hẳn bộ
-// tab genre cũ mà nó thay thế.
+// Assign tab: one page for all three genres. Roster on top, history matrix
+// below. The chips only filter the view — they do not decide what gets loaded,
+// unlike the genre tabs they replace.
 // Evaluators see a read-only view scoped to their own Initial-list rows.
 function AssignTab() {
   const { data: session } = useSession()
@@ -75,8 +75,8 @@ function AssignTab() {
   const userName = session?.user?.name || ''
   const [genre, setGenre] = useState<Bucket | 'all'>('all')
   const [rosterNames, setRosterNames] = useState<string[]>([])
-  // So sánh trước khi set: AssignSetup gọi lại sau mỗi render của nó, và set
-  // state của cha vô điều kiện sẽ thành vòng lặp render không dừng.
+  // Compare before setting: AssignSetup calls this after each of its renders,
+  // and setting parent state unconditionally would never stop re-rendering.
   const onRosterNames = useCallback((names: string[]) => {
     setRosterNames(prev => (prev.join('|') === names.join('|') ? prev : names))
   }, [])

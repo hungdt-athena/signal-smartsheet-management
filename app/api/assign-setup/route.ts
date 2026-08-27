@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   if (guard) return guard
   const b = await req.json()
 
-  // Một lần thêm người có thể tạo nhiều dòng, mỗi genre một dòng.
+  // Adding a person can create several rows at once, one per genre.
   const groups: Bucket[] = Array.isArray(b.category_groups)
     ? b.category_groups.filter(isBucket)
     : isBucket(b.category_group) ? [b.category_group] : []
@@ -70,8 +70,8 @@ export async function POST(req: NextRequest) {
         ON CONFLICT (email) DO NOTHING
       `
     }
-    // Available kế thừa từ dòng đã có của người này (nếu có), để thêm một genre
-    // mới cho người đang nghỉ không âm thầm bật họ trở lại.
+    // Availability is inherited from any row this person already has, so adding
+    // a genre to someone who is off today does not quietly bring them back.
     const [existing] = await sql<{ today_available: boolean }[]>`
       SELECT today_available FROM evaluator_roster
       WHERE list_type = ${b.list_type} AND name = ${name} LIMIT 1
@@ -99,9 +99,10 @@ export async function PATCH(req: NextRequest) {
   const { id, field, value, name, list_type: listType } = await req.json()
 
   try {
-    // Available là dữ kiện cấp người, nên ghi theo (list_type, name) — mọi genre
-    // của người đó, một câu. Đây là chỗ duy nhất ngữ nghĩa "theo người" tồn tại;
-    // để nó ở server nên UI không thể tạo ra trạng thái lệch giữa các genre.
+    // Availability is a fact about the person, so it is written by
+    // (list_type, name) — every genre of theirs, in one statement. This is the
+    // only place the per-person rule lives, and it lives on the server so no UI
+    // can put a person's genres into disagreeing states.
     if (field === 'today_available') {
       const who = typeof name === 'string' ? name.trim() : ''
       if (!who) return NextResponse.json({ error: 'name is required' }, { status: 400 })

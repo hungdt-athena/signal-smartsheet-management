@@ -5,7 +5,7 @@ const row = (o: Partial<RosterRow> & { id: number; name: string; category_group:
 })
 
 describe('groupRosterByPerson', () => {
-  it('gom mọi genre của một người vào một group, sort tên A→Z', () => {
+  it('collects all of a person\'s genres into one group, names A to Z', () => {
     const groups = groupRosterByPerson([
       row({ id: 1, name: 'MyTL', category_group: 'puzzle' }),
       row({ id: 2, name: 'NhiLV', category_group: 'arcade' }),
@@ -15,7 +15,7 @@ describe('groupRosterByPerson', () => {
     expect(groups[1].rows).toHaveLength(2)
   })
 
-  it('trong một người, genre theo thứ tự puzzle → arcade → simulation', () => {
+  it('orders a person\'s genres puzzle, arcade, simulation', () => {
     const [g] = groupRosterByPerson([
       row({ id: 1, name: 'A', category_group: 'simulation' }),
       row({ id: 2, name: 'A', category_group: 'arcade' }),
@@ -24,12 +24,12 @@ describe('groupRosterByPerson', () => {
     expect(g.rows.map(r => r.category_group)).toEqual(['puzzle', 'arcade', 'simulation'])
   })
 
-  it('missingGenres liệt kê genre người đó chưa có, theo thứ tự chuẩn', () => {
+  it('missingGenres lists the genres they do not have, in the standard order', () => {
     const [g] = groupRosterByPerson([row({ id: 1, name: 'A', category_group: 'arcade' })])
     expect(g.missingGenres).toEqual(['puzzle', 'simulation'])
   })
 
-  it('người đủ 3 genre thì missingGenres rỗng', () => {
+  it('missingGenres is empty for someone covering all three', () => {
     const [g] = groupRosterByPerson([
       row({ id: 1, name: 'A', category_group: 'puzzle' }),
       row({ id: 2, name: 'A', category_group: 'arcade' }),
@@ -38,7 +38,7 @@ describe('groupRosterByPerson', () => {
     expect(g.missingGenres).toEqual([])
   })
 
-  it('today_available lấy theo người: dữ liệu lệch giữa các dòng vẫn ra một giá trị', () => {
+  it('today_available is per person: rows disagreeing still yield one value', () => {
     const [g] = groupRosterByPerson([
       row({ id: 1, name: 'A', category_group: 'puzzle', today_available: false }),
       row({ id: 2, name: 'A', category_group: 'arcade', today_available: true }),
@@ -47,7 +47,7 @@ describe('groupRosterByPerson', () => {
     expect(g.today_available).toBe(false)
   })
 
-  it('roster rỗng ra mảng rỗng', () => {
+  it('an empty roster yields an empty list', () => {
     expect(groupRosterByPerson([])).toEqual([])
   })
 })
