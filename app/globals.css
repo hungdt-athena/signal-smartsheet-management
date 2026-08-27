@@ -1978,3 +1978,35 @@ input:checked + .slider:before {
   display: block; font-size: 11px; font-weight: 400; font-family: var(--num);
   color: var(--warn); text-decoration: line-through; margin-top: 2px;
 }
+
+/* ── Assign history matrix ─────────────────────────────────────────────────── */
+.hist-matrix-wrap { overflow-x: auto; }
+.hist-matrix { border-collapse: collapse; font-size: 12.5px; }
+.hist-matrix th, .hist-matrix td { padding: 4px 6px; text-align: center; }
+.hist-matrix td { position: relative; }
+.hist-matrix .hm-name {
+  position: sticky; left: 0; z-index: 1; text-align: left;
+  background: var(--surface); white-space: nowrap; padding-right: 12px;
+}
+.hist-matrix .hm-day { line-height: 1.15; font-weight: 600; font-family: var(--num); }
+.hist-matrix .hm-day small { display: block; font-weight: 400; font-family: var(--font); color: var(--faint); }
+.hist-matrix .hm-weekend, .hist-matrix .hm-weekend small { color: var(--faint); }
+.hist-matrix .hm-none { color: var(--faint); }
+.hist-matrix .hm-gone .hm-name { color: var(--faint); }
+.hist-matrix .hm-total { font-weight: 600; font-family: var(--num); }
+.hist-matrix .hm-foot td { border-top: 1px solid var(--border-strong); font-weight: 600; }
+.hist-matrix .hm-l1 { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.hist-matrix .hm-l2 { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.hist-matrix .hm-l3 { background: color-mix(in srgb, var(--accent) 36%, transparent); }
+.hist-matrix .hm-l4 { background: color-mix(in srgb, var(--accent) 52%, transparent); }
+.hist-matrix button { all: unset; cursor: pointer; display: block; width: 100%; font-family: var(--num); }
+.hm-pop {
+  position: absolute; z-index: 40; top: 100%; left: 50%; transform: translateX(-50%);
+  min-width: 260px; padding: 8px 10px; text-align: left; font-size: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow-md);
+}
+.hm-pop-head { display: flex; justify-content: space-between; margin-bottom: 6px; font-weight: 600; }
+.hm-pop-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; padding: 2px 0; }
+.hm-pop-time { color: var(--faint); font-variant-numeric: tabular-nums; }
+.hm-pop-from, .hm-pop-by { color: var(--faint); }
