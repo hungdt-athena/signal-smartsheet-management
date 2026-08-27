@@ -14,6 +14,7 @@ import { TrendTagsField, type TrendTag, type ExistingTrendTag } from './TrendTag
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
 import { isManagerRole } from '@/lib/roles'
+import { NOTE_MIN_LEN, noteRequirementError } from '@/lib/eval-rules'
 
 export interface EvalDetail {
   id: number
@@ -707,6 +708,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // The eval editor's Save button also flushes staged screenshots, so staged
   // shots count as unsaved work for it (the card hides its own button then).
   const needsSave = dirty || (canEditEval && stagedShots > 0)
+  // A written note has to be a real note. The rule bites only when the note is
+  // rewritten — reopening a game (evaluated or not) and saving some other field
+  // never blocks, however short its stored note is. Link_dead is exempt.
+  const noteError = canEditEval ? noteRequirementError({
+    note,
+    prevNote: ev?.initial_note,
+    conclusion,
+  }) : null
+  const noteTooShort = !!noteError
 
   useEffect(() => {
     if (!canEditAssignee) return
@@ -724,6 +734,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
   const save = async () => {
     if (!ev || !canEdit) return
+    if (noteError) {
+      showToast(noteError, true)
+      return
+    }
     setSaving(true)
     try {
       // Flush staged screenshots first so one Save persists both. Silent success —
@@ -832,12 +846,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (!autoSave || !needsSave || saving || !canEdit) return
+    if (!autoSave || !needsSave || saving || !canEdit || noteTooShort) return
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 1500)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSave, needsSave, saving, canEdit, currentGameId, note, conclusion, driveLink, deadLink, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots, trendTags])
+  }, [autoSave, needsSave, saving, canEdit, noteTooShort, currentGameId, note, conclusion, driveLink, deadLink, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots, trendTags])
 
   const clearField = (f: 'note' | 'conclusion' | 'drive') => {
     if (!canEditEval) return
@@ -1198,8 +1212,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   onChange={e => { setNote(e.target.value); setDirty(true) }}
                   placeholder="Evaluation note..."
                   disabled={!canEditEval}
-                  style={{ resize: 'vertical', fontSize: 13 }}
+                  style={{ resize: 'vertical', fontSize: 13, ...(noteTooShort ? { borderColor: 'var(--warn)' } : {}) }}
                 />
+                {noteTooShort && (
+                  <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
+                    Required — at least {NOTE_MIN_LEN} characters ({note.trim().length}/{NOTE_MIN_LEN})
+                  </div>
+                )}
               </div>
 
               <div className="field">
@@ -1258,7 +1277,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               )}
 
               {canEditGameAlike && (
-                <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave}
+                <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave || noteTooShort}
                   style={{
                     width: '100%', justifyContent: 'center', marginTop: 2, gap: 6,
                     ...(needsSave ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
@@ -1325,7 +1344,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                 </div>
 
                 {canEditFinalNote && (
-                  <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave}
+                  <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave || noteTooShort}
                     style={{
                       width: '100%', justifyContent: 'center', gap: 6,
                       ...(needsSave ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
@@ -1430,7 +1449,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
           {/* Save button for record changes */}
           {!hideRecordSections && (ev.record_5min_assignee || ev.record_20min_assignee || canEditAssignee) && (canEdit5 || canEdit20 || canEditAssignee) && (
-            <button className={`btn ${dirty ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !dirty}
+            <button className={`btn ${dirty ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !dirty || noteTooShort}
               style={{
                 width: '100%', justifyContent: 'center', gap: 6,
                 ...(dirty ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
