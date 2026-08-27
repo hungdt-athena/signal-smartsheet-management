@@ -172,18 +172,42 @@ export async function PUT(req: NextRequest) {
   const values = unique.map(t => t.field_value)
   await sql.begin(async txRaw => {
     const tx = txRaw as unknown as typeof sql
-    // Dropping a tag from the list rejects it; it is never deleted. A deleted
+    // Dropping someone else's tag rejects it; it is never deleted. A deleted
     // row takes the whole episode with it -- the evaluator who proposed the tag
     // would find it simply gone, with nothing in History to say who dropped it
     // or when. `rejected` keeps that line readable, and the partial unique index
     // only covers pending rows, so the same value can be proposed again later.
+    // Taking back your own untouched proposal is not a review, it is a
+    // correction mid-thought: the row is deleted outright. `rejected` here would
+    // fill History with lines whose Proposed and Reviewed are the same person,
+    // saying nothing except that someone changed their mind before an admin ever
+    // saw the tag. Anyone else's tag still goes to `rejected` -- that one is a
+    // decision about another person's work and has to stay readable.
+    //
+    // `edited_by` is the second half of the rule: once a moderator has corrected
+    // the tag, the episode involves two people, and dropping it deletes their
+    // correction along with it. So the row only disappears while it is still
+    // wholly yours.
     if (values.length === 0) {
+      await tx`
+        DELETE FROM playtest_tags
+        WHERE game_id = ${gameId} AND status = 'pending'
+          AND tagged_by = ${email}
+          AND (edited_by IS NULL OR edited_by = ${email})
+      `
       await tx`
         UPDATE playtest_tags
         SET status = 'rejected', confirmed_by = ${email}, confirmed_at = now()
         WHERE game_id = ${gameId} AND status = 'pending'
       `
     } else {
+      await tx`
+        DELETE FROM playtest_tags
+        WHERE game_id = ${gameId} AND status = 'pending'
+          AND NOT (field_value = ANY(${values}))
+          AND tagged_by = ${email}
+          AND (edited_by IS NULL OR edited_by = ${email})
+      `
       await tx`
         UPDATE playtest_tags
         SET status = 'rejected', confirmed_by = ${email}, confirmed_at = now()

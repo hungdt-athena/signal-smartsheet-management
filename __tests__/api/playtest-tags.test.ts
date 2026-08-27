@@ -114,8 +114,9 @@ describe('/api/playtest-tags', () => {
     ])
     const r = await PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: 2 }] }))
     expect(await r.json()).toEqual({ ok: true, count: 1 })
-    // Tags dropped from the list are rejected, never deleted -- History has to
-    // keep the episode.
+    // Tags dropped from the list are rejected -- History has to keep the
+    // episode -- unless they are the caller's own untouched proposal, which is
+    // deleted instead (see the self-drop tests below).
     expect(calls.some(c => /UPDATE playtest_tags\s*SET status = /.test(c.text))).toBe(true)
     const insert = calls.find(c => /INSERT INTO playtest_tags/.test(c.text))
     expect(insert?.binds).toEqual(expect.arrayContaining(['g1', 'Balatro', 2, 'mitt@athena.studio']))
@@ -152,6 +153,43 @@ describe('/api/playtest-tags', () => {
     expect(update).toMatch(/edited_by = CASE/)
     expect(update).toMatch(/original_captured_at = CASE/)
     expect(update).toMatch(/sub_value_id IS DISTINCT FROM EXCLUDED\.sub_value_id/)
+  })
+
+  it('deletes your own untouched proposal instead of logging a self-rejection', async () => {
+    // Proposed by Mitt, dropped by Mitt, before any admin saw it: History would
+    // otherwise show a `rejected` line whose Proposed and Reviewed are both Mitt.
+    sessionMock.mockResolvedValue({ user: { role: 'evaluator', name: 'Mitt', email: 'mitt@athena.studio' } })
+    routeSql([
+      authz(true, true),
+      { match: /field_value = ANY/, rows: [{ field_value: 'Balatro' }] },
+    ])
+    const r = await PUT(putReq({ game_id: 'g1', tags: [{ field_value: 'Balatro', sub_value_id: 1 }] }))
+    expect(r.status).toBe(200)
+
+    const del = calls.find(c => /DELETE FROM playtest_tags/.test(c.text))!
+    // Scoped three ways: this game's dropped values, tagged by the caller, and
+    // not corrected by anyone else -- an edited row belongs to two people.
+    expect(del.text).toMatch(/NOT \(field_value = ANY/)
+    expect(del.text).toMatch(/tagged_by = /)
+    expect(del.text).toMatch(/edited_by IS NULL OR edited_by = /)
+    expect(del.binds).toEqual(expect.arrayContaining([['Balatro'], 'mitt@athena.studio']))
+
+    // Everyone else's dropped tags still become history, and the delete runs
+    // first so it wins the rows it owns.
+    const reject = calls.find(c => /UPDATE playtest_tags\s*SET status = /.test(c.text))!
+    expect(calls.indexOf(del)).toBeLessThan(calls.indexOf(reject))
+    expect(reject.text).not.toMatch(/tagged_by = /)
+  })
+
+  it('deletes only your own tags when clearing the whole pending set', async () => {
+    sessionMock.mockResolvedValue({ user: { role: 'evaluator', name: 'Mitt', email: 'mitt@athena.studio' } })
+    routeSql([authz(true, true)])
+    const r = await PUT(putReq({ game_id: 'g1', tags: [] }))
+    expect(r.status).toBe(200)
+    const del = calls.find(c => /DELETE FROM playtest_tags/.test(c.text))!
+    expect(del.text).not.toMatch(/NOT \(field_value = ANY/)
+    expect(del.text).toMatch(/tagged_by = /)
+    expect(del.binds).toEqual(expect.arrayContaining(['mitt@athena.studio']))
   })
 
   it('rejects a value that is not an active Trends definition', async () => {
