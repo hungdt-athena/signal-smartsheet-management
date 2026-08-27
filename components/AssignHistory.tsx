@@ -5,7 +5,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AssignHistoryMatrix } from '@/components/AssignHistoryMatrix'
 import { buildMatrix, shiftWindow, type HistoryRow } from '@/lib/assign-history-matrix'
-import type { Bucket } from '@/lib/buckets'
 
 const WINDOW_DAYS = 14
 
@@ -18,13 +17,13 @@ function defaultWindow(): { from: string; to: string } {
   return { from, to }
 }
 
-export function AssignHistory({ genre, rosterNames }: { genre: Bucket | 'all'; rosterNames: string[] }) {
+export function AssignHistory({ rosterNames }: { rosterNames: string[] }) {
   const [win, setWin] = useState(defaultWindow)
   const [rows, setRows] = useState<HistoryRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // No `category`: one read serves all three genres and the chip filters client-side.
+  // No `category`: one read covers all three genres; the grid shows them together.
   const refresh = useCallback(async () => {
     setLoading(true); setError(null)
     try {
@@ -38,11 +37,10 @@ export function AssignHistory({ genre, rosterNames }: { genre: Bucket | 'all'; r
 
   useEffect(() => { refresh() }, [refresh])
 
-  const matrix = useMemo(() => buildMatrix({
-    ...win,
-    rows: rows.filter(r => genre === 'all' || r.category_group === genre),
-    rosterNames,
-  }), [win, rows, genre, rosterNames])
+  const matrix = useMemo(
+    () => buildMatrix({ ...win, rows, rosterNames }),
+    [win, rows, rosterNames],
+  )
 
   return (
     <div className="card hist-card">

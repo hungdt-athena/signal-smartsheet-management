@@ -281,22 +281,28 @@ body {
   position: sticky; top: 0; z-index: 2; background: var(--surface);
 }
 
-/* A stronger rule on each person's first row, so the group boundary stays
-   visible while Evaluator and Available span several genre rows. */
+/* One person is one band. A row on its own carries no clue whose genre it is once
+   the name cell has been spanned away, so alternating people — not alternating
+   rows — is what makes the grouping legible. The stronger rule on the first row
+   closes the band. */
 .roster-tbl .tbl tr.person-first > td { border-top: 1px solid var(--border-strong); }
-.roster-tbl .cell-name { font-weight: 600; white-space: nowrap; }
-.roster-tbl .cell-genre { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.roster-tbl .tbl tr.person-alt > td { background: var(--surface-2); }
+.roster-tbl .tbl tr:not(.person-first):not(.person-add) > td { border-top-color: var(--border); }
+.roster-tbl .cell-name { font-weight: 600; white-space: nowrap; vertical-align: middle; }
+.roster-tbl .cell-genre { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.roster-tbl .tbl td { vertical-align: middle; }
 
 /* "Who, and are they in" on the left; "on what, and how much" on the right. This
    rule is that boundary, which is why it sits on Genre and not mid-table. */
 .roster-tbl .tbl .col-split { border-left: 1px solid var(--border); padding-left: 16px; }
 
-/* "+ genre" is a secondary action: it sits centred across the Genre..Weight span
-   rather than crowding the Genre column, and it does not carry the weight of the
-   real selects above it. */
-.roster-tbl .person-add > td { border-top: none; padding-top: 0; padding-bottom: 10px; }
-.roster-tbl .person-add > td.col-split { text-align: center; }
-.roster-tbl .person-add .ssel { display: inline-block; width: 120px; text-align: left; }
+/* "+ genre" is a secondary action: a quiet band closing the person's block,
+   centred across Genre..Weight rather than crowding the Genre column. */
+.roster-tbl .person-add > td {
+  border-top: 1px dashed var(--border); text-align: center;
+  padding-top: 4px; padding-bottom: 4px;
+}
+.roster-tbl .person-add .ssel { display: inline-block; width: 110px; text-align: left; }
 .roster-tbl .person-add .ssel-btn {
   border-color: transparent; background: none; color: var(--faint); font-size: 11.5px;
 }
@@ -304,13 +310,13 @@ body {
 
 /* Sub-genre as inline checkboxes. A bucket has two to five of them, so the whole
    set fits on one line and the row's state is readable without a click. */
-.subg { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.subg { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
 .subg-item {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; color: var(--muted); cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap;
 }
-.subg-item.on { color: var(--text); font-weight: 600; }
-.subg-item input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.subg-item.on { color: var(--text); }
+.subg-item input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .subg-item input:disabled { cursor: default; }
 
 .hist-card { display: flex; flex-direction: column; min-height: 0; }

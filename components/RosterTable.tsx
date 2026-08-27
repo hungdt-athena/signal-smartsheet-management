@@ -40,25 +40,25 @@ export function RosterTable({
       <div className={`tbl-wrap roster-tbl${scroll ? ' roster-scroll' : ''}`}>
         <table className="tbl">
           <thead>
-            {/* Sub-genre is the only column without a width, so the table's slack
-                collects there instead of stretching the name column. */}
+            {/* Genre and its sub-genres read as one thing, so they share a header.
+                The sub-genre column is the only one without a width, so the
+                table's slack collects there instead of stretching the name. */}
             <tr>
               <th style={{ width: 160 }}>Evaluator Name</th>
               <th style={{ width: 92 }}>Available</th>
-              <th style={{ width: 110 }} className="col-split">Genre</th>
-              <th>Sub-genre</th>
-              <th style={{ width: 96 }}>Platform</th>
-              <th style={{ width: 76 }}>Weight</th>
+              <th className="col-split" colSpan={2}>Genre &amp; sub-genre details</th>
+              <th style={{ width: 96 }} />
+              <th style={{ width: 76 }} />
               {!readOnly && <th style={{ width: 80 }} />}
             </tr>
           </thead>
           <tbody>
             {groups.length === 0 && <tr><td colSpan={colSpan} className="empty">No evaluators yet</td></tr>}
-            {groups.map(g => {
+            {groups.map((g, gi) => {
               const showAdd = !readOnly && g.missingGenres.length > 0
               return (
                 <PersonRows key={g.name} group={g} span={g.rows.length + (showAdd ? 1 : 0)} showAdd={showAdd}
-                  subGenres={subGenres} readOnly={readOnly}
+                  alt={gi % 2 === 1} subGenres={subGenres} readOnly={readOnly}
                   onPatchRow={onPatchRow} onPatchAvailable={onPatchAvailable}
                   onRemoveRow={onRemoveRow} onAddGenre={onAddGenre} />
               )
@@ -74,10 +74,11 @@ export function RosterTable({
 // A person renders as several <tr>. Evaluator and Available exist only on the
 // first row and span the rest, so there is physically one Available control per
 // person — the UI cannot put a person's genres into disagreeing states.
-function PersonRows({ group, span, showAdd, subGenres, readOnly, onPatchRow, onPatchAvailable, onRemoveRow, onAddGenre }: {
+function PersonRows({ group, span, showAdd, alt, subGenres, readOnly, onPatchRow, onPatchAvailable, onRemoveRow, onAddGenre }: {
   group: PersonGroup
   span: number
   showAdd: boolean
+  alt: boolean
   subGenres: Record<Bucket, string[]>
   readOnly: boolean
   onPatchRow: RosterTableProps['onPatchRow']
@@ -88,7 +89,7 @@ function PersonRows({ group, span, showAdd, subGenres, readOnly, onPatchRow, onP
   return (
     <>
       {group.rows.map((r, i) => (
-        <tr key={r.id} className={i === 0 ? 'person-first' : undefined}>
+        <tr key={r.id} className={`${alt ? 'person-alt' : ''}${i === 0 ? ' person-first' : ''}`}>
           {i === 0 && <td className="cell-name" rowSpan={span}>{group.name}</td>}
           {i === 0 && (
             <td rowSpan={span} data-testid="avail-cell">
@@ -115,7 +116,7 @@ function PersonRows({ group, span, showAdd, subGenres, readOnly, onPatchRow, onP
         </tr>
       ))}
       {showAdd && (
-        <tr className="person-add">
+        <tr className={`person-add${alt ? ' person-alt' : ''}`}>
           <td className="col-split" colSpan={4}>
             <span data-testid={`add-genre-${group.name}`}>
               <StyledSelect value="" placeholder="+ genre"
@@ -130,34 +131,36 @@ function PersonRows({ group, span, showAdd, subGenres, readOnly, onPatchRow, onP
   )
 }
 
-// Sub-genres of this row's own genre, laid out as inline checkboxes. A dropdown
-// hid the choice behind a click and read as "All" on every row; a bucket only has
-// two to five sub-genres, so they all fit on one line and the state is visible
-// without opening anything. No selection is stored as 'All'.
+// Sub-genres of this row's own genre, as inline checkboxes. A dropdown hid the
+// choice behind a click and read "All" on every row.
+//
+// 'All' stays the stored value for "no restriction" — the cron reads it, so it is
+// not ours to change — but it renders as every box ticked rather than as a
+// separate All box, because that is what it means. Ticking every box stores 'All'
+// again. Unticking the last remaining box is refused: an empty list would
+// normalize back to 'All' on the server and silently mean the opposite.
 function SubGenrePicker({ value, options, onChange, disabled }: {
   value: string; options: string[]; onChange: (v: string) => void; disabled?: boolean
 }) {
-  const selected = useMemo(
+  const picked = useMemo(
     () => (value && value.toLowerCase() !== 'all' ? value.split(',').map(s => s.trim()).filter(Boolean) : []),
     [value],
   )
-  const all = selected.length === 0
+  const all = picked.length === 0 || picked.length >= options.length
+  const checked = (g: string) => all || picked.includes(g)
 
   function toggle(g: string) {
-    const next = selected.includes(g) ? selected.filter(x => x !== g) : [...selected, g]
-    onChange(next.length === 0 ? 'All' : next.join(','))
+    const current = all ? [...options] : picked
+    const next = current.includes(g) ? current.filter(x => x !== g) : [...current, g]
+    if (next.length === 0) return
+    onChange(next.length >= options.length ? 'All' : next.join(','))
   }
 
   return (
     <div className="subg">
-      <label className={`subg-item${all ? ' on' : ''}`}>
-        <input type="checkbox" checked={all} disabled={disabled}
-          onChange={() => onChange('All')} />
-        <span>All</span>
-      </label>
       {options.map(g => (
-        <label key={g} className={`subg-item${selected.includes(g) ? ' on' : ''}`}>
-          <input type="checkbox" checked={selected.includes(g)} disabled={disabled}
+        <label key={g} className={`subg-item${checked(g) ? ' on' : ''}`}>
+          <input type="checkbox" checked={checked(g)} disabled={disabled}
             onChange={() => toggle(g)} />
           <span>{g}</span>
         </label>

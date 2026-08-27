@@ -53,22 +53,30 @@ describe('AssignHistoryMatrix', () => {
     expect(pop).toHaveTextContent('Assigned')
   })
 
-  it('clicking a total opens the assign vs reassign breakdown', () => {
+  it('clicking a total opens the assign vs reassign sums only', () => {
     render(<AssignHistoryMatrix matrix={matrix} />)
     fireEvent.click(screen.getByTestId('total-Ann').querySelector('button')!)
     const pop = screen.getByRole('dialog')
     expect(pop).toHaveTextContent('Assigned')
     expect(pop).toHaveTextContent('Received')
     expect(pop).toHaveTextContent('Net')
+    expect(pop.querySelectorAll('.hm-pop-row')).toHaveLength(0)
   })
 
-  it("the giver's popover shows the games leaving, with a destination", () => {
+  it("the giver's total shows what left, without repeating the per-day rows", () => {
     render(<AssignHistoryMatrix matrix={matrix} />)
     fireEvent.click(screen.getByTestId('total-Zed').querySelector('button')!)
     const pop = screen.getByRole('dialog')
     expect(pop).toHaveTextContent('Given away')
     expect(pop).toHaveTextContent('-2')
-    expect(pop).toHaveTextContent('→ Ann')
+    // The day-by-day detail is the grid underneath, so the total does not list it.
+    expect(pop.querySelectorAll('.hm-pop-row')).toHaveLength(0)
+  })
+
+  it("a giver's own cell names where the games went", () => {
+    render(<AssignHistoryMatrix matrix={matrix} />)
+    fireEvent.click(screen.getByTestId('cell-Zed-2026-08-26').querySelector('button')!)
+    expect(screen.getByRole('dialog')).toHaveTextContent('→ Ann')
   })
 
   it('the run time is rendered in UTC+7, not the raw UTC string', () => {

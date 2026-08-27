@@ -10,10 +10,9 @@ import type { Bucket } from '@/lib/buckets'
 
 type ListType = 'initial' | 'final'
 
-export function AssignSetup({ isEvaluator = false, userName = '', genre, onRosterNames }: {
+export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames }: {
   isEvaluator?: boolean
   userName?: string
-  genre: Bucket | 'all'
   onRosterNames?: (names: string[]) => void
 }) {
   const { data: subGenres } = useCategoryMappings()
@@ -41,16 +40,11 @@ export function AssignSetup({ isEvaluator = false, userName = '', genre, onRoste
     onRosterNames?.(Array.from(new Set(initial.map(r => r.name))))
   }, [initial, onRosterNames])
 
-  const visible = useCallback(
-    (rows: RosterRow[]) => rows.filter(r => genre === 'all' || r.category_group === genre),
-    [genre],
-  )
-
   // An evaluator only sees their own Initial rows (the server filters too).
   const initialGroups = useMemo(() => groupRosterByPerson(
-    visible(isEvaluator ? initial.filter(r => r.name.toLowerCase() === userName.toLowerCase()) : initial),
-  ), [visible, isEvaluator, initial, userName])
-  const finalGroups = useMemo(() => groupRosterByPerson(visible(final)), [visible, final])
+    isEvaluator ? initial.filter(r => r.name.toLowerCase() === userName.toLowerCase()) : initial,
+  ), [isEvaluator, initial, userName])
+  const finalGroups = useMemo(() => groupRosterByPerson(final), [final])
 
   const send = useCallback(async (method: string, body: unknown, msg: string) => {
     const res = await fetch('/api/assign-setup', {

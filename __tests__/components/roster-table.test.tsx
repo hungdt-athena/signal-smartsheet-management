@@ -106,23 +106,37 @@ describe('RosterTable', () => {
     expect(screen.queryByText(/add evaluator/i)).not.toBeInTheDocument()
   })
 
-  it('sub-genre is a row of checkboxes, with All checked when nothing is picked', () => {
+  it("stored 'All' renders as every sub-genre ticked, not as an All box", () => {
     setup()
     const puzzleRow = screen.getAllByTestId('avail-cell')[0].closest('tr')!
-    expect(within(puzzleRow).getByLabelText('All')).toBeChecked()
-    expect(within(puzzleRow).getByLabelText('word')).not.toBeChecked()
+    expect(within(puzzleRow).queryByLabelText('All')).not.toBeInTheDocument()
+    for (const g of SUB_GENRES.puzzle) {
+      expect(within(puzzleRow).getByLabelText(g)).toBeChecked()
+    }
   })
 
-  it('ticking a sub-genre stores it; unticking the last one falls back to All', () => {
+  it('unticking one of an All row stores the rest', () => {
     const { onPatchRow } = setup()
     const puzzleRow = screen.getAllByTestId('avail-cell')[0].closest('tr')!
     fireEvent.click(within(puzzleRow).getByLabelText('word'))
-    expect(onPatchRow).toHaveBeenCalledWith(1, 'game_category', 'word')
+    expect(onPatchRow).toHaveBeenCalledWith(1, 'game_category', 'puzzle,trivia')
+  })
 
-    // The Arcade row holds 'action'; unticking it leaves nothing, so 'All'.
+  it("ticking the rest back stores 'All' again", () => {
+    const { onPatchRow } = setup()
+    // The Arcade row holds only 'action' of arcade's two options.
+    const arcadeRow = screen.getByText('Arcade').closest('tr')!
+    expect(within(arcadeRow).getByLabelText('arcade')).not.toBeChecked()
+    fireEvent.click(within(arcadeRow).getByLabelText('arcade'))
+    expect(onPatchRow).toHaveBeenCalledWith(2, 'game_category', 'All')
+  })
+
+  it('refuses to untick the last remaining sub-genre', () => {
+    const { onPatchRow } = setup()
     const arcadeRow = screen.getByText('Arcade').closest('tr')!
     fireEvent.click(within(arcadeRow).getByLabelText('action'))
-    expect(onPatchRow).toHaveBeenCalledWith(2, 'game_category', 'All')
+    // An empty list would normalize back to 'All' server-side — the opposite.
+    expect(onPatchRow).not.toHaveBeenCalled()
   })
 
   it('an empty roster shows the empty state', () => {

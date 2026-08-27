@@ -34,7 +34,7 @@ function hhmmVN(runAt: string): string {
 
 type Popover =
   | { kind: 'cell'; key: string; cell: Cell; day: string; name: string; rect: DOMRect }
-  | { kind: 'total'; key: string; total: Totals; entries: Entry[]; name: string; rect: DOMRect }
+  | { kind: 'total'; key: string; total: Totals; name: string; rect: DOMRect }
 
 export function AssignHistoryMatrix({ matrix }: { matrix: Matrix }) {
   const [open, setOpen] = useState<Popover | null>(null)
@@ -91,7 +91,6 @@ export function AssignHistoryMatrix({ matrix }: { matrix: Matrix }) {
                 <button aria-expanded={open?.key === `total-${r.name}`}
                   onClick={e => setOpen(open?.key === `total-${r.name}` ? null : {
                     kind: 'total', key: `total-${r.name}`, total: r.total, name: r.name,
-                    entries: r.cells.flatMap(c => c.entries),
                     rect: e.currentTarget.getBoundingClientRect(),
                   })}>
                   {r.total.net}
@@ -169,8 +168,10 @@ function PopoverCard({ open, onClose }: { open: Popover; onClose: () => void }) 
     }
   }, [onClose])
 
+  // The total popover is the window's sums and nothing else: the day-by-day
+  // detail is already the grid it sits on top of.
   const totals = open.kind === 'cell' ? open.cell : open.total
-  const entries = open.kind === 'cell' ? open.cell.entries : open.entries
+  const entries = open.kind === 'cell' ? open.cell.entries : []
   const title = open.kind === 'cell' ? fmtDay(open.day) : `${open.name} · window total`
 
   return createPortal(
@@ -187,12 +188,10 @@ function PopoverCard({ open, onClose }: { open: Popover; onClose: () => void }) 
 
       <Breakdown totals={totals} />
 
-      <div className="hm-pop-body">
+      {entries.length > 0 && <div className="hm-pop-body">
         {entries.map(({ row, dir }) => (
           <div className={`hm-pop-row${dir === 'out' ? ' out' : ''}`} key={`${row.id}-${dir}`}>
-            <span className="hm-pop-time">
-              {open.kind === 'cell' ? hhmmVN(row.run_at) : row.run_date.slice(5, 10)}
-            </span>
+            <span className="hm-pop-time">{hhmmVN(row.run_at)}</span>
             <span className={`pill ${row.action === 'assign' ? 'on' : row.action === 'reassign' ? 'tag' : 'off'}`}>
               {row.action}
             </span>
@@ -205,7 +204,7 @@ function PopoverCard({ open, onClose }: { open: Popover; onClose: () => void }) 
             </span>
           </div>
         ))}
-      </div>
+      </div>}
     </div>,
     document.body,
   )
