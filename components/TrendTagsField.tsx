@@ -2,18 +2,20 @@
 import { useMemo, useState } from 'react'
 import { TrendTagsDialog } from './TrendTagsDialog'
 import { TrendTagReview, type ReviewChange, type ReviewTag } from './TrendTagReview'
+import { ExistingTrendTags, type ExistingTagChange, type ExistingTrendTag } from './ExistingTrendTags'
 
 export interface TrendTag {
   field_value: string
   sub_value_id: number | null
 }
 
-export interface ExistingTrendTag {
-  field_value: string
-  sub_value_name: string | null
-}
+// Re-exported: the tag's shape belongs with the component that owns the section.
+export type { ExistingTrendTag }
 
 interface Props {
+  /** The game these tags belong to. Editing one goes straight into Signal Sense,
+   *  which knows a tag by (game, value), so the id is needed here. */
+  gameId: string
   value: TrendTag[]
   /** Trends tags this game already carries in Signal Sense (read-only). */
   existing: ExistingTrendTag[]
@@ -41,6 +43,8 @@ interface Props {
   /** Called with what a review action did, so the caller can apply it without
    *  re-reading the game. */
   onReviewed?: (change: ReviewChange) => void
+  /** Called when a manager changed a tag that was already in Signal Sense. */
+  onExistingChanged?: (change: ExistingTagChange) => void
 }
 
 // Trend values are catalog identifiers owned by Signal Sense, not prose, so they
@@ -61,9 +65,9 @@ const CHIP_SUB: React.CSSProperties = { fontSize: 10.5, color: 'var(--faint)', f
 // opens the editor. Proposals only — nothing here reaches Signal Sense until an
 // admin confirms in Evaluations > Tagging.
 export function TrendTagsField({
-  value, existing, options, subValues, onChange, disabled,
+  gameId, value, existing, options, subValues, onChange, disabled,
   optionsError, onRetryOptions, loadError, onRetryLoad,
-  review, canReview, onReviewed,
+  review, canReview, onReviewed, onExistingChanged,
 }: Props) {
   const [open, setOpen] = useState(false)
   const tags = value || []
@@ -124,19 +128,13 @@ export function TrendTagsField({
         </div>
       )}
 
-      {existing.length > 0 && (
-        <div>
-          <span style={CHIP_LABEL}>Already in Signal Sense</span>
-          <div style={CHIP_ROW}>
-            {existing.map(e => (
-              <span key={e.field_value} style={CHIP}>
-                {e.field_value}
-                {e.sub_value_name && <span style={CHIP_SUB}>{e.sub_value_name}</span>}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      <ExistingTrendTags
+        gameId={gameId}
+        tags={existing}
+        subValues={subValues}
+        canEdit={!!canReview}
+        onChanged={c => onExistingChanged?.(c)}
+      />
 
       {!loadError && tags.length === 0 && existing.length === 0 && (
         <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>
@@ -151,8 +149,11 @@ export function TrendTagsField({
 
       {open && (
         <TrendTagsDialog
+          gameId={gameId}
           value={tags}
           existing={existing}
+          canEditExisting={!!canReview}
+          onExistingChanged={onExistingChanged}
           options={options}
           subValues={subValues}
           optionsError={optionsError}

@@ -81,10 +81,16 @@ export async function GET(req: NextRequest) {
       WHERE pt.game_id = ${gameId} AND pt.status = 'pending'
       ORDER BY pt.field_value
     `,
+    // created_by is carried through so the modal can name whoever tagged it
+    // before a manager edits or removes it -- these rows include tags made in
+    // Signal Sense, which this app never proposed and now may still change.
     sql`
-      SELECT cfv.field_value, cfv.sub_value_id, sv.name AS sub_value_name
+      SELECT cfv.field_value, cfv.sub_value_id, sv.name AS sub_value_name,
+             cfv.created_by,
+             NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '') AS created_by_name
       FROM custom_field_values cfv
       LEFT JOIN sub_value_definitions sv ON sv.id = cfv.sub_value_id
+      LEFT JOIN users u ON u.id = cfv.created_by
       WHERE cfv.game_id = ${gameId} AND cfv.field_name = ${TRENDS_FIELD}
       ORDER BY cfv.field_value
     `,

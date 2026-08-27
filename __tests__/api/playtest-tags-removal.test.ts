@@ -211,28 +211,32 @@ describe('POST /api/playtest-tags/remove', () => {
     const body = await (await REMOVE(req('/api/playtest-tags/remove', { id: 7 }))).json()
     expect(body).toEqual({ ok: true, outcome: 'deleted' })
     const del = calls.find(c => /DELETE FROM custom_field_values/.test(c.text))!
-    // Scoped to our own row, so a concurrent hand-off cannot widen the delete.
-    expect(del.text).toMatch(/created_by =/)
-    expect(del.binds).toEqual(expect.arrayContaining(['g1', 'Trends', 'Animal Driver', 'playtest_sync']))
+    // Not scoped by creator any more: the tag's identity over there is
+    // (game, field, value), and that is what the admin acted on.
+    expect(del.text).not.toMatch(/created_by/)
+    expect(del.binds).toEqual(expect.arrayContaining(['g1', 'Trends', 'Animal Driver']))
     const stamp = calls.find(c => /UPDATE playtest_tags/.test(c.text))!
     expect(stamp.text).toMatch(/status = 'removed'/)
-    expect(stamp.binds).toEqual(expect.arrayContaining(['vinhtd@athena.studio', 7]))
+    // Stamped by (game, value) rather than by the id this route was given: the
+    // shared helper is also reached from surfaces that have no id to pass.
+    expect(stamp.binds).toEqual(expect.arrayContaining(['vinhtd@athena.studio', 'g1', 'Animal Driver']))
   })
 
-  it('refuses to delete a row a Signal Sense user created, naming them', async () => {
+  // This route used to refuse here with a 409 naming the Signal Sense user, on
+  // the rule "this app only removes what it added". An admin here now owns
+  // every Trends tag on the game, so the rule is gone -- what stays is the
+  // bookkeeping: their change log gets the removal, and so does ours.
+  it('deletes a row a Signal Sense user created, same as its own', async () => {
     routeSql([
       SYNCED,
       { match: /FROM custom_field_values/, rows: [{ created_by: 'LCU6y3GtrRRoqHYyOn_tE', sub_value_id: 1, first_name: 'Tran', last_name: 'Vinh', email: 'vinhtd@athena.studio' }] },
     ])
     const r = await REMOVE(req('/api/playtest-tags/remove', { id: 7 }))
-    expect(r.status).toBe(409)
-    expect((await r.json()).error).toContain('Tran Vinh')
-    expect(calls.some(c => /DELETE FROM custom_field_values/.test(c.text))).toBe(false)
-    // Nor a log entry: nothing happened, so the log must not claim a removal.
-    expect(calls.some(c => /INSERT INTO custom_field_value_changes/.test(c.text))).toBe(false)
-    // Nothing is stamped either: the tag is still there, so history must not
-    // claim it was removed.
-    expect(calls.some(c => /UPDATE playtest_tags/.test(c.text))).toBe(false)
+    expect(r.status).toBe(200)
+    expect(await r.json()).toEqual({ ok: true, outcome: 'deleted' })
+    expect(calls.some(c => /DELETE FROM custom_field_values/.test(c.text))).toBe(true)
+    expect(calls.some(c => /INSERT INTO custom_field_value_changes/.test(c.text))).toBe(true)
+    expect(calls.some(c => /UPDATE playtest_tags/.test(c.text))).toBe(true)
   })
 
   it('stamps the removal without a delete when the row is already gone', async () => {

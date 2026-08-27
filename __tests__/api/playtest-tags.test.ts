@@ -68,6 +68,23 @@ describe('/api/playtest-tags', () => {
     expect(body.existing[0].field_value).toBe('Backpack')
   })
 
+  // A manager can now edit these tags, including ones nobody here proposed, so
+  // the modal has to be able to say whose tag it is before they touch it.
+  it('names who tagged each live Signal Sense tag', async () => {
+    sessionMock.mockResolvedValue({ user: { role: 'admin', name: 'VinhTD', email: 'vinhtd@athena.studio' } })
+    routeSql([
+      { match: /FROM playtest_tags/, rows: [] },
+      { match: /FROM custom_field_values/, rows: [{
+        field_value: 'Backpack', sub_value_id: null, sub_value_name: null,
+        created_by: 'LCU6y3GtrRRoqHYyOn_tE', created_by_name: 'Tran Vinh',
+      }] },
+    ])
+    const body = await (await GET(getReq('g1'))).json()
+    expect(body.existing[0]).toMatchObject({ created_by_name: 'Tran Vinh' })
+    const read = calls.find(c => /FROM custom_field_values/.test(c.text))!
+    expect(read.text).toMatch(/JOIN users/)
+  })
+
   // The authorisation query answers two EXISTS in one row: whether the game has
   // any game_evaluations rows at all, and whether the caller is the evaluator on
   // any of them (a game can hold one row per category_group).

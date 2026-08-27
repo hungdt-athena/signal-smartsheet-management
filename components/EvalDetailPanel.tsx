@@ -10,6 +10,7 @@ import { prettyConclusion } from '@/lib/buckets'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
 import { type ReviewChange, type ReviewTag } from './TrendTagReview'
+import { applyExistingChange, type ExistingTagChange } from './ExistingTrendTags'
 import { TrendTagsField, type TrendTag, type ExistingTrendTag } from './TrendTagsField'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
@@ -606,9 +607,21 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     if (change.landed) {
       setExistingTrends(prev => prev.some(e => e.field_value === tag.field_value)
         ? prev.map(e => (e.field_value === tag.field_value
-          ? { ...e, sub_value_name: tag.sub_value_name } : e))
-        : [...prev, { field_value: tag.field_value, sub_value_name: tag.sub_value_name }])
+          ? { ...e, sub_value_id: tag.sub_value_id, sub_value_name: tag.sub_value_name } : e))
+        // created_by is what the section reads to decide whether to name a
+        // person: a tag that just landed was written by this app's sync account.
+        : [...prev, {
+          field_value: tag.field_value, sub_value_id: tag.sub_value_id,
+          sub_value_name: tag.sub_value_name, created_by: 'playtest_sync', created_by_name: null,
+        }])
     }
+  }, [])
+
+  // A manager changed a tag that was already in Signal Sense. Nothing else in
+  // the form depends on that list, so the section is all that moves -- and it
+  // moves from the response, not from a re-read.
+  const onExistingChanged = useCallback((change: ExistingTagChange) => {
+    setExistingTrends(prev => applyExistingChange(prev, change))
   }, [])
 
   useEffect(() => {
@@ -1229,6 +1242,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
               <div className="field">
                 <span className="label">Trends Tags</span>
                 <TrendTagsField
+                  gameId={currentGameId}
                   value={trendTags}
                   existing={existingTrends}
                   options={trendOptions}
@@ -1242,6 +1256,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   review={pendingReview}
                   canReview={isManager}
                   onReviewed={onTagReviewed}
+                  onExistingChanged={onExistingChanged}
                 />
               </div>
 

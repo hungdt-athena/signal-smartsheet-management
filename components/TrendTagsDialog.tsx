@@ -1,15 +1,21 @@
 'use client'
 import { useMemo, useState } from 'react'
 import { TrendValuePicker } from './TrendValuePicker'
-import type { TrendTag, ExistingTrendTag } from './TrendTagsField'
+import { ExistingTrendTags, type ExistingTagChange, type ExistingTrendTag } from './ExistingTrendTags'
+import type { TrendTag } from './TrendTagsField'
 
 // A draft row. `field_value` is '' for a row the user added but has not filled in
 // yet — those are dropped on Save rather than blocking it.
 type Draft = { field_value: string; sub_value_id: number | null }
 
 interface Props {
+  gameId: string
   value: TrendTag[]
   existing: ExistingTrendTag[]
+  /** True for the manager tier: the tags already in Signal Sense become live
+   *  here too, not only in the field behind this dialog. */
+  canEditExisting?: boolean
+  onExistingChanged?: (change: ExistingTagChange) => void
   options: string[]
   subValues: { id: number; name: string }[]
   onSave: (next: TrendTag[]) => void
@@ -26,7 +32,8 @@ interface Props {
 // Save commits to the evaluation form's state; the evaluation's own Save (or
 // auto-save) persists it, exactly like every other field in that modal.
 export function TrendTagsDialog({
-  value, existing, options, subValues, onSave, onClose, optionsError, onRetryOptions,
+  gameId, value, existing, options, subValues, onSave, onClose, optionsError, onRetryOptions,
+  canEditExisting, onExistingChanged,
 }: Props) {
   const [draft, setDraft] = useState<Draft[]>(() =>
     value.length > 0 ? value.map(t => ({ ...t })) : [{ field_value: '', sub_value_id: null }])
@@ -82,29 +89,15 @@ export function TrendTagsDialog({
         </header>
 
         <div style={{ padding: '14px 20px', overflowY: 'auto', flex: 1 }}>
-          {existing.length > 0 && (
-            <section style={{ marginBottom: 16 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Already in Signal Sense
-              </span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
-                {existing.map(e => (
-                  <span key={e.field_value} style={{
-                    display: 'inline-flex', alignItems: 'baseline', gap: 5,
-                    padding: '4px 9px', borderRadius: 7, background: 'var(--surface-2)',
-                    border: '1px solid var(--border)', fontSize: 12, fontFamily: 'var(--num)',
-                  }}>
-                    {e.field_value}
-                    {e.sub_value_name && (
-                      <span style={{ fontSize: 10.5, color: 'var(--faint)', fontFamily: 'var(--font)' }}>
-                        {e.sub_value_name}
-                      </span>
-                    )}
-                  </span>
-                ))}
-              </div>
-            </section>
-          )}
+          <section style={{ marginBottom: existing.length > 0 ? 16 : 0 }}>
+            <ExistingTrendTags
+              gameId={gameId}
+              tags={existing}
+              subValues={subValues}
+              canEdit={!!canEditExisting}
+              onChanged={c => onExistingChanged?.(c)}
+            />
+          </section>
 
           {optionsError ? (
             <div style={{
