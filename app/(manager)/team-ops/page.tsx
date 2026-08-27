@@ -1,5 +1,5 @@
 'use client'
-import { Suspense, useState } from 'react'
+import { Suspense, useCallback, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { AssignSetup } from '@/components/AssignSetup'
@@ -7,6 +7,7 @@ import { AssignHistory } from '@/components/AssignHistory'
 import { ReassignPanel } from '@/components/ReassignPanel'
 import { RescuePanel } from '@/components/RescuePanel'
 import { HandoverPanel } from '@/components/HandoverPanel'
+import { BUCKET_LABELS } from '@/components/RosterTable'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 import { ReportView } from '@/components/report/ReportView'
 
@@ -17,7 +18,6 @@ const TABS: { value: Tab; pageTitle: string }[] = [
   { value: 'rescue', pageTitle: 'Rescue' },
   { value: 'handover', pageTitle: 'Handover' },
 ]
-const BUCKET_LABELS: Record<Bucket, string> = { puzzle: 'Puzzle', arcade: 'Arcade', simulation: 'Simulation' }
 
 export default function TeamOpsPage() {
   return (
@@ -65,28 +65,34 @@ function TeamOpsInner() {
   )
 }
 
-// Assign tab: per-bucket roster (left, 60%) + assignment history (right, 40%).
-// Evaluators see a read-only view scoped to their own Initial-list row.
+// Assign tab: một trang cho cả 3 genre. Roster trên, history matrix dưới.
+// Filter chip chỉ lọc view — nó không quyết định cái gì được load, khác hẳn bộ
+// tab genre cũ mà nó thay thế.
+// Evaluators see a read-only view scoped to their own Initial-list rows.
 function AssignTab() {
   const { data: session } = useSession()
   const isEvaluator = session?.user?.role === 'evaluator'
   const userName = session?.user?.name || ''
-  const [bucket, setBucket] = useState<Bucket>('puzzle')
+  const [genre, setGenre] = useState<Bucket | 'all'>('all')
+  const [rosterNames, setRosterNames] = useState<string[]>([])
+  // So sánh trước khi set: AssignSetup gọi lại sau mỗi render của nó, và set
+  // state của cha vô điều kiện sẽ thành vòng lặp render không dừng.
+  const onRosterNames = useCallback((names: string[]) => {
+    setRosterNames(prev => (prev.join('|') === names.join('|') ? prev : names))
+  }, [])
+
   return (
     <div>
       <div className="seg-wrapper" style={{ display: 'inline-flex', gap: 4, marginBottom: 14 }}>
-        {BUCKETS.map(b => (
-          <button key={b} className={`seg-btn-premium${bucket === b ? ' active' : ''}`} onClick={() => setBucket(b)}>
-            {BUCKET_LABELS[b]}
+        {(['all', ...BUCKETS] as const).map(g => (
+          <button key={g} className={`seg-btn-premium${genre === g ? ' active' : ''}`} onClick={() => setGenre(g)}>
+            {g === 'all' ? 'All' : BUCKET_LABELS[g]}
           </button>
         ))}
       </div>
-      <div className="assign-grid">
-        <AssignSetup bucket={bucket} isEvaluator={isEvaluator} userName={userName} />
-        <div className="assign-right">
-          <AssignHistory bucket={bucket} />
-        </div>
-      </div>
+      <AssignSetup isEvaluator={isEvaluator} userName={userName} genre={genre} onRosterNames={onRosterNames} />
+      <div style={{ height: 18 }} />
+      <AssignHistory genre={genre} rosterNames={rosterNames} />
     </div>
   )
 }

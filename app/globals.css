@@ -266,15 +266,11 @@ body {
 .ht-name { font-family: var(--num); font-size: 12.5px; font-weight: 500; }
 .ht-note { font-size: 12px; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; }
 
-/* ===== Assign tab: roster (left, 70%) + history (right, 30%) ===== */
-.assign-grid {
-  display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 4fr);
-  gap: var(--gap); align-items: stretch;
-}
+/* ===== Assign tab: roster trên, history matrix dưới, cả hai full width ===== */
 .assign-setup { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 .roster-head { display: flex; justify-content: space-between; align-items: center; }
 
-/* Compact roster cells so the 5–6 columns fit the narrower 60% column. */
+/* Compact roster cells — bảng giờ có 7 cột (thêm Genre). */
 .roster-tbl .tbl th, .roster-tbl .tbl td { padding: 6px 8px; }
 .roster-tbl .tbl td { font-size: 12.5px; }
 .roster-tbl .ssel-btn { padding: 5px 8px; font-size: 12px; }
@@ -285,21 +281,14 @@ body {
   position: sticky; top: 0; z-index: 2; background: var(--surface);
 }
 
-/* History matches the left column's height exactly. The right cell is sized by
-   the left column (its only child is absolutely positioned, so it has no
-   intrinsic height), and the card fills it and scrolls its timeline inside. */
-.assign-right { position: relative; min-width: 0; }
-.assign-right > .hist-card { position: absolute; inset: 0; }
+/* Dòng đầu của mỗi người có đường kẻ đậm hơn, để mắt thấy ranh giới nhóm khi
+   cột Evaluator gộp cell qua nhiều dòng genre. */
+.roster-tbl .tbl tr.person-first > td { border-top: 1px solid var(--border-strong); }
+.roster-tbl .cell-genre { font-size: 12.5px; color: var(--muted); }
+.roster-tbl .person-add .cell-genre { padding-top: 2px; padding-bottom: 8px; }
+
 .hist-card { display: flex; flex-direction: column; min-height: 0; }
-
-/* ===== Assign History ===== */
 .hist-sub { color: var(--faint); font-weight: 400; margin-left: 8px; font-variant-numeric: tabular-nums; }
-
-@media (max-width: 900px) {
-  .assign-grid { grid-template-columns: 1fr; }
-  .assign-right { position: static; min-height: 460px; }
-  .assign-right > .hist-card { position: static; height: 100%; }
-}
 
 /* ===== Badges & status ===== */
 .badge {

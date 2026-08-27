@@ -143,7 +143,7 @@ function ConfigSection({
   )
 }
 
-// ── Genre → Bucket section ─────────────────────────────────────────────────────
+// ── Genre → Sub-genre section ─────────────────────────────────────────────────────
 
 interface MappingRow { id: number; genre: string; category_group: string; active: boolean }
 
@@ -180,7 +180,7 @@ function CategorySection() {
   return (
     <div className="card">
       <div className="card-head">
-        <span className="card-label">Genre → Bucket</span>
+        <span className="card-label">Genre → Sub-genre</span>
         <span className="card-note">Which game genres feed each evaluation bucket</span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -244,7 +244,7 @@ function BucketGroup({
         <input className="input" style={{ flex: 1 }} value={newValue}
           onChange={e => { setNewValue(e.target.value); setWarn(false) }}
           onKeyDown={e => { if (e.key === 'Enter') attemptAdd() }}
-          placeholder={`Add genre to ${label.toLowerCase()}…`} />
+          placeholder={`Add sub-genre to ${label.toLowerCase()}…`} />
         <button className="btn btn-primary btn-sm" disabled={checking || !newValue.trim()} onClick={attemptAdd}>
           {checking ? '...' : warn ? 'Add anyway' : 'Add'}
         </button>
