@@ -7,7 +7,7 @@
 'use client'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { shadeScale, type Cell, type Entry, type Matrix, type Totals } from '@/lib/assign-history-matrix'
+import { shadeScale, type Cell, type Matrix, type Totals } from '@/lib/assign-history-matrix'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
