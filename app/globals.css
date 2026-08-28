@@ -270,6 +270,28 @@ body {
 .assign-setup { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 .roster-head { display: flex; justify-content: space-between; align-items: center; }
 
+/* Genre switches. A chip carries both halves of the rule that decides whether a
+   genre runs today: the switch, and whether anyone is available to receive the
+   games. On-but-unstaffed is the state worth seeing, so it gets the warn colour
+   rather than quietly reading as live. */
+.genre-toggles { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.genre-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.genre-chip {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 6px 12px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  font: inherit; text-align: left; transition: background .12s, border-color .12s;
+}
+.genre-chip:disabled { cursor: default; opacity: .75; }
+.genre-chip:not(:disabled):hover { border-color: var(--accent-border); }
+.genre-chip-name { font-size: 12.5px; font-weight: 600; }
+.genre-chip-state { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.genre-chip-on { background: var(--good-weak); border-color: color-mix(in srgb, var(--good) 35%, transparent); }
+.genre-chip-on .genre-chip-state { color: var(--good); }
+.genre-chip-warn { background: var(--warn-weak); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.genre-chip-warn .genre-chip-state { color: var(--warn); }
+.genre-chip-off .genre-chip-name { color: var(--muted); }
+
 /* Compact roster cells — the table carries 7 columns now that Genre is one. */
 .roster-tbl .tbl th, .roster-tbl .tbl td { padding: 6px 8px; }
 .roster-tbl .tbl td { font-size: 12.5px; }

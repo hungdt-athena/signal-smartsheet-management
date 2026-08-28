@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { assignGames } from '@/lib/assign-evaluators'
 import { writeAssignmentHistory } from '@/lib/assignment-history'
+import { loadGenreTargets } from '@/lib/genre-config-db'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -42,6 +43,17 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // Genre gate — the same question /api/cron/push-targets answers for n8n, asked
+    // again here because this route is also reachable by hand and by a replayed
+    // run. A skipped genre is a 200: nothing failed, there is just nothing to do.
+    const target = (await loadGenreTargets()).find(t => t.bucket === category)
+    const gateSkip = !target?.enabled ? 'disabled' : target.available === 0 ? 'no-evaluator' : null
+    if (gateSkip) {
+      return NextResponse.json({
+        ok: true, dryRun: !!body.dryRun, category, assigned: 0, per_evaluator: {}, skipped: gateSkip,
+      })
+    }
+
     // Roster: available initial evaluators whose category matches (blank = any).
     // Unassigned rows of this category, with the game's platform.
     const [roster, games] = await Promise.all([
@@ -69,7 +81,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, dryRun: !!body.dryRun, category, assigned: 0, per_evaluator: {} })
     }
     if (roster.length === 0) {
-      return NextResponse.json({ error: 'no available evaluators in roster' }, { status: 409 })
+      // Unreachable via the gate above (it counts the same rows); kept for a roster
+      // that empties between the two queries.
+      return NextResponse.json({ ok: true, dryRun: !!body.dryRun, category, assigned: 0, per_evaluator: {}, skipped: 'no-evaluator' })
     }
 
     let assignment: Map<number, string>
@@ -80,7 +94,7 @@ export async function POST(req: NextRequest) {
       )
     } catch (e) {
       if (e instanceof Error && e.message === 'evaluator list empty') {
-        return NextResponse.json({ error: 'no available evaluators in roster' }, { status: 409 })
+        return NextResponse.json({ ok: true, dryRun: !!body.dryRun, category, assigned: 0, per_evaluator: {}, skipped: 'no-evaluator' })
       }
       throw e
     }

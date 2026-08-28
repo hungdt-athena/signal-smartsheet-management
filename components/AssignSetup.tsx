@@ -3,10 +3,12 @@
 // page. Rendering is delegated to RosterTable, leaving fetch and four writes.
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { GenreToggles } from '@/components/GenreToggles'
 import { RosterTable } from '@/components/RosterTable'
 import { useCategoryMappings } from '@/hooks/useCategoryMappings'
 import { groupRosterByPerson, type RosterRow } from '@/lib/assign-roster'
 import type { Bucket } from '@/lib/buckets'
+import type { GenreTarget } from '@/lib/genre-config'
 
 type ListType = 'initial' | 'final'
 
@@ -18,16 +20,27 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
   const { data: subGenres } = useCategoryMappings()
   const [initial, setInitial] = useState<RosterRow[]>([])
   const [final, setFinal] = useState<RosterRow[]>([])
+  const [genres, setGenres] = useState<GenreTarget[]>([])
+  const [canEditGenres, setCanEditGenres] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Roster and genre state are fetched together: availability is half of what a
+  // genre chip says, so showing one without the other would misreport the pipeline.
   const refresh = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const res = await fetch('/api/assign-setup', { cache: 'no-store' })
-      if (!res.ok) throw new Error()
-      const json = await res.json()
+      const [rosterRes, genreRes] = await Promise.all([
+        fetch('/api/assign-setup', { cache: 'no-store' }),
+        fetch('/api/genre-config', { cache: 'no-store' }),
+      ])
+      if (!rosterRes.ok) throw new Error()
+      const json = await rosterRes.json()
       setInitial(json.initial ?? []); setFinal(json.final ?? [])
+      if (genreRes.ok) {
+        const g = await genreRes.json()
+        setGenres(g.genres ?? []); setCanEditGenres(g.canEdit === true)
+      }
     } catch { setError('Failed to load roster.') }
     finally { setLoading(false) }
   }, [])
@@ -62,6 +75,16 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
   const patchPerson = (list_type: ListType) => (name: string, field: string, value: unknown) =>
     send('PATCH', { field, list_type, name, value }, 'Update failed.')
   const removeRow = (id: number) => send('DELETE', { id }, 'Delete failed.')
+  // The reply carries the recomputed genre list, so the chips update without a
+  // second round trip -- and without the UI deciding for itself what `active` means.
+  const toggleGenre = useCallback(async (bucket: Bucket, enabled: boolean) => {
+    const res = await fetch('/api/genre-config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bucket, enabled }),
+    })
+    if (res.ok) { const json = await res.json(); setGenres(json.genres ?? []) }
+    else setError('Could not change that genre.')
+  }, [])
   const addGenre = (list_type: ListType) => (name: string, g: Bucket) =>
     send('POST', { list_type, name, category_groups: [g] }, 'Add failed.')
   const addEvaluator = (list_type: ListType) => (p: { name: string; provision: boolean; genres: Bucket[] }) =>
@@ -77,6 +100,10 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
       </div>
 
       {error && <p className="msg-err">{error}</p>}
+
+      {genres.length > 0 && (
+        <GenreToggles genres={genres} canEdit={canEditGenres && !isEvaluator} onToggle={toggleGenre} />
+      )}
 
       <RosterTable title="Initial Evaluator" groups={initialGroups} subGenres={subGenres} scroll
         readOnly={isEvaluator}

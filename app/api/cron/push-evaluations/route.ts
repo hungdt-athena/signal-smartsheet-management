@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { loadGenreTargets } from '@/lib/genre-config-db'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 // DB replacement for the "[unified] database-to-smartsheet" n8n flow:
 // new releases from game_info become unassigned game_evaluations rows.
-// Same eligibility filter as the Smartsheet push; dedupe via the
-// UNIQUE(game_id, category_group) constraint instead of the ID-ledger sheet.
+// Dedupe via the UNIQUE(game_id, category_group) constraint instead of the
+// ID-ledger sheet.
 // NOTE: never hard-delete game_evaluations rows for dead links (mark
 // Link_dead) — a deleted row inside the 30-day window would be re-pushed.
 
@@ -33,20 +34,31 @@ export async function POST(req: NextRequest) {
   }
 
   // category  = the category_group written to game_evaluations (one of CATEGORIES).
-  // categories = the game_info metadata category names to match against (driven by
-  //              the n8n config sheet). These two fields differ by design: e.g. the
-  //              config sheet may list ["puzzle", "word"] as the metadata categories
-  //              that map into the "puzzle" evaluation group.
+  // categories = the game_info metadata category names to match against. These two
+  //              fields differ by design: ["puzzle", "word"] are the metadata
+  //              categories that map into the "puzzle" evaluation group.
   const category = String(body.category ?? '').trim().toLowerCase()
   if (!CATEGORIES.includes(category)) {
     return NextResponse.json({ error: `category must be one of ${CATEGORIES.join(', ')}` }, { status: 400 })
   }
-  // Genres to match against game_info.metadata->'categories'. Callers may pass an
-  // explicit `categories` override; otherwise derive them from category_mappings so
-  // n8n only needs to send {category} (the DB owns the genre→bucket split now).
-  let cats = (body.categories || []).map(c => String(c).trim().toLowerCase()).filter(Boolean)
 
   try {
+    // Genre gate. /api/cron/push-targets already filters the list n8n loops over,
+    // but this route is also reachable by hand and by a replayed run, so it asks
+    // the same question itself. A skipped genre is a 200, not an error: nothing
+    // went wrong, there is simply no reason to push games nobody will evaluate.
+    const target = (await loadGenreTargets()).find(t => t.bucket === category)
+    const skipped = !target?.enabled ? 'disabled' : target.available === 0 ? 'no-evaluator' : null
+    if (skipped) {
+      return NextResponse.json({
+        ok: true, dryRun: !!body.dryRun, category, pushed: 0, game_ids: [], skipped,
+      })
+    }
+
+    // Genres to match against game_info.metadata->'categories'. Callers may pass an
+    // explicit `categories` override; otherwise derive them from category_mappings so
+    // n8n only needs to send {category} (the DB owns the genre→bucket split now).
+    let cats = (body.categories || []).map(c => String(c).trim().toLowerCase()).filter(Boolean)
     if (cats.length === 0) {
       const mapped = await sql<{ genre: string }[]>`
         SELECT genre FROM category_mappings
@@ -59,27 +71,28 @@ export async function POST(req: NextRequest) {
     }
     let rows: { game_id: string }[]
 
+    // Eligibility window (both branches below carry an identical copy; postgres.js
+    // template literals do not compose cleanly and the dry-run count is only worth
+    // reading if it filters exactly like the insert):
+    //   released in the last 30 days, OR — only when the store gave us no release
+    //   date at all — crawled in the last 30 days.
+    // A game released long ago that merely got crawled today is back catalogue, not
+    // a new release. Admitting it on created_date alone is what put 2,876 games in
+    // the queue on 2026-08-19 when the apkcombo scraper reached a publisher's
+    // archive.
+
     if (body.dryRun) {
-      // DryRun: SELECT only, no INSERT. Inline the eligibility filter directly.
+      // DryRun: SELECT only, no INSERT.
       rows = await sql<{ game_id: string }[]>`
         SELECT gi.game_id
         FROM game_info gi
+        CROSS JOIN LATERAL (
+          SELECT COALESCE(gi.initial_release, gi.temp_release) AS rel,
+                 (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS today
+        ) w
         WHERE (
-                COALESCE(gi.initial_release, gi.temp_release)
-                  BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
-                      AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-                OR gi.created_date
-                  BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
-                      AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-              )
-          -- Release-age cap: the created_date branch above ignores release date, so a
-          -- scraper that starts crawling a publisher's back catalog (apkcombo did on
-          -- 2026-08-19) floods the queue with years-old games. Games with no release
-          -- date at all stay eligible.
-          AND (
-                COALESCE(gi.initial_release, gi.temp_release) IS NULL
-                OR COALESCE(gi.initial_release, gi.temp_release)
-                     >= ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '180 days')
+                w.rel BETWEEN (w.today - INTERVAL '30 days') AND w.today
+                OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - INTERVAL '30 days') AND w.today)
               )
           AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
                OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
@@ -96,9 +109,6 @@ export async function POST(req: NextRequest) {
           )
       `
     } else {
-      // Insert path: inline eligibility filter into the INSERT…SELECT.
-      // Both INSERT INTO game_evaluations, ON CONFLICT (game_id, category_group) DO NOTHING,
-      // and INTERVAL '30 days' appear in this single sql call — satisfying test assertions.
       rows = await sql<{ game_id: string }[]>`
         INSERT INTO game_evaluations (game_id, category_group, genre_1, genre_2)
         -- genre_1/genre_2 mirror the first two entries of metadata->'categories', the
@@ -108,22 +118,13 @@ export async function POST(req: NextRequest) {
                left(gi.metadata -> 'categories' ->> 0, 50),
                left(gi.metadata -> 'categories' ->> 1, 50)
         FROM game_info gi
+        CROSS JOIN LATERAL (
+          SELECT COALESCE(gi.initial_release, gi.temp_release) AS rel,
+                 (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS today
+        ) w
         WHERE (
-                COALESCE(gi.initial_release, gi.temp_release)
-                  BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
-                      AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-                OR gi.created_date
-                  BETWEEN ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')
-                      AND (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-              )
-          -- Release-age cap: the created_date branch above ignores release date, so a
-          -- scraper that starts crawling a publisher's back catalog (apkcombo did on
-          -- 2026-08-19) floods the queue with years-old games. Games with no release
-          -- date at all stay eligible.
-          AND (
-                COALESCE(gi.initial_release, gi.temp_release) IS NULL
-                OR COALESCE(gi.initial_release, gi.temp_release)
-                     >= ((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '180 days')
+                w.rel BETWEEN (w.today - INTERVAL '30 days') AND w.today
+                OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - INTERVAL '30 days') AND w.today)
               )
           AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
                OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')

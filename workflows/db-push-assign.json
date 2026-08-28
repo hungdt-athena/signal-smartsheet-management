@@ -18,60 +18,18 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 0 * * *"
+              "expression": "0 5 * * *"
             }
           ]
         }
       },
       "id": "trigger-daily",
-      "name": "Daily 07:00 VN (00:00 UTC)",
+      "name": "Daily 12:00 VN (05:00 UTC)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
         0,
         200
-      ]
-    },
-    {
-      "parameters": {
-        "documentId": {
-          "__rl": true,
-          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
-          "mode": "id"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "N8N configs",
-          "mode": "name"
-        },
-        "options": {}
-      },
-      "id": "read-config",
-      "name": "Read Config",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
-      "position": [
-        220,
-        100
-      ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "UMl5XCc7aOcf9yi3",
-          "name": "HandoverRequest-HungDT"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// Parse rows from N8N configs sheet.\n// Looks for rows where `field` matches \"<Group> smartsheet ID\" (case-insensitive regex).\n// Emits one item per category_group with { category_group, categories: string[] }\n// Categories come from the `categories_list` column (comma-separated), NOT from the smartsheet ID value.\nconst rows = $input.all().map(i => i.json);\nconst FIELD_RE = /^(.+?)\\s+smartsheet\\s+id$/i;\n\nconst out = [];\nfor (const row of rows) {\n  const fieldVal = String(row.field || row.Field || '').trim();\n  const match = fieldVal.match(FIELD_RE);\n  if (!match) continue;\n  const category_group = match[1].trim().toLowerCase();\n  if (!category_group) continue;\n  const raw = String(row.categories_list ?? row['Categories List'] ?? row['categories list'] ?? '').trim();\n  const categories = raw.split(',').map(s => s.trim()).filter(Boolean);\n  if (categories.length === 0) continue;\n  out.push({ json: { category_group, categories } });\n}\n\nif (out.length === 0) {\n  throw new Error('No category groups found in N8N configs sheet. Check field names and categories_list column.');\n}\nreturn out;\n"
-      },
-      "id": "parse-config",
-      "name": "Parse Config",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        440,
-        100
       ]
     },
     {
@@ -132,7 +90,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Emit one item per category_group from Parse Config output.\n// Each item: { category_group, categories }\nconst configItems = $('Parse Config').all();\nreturn configItems.map(i => ({ json: { category_group: i.json.category_group, categories: i.json.categories } }));\n"
+        "jsCode": "// One item per genre the app says is live today. `targets` already excludes\n// genres that are switched off or have nobody available, so this flow no longer\n// decides anything -- it just carries out the list. `genres` holds the full\n// picture (enabled + available per genre) for the summary message.\nconst res = $('HTTP: Push Targets').first().json;\nconst targets = res.targets || [];\nif (targets.length === 0) return [];\nreturn targets.map(t => ({ json: { category_group: t } }));\n"
       },
       "id": "split-per-category",
       "name": "Split per category",
@@ -158,7 +116,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ category: $json.category_group, categories: $json.categories, dryRun: true }) }}",
+        "jsonBody": "={{ JSON.stringify({ category: $json.category_group, dryRun: false }) }}",
         "options": {}
       },
       "id": "http-push",
@@ -185,7 +143,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ category: $('Split per category').item.json.category_group, dryRun: true }) }}",
+        "jsonBody": "={{ JSON.stringify({ category: $('Split per category').item.json.category_group, dryRun: false }) }}",
         "options": {}
       },
       "id": "http-assign",
@@ -200,7 +158,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Aggregate pushed/assigned/per_evaluator totals from all HTTP: Push + HTTP: Assign responses.\n// Runs once for ALL items (runOnceForAllItems mode) to produce a single roll-up item.\nconst pushItems = $('HTTP: Push').all();\nconst assignItems = $('HTTP: Assign').all();\n\nlet totalPushed = 0;\nlet totalAssigned = 0;\nconst perEvaluator = {};\nconst byCategory = {};\nlet hasError = false;\n\nfor (const item of pushItems) {\n  const j = item.json || {};\n  // Detect failure: missing ok:true or explicit error field\n  if (j.ok !== true || j.error) hasError = true;\n  totalPushed += (j.pushed || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].pushed += (j.pushed || 0);\n}\n\nfor (const item of assignItems) {\n  const j = item.json || {};\n  // Detect failure: missing ok:true or explicit error field\n  if (j.ok !== true || j.error) hasError = true;\n  totalAssigned += (j.assigned || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].assigned += (j.assigned || 0);\n  // per_evaluator map from each assign response\n  for (const [ev, count] of Object.entries(j.per_evaluator || {})) {\n    perEvaluator[ev] = (perEvaluator[ev] || 0) + count;\n  }\n}\n\nconst now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });\nconst catLines = Object.entries(byCategory)\n  .map(([c, v]) => `  ${c}: pushed=${v.pushed} assigned=${v.assigned}`)\n  .join('\\n');\nconst evLines = Object.entries(perEvaluator)\n  .map(([e, v]) => `  ${e}: ${v}`)\n  .join('\\n');\n\nconst note = `[${now}] db-push-assign (dryRun=true)\\nTotal pushed: ${totalPushed} | assigned: ${totalAssigned}\\nBy category:\\n${catLines || '  (none)'}\\nBy evaluator:\\n${evLines || '  (none)'}`;\n\nconst status = hasError ? 'error' : 'success';\nreturn [{ json: { name: 'db-push-assign', status, note } }];\n"
+        "jsCode": "// Aggregate pushed/assigned/per_evaluator totals from all HTTP: Push + HTTP: Assign responses.\n// Runs once for ALL items (runOnceForAllItems mode) to produce a single roll-up item.\nconst pushItems = $('HTTP: Push').all();\nconst assignItems = $('HTTP: Assign').all();\n\nlet totalPushed = 0;\nlet totalAssigned = 0;\nconst perEvaluator = {};\nconst byCategory = {};\nlet hasError = false;\n\nfor (const item of pushItems) {\n  const j = item.json || {};\n  // Detect failure: missing ok:true or explicit error field\n  if (j.ok !== true || j.error) hasError = true;\n  totalPushed += (j.pushed || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].pushed += (j.pushed || 0);\n}\n\nfor (const item of assignItems) {\n  const j = item.json || {};\n  // Detect failure: missing ok:true or explicit error field\n  if (j.ok !== true || j.error) hasError = true;\n  totalAssigned += (j.assigned || 0);\n  const cat = j.category || '?';\n  if (!byCategory[cat]) byCategory[cat] = { pushed: 0, assigned: 0 };\n  byCategory[cat].assigned += (j.assigned || 0);\n  // per_evaluator map from each assign response\n  for (const [ev, count] of Object.entries(j.per_evaluator || {})) {\n    perEvaluator[ev] = (perEvaluator[ev] || 0) + count;\n  }\n}\n\n// A genre can be live in config yet have nobody available, or be switched off\n// entirely. Saying so beats a silent zero.\nconst gate = ($('HTTP: Push Targets').first().json.genres) || [];\nconst skipLines = gate.filter(g => !g.active)\n  .map(g => `  ${g.bucket}: ${g.enabled ? 'no one available' : 'off'}`)\n  .join('\\n');\n\nconst now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });\nconst catLines = Object.entries(byCategory)\n  .map(([c, v]) => `  ${c}: pushed=${v.pushed} assigned=${v.assigned}`)\n  .join('\\n');\nconst evLines = Object.entries(perEvaluator)\n  .map(([e, v]) => `  ${e}: ${v}`)\n  .join('\\n');\n\nconst note = `[${now}] db-push-assign\\nTotal pushed: ${totalPushed} | assigned: ${totalAssigned}\\nBy category:\\n${catLines || '  (none)'}\\nSkipped:\\n${skipLines || '  (none)'}\\nBy evaluator:\\n${evLines || '  (none)'}`;\n\nconst status = hasError ? 'error' : 'success';\nreturn [{ json: { name: 'db-push-assign', status, note } }];\n"
       },
       "id": "summary",
       "name": "Summary",
@@ -355,6 +313,29 @@
           "name": "Google Service Account account"
         }
       }
+    },
+    {
+      "parameters": {
+        "url": "=REPLACE_WITH_APP_URL/api/cron/push-targets",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-webhook-secret",
+              "value": "REPLACE_WITH_WEBHOOK_SECRET"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-push-targets",
+      "name": "HTTP: Push Targets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        100
+      ]
     }
   ],
   "connections": {
@@ -362,36 +343,14 @@
       "main": [
         [
           {
-            "node": "Read Config",
+            "node": "Read Evaluator List",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Daily 07:00 VN (00:00 UTC)": {
-      "main": [
-        [
-          {
-            "node": "Read Config",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read Config": {
-      "main": [
-        [
-          {
-            "node": "Parse Config",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Config": {
+    "Daily 12:00 VN (05:00 UTC)": {
       "main": [
         [
           {
@@ -414,6 +373,17 @@
       ]
     },
     "HTTP: Sync Roster": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Push Targets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Push Targets": {
       "main": [
         [
           {
