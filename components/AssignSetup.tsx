@@ -92,6 +92,12 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
 
   return (
     <div className="assign-setup">
+      {/* Which genres receive games is a fact about the pipeline, not about the
+          roster, so it sits above the roster's own heading. */}
+      {genres.length > 0 && (
+        <GenreToggles genres={genres} canEdit={canEditGenres && !isEvaluator} onToggle={toggleGenre} />
+      )}
+
       <div className="roster-head">
         <span className="card-label">Roster</span>
         <button className="btn btn-sm" onClick={refresh} disabled={loading}>
@@ -101,11 +107,7 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
 
       {error && <p className="msg-err">{error}</p>}
 
-      {genres.length > 0 && (
-        <GenreToggles genres={genres} canEdit={canEditGenres && !isEvaluator} onToggle={toggleGenre} />
-      )}
-
-      <RosterTable title="Initial Evaluator" groups={initialGroups} subGenres={subGenres} scroll
+      <RosterTable title="Initial Evaluator" groups={initialGroups} subGenres={subGenres}
         readOnly={isEvaluator}
         onPatchRow={patchRow} onPatchAvailable={patchAvailable('initial')} onPatchPerson={patchPerson('initial')}
         onRemoveRow={removeRow}

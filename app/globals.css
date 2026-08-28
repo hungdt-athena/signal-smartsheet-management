@@ -270,38 +270,49 @@ body {
 .assign-setup { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 .roster-head { display: flex; justify-content: space-between; align-items: center; }
 
-/* Genre switches. A chip carries both halves of the rule that decides whether a
-   genre runs today: the switch, and whether anyone is available to receive the
-   games. On-but-unstaffed is the state worth seeing, so it gets the warn colour
-   rather than quietly reading as live. */
-.genre-toggles { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.genre-chips { display: flex; gap: 8px; flex-wrap: wrap; }
-.genre-chip {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
-  padding: 6px 12px; border-radius: 9px; cursor: pointer;
-  border: 1px solid var(--border-strong); background: var(--surface);
-  font: inherit; text-align: left; transition: background .12s, border-color .12s;
+/* Genres receiving new games. The switch says what was asked for; the "Ready
+   today" column says whether it can happen. When they disagree the row below
+   names the fix, so the warn colour never appears without an instruction. */
+.genre-card .tbl th, .genre-card .tbl td { padding: 7px 10px; }
+.genre-tbl td { font-size: 12.5px; }
+.genre-name { font-weight: 600; }
+.genre-none { color: var(--faint); }
+.genre-warn-row td { border-top: 0; padding-top: 0; }
+.genre-warn { font-size: 11.5px; color: var(--warn); }
+.genre-note { font-size: 11.5px; color: var(--faint); padding: 0 10px 8px; margin: 0; }
+
+/* Switch: a track the knob slides in, plus the word, so state survives both a
+   glance and a screen reader. */
+.sw {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: none; border: 0; padding: 2px; font: inherit; cursor: pointer;
+  border-radius: 7px;
 }
-.genre-chip:disabled { cursor: default; opacity: .75; }
-.genre-chip:not(:disabled):hover { border-color: var(--accent-border); }
-.genre-chip-name { font-size: 12.5px; font-weight: 600; }
-.genre-chip-state { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
-.genre-chip-on { background: var(--good-weak); border-color: color-mix(in srgb, var(--good) 35%, transparent); }
-.genre-chip-on .genre-chip-state { color: var(--good); }
-.genre-chip-warn { background: var(--warn-weak); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
-.genre-chip-warn .genre-chip-state { color: var(--warn); }
-.genre-chip-off .genre-chip-name { color: var(--muted); }
+.sw:disabled { cursor: default; }
+.sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sw-track {
+  position: relative; width: 30px; height: 17px; border-radius: 999px;
+  background: var(--track); box-shadow: inset 0 0 0 1px var(--border-strong);
+  transition: background .14s, box-shadow .14s;
+}
+.sw-knob {
+  position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+  border-radius: 50%; background: #fff; box-shadow: var(--shadow-sm);
+  transition: transform .14s;
+}
+.sw-text { font-size: 12px; color: var(--muted); font-weight: 500; }
+.sw-on .sw-track { background: var(--good); box-shadow: inset 0 0 0 1px transparent; }
+.sw-on .sw-knob { transform: translateX(13px); }
+.sw-on .sw-text { color: var(--good); }
+.sw-stuck .sw-track { background: var(--warn); }
+.sw-stuck .sw-text { color: var(--warn); }
+.sw:not(:disabled):hover .sw-track { box-shadow: inset 0 0 0 1px var(--accent-border); }
+.sw:disabled .sw-track { opacity: .6; }
 
 /* Compact roster cells — the table carries 7 columns now that Genre is one. */
 .roster-tbl .tbl th, .roster-tbl .tbl td { padding: 6px 8px; }
 .roster-tbl .tbl td { font-size: 12.5px; }
 .roster-tbl .ssel-btn { padding: 5px 8px; font-size: 12px; }
-
-/* Initial list keeps a fixed ~10-row height: scrolls when longer, holds when shorter. */
-.roster-scroll { height: 428px; overflow: auto; }
-.roster-scroll .tbl thead th {
-  position: sticky; top: 0; z-index: 2; background: var(--surface);
-}
 
 /* One person is one band. A row on its own carries no clue whose genre it is once
    the name cell has been spanned away, so alternating people — not alternating

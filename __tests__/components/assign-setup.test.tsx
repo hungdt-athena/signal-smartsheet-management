@@ -23,19 +23,21 @@ function mockFetch(canEdit = true) {
   return calls
 }
 
+const sw = (genre: string) => screen.getByRole('switch', { name: new RegExp(genre, 'i') })
+
 describe('AssignSetup genre toggles', () => {
   it('shows the genre state the server reports', async () => {
     mockFetch()
     render(<AssignSetup />)
-    await waitFor(() => expect(screen.getByRole('button', { name: /puzzle/i })).toHaveTextContent('7 available'))
-    expect(screen.getByRole('button', { name: /arcade/i })).toHaveTextContent(/off/i)
+    await waitFor(() => expect(screen.getByRole('row', { name: /puzzle/i })).toHaveTextContent('7 evaluators'))
+    expect(sw('arcade')).toHaveAttribute('aria-checked', 'false')
   })
 
   it('turns a genre on through the admin-only endpoint', async () => {
     const calls = mockFetch()
     render(<AssignSetup />)
-    await waitFor(() => screen.getByRole('button', { name: /arcade/i }))
-    fireEvent.click(screen.getByRole('button', { name: /arcade/i }))
+    await waitFor(() => sw('arcade'))
+    fireEvent.click(sw('arcade'))
     await waitFor(() => {
       const put = calls.find(c => c.url === '/api/genre-config' && c.init?.method === 'PUT')
       expect(put).toBeDefined()
@@ -46,6 +48,20 @@ describe('AssignSetup genre toggles', () => {
   it('hides the switch behind a disabled chip when the server says the user may not edit', async () => {
     mockFetch(false)
     render(<AssignSetup />)
-    await waitFor(() => expect(screen.getByRole('button', { name: /puzzle/i })).toBeDisabled())
+    await waitFor(() => expect(sw('puzzle')).toBeDisabled())
+  })
+})
+
+describe('AssignSetup roster height', () => {
+  // The roster is the page's content, not a widget on it: capping the Initial list
+  // at ten rows put a second scrollbar inside a page that already scrolls, and hid
+  // the people at the bottom behind it.
+  it('lets both rosters run to their full height', async () => {
+    mockFetch()
+    render(<AssignSetup />)
+    await waitFor(() => expect(screen.getByText('Initial Evaluator')).toBeInTheDocument())
+    const wraps = Array.from(document.querySelectorAll('.roster-tbl'))
+    expect(wraps).toHaveLength(2)
+    for (const w of wraps) expect(w.className).not.toContain('roster-scroll')
   })
 })

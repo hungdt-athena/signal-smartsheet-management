@@ -21,7 +21,6 @@ export interface RosterTableProps {
   groups: PersonGroup[]
   subGenres: Record<Bucket, string[]>
   readOnly?: boolean
-  scroll?: boolean
   onPatchRow: (id: number, field: 'game_category', value: unknown) => void
   onPatchAvailable: (name: string, value: boolean) => void
   onPatchPerson: (name: string, field: 'game_platform' | 'weight', value: unknown) => void
@@ -31,14 +30,16 @@ export interface RosterTableProps {
 }
 
 export function RosterTable({
-  title, groups, subGenres, readOnly = false, scroll = false,
+  title, groups, subGenres, readOnly = false,
   onPatchRow, onPatchAvailable, onPatchPerson, onRemoveRow, onAddGenre, onAddEvaluator,
 }: RosterTableProps) {
   const colSpan = readOnly ? 6 : 7
   return (
     <div className="card">
       <div className="card-head"><span className="card-label">{title}</span></div>
-      <div className={`tbl-wrap roster-tbl${scroll ? ' roster-scroll' : ''}`}>
+      {/* No inner scroller: the roster is the page's content, so it runs to its
+          full height and the page does the scrolling. */}
+      <div className="tbl-wrap roster-tbl">
         <table className="tbl">
           <thead>
             {/* The four person-level facts come first and read left to right;
