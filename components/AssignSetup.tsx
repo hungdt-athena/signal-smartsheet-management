@@ -57,6 +57,10 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
     send('PATCH', { id, field, value }, 'Update failed.')
   const patchAvailable = (list_type: ListType) => (name: string, value: boolean) =>
     send('PATCH', { field: 'today_available', list_type, name, value }, 'Update failed.')
+  // Platform and weight are person-level too, so they go by name like
+  // availability — one write covers every genre that person holds.
+  const patchPerson = (list_type: ListType) => (name: string, field: string, value: unknown) =>
+    send('PATCH', { field, list_type, name, value }, 'Update failed.')
   const removeRow = (id: number) => send('DELETE', { id }, 'Delete failed.')
   const addGenre = (list_type: ListType) => (name: string, g: Bucket) =>
     send('POST', { list_type, name, category_groups: [g] }, 'Add failed.')
@@ -76,11 +80,13 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
 
       <RosterTable title="Initial Evaluator" groups={initialGroups} subGenres={subGenres} scroll
         readOnly={isEvaluator}
-        onPatchRow={patchRow} onPatchAvailable={patchAvailable('initial')} onRemoveRow={removeRow}
+        onPatchRow={patchRow} onPatchAvailable={patchAvailable('initial')} onPatchPerson={patchPerson('initial')}
+        onRemoveRow={removeRow}
         onAddGenre={addGenre('initial')} onAddEvaluator={addEvaluator('initial')} />
       {!isEvaluator && (
         <RosterTable title="Final Evaluator" groups={finalGroups} subGenres={subGenres}
-          onPatchRow={patchRow} onPatchAvailable={patchAvailable('final')} onRemoveRow={removeRow}
+          onPatchRow={patchRow} onPatchAvailable={patchAvailable('final')} onPatchPerson={patchPerson('final')}
+          onRemoveRow={removeRow}
           onAddGenre={addGenre('final')} onAddEvaluator={addEvaluator('final')} />
       )}
     </div>

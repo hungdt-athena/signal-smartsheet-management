@@ -22,8 +22,9 @@ export interface RosterTableProps {
   subGenres: Record<Bucket, string[]>
   readOnly?: boolean
   scroll?: boolean
-  onPatchRow: (id: number, field: 'game_platform' | 'game_category' | 'weight', value: unknown) => void
+  onPatchRow: (id: number, field: 'game_category', value: unknown) => void
   onPatchAvailable: (name: string, value: boolean) => void
+  onPatchPerson: (name: string, field: 'game_platform' | 'weight', value: unknown) => void
   onRemoveRow: (id: number) => void
   onAddGenre: (name: string, genre: Bucket) => void
   onAddEvaluator: (p: { name: string; provision: boolean; genres: Bucket[] }) => void
@@ -31,7 +32,7 @@ export interface RosterTableProps {
 
 export function RosterTable({
   title, groups, subGenres, readOnly = false, scroll = false,
-  onPatchRow, onPatchAvailable, onRemoveRow, onAddGenre, onAddEvaluator,
+  onPatchRow, onPatchAvailable, onPatchPerson, onRemoveRow, onAddGenre, onAddEvaluator,
 }: RosterTableProps) {
   const colSpan = readOnly ? 6 : 7
   return (
@@ -40,15 +41,16 @@ export function RosterTable({
       <div className={`tbl-wrap roster-tbl${scroll ? ' roster-scroll' : ''}`}>
         <table className="tbl">
           <thead>
-            {/* Genre and its sub-genres read as one thing, so they share a header.
-                The sub-genre column is the only one without a width, so the
-                table's slack collects there instead of stretching the name. */}
+            {/* The four person-level facts come first and read left to right;
+                genre and its sub-genres read as one thing, so they share a
+                header. The sub-genre column is the only one without a width, so
+                the table's slack collects there instead of stretching the name. */}
             <tr>
               <th style={{ width: 160 }}>Evaluator Name</th>
               <th style={{ width: 92 }}>Available</th>
+              <th style={{ width: 96 }}>Platform</th>
+              <th style={{ width: 76 }}>Weight</th>
               <th className="col-split" colSpan={2}>Genre &amp; sub-genre details</th>
-              <th style={{ width: 96 }} />
-              <th style={{ width: 76 }} />
               {!readOnly && <th style={{ width: 80 }} />}
             </tr>
           </thead>
@@ -59,7 +61,7 @@ export function RosterTable({
               return (
                 <PersonRows key={g.name} group={g} span={g.rows.length + (showAdd ? 1 : 0)} showAdd={showAdd}
                   alt={gi % 2 === 1} subGenres={subGenres} readOnly={readOnly}
-                  onPatchRow={onPatchRow} onPatchAvailable={onPatchAvailable}
+                  onPatchRow={onPatchRow} onPatchAvailable={onPatchAvailable} onPatchPerson={onPatchPerson}
                   onRemoveRow={onRemoveRow} onAddGenre={onAddGenre} />
               )
             })}
@@ -71,10 +73,11 @@ export function RosterTable({
   )
 }
 
-// A person renders as several <tr>. Evaluator and Available exist only on the
-// first row and span the rest, so there is physically one Available control per
-// person — the UI cannot put a person's genres into disagreeing states.
-function PersonRows({ group, span, showAdd, alt, subGenres, readOnly, onPatchRow, onPatchAvailable, onRemoveRow, onAddGenre }: {
+// A person renders as several <tr>. Evaluator, Available, Platform and Weight
+// exist only on the first row and span the rest, so there is physically one
+// control each per person — the UI cannot put a person's genres into
+// disagreeing states. Only genre and sub-genre vary row by row.
+function PersonRows({ group, span, showAdd, alt, subGenres, readOnly, onPatchRow, onPatchAvailable, onPatchPerson, onRemoveRow, onAddGenre }: {
   group: PersonGroup
   span: number
   showAdd: boolean
@@ -83,6 +86,7 @@ function PersonRows({ group, span, showAdd, alt, subGenres, readOnly, onPatchRow
   readOnly: boolean
   onPatchRow: RosterTableProps['onPatchRow']
   onPatchAvailable: RosterTableProps['onPatchAvailable']
+  onPatchPerson: RosterTableProps['onPatchPerson']
   onRemoveRow: RosterTableProps['onRemoveRow']
   onAddGenre: RosterTableProps['onAddGenre']
 }) {
@@ -97,18 +101,22 @@ function PersonRows({ group, span, showAdd, alt, subGenres, readOnly, onPatchRow
                 onChange={v => onPatchAvailable(group.name, v === 'Yes')} />
             </td>
           )}
+          {i === 0 && (
+            <td rowSpan={span} data-testid="platform-cell">
+              <StyledSelect value={group.game_platform || 'all'} options={PLATFORM_OPTS} disabled={readOnly}
+                onChange={v => onPatchPerson(group.name, 'game_platform', v)} />
+            </td>
+          )}
+          {i === 0 && (
+            <td rowSpan={span} data-testid="weight-cell">
+              <StyledSelect value={String(group.weight ?? 100)} options={WEIGHT_OPTS} disabled={readOnly}
+                onChange={v => onPatchPerson(group.name, 'weight', Number(v))} />
+            </td>
+          )}
           <td className="cell-genre col-split">{BUCKET_LABELS[r.category_group]}</td>
           <td>
             <SubGenrePicker value={r.game_category} options={subGenres[r.category_group] ?? []} disabled={readOnly}
               onChange={v => onPatchRow(r.id, 'game_category', v)} />
-          </td>
-          <td>
-            <StyledSelect value={r.game_platform || 'all'} options={PLATFORM_OPTS} disabled={readOnly}
-              onChange={v => onPatchRow(r.id, 'game_platform', v)} />
-          </td>
-          <td>
-            <StyledSelect value={String(r.weight ?? 100)} options={WEIGHT_OPTS} disabled={readOnly}
-              onChange={v => onPatchRow(r.id, 'weight', Number(v))} />
           </td>
           {!readOnly && (
             <td><button className="btn btn-sm btn-danger" onClick={() => onRemoveRow(r.id)}>Remove</button></td>
@@ -117,7 +125,7 @@ function PersonRows({ group, span, showAdd, alt, subGenres, readOnly, onPatchRow
       ))}
       {showAdd && (
         <tr className={`person-add${alt ? ' person-alt' : ''}`}>
-          <td className="col-split" colSpan={4}>
+          <td className="col-split" colSpan={2}>
             <span data-testid={`add-genre-${group.name}`}>
               <StyledSelect value="" placeholder="+ genre"
                 options={group.missingGenres.map(b => ({ value: b, label: BUCKET_LABELS[b] }))}

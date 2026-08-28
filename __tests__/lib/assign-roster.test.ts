@@ -47,6 +47,16 @@ describe('groupRosterByPerson', () => {
     expect(g.today_available).toBe(false)
   })
 
+  it('platform and weight are per person: the first genre row wins', () => {
+    const [g] = groupRosterByPerson([
+      // Genre order decides, not input order: puzzle sorts first.
+      row({ id: 1, name: 'A', category_group: 'arcade', game_platform: 'android', weight: 30 }),
+      row({ id: 2, name: 'A', category_group: 'puzzle', game_platform: 'ios', weight: 70 }),
+    ])
+    expect(g.game_platform).toBe('ios')
+    expect(g.weight).toBe(70)
+  })
+
   it('an empty roster yields an empty list', () => {
     expect(groupRosterByPerson([])).toEqual([])
   })

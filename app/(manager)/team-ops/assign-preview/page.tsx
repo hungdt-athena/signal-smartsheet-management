@@ -27,10 +27,10 @@ export default function AssignPreviewPage() {
         <h1 className="h-title">Assign · preview (fixture)</h1>
       </div>
       <RosterTable title="Initial Evaluator" groups={initial} subGenres={FIXTURE_SUB_GENRES}
-        onPatchRow={noop} onPatchAvailable={noop} onRemoveRow={noop} onAddGenre={noop} onAddEvaluator={noop} />
+        onPatchRow={noop} onPatchAvailable={noop} onPatchPerson={noop} onRemoveRow={noop} onAddGenre={noop} onAddEvaluator={noop} />
       <div style={{ height: 14 }} />
       <RosterTable title="Final Evaluator" groups={final} subGenres={FIXTURE_SUB_GENRES}
-        onPatchRow={noop} onPatchAvailable={noop} onRemoveRow={noop} onAddGenre={noop} onAddEvaluator={noop} />
+        onPatchRow={noop} onPatchAvailable={noop} onPatchPerson={noop} onRemoveRow={noop} onAddGenre={noop} onAddEvaluator={noop} />
       <div style={{ height: 18 }} />
       <div className="card">
         <div className="card-head"><span className="card-label">History · 14 days</span></div>

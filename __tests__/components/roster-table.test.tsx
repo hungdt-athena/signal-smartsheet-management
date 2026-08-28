@@ -12,6 +12,8 @@ const groups: PersonGroup[] = [
   {
     name: 'NhiLV',
     today_available: true,
+    game_platform: 'all',
+    weight: 100,
     missingGenres: ['simulation'],
     rows: [
       { id: 1, name: 'NhiLV', category_group: 'puzzle', today_available: true, game_platform: 'all', game_category: 'All', weight: 100 },
@@ -21,6 +23,8 @@ const groups: PersonGroup[] = [
   {
     name: 'MyTL',
     today_available: false,
+    game_platform: 'ios',
+    weight: 50,
     missingGenres: ['arcade', 'simulation'],
     rows: [
       { id: 3, name: 'MyTL', category_group: 'puzzle', today_available: false, game_platform: 'all', game_category: 'All', weight: 100 },
@@ -35,6 +39,7 @@ function setup(over: Partial<React.ComponentProps<typeof RosterTable>> = {}) {
     subGenres: SUB_GENRES,
     onPatchRow: jest.fn(),
     onPatchAvailable: jest.fn(),
+    onPatchPerson: jest.fn(),
     onRemoveRow: jest.fn(),
     onAddGenre: jest.fn(),
     onAddEvaluator: jest.fn(),
@@ -77,6 +82,21 @@ describe('RosterTable', () => {
     expect(onPatchAvailable).toHaveBeenCalledWith('NhiLV', false)
   })
 
+  it('there is one Platform and one Weight control per person, written by name', () => {
+    const { onPatchPerson } = setup()
+    // Two people, three rows: the controls span a person's genres.
+    expect(screen.getAllByTestId('platform-cell')).toHaveLength(2)
+    expect(screen.getAllByTestId('weight-cell')).toHaveLength(2)
+
+    const pMenu = openMenu(screen.getAllByTestId('platform-cell')[0])
+    fireEvent.click(within(pMenu).getByText('ios'))
+    expect(onPatchPerson).toHaveBeenCalledWith('NhiLV', 'game_platform', 'ios')
+
+    const wMenu = openMenu(screen.getAllByTestId('weight-cell')[0])
+    fireEvent.click(within(wMenu).getByText('70'))
+    expect(onPatchPerson).toHaveBeenCalledWith('NhiLV', 'weight', 70)
+  })
+
   it('+ genre only offers the genres that person is missing', () => {
     const { onAddGenre } = setup()
     const menu = openMenu(screen.getByTestId('add-genre-NhiLV'))
@@ -89,7 +109,7 @@ describe('RosterTable', () => {
   it('someone covering all three genres gets no + genre control', () => {
     setup({
       groups: [{
-        name: 'Full', today_available: true, missingGenres: [],
+        name: 'Full', today_available: true, game_platform: 'all', weight: 100, missingGenres: [],
         rows: (['puzzle', 'arcade', 'simulation'] as const).map((g, i) => ({
           id: 10 + i, name: 'Full', category_group: g, today_available: true,
           game_platform: 'all', game_category: 'All', weight: 100,
