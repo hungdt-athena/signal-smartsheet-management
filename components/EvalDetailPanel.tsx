@@ -721,14 +721,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // The eval editor's Save button also flushes staged screenshots, so staged
   // shots count as unsaved work for it (the card hides its own button then).
   const needsSave = dirty || (canEditEval && stagedShots > 0)
-  // A written note has to be a real note. The rule bites only when the note is
-  // rewritten — reopening a game (evaluated or not) and saving some other field
-  // never blocks, however short its stored note is. Link_dead is exempt.
-  const noteError = canEditEval ? noteRequirementError({
-    note,
-    prevNote: ev?.initial_note,
-    conclusion,
-  }) : null
+  // A written note has to be a real note, on every save — reopening a game whose
+  // stored note is short blocks Save until it is filled in, even when the edit is
+  // to some other field. Link_dead is exempt.
+  const noteError = canEditEval ? noteRequirementError({ note, conclusion }) : null
   const noteTooShort = !!noteError
 
   useEffect(() => {

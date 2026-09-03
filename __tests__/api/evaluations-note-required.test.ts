@@ -31,13 +31,13 @@ function patchReq(body: unknown) {
 let calls: { text: string; binds: unknown[] }[] = []
 
 /** Answers the row-state SELECT with `row`; everything else with one dummy row. */
-function routeSql(row: { initial_note: string | null; initial_conclusion: string | null }) {
+function routeSql(row: { initial_conclusion: string | null }) {
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
     if (!Array.isArray(strings)) return Promise.resolve([])
     const text = (strings as string[]).join(' ')
     calls.push({ text, binds })
-    if (/SELECT\s+initial_note, initial_conclusion/.test(text)) return Promise.resolve([row])
+    if (/SELECT\s+initial_conclusion FROM game_evaluations/.test(text)) return Promise.resolve([row])
     return Promise.resolve([{ id: 1 }])
   })
   sqlMock.begin = jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(sqlMock)))
@@ -54,53 +54,53 @@ describe('/api/evaluations PATCH — initial note is required', () => {
     sessionMock.mockResolvedValue({ user: { role: 'admin', name: 'VinhTD' } })
   })
 
-  it('rejects a short rewritten note', async () => {
-    routeSql({ initial_note: 'A long enough note', initial_conclusion: 'List_Idea' })
+  it('rejects a short note', async () => {
+    routeSql({ initial_conclusion: 'List_Idea' })
     const res = await PATCH(patchReq({ id: 1, initial_note: 'meh' }))
     expect(res.status).toBe(400)
     expect((await res.json()).error).toMatch(/at least 10/)
     expect(updated()).toBe(false)
   })
 
-  it('lets a first evaluation through with an empty note', async () => {
-    routeSql({ initial_note: null, initial_conclusion: null })
+  it('rejects a first evaluation that leaves the note empty', async () => {
+    routeSql({ initial_conclusion: null })
     const res = await PATCH(patchReq({ id: 1, initial_conclusion: 'List_Idea', initial_note: '' }))
-    expect(res.status).toBe(200)
-    expect(updated()).toBe(true)
+    expect(res.status).toBe(400)
+    expect(updated()).toBe(false)
   })
 
   it('rejects a short note written onto an already-evaluated game', async () => {
-    routeSql({ initial_note: null, initial_conclusion: 'List_Idea' })
+    routeSql({ initial_conclusion: 'List_Idea' })
     const res = await PATCH(patchReq({ id: 1, initial_note: 'bad' }))
     expect(res.status).toBe(400)
     expect(updated()).toBe(false)
   })
 
   it('accepts a first evaluation with a real note', async () => {
-    routeSql({ initial_note: null, initial_conclusion: null })
+    routeSql({ initial_conclusion: null })
     const res = await PATCH(patchReq({ id: 1, initial_conclusion: 'List_Idea', initial_note: 'Core loop is fine, meta is thin' }))
     expect(res.status).toBe(200)
     expect(updated()).toBe(true)
   })
 
-  it('still saves a legacy row whose short note is resent untouched', async () => {
-    routeSql({ initial_note: 'ok', initial_conclusion: 'List_Idea' })
+  it('blocks a legacy row whose short note is resent untouched', async () => {
+    routeSql({ initial_conclusion: 'List_Idea' })
     const res = await PATCH(patchReq({ id: 1, initial_note: 'ok', drive_link: 'https://x' }))
-    expect(res.status).toBe(200)
-    expect(updated()).toBe(true)
+    expect(res.status).toBe(400)
+    expect(updated()).toBe(false)
   })
 
   it('exempts Link_dead', async () => {
-    routeSql({ initial_note: null, initial_conclusion: null })
+    routeSql({ initial_conclusion: null })
     const res = await PATCH(patchReq({ id: 1, initial_conclusion: 'Link_dead', initial_note: '' }))
     expect(res.status).toBe(200)
     expect(updated()).toBe(true)
   })
 
-  it('does not read the row when no note is sent', async () => {
-    routeSql({ initial_note: null, initial_conclusion: null })
+  it('leaves a manager-only write alone when no note is sent', async () => {
+    routeSql({ initial_conclusion: null })
     const res = await PATCH(patchReq({ id: 1, final_note: 'admin says hi' }))
     expect(res.status).toBe(200)
-    expect(calls.some(c => /SELECT\s+initial_note, initial_conclusion/.test(c.text))).toBe(false)
+    expect(calls.some(c => /SELECT\s+initial_conclusion FROM game_evaluations/.test(c.text))).toBe(false)
   })
 })
