@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
+import { visibleEvaluators } from '@/lib/people-config'
+import { loadHiddenEvaluatorKeys } from '@/lib/people-config-db'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,5 +33,8 @@ export async function GET() {
     SELECT DISTINCT evaluator FROM weekly_feedback WHERE evaluator IS NOT NULL ORDER BY evaluator
   `
 
-  return NextResponse.json({ batches, allBatches, evaluators: evalRows.map(r => r.evaluator) })
+  // Same dropdown roster as the Evaluate/Short List filters — Config › People.
+  const evaluators = visibleEvaluators(evalRows.map(r => r.evaluator), await loadHiddenEvaluatorKeys())
+
+  return NextResponse.json({ batches, allBatches, evaluators })
 }

@@ -1,0 +1,403 @@
+<title>Signal Config Rework</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --font: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --num: "IBM Plex Mono", ui-monospace, monospace;
+    --bg:#f7f8fa; --surface:#ffffff; --surface-2:#f5f6f8; --surface-3:#eef0f4;
+    --border:#e7e9ee; --border-strong:#d7dae1;
+    --text:#1a1c22; --muted:#59606e; --faint:#99a0ad;
+    --good:#1f9d57; --good-weak:#e8f6ee;
+    --warn:#b9760a; --warn-weak:#fbf1de;
+    --bad:#d23b3b; --bad-weak:#fbeaea;
+    --track:#ebedf1;
+    --accent:#2f6bed; --accent-strong:#2455c9; --accent-weak:#eef3ff;
+    --shadow-sm:0 1px 2px rgba(20,24,40,.05);
+    --shadow-md:0 6px 22px rgba(20,24,40,.09);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f1115; --surface:#161920; --surface-2:#1b1f27; --surface-3:#212633;
+      --border:#272c36; --border-strong:#39404e;
+      --text:#e8eaef; --muted:#a2aab9; --faint:#6d7686;
+      --good:#4ecb85; --good-weak:#12291d;
+      --warn:#e0a54a; --warn-weak:#2c2313;
+      --bad:#f0716f; --bad-weak:#301818;
+      --track:#242935;
+      --accent:#6f9bff; --accent-strong:#8fb2ff; --accent-weak:#182236;
+      --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+      --shadow-md:0 6px 22px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f1115; --surface:#161920; --surface-2:#1b1f27; --surface-3:#212633;
+    --border:#272c36; --border-strong:#39404e;
+    --text:#e8eaef; --muted:#a2aab9; --faint:#6d7686;
+    --good:#4ecb85; --good-weak:#12291d;
+    --warn:#e0a54a; --warn-weak:#2c2313;
+    --bad:#f0716f; --bad-weak:#301818;
+    --track:#242935;
+    --accent:#6f9bff; --accent-strong:#8fb2ff; --accent-weak:#182236;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+    --shadow-md:0 6px 22px rgba(0,0,0,.45);
+  }
+
+  *{box-sizing:border-box}
+  body{background:var(--bg); color:var(--text); font-family:var(--font); font-size:13.5px; line-height:1.5;}
+  .wrap{max-width:1080px; margin:0 auto; padding:28px 22px 80px;}
+
+  /* ── framing note ────────────────────────────────── */
+  .banner{border-left:3px solid var(--accent); background:var(--accent-weak); padding:12px 16px; margin-bottom:26px; border-radius:0 6px 6px 0;}
+  .banner h1{margin:0 0 4px; font-size:17px; font-weight:600; letter-spacing:-.01em;}
+  .banner p{margin:0; color:var(--muted); font-size:12.5px; max-width:70ch;}
+  .banner code{font-family:var(--num); font-size:11.5px; background:var(--surface); padding:1px 4px; border-radius:3px; border:1px solid var(--border);}
+
+  .page-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;}
+  .h-title{font-size:22px; font-weight:700; margin:0; letter-spacing:-.02em;}
+
+  /* ── cards ───────────────────────────────────────── */
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 16px 16px; margin-bottom:16px; box-shadow:var(--shadow-sm);}
+  .card-head{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:12px;}
+  .card-label{font-size:13.5px; font-weight:600;}
+  .card-note{font-size:11.5px; color:var(--faint);}
+  .card-note b{color:var(--muted); font-weight:500;}
+
+  /* ── option rows (replaces drag & drop) ──────────── */
+  .rows{display:flex; flex-direction:column; border:1px solid var(--border); border-radius:6px; overflow:hidden;}
+  .row{display:grid; grid-template-columns:26px 1fr auto auto; align-items:center; gap:10px; padding:7px 10px; background:var(--surface); border-bottom:1px solid var(--border);}
+  .row:last-child{border-bottom:none}
+  .row:hover{background:var(--surface-2)}
+  .row.off .name{color:var(--faint); text-decoration:line-through; text-decoration-color:var(--border-strong);}
+  .ord{display:flex; flex-direction:column; gap:1px;}
+  .ord button{all:unset; cursor:pointer; font-size:9px; line-height:8px; color:var(--faint); text-align:center; width:16px; border-radius:2px;}
+  .ord button:hover{color:var(--accent); background:var(--accent-weak)}
+  .ord button:disabled{opacity:.25; cursor:default; background:none; color:var(--faint)}
+  .ord button:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+  .name{font-size:13px; font-weight:500;}
+  .name[contenteditable]:focus{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
+  .usage{font-family:var(--num); font-size:11px; color:var(--faint); white-space:nowrap;}
+  .row-actions{display:flex; align-items:center; gap:8px;}
+  .del{all:unset; cursor:pointer; color:var(--faint); font-size:13px; padding:0 3px; border-radius:3px;}
+  .del:hover{color:var(--bad); background:var(--bad-weak)}
+  .del:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+
+  /* toggle */
+  .sw{all:unset; cursor:pointer; width:32px; height:18px; border-radius:9px; background:var(--track); position:relative; transition:background .13s; flex:none;}
+  .sw::after{content:""; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:var(--surface); box-shadow:var(--shadow-sm); transition:transform .13s;}
+  .sw[aria-checked="true"]{background:var(--good)}
+  .sw[aria-checked="true"]::after{transform:translateX(14px)}
+  .sw:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  .addrow{display:flex; gap:8px; margin-top:10px;}
+  .input{flex:1; font:inherit; font-size:12.5px; padding:6px 9px; border:1px solid var(--border-strong); border-radius:5px; background:var(--surface); color:var(--text);}
+  .input:focus{outline:2px solid var(--accent); outline-offset:-1px; border-color:var(--accent)}
+  .btn{font:inherit; font-size:12px; font-weight:500; padding:6px 12px; border-radius:5px; border:1px solid var(--border-strong); background:var(--surface); color:var(--text); cursor:pointer;}
+  .btn:hover{background:var(--surface-2)}
+  .btn:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+  .btn-primary{background:var(--accent); border-color:var(--accent); color:#fff;}
+  .btn-primary:hover{background:var(--accent-strong)}
+
+
+  /* ── people matrix ───────────────────────────────── */
+  .tools{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;}
+  .search{font:inherit; font-size:12.5px; padding:6px 9px 6px 26px; border:1px solid var(--border-strong); border-radius:5px; background:var(--surface) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2399a0ad' stroke-width='1.6'><circle cx='7' cy='7' r='4.5'/><path d='M10.5 10.5 14 14'/></svg>") no-repeat 7px center/13px; color:var(--text); width:190px;}
+  .search:focus{outline:2px solid var(--accent); outline-offset:-1px}
+  .spacer{flex:1}
+  .tally{font-family:var(--num); font-size:11.5px; color:var(--faint);}
+
+  .matrix{width:100%; border-collapse:collapse; border:1px solid var(--border); border-radius:6px; overflow:hidden;}
+  .matrix th{font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); text-align:center; padding:8px 6px; background:var(--surface-2); border-bottom:1px solid var(--border); white-space:nowrap;}
+  .matrix th.who{text-align:left; padding-left:12px;}
+  .matrix th sub{display:block; font-size:9.5px; letter-spacing:.02em; text-transform:none; font-weight:400; color:var(--faint); opacity:.85; margin-top:1px;}
+  .matrix td{padding:7px 6px; border-bottom:1px solid var(--border); text-align:center; vertical-align:middle;}
+  .matrix tr:last-child td{border-bottom:none}
+  .matrix tr:hover td{background:var(--surface-2)}
+  .matrix td.who{text-align:left; padding-left:12px;}
+  .who-name{font-weight:500; font-size:13px;}
+  .who-meta{font-size:11px; color:var(--faint); display:flex; align-items:center; gap:6px; margin-top:1px;}
+  .tag{font-size:9.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; padding:1px 5px; border-radius:3px; background:var(--surface-3); color:var(--muted);}
+  .tag.sys{background:var(--accent-weak); color:var(--accent-strong)}
+  .tag.free{background:var(--warn-weak); color:var(--warn)}
+  .stale{color:var(--warn)}
+  .num{font-family:var(--num); font-variant-numeric:tabular-nums;}
+
+  .cb{all:unset; cursor:pointer; width:17px; height:17px; border-radius:4px; border:1.5px solid var(--border-strong); display:inline-block; vertical-align:middle; position:relative; background:var(--surface);}
+  .cb[aria-checked="true"]{background:var(--accent); border-color:var(--accent)}
+  .cb[aria-checked="true"]::after{content:""; position:absolute; left:5px; top:1.5px; width:4px; height:8px; border:solid #fff; border-width:0 2px 2px 0; transform:rotate(42deg);}
+  .cb:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  .hint{margin-top:12px; display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:6px; background:var(--warn-weak); color:var(--warn); font-size:12px;}
+  .hint b{font-weight:600}
+  .hint .btn{margin-left:auto; border-color:currentColor; color:inherit; background:transparent;}
+  .hint .btn:hover{background:rgba(0,0,0,.05)}
+
+  /* ── live preview of the dropdown ────────────────── */
+  .preview{display:grid; grid-template-columns:220px 1fr; gap:18px; align-items:start;}
+  @media (max-width:720px){ .preview{grid-template-columns:1fr} .matrix th.hideable, .matrix td.hideable{display:none} }
+  .dd{border:1px solid var(--border-strong); border-radius:6px; background:var(--surface); box-shadow:var(--shadow-md); overflow:hidden;}
+  .dd-head{padding:8px 11px; border-bottom:1px solid var(--border); font-size:12.5px; display:flex; justify-content:space-between; color:var(--muted);}
+  .dd-list{max-height:210px; overflow-y:auto;}
+  .dd-item{padding:6px 11px; font-size:12.5px;}
+  .dd-item:hover{background:var(--surface-2)}
+  .preview-note{font-size:12px; color:var(--muted); max-width:60ch;}
+  .preview-note strong{color:var(--text); font-weight:600;}
+  .kv{list-style:none; padding:0; margin:8px 0 0; display:flex; flex-direction:column; gap:5px;}
+  .kv li{font-size:12px; color:var(--muted); display:flex; gap:8px;}
+  .kv code{font-family:var(--num); font-size:11px; color:var(--text); background:var(--surface-3); padding:0 5px; border-radius:3px; white-space:nowrap;}
+
+  .buckets{display:flex; flex-direction:column; gap:14px;}
+  .bucket-label{font-size:11.5px; font-weight:600; color:var(--muted); margin-bottom:6px;}
+  .bucket-label span{font-weight:400; color:var(--faint)}
+
+  .foot{margin-top:34px; padding-top:16px; border-top:1px solid var(--border); font-size:12px; color:var(--muted);}
+  .foot h2{font-size:13px; margin:0 0 8px; color:var(--text);}
+  .foot ol{margin:0; padding-left:18px; display:flex; flex-direction:column; gap:5px; max-width:78ch;}
+  .foot code{font-family:var(--num); font-size:11px; background:var(--surface-3); padding:0 4px; border-radius:3px;}
+</style>
+
+<div class="wrap">
+
+  <div class="banner">
+    <h1>Config, bản không kéo thả</h1>
+    <p>Hai thay đổi: (1) mọi danh sách bỏ drag &amp; drop, đổi sang hàng gọn có nút thứ tự + công tắc bật/tắt; (2) thêm mục <b>People</b> quyết định ai xuất hiện trong dropdown evaluator của Evaluate / Short List / Weekly Feedback — thay cho danh sách <code>SELECT DISTINCT initial_evaluator</code> hiện tại vốn lôi cả tài khoản hệ thống và người đã nghỉ vào.</p>
+  </div>
+
+  <div class="page-head">
+    <h1 class="h-title">Config</h1>
+    <button class="btn">↻ Refresh</button>
+  </div>
+
+  <!-- ══ People ══════════════════════════════════════ -->
+  <div class="card">
+    <div class="card-head">
+      <span class="card-label">People in filters</span>
+      <span class="card-note">Ai được liệt kê ở dropdown evaluator, ai được tính vào Report · <b><span id="tallyF">9</span>/12 hiện trong filter</b></span>
+    </div>
+
+    <div class="tools">
+      <input class="search" id="q" placeholder="Tìm người…" aria-label="Tìm người">
+      <button class="btn" id="showAll">Bật hết filter</button>
+      <span class="spacer"></span>
+      <span class="tally">Tắt filter không xoá dữ liệu — game cũ vẫn giữ tên</span>
+    </div>
+
+    <div class="preview">
+      <div>
+        <table class="matrix" id="mx">
+          <thead>
+            <tr>
+              <th class="who">Người</th>
+              <th class="hideable">Eval 7d</th>
+              <th>Filter<sub>dropdown</sub></th>
+              <th class="hideable">Report<sub>tính điểm</sub></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+
+        <div class="hint" id="staleHint">
+          <span><b>3 người</b> không có evaluation nào trong 7 ngày: NhiLV, ThuDT, TuanAM.</span>
+          <button class="btn" id="hideStale">Ẩn khỏi filter</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="bucket-label">Short List sẽ thấy</div>
+        <div class="dd">
+          <div class="dd-head"><span>All evaluators</span><span style="color:var(--faint)">▴</span></div>
+          <div class="dd-list" id="dd"></div>
+        </div>
+        <p class="preview-note" style="margin-top:12px;">Bảng bên trái đổi là dropdown này đổi theo ngay — không phải mở tab khác để kiểm tra.</p>
+        <ul class="kv">
+          <li><code>Filter</code> Evaluate, Short List, Weekly Feedback, Record</li>
+          <li><code>Report</code> thay cho <code>report_config.excluded</code></li>
+          <li><code>Assign</code> không nằm ở đây — roster chia game vẫn do Team Ops giữ</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Conclusions ═════════════════════════════════ -->
+  <div class="card">
+    <div class="card-head">
+      <span class="card-label">Initial Conclusion</span>
+      <span class="card-note">Lựa chọn của evaluator · <b><span class="cnt" data-for="initial">5</span>/6 đang bật</b> · ▲▼ đổi thứ tự, click tên để sửa, tắt thì gạch ngang tại chỗ</span>
+    </div>
+    <div class="rows" id="initial"></div>
+    <div class="addrow">
+      <input class="input" placeholder="Thêm lựa chọn initial conclusion…">
+      <button class="btn btn-primary">Add</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-label">Final Conclusion</span>
+      <span class="card-note">Kết luận của moderator ở Short List · <b><span class="cnt" data-for="final">6</span>/7 đang bật</b></span>
+    </div>
+    <div class="rows" id="final"></div>
+    <div class="addrow">
+      <input class="input" placeholder="Thêm lựa chọn final conclusion…">
+      <button class="btn btn-primary">Add</button>
+    </div>
+  </div>
+
+  <!-- ══ Genre ═══════════════════════════════════════ -->
+  <div class="card">
+    <div class="card-head">
+      <span class="card-label">Genre → Sub-genre</span>
+      <span class="card-note">Sub-genre nào chảy vào từng bucket đánh giá · không cần thứ tự nên chỉ có công tắc</span>
+    </div>
+    <div class="buckets">
+      <div>
+        <div class="bucket-label">Puzzle <span>· 4 dùng / 1 lưu kho</span></div>
+        <div class="rows" id="puzzle"></div>
+      </div>
+      <div>
+        <div class="bucket-label">Arcade <span>· 3 dùng / 0 lưu kho</span></div>
+        <div class="rows" id="arcade"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <h2>Đổi ở đâu trong code</h2>
+    <ol>
+      <li><code>components/DnDColumns.tsx</code> → <code>components/OptionRows.tsx</code>: bỏ toàn bộ HTML5 drag, giữ nguyên callback <code>onToggle / onReorder / onRename / onDelete</code> nên <code>app/(manager)/config/page.tsx</code> gần như không phải sửa.</li>
+      <li>Bảng mới <code>people_visibility</code> (hoặc một blob trong <code>app_config</code>) với 2 cờ <code>in_filters / in_report</code>, seed từ roster hiện có, mặc định bật hết. Không đụng tới roster assign — chỗ đó Team Ops đã quản.</li>
+      <li><code>app/api/evaluations/route.ts</code>: <code>available_evaluators</code> lọc theo <code>in_filters</code> thay vì trả nguyên distinct.</li>
+      <li><code>lib/report-config.ts</code>: <code>excluded</code> đọc từ cờ <code>in_report</code>, giữ parse cũ làm fallback để Report không gãy.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function(){
+  const people = [
+    { n:'HungDT',    t:'Admin',      d:'2026-09-04', e:4, f:1, a:1, r:1 },
+    { n:'MiTT',      t:'Fulltime',   d:'2026-09-05', e:12, f:1, a:1, r:1 },
+    { n:'MyDV',      t:'Fulltime',   d:'2026-09-05', e:9, f:1, a:1, r:1 },
+    { n:'MyTL',      t:'Freelancer', d:'2026-09-03', e:6, f:1, a:1, r:1 },
+    { n:'NhiLV',     t:'Freelancer', d:'2026-04-18', e:0,  f:1, a:0, r:1 },
+    { n:'PhuongNT1', t:'Fulltime',   d:'2026-09-04', e:8, f:1, a:1, r:1 },
+    { n:'QuangNM',   t:'Fulltime',   d:'2026-09-05', e:11, f:1, a:1, r:1 },
+    { n:'Shortcut',  t:'System',     d:'2026-09-05', e:3, f:0, a:0, r:0 },
+    { n:'ThuDT',     t:'Freelancer', d:'2026-03-02', e:0,  f:1, a:0, r:0 },
+    { n:'TuanAM',    t:'Freelancer', d:'2026-05-11', e:0,  f:1, a:0, r:1 },
+    { n:'VinhTD',    t:'Fulltime',   d:'2026-09-05', e:10, f:1, a:1, r:1 },
+    { n:'LinhNP',    t:'Recorder',   d:'2026-09-04', e:0,  f:0, a:0, r:0 },
+  ];
+  const tagClass = t => t === 'System' ? 'sys' : (t === 'Freelancer' ? 'free' : '');
+  const tbody = document.querySelector('#mx tbody');
+  const dd = document.getElementById('dd');
+  const q = document.getElementById('q');
+
+  function renderPeople(){
+    const term = q.value.trim().toLowerCase();
+    tbody.innerHTML = '';
+    people.forEach((p, i) => {
+      if (term && !p.n.toLowerCase().includes(term)) return;
+      const tr = document.createElement('tr');
+      const stale = p.e === 0 && p.t !== 'Recorder';
+      tr.innerHTML =
+        '<td class="who"><div class="who-name">' + p.n + '</div>' +
+        '<div class="who-meta"><span class="tag ' + tagClass(p.t) + '">' + p.t + '</span>' +
+        '<span class="' + (stale ? 'stale' : '') + '">eval gần nhất ' + p.d + '</span></div></td>' +
+        '<td class="hideable num" style="color:var(--' + (p.e ? 'muted' : 'faint') + ')">' + (p.e || '—') + '</td>' +
+        cell(i, 'f') + cell(i, 'r', true);
+      tbody.appendChild(tr);
+    });
+    tbody.querySelectorAll('.cb').forEach(cb => cb.addEventListener('click', () => {
+      const p = people[+cb.dataset.i];
+      p[cb.dataset.k] = p[cb.dataset.k] ? 0 : 1;
+      renderPeople(); renderDropdown(); renderTally();
+    }));
+  }
+  function cell(i, k, hide){
+    return '<td' + (hide ? ' class="hideable"' : '') + '><button class="cb" role="checkbox" aria-checked="' +
+      (people[i][k] ? 'true' : 'false') + '" aria-label="' + people[i].n + ' ' + k + '" data-i="' + i + '" data-k="' + k + '"></button></td>';
+  }
+  function renderDropdown(){
+    const on = people.filter(p => p.f);
+    dd.innerHTML = on.map(p => '<div class="dd-item">' + p.n + '</div>').join('') ||
+      '<div class="dd-item" style="color:var(--faint)">Chưa bật ai</div>';
+  }
+  function renderTally(){
+    document.getElementById('tallyF').textContent = people.filter(p => p.f).length;
+    const stale = people.filter(p => p.e === 0 && p.f && p.t !== 'Recorder');
+    const hint = document.getElementById('staleHint');
+    if (!stale.length) { hint.style.display = 'none'; return; }
+    hint.style.display = 'flex';
+    hint.firstElementChild.innerHTML = '<b>' + stale.length + ' người</b> không có evaluation nào trong 7 ngày: ' +
+      stale.map(p => p.n).join(', ') + '.';
+  }
+  q.addEventListener('input', renderPeople);
+  document.getElementById('showAll').addEventListener('click', () => {
+    people.forEach(p => p.f = 1); renderPeople(); renderDropdown(); renderTally();
+  });
+  document.getElementById('hideStale').addEventListener('click', () => {
+    people.forEach(p => { if (p.e === 0 && p.t !== 'Recorder') p.f = 0; });
+    renderPeople(); renderDropdown(); renderTally();
+  });
+
+  // ── option lists ────────────────────────────────
+  const lists = {
+    initial: { ordered:true, items:[
+      { l:'List_Idea', on:1, u:'1.204 game' }, { l:'Watch List', on:1, u:'318 game' },
+      { l:'Theme/Art', on:1, u:'96 game' }, { l:'Bypass', on:1, u:'2.877 game' },
+      { l:'Link_dead', on:1, u:'441 game' }, { l:'Re-check', on:0, u:'12 game' },
+    ] },
+    final: { ordered:true, items:[
+      { l:'Pass I-IV', on:1, u:'87 game' }, { l:'Insight', on:1, u:'134 game' },
+      { l:'Watch List', on:1, u:'201 game' }, { l:'Pass V', on:1, u:'59 game' },
+      { l:'Theme/Art', on:1, u:'44 game' }, { l:'Bypass', on:1, u:'1.902 game' },
+      { l:'Hold', on:0, u:'8 game' },
+    ] },
+    puzzle: { ordered:false, items:[
+      { l:'Match 3', on:1, u:'2.310 game' }, { l:'Block Puzzle', on:1, u:'884 game' },
+      { l:'Sort / Organize', on:1, u:'671 game' }, { l:'Word', on:1, u:'405 game' },
+      { l:'Jigsaw', on:0, u:'128 game' },
+    ] },
+    arcade: { ordered:false, items:[
+      { l:'Runner', on:1, u:'512 game' }, { l:'Idle Merge', on:1, u:'389 game' },
+      { l:'Shooter', on:1, u:'246 game' },
+    ] },
+  };
+
+  function renderList(key){
+    const cfg = lists[key];
+    const host = document.getElementById(key);
+    host.innerHTML = '';
+    cfg.items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'row' + (it.on ? '' : ' off');
+      row.innerHTML =
+        (cfg.ordered
+          ? '<div class="ord"><button aria-label="Lên"' + (i === 0 ? ' disabled' : '') + ' data-mv="-1">▲</button>' +
+            '<button aria-label="Xuống"' + (i === cfg.items.length - 1 ? ' disabled' : '') + ' data-mv="1">▼</button></div>'
+          : '<div class="ord"></div>') +
+        '<span class="name" contenteditable="true" spellcheck="false">' + it.l + '</span>' +
+        '<span class="usage">' + it.u + '</span>' +
+        '<div class="row-actions"><button class="sw" role="switch" aria-checked="' + (it.on ? 'true' : 'false') +
+        '" aria-label="Bật ' + it.l + '"></button><button class="del" aria-label="Xoá ' + it.l + '">✕</button></div>';
+      row.querySelector('.sw').addEventListener('click', () => { it.on = it.on ? 0 : 1; renderList(key); });
+      row.querySelectorAll('[data-mv]').forEach(b => b.addEventListener('click', () => {
+        const j = i + (+b.dataset.mv);
+        if (j < 0 || j >= cfg.items.length) return;
+        cfg.items.splice(j, 0, cfg.items.splice(i, 1)[0]);
+        renderList(key);
+      }));
+      row.querySelector('.del').addEventListener('click', () => {
+        cfg.items.splice(i, 1); renderList(key);
+      });
+      host.appendChild(row);
+    });
+    const cnt = document.querySelector('.cnt[data-for="' + key + '"]');
+    if (cnt) cnt.textContent = cfg.items.filter(x => x.on).length
+  }
+
+  renderPeople(); renderDropdown(); renderTally();
+  Object.keys(lists).forEach(renderList);
+})();
+</script>

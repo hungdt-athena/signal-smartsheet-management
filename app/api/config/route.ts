@@ -27,7 +27,26 @@ export async function GET(req: NextRequest) {
     const grouped: Record<string, OptionRow[]> = {}
     for (const f of CONFIG_FIELDS) grouped[f] = []
     for (const r of rows) (grouped[r.field] ??= []).push(r)
-    return NextResponse.json(grouped, { headers: { 'Cache-Control': 'no-store' } })
+
+    // How many games each option is attached to, so an admin can see what turning
+    // one off (or deleting it) actually touches. Keyed by lower(value).
+    const usage: Record<string, Record<string, number>> = { conclusion: {}, final_conclusion: {} }
+    try {
+      const counts = await sql<{ field: string; v: string; n: number }[]>`
+        SELECT 'conclusion' AS field, lower(initial_conclusion) AS v, COUNT(*)::int AS n
+        FROM game_evaluations WHERE initial_conclusion IS NOT NULL AND initial_conclusion <> ''
+        GROUP BY 2
+        UNION ALL
+        SELECT 'final_conclusion', lower(final_conclusion), COUNT(*)::int
+        FROM game_evaluations WHERE final_conclusion IS NOT NULL AND final_conclusion <> ''
+        GROUP BY 2
+      `
+      for (const c of counts) (usage[c.field] ??= {})[c.v] = c.n
+    } catch {
+      /* counts are decoration — the option list must render without them */
+    }
+
+    return NextResponse.json({ ...grouped, usage }, { headers: { 'Cache-Control': 'no-store' } })
   }
 
   const guard = await requireAuth()

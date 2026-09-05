@@ -5,6 +5,7 @@ import { Suspense } from 'react'
 
 const ERROR_MESSAGES: Record<string, string> = {
   unauthorized: 'Your account is not authorized. Contact your admin.',
+  inactive: 'This account has been deactivated. Ask an admin to turn it back on.',
   domain: 'Only @athena.studio accounts are allowed.',
   server: 'Server is temporarily unavailable. Please try again later.',
   default: 'Sign-in failed. Please try again.',

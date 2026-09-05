@@ -1,19 +1,22 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
-import { DnDColumns } from '@/components/DnDColumns'
+import { OptionRows } from '@/components/OptionRows'
+import { PeopleSection } from '@/components/config/PeopleSection'
 
 type Field = 'conclusion' | 'final_conclusion'
 
 interface OptionRow { id: number; field: string; value: string; sort_order: number; active: boolean }
+type UsageMap = Record<string, Record<string, number>>
 
 const FIELDS: { key: Field; label: string; note: string }[] = [
   { key: 'conclusion',       label: 'Initial Conclusion', note: "Evaluator's conclusion options" },
-  { key: 'final_conclusion', label: 'Final Conclusion',   note: "Moderator triage verdicts (Short List)" },
+  { key: 'final_conclusion', label: 'Final Conclusion',   note: 'Moderator triage verdicts (Short List)' },
 ]
 
 export default function ConfigPage() {
   const [data, setData] = useState<Record<Field, OptionRow[]>>({ conclusion: [], final_conclusion: [] })
+  const [usage, setUsage] = useState<UsageMap>({})
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -24,6 +27,7 @@ export default function ConfigPage() {
       if (res.ok) {
         const json = await res.json()
         setData({ conclusion: json.conclusion ?? [], final_conclusion: json.final_conclusion ?? [] })
+        setUsage(json.usage ?? {})
       }
     } catch { /* ignore */ }
     finally { setLoading(false) }
@@ -65,20 +69,25 @@ export default function ConfigPage() {
         </p>
       )}
 
-      {FIELDS.map(f => (
-        <ConfigSection
-          key={f.key}
-          label={f.label}
-          note={f.note}
-          options={data[f.key]}
-          loading={loading}
-          onAdd={value => send('POST', { field: f.key, value })}
-          onRename={(id, value) => send('PATCH', { id, value })}
-          onToggle={(id, active) => send('PATCH', { id, active })}
-          onReorder={ids => send('PATCH', { field: f.key, ids })}
-          onDelete={id => send('DELETE', { id })}
-        />
-      ))}
+      <PeopleSection />
+
+      <div className="cfg-grid">
+        {FIELDS.map(f => (
+          <ConfigSection
+            key={f.key}
+            label={f.label}
+            note={f.note}
+            options={data[f.key]}
+            usage={usage[f.key]}
+            loading={loading}
+            onAdd={value => send('POST', { field: f.key, value })}
+            onRename={(id, value) => send('PATCH', { id, value })}
+            onToggle={(id, active) => send('PATCH', { id, active })}
+            onReorder={ids => send('PATCH', { field: f.key, ids })}
+            onDelete={id => send('DELETE', { id })}
+          />
+        ))}
+      </div>
 
       <CategorySection />
     </div>
@@ -86,11 +95,12 @@ export default function ConfigPage() {
 }
 
 function ConfigSection({
-  label, note, options, loading, onAdd, onRename, onToggle, onReorder, onDelete,
+  label, note, options, usage, loading, onAdd, onRename, onToggle, onReorder, onDelete,
 }: {
   label: string
   note: string
   options: OptionRow[]
+  usage?: Record<string, number>
   loading: boolean
   onAdd: (value: string) => Promise<boolean>
   onRename: (id: number, value: string) => Promise<boolean>
@@ -111,15 +121,27 @@ function ConfigSection({
 
   const activeCount = options.filter(o => o.active).length
 
+  const items = useMemo(() => options.map(o => {
+    const n = usage?.[o.value.toLowerCase()]
+    return {
+      id: o.id,
+      label: o.value,
+      active: o.active,
+      usage: n ? `${n.toLocaleString('en-US')} games` : undefined,
+    }
+  }), [options, usage])
+
   return (
     <div className="card">
       <div className="card-head">
         <span className="card-label">{label}</span>
-        <span className="card-note">{note} · {activeCount}/{options.length} active · drag to reorder / archive, double-click to rename</span>
+        <span className="card-note">
+          {note} · {activeCount}/{options.length} on · ▲▼ to reorder, click a name to rename
+        </span>
       </div>
 
-      <DnDColumns
-        items={options.map(o => ({ id: o.id, label: o.value, active: o.active }))}
+      <OptionRows
+        items={items}
         loading={loading}
         onToggle={(id, active) => { onToggle(id, active) }}
         onReorder={ids => { onReorder(ids) }}
@@ -127,10 +149,9 @@ function ConfigSection({
         onDelete={id => { onDelete(id) }}
       />
 
-      <form onSubmit={handleAdd} style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+      <form onSubmit={handleAdd} className="cfg-add">
         <input
           className="input"
-          style={{ flex: 1 }}
           value={newValue}
           onChange={e => setNewValue(e.target.value)}
           placeholder={`Add ${label.toLowerCase()} option…`}
@@ -181,9 +202,9 @@ function CategorySection() {
     <div className="card">
       <div className="card-head">
         <span className="card-label">Genre → Sub-genre</span>
-        <span className="card-note">Which game genres feed each evaluation bucket</span>
+        <span className="card-note">Which game genres feed each evaluation bucket · order does not matter here, so no ▲▼</span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="cfg-grid cfg-grid-3">
         {BUCKETS.map(b => (
           <BucketGroup
             key={b}
@@ -215,7 +236,6 @@ function BucketGroup({
   const [checking, setChecking] = useState(false)
 
   const used = rows.filter(r => r.active)
-  const archived = rows.filter(r => !r.active)
 
   async function attemptAdd() {
     const g = newValue.trim()
@@ -230,21 +250,22 @@ function BucketGroup({
   }
 
   return (
-    <div>
-      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--faint)' }}>
-        {label} <span style={{ fontWeight: 400 }}>· {used.length} used / {archived.length} archived</span>
+    <div className="cfg-bucket">
+      <div className="cfg-bucket-head">
+        {label} <span>· {used.length} on / {rows.length - used.length} off</span>
       </div>
-      <DnDColumns
+      <OptionRows
         items={rows.map(r => ({ id: r.id, label: r.genre, active: r.active }))}
         loading={loading}
+        emptyText="No sub-genre yet"
         onToggle={(id, active) => { onToggle(id, active) }}
         onDelete={id => { onDelete(id) }}
       />
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
-        <input className="input" style={{ flex: 1 }} value={newValue}
+      <div className="cfg-add">
+        <input className="input" value={newValue}
           onChange={e => { setNewValue(e.target.value); setWarn(false) }}
           onKeyDown={e => { if (e.key === 'Enter') attemptAdd() }}
-          placeholder={`Add sub-genre to ${label.toLowerCase()}…`} />
+          placeholder={`Add to ${label.toLowerCase()}…`} />
         <button className="btn btn-primary btn-sm" disabled={checking || !newValue.trim()} onClick={attemptAdd}>
           {checking ? '...' : warn ? 'Add anyway' : 'Add'}
         </button>

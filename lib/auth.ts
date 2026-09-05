@@ -47,8 +47,10 @@ export const authOptions: NextAuthOptions = {
           return '/login?error=domain'
         }
 
-        const existing = await sql`SELECT id FROM dashboard_users WHERE email = ${user.email}`
-        if (existing.length > 0) return true
+        const existing = await sql`SELECT id, active FROM dashboard_users WHERE email = ${user.email}`
+        // A deactivated account keeps its row (and all its history) but must not
+        // get back in — this is what Users Management' Deactivate now means.
+        if (existing.length > 0) return existing[0].active === false ? '/login?error=inactive' : true
 
         const prefix = user.email.split('@')[0].toLowerCase()
 
@@ -87,8 +89,11 @@ export const authOptions: NextAuthOptions = {
       if (!session.user?.email) return session
       try {
         const email = session.user.email
-        const rows = await sql`SELECT id, name, role FROM dashboard_users WHERE email = ${email}`
-        if (rows.length > 0) {
+        const rows = await sql`SELECT id, name, role, active FROM dashboard_users WHERE email = ${email}`
+        // Deactivating someone must take effect on their next request, not when
+        // their JWT happens to expire, so a live session loses its role here and
+        // every requireRole guard then turns it away.
+        if (rows.length > 0 && rows[0].active !== false) {
           session.user.id = rows[0].id
           session.user.role = rows[0].role
           session.user.name = rows[0].name
@@ -101,8 +106,8 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user?.email) {
         try {
-          const rows = await sql`SELECT role FROM dashboard_users WHERE email = ${user.email}`
-          if (rows.length > 0) token.role = rows[0].role
+          const rows = await sql`SELECT role, active FROM dashboard_users WHERE email = ${user.email}`
+          if (rows.length > 0 && rows[0].active !== false) token.role = rows[0].role
         } catch (e) {
           console.error('[auth] jwt DB error:', (e as Error).message)
         }

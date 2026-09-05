@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { requireAdmin, requireManager } from '@/lib/auth-guard'
+import { requireManager } from '@/lib/auth-guard'
 import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 
@@ -29,10 +29,12 @@ export async function GET() {
   const guard = await requireManager()
   if (guard) return guard
 
+  // Active first, so the working roster is what you see and the deactivated tail
+  // sits at the bottom instead of being interleaved with it.
   const users = await sql`
-    SELECT id, email, name, role, title, created_at
+    SELECT id, email, name, role, title, active, created_at
     FROM dashboard_users
-    ORDER BY created_at ASC
+    ORDER BY active DESC, created_at ASC
   `
   return NextResponse.json(users, { headers: { 'Cache-Control': 'no-store' } })
 }
@@ -73,15 +75,23 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PUT /api/admin/users — update role / display name / title (any subset)
+// PUT /api/admin/users — update role / display name / title / active (any subset)
 export async function PUT(req: NextRequest) {
   const guard = await requireManager()
   if (guard) return guard
 
   const body = await req.json()
-  const { id, role, name, title } = body
-  if (!id || (role === undefined && name === undefined && title === undefined)) {
-    return NextResponse.json({ error: 'id and at least one of role, name, title are required' }, { status: 400 })
+  const { id, role, name, title, active } = body
+  if (!id || (role === undefined && name === undefined && title === undefined && active === undefined)) {
+    return NextResponse.json({ error: 'id and at least one of role, name, title, active are required' }, { status: 400 })
+  }
+  if (active !== undefined && typeof active !== 'boolean') {
+    return NextResponse.json({ error: 'active must be boolean' }, { status: 400 })
+  }
+  // Same tier as changing a role: deactivating someone locks them out of the
+  // whole dashboard, which is not a moderator's call to make.
+  if (active !== undefined && !(await callerIsAdmin())) {
+    return NextResponse.json({ error: 'Only an admin can deactivate a user' }, { status: 403 })
   }
   if (role !== undefined && !VALID_ROLES.includes(role)) {
     return NextResponse.json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` }, { status: 400 })
@@ -108,37 +118,22 @@ export async function PUT(req: NextRequest) {
   if (role !== undefined && user[0].email === SUPER_ADMIN_EMAIL && role !== 'admin') {
     return NextResponse.json({ error: 'Cannot demote super admin' }, { status: 403 })
   }
+  if (active === false && user[0].email === SUPER_ADMIN_EMAIL) {
+    return NextResponse.json({ error: 'Cannot deactivate super admin' }, { status: 403 })
+  }
 
   await sql`
     UPDATE dashboard_users SET
       role = ${role !== undefined ? role : sql`role`},
       name = ${name !== undefined ? name.trim() : sql`name`},
-      title = ${title !== undefined ? (title || null) : sql`title`}
+      title = ${title !== undefined ? (title || null) : sql`title`},
+      active = ${active !== undefined ? active : sql`active`}
     WHERE id = ${id}
   `
   return NextResponse.json({ ok: true })
 }
 
-// DELETE /api/admin/users — remove a user
-export async function DELETE(req: NextRequest) {
-  const guard = await requireAdmin()
-  if (guard) return guard
-
-  const { id } = await req.json()
-  if (!id) {
-    return NextResponse.json({ error: 'id is required' }, { status: 400 })
-  }
-
-  const user = await sql`SELECT email, role FROM dashboard_users WHERE id = ${id}`
-  if (user.length === 0) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
-  }
-
-  // Prevent deleting super admin
-  if (user[0].email === SUPER_ADMIN_EMAIL) {
-    return NextResponse.json({ error: 'Cannot delete super admin' }, { status: 403 })
-  }
-
-  await sql`DELETE FROM dashboard_users WHERE id = ${id}`
-  return NextResponse.json({ ok: true })
-}
+// Deleting a user is gone on purpose. It removed the only row saying a name
+// belonged to a real person while every game they evaluated kept that name, so
+// the roster and the history disagreed for good. PUT { id, active: false } is
+// the replacement: no sign-in, out of every dropdown, row and history intact.

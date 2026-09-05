@@ -11,8 +11,11 @@ interface User {
   name: string
   role: Role
   title: string | null
+  active: boolean
   created_at: string
 }
+
+interface Orphan { key: string; name: string; total: number; last_eval: string | null }
 
 const SUPER_ADMIN = 'hungdt@athena.studio'
 
@@ -40,12 +43,17 @@ const TITLE_OPTIONS = [
 export default function AdminPage() {
   const { data: session } = useSession()
   // Moderators share this page: they invite people and fix display names, but
-  // role and Remove are the admin's. The API enforces both.
+  // role and Deactivate are the admin's. The API enforces both.
   const isAdmin = session?.user?.role === 'admin'
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
+  // Evaluator audit: preview first (GET), then apply (POST). Nothing is written
+  // until the admin has seen the list.
+  const [orphans, setOrphans] = useState<Orphan[] | null>(null)
+  const [auditing, setAuditing] = useState(false)
+  const [auditResult, setAuditResult] = useState<string | null>(null)
 
   const [newEmail, setNewEmail] = useState('')
   const [newName, setNewName] = useState('')
@@ -97,7 +105,7 @@ export default function AdminPage() {
     }
   }
 
-  async function updateUser(id: number, patch: { role?: string; name?: string; title?: string }) {
+  async function updateUser(id: number, patch: { role?: string; name?: string; title?: string; active?: boolean }) {
     try {
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
@@ -122,20 +130,35 @@ export default function AdminPage() {
     if (name && name !== u.name) updateUser(u.id, { name })
   }
 
-  async function handleDelete(id: number, email: string) {
-    if (!confirm(`Remove ${email}?`)) return
+  // Deactivating replaced deleting: the row and its history stay, but the person
+  // cannot sign in and drops out of every evaluator dropdown and Config › People.
+  function setActive(u: User, active: boolean) {
+    if (!active && !confirm(`Deactivate ${u.email}? They will not be able to sign in.`)) return
+    updateUser(u.id, { active })
+  }
+
+  async function runAudit(apply: boolean) {
+    setAuditing(true)
+    setAuditResult(null)
     try {
-      const res = await fetch('/api/admin/users', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      })
-      if (res.ok) fetchUsers()
-      else {
-        const body = await res.json()
-        alert(body.error ?? 'Failed to delete')
+      const res = await fetch('/api/admin/users/audit-evaluators', { method: apply ? 'POST' : 'GET' })
+      const body = await res.json()
+      if (!res.ok) { setAuditResult(body.error ?? 'Audit failed'); return }
+      if (apply) {
+        setOrphans(null)
+        setAuditResult(body.created.length
+          ? `Created ${body.created.length} deactivated account(s): ${body.created.join(', ')}`
+          : 'Nothing to create')
+        fetchUsers()
+      } else {
+        setOrphans(body.orphans)
+        if (body.orphans.length === 0) setAuditResult('Every evaluator already has an account')
       }
-    } catch { /* ignore */ }
+    } catch {
+      setAuditResult('Network error')
+    } finally {
+      setAuditing(false)
+    }
   }
 
   async function handleSync() {
@@ -157,6 +180,9 @@ export default function AdminPage() {
     }
   }
 
+  const active = users.filter(u => u.active !== false)
+  const inactive = users.filter(u => u.active === false)
+
   return (
     <div className="page">
       <div className="page-head">
@@ -167,14 +193,50 @@ export default function AdminPage() {
       <div className="card">
         <div className="card-head">
           <span className="card-label">Add User</span>
-          <button className="btn btn-sm btn-primary" onClick={handleSync} disabled={syncing}>
-            <span className={syncing ? 'spin' : ''}>↻</span>
-            {syncing ? 'Syncing...' : 'Sync Evaluators'}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {isAdmin && (
+              <button className="btn btn-sm" onClick={() => runAudit(false)} disabled={auditing}>
+                {auditing ? '...' : 'Audit evaluators'}
+              </button>
+            )}
+            <button className="btn btn-sm btn-primary" onClick={handleSync} disabled={syncing}>
+              <span className={syncing ? 'spin' : ''}>↻</span>
+              {syncing ? 'Syncing...' : 'Sync Evaluators'}
+            </button>
+          </div>
         </div>
 
         {syncResult && (
           <p className="msg-ok" style={{ marginBottom: 10 }}>{syncResult}</p>
+        )}
+        {auditResult && (
+          <p className="msg-ok" style={{ marginBottom: 10 }}>{auditResult}</p>
+        )}
+        {orphans && orphans.length > 0 && (
+          <div className="audit-box">
+            <p>
+              <b>{orphans.length}</b> evaluator name(s) have no user account. Creating them
+              adds a <b>deactivated</b> account each — no sign-in, and they leave Config › People.
+              Reactivate any that turn out to be current staff.
+            </p>
+            <ul>
+              {orphans.map(o => (
+                <li key={o.key}>
+                  <span>{o.name}</span>
+                  <span className="audit-meta">
+                    {o.total.toLocaleString('en-US')} games · last{' '}
+                    {o.last_eval ? new Date(o.last_eval).toLocaleDateString('en-CA') : 'never'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-sm btn-primary" onClick={() => runAudit(true)} disabled={auditing}>
+                {auditing ? '...' : `Create ${orphans.length} deactivated account(s)`}
+              </button>
+              <button className="btn btn-sm" onClick={() => setOrphans(null)}>Cancel</button>
+            </div>
+          </div>
         )}
 
         <form onSubmit={handleAdd} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -216,7 +278,7 @@ export default function AdminPage() {
       {/* User List */}
       <div className="card">
         <div className="card-head">
-          <span className="card-label">Users ({users.length})</span>
+          <span className="card-label">Users ({active.length})</span>
           <button className="btn btn-sm" onClick={fetchUsers} disabled={loading}>
             <span className={loading ? 'spin' : ''}>↻</span>
             {loading ? '...' : 'Refresh'}
@@ -236,13 +298,13 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {users.length === 0 && !loading && (
+              {active.length === 0 && !loading && (
                 <tr><td colSpan={6} className="empty">No users</td></tr>
               )}
               {loading && (
                 <tr><td colSpan={6} className="empty">Loading...</td></tr>
               )}
-              {!loading && users.map(u => {
+              {!loading && active.map(u => {
                 const isSuper = u.email === SUPER_ADMIN
                 return (
                   <tr key={u.id}>
@@ -291,9 +353,8 @@ export default function AdminPage() {
                     </td>
                     <td>
                       {!isSuper && isAdmin && (
-                        <button className="btn btn-sm btn-danger"
-                          onClick={() => handleDelete(u.id, u.email)}>
-                          Remove
+                        <button className="btn btn-sm btn-danger" onClick={() => setActive(u, false)}>
+                          Deactivate
                         </button>
                       )}
                     </td>
@@ -304,6 +365,54 @@ export default function AdminPage() {
           </table>
         </div>
       </div>
+
+      {/* Deactivated accounts: their own table, not greyed rows mixed into the
+          roster above. Nothing here can sign in, and none of them appear in an
+          evaluator dropdown or in Config > People. */}
+      {inactive.length > 0 && (
+        <div className="card">
+          <div className="card-head">
+            <span className="card-label">Inactive ({inactive.length})</span>
+            <span className="card-note">
+              No sign-in, hidden from every evaluator dropdown and from Config › People.
+              History and past evaluations are untouched.
+            </span>
+          </div>
+
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Name</th>
+                  <th>Title</th>
+                  <th>Created</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {inactive.map(u => (
+                  <tr key={u.id}>
+                    <td><span className="cell-name">{u.email}</span></td>
+                    <td>{u.name}</td>
+                    <td style={{ color: 'var(--faint)', fontSize: 12 }}>{u.title || '—'}</td>
+                    <td style={{ color: 'var(--faint)', fontSize: 12 }}>
+                      {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
+                    </td>
+                    <td>
+                      {isAdmin && (
+                        <button className="btn btn-sm" onClick={() => setActive(u, true)}>
+                          Activate
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
