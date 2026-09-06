@@ -1,0 +1,8 @@
+=== Evaluations page — end-to-end (port 3334, median of 5) ===
+Evaluate tab, mở lần đầu (month=auto)        7530 ms    575717 B
+Evaluate tab, đổi filter conclusion              6724 ms    596180 B
+Short List, mở lần đầu (date_basis=evaluated)      6801 ms    576732 B
+Short List, đổi filter final_conclusion          5159 ms     97450 B
+Short List, đổi batch                            4690 ms       826 B
+
+[exited with code 0]

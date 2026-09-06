@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
-import { readYtbUploaded, updateYtbRow, appendYtbRow, deleteYtbRow } from '@/lib/google-sheets'
+import { updateYtbRow, appendYtbRow, deleteYtbRow } from '@/lib/google-sheets'
+import { getYtbUploaded, invalidateYtbCache } from '@/lib/ytb-cache'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +19,7 @@ export async function GET() {
   if (missing) return NextResponse.json({ error: `${missing} not configured` }, { status: 503 })
 
   try {
-    const rows = await readYtbUploaded()
+    const rows = await getYtbUploaded()
     return NextResponse.json(rows, { headers: { 'Cache-Control': 'no-store' } })
   } catch (e) {
     console.error('[sheets/ytb-uploaded GET]', e)
@@ -40,6 +41,7 @@ export async function PATCH(req: NextRequest) {
 
   try {
     await updateYtbRow(row_index, updates)
+    invalidateYtbCache()
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('[sheets/ytb-uploaded PATCH]', e)
@@ -68,6 +70,7 @@ export async function POST(req: NextRequest) {
       pic:       body.pic       ?? '',
       duration:  body.duration  ?? '',
     })
+    invalidateYtbCache()
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('[sheets/ytb-uploaded POST]', e)
@@ -89,6 +92,7 @@ export async function DELETE(req: NextRequest) {
 
   try {
     await deleteYtbRow(row_index)
+    invalidateYtbCache()
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('[sheets/ytb-uploaded DELETE]', e)

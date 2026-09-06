@@ -396,13 +396,19 @@ interface Props {
   onClose?: () => void
 }
 
-// Fetches the `ytb_uploaded` sheet once and builds the duration-aware
-// title→youtubeId map (shared logic with the Record grid). The Record cards and
-// the "Video Uploaded" milestone derive "recorded" live from this.
+// Builds the duration-aware title→youtubeId map (shared logic with the Record
+// grid). The Record cards and the "Video Uploaded" milestone derive "recorded"
+// from this.
+//
+// Reads the Postgres mirror, NOT the sheet. Every panel open used to trigger a
+// full Google Sheets read (300-1500ms, quota-limited) for data that only changes
+// long after this screen matters — recording happens after final conclusion, so
+// a mirror minutes behind is indistinguishable from live here. The Record tab,
+// which actually edits these rows, still talks to the sheet directly.
 function useYtbUploads(): Map<string, YtMatch> {
   const [map, setMap] = useState<Map<string, YtMatch>>(new Map())
   useEffect(() => {
-    fetch('/api/sheets/ytb-uploaded', { cache: 'no-store' })
+    fetch('/api/ytb-uploads', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : [])
       .then((rows: Array<{ gameTitle: string; youtubeId: string; duration: string; time: string }>) => setMap(buildYtMap(rows)))
       .catch(() => {})

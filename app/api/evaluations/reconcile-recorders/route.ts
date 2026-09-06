@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
-import { readYtbUploaded } from '@/lib/google-sheets'
+import { getYtbUploaded } from '@/lib/ytb-cache'
 import { buildYtMap, ytLookup, normalizeName, type Bucket } from '@/lib/ytb-match'
 
 export const dynamic = 'force-dynamic'
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
       : null
 
     // 1. Uploads → map keyed by title+bucket, keeping the earliest upload's pic.
-    const ytRows = await readYtbUploaded()
+    const ytRows = await getYtbUploaded()
     const ytMap = buildYtMap(ytRows)
 
     // 2. Canonical recorder names (normalized → exact DB name).

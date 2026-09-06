@@ -1,0 +1,8 @@
+=== SAU KHI TÁCH FACET (median of 3) ===
+-- rows (mỗi lần đổi filter đều gọi) --
+Evaluate: đổi filter conclusion                  3077 ms    595541 B
+Short List: mở lần đầu                       2306 ms    576015 B
+Short List: đổi final_conclusion                 1675 ms     96778 B
+Short List: đổi batch                            1116 ms       109 B
+-- facets (chỉ gọi khi category/evaluator/conclusion/ngày đổi) --
+facets                                              1920 ms       739 B
