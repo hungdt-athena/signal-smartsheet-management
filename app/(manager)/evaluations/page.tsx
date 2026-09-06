@@ -549,34 +549,33 @@ function ShortListEvalTab() {
   const batchDefaultedRef = useRef(false)
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
 
-  const fetchData = useCallback(async () => {
-    const seq = ++fetchSeqRef.current
-    setLoading(true)
+  // The filter params both fetches share. Kept in one place so the rows request and
+  // the facets request can never disagree about what is being looked at.
+  const scopeParams = useCallback(() => {
+    const params = new URLSearchParams({ category: filterCategory })
+    if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
+    if (filterFinalConclusions.length > 0) params.set('final_conclusions', filterFinalConclusions.join(','))
+    // Evaluators are locked to their own rows; managers may filter freely.
+    if (!isManager) {
+      if (userName) params.set('evaluator', userName)
+    } else if (filterEvaluator) {
+      params.set('evaluator', filterEvaluator)
+    }
+    for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
+    return params
+  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, df.value, df.autoMonth, isManager, userName])
+
+  // Dropdown contents. Deliberately NOT dependent on batch or sort: `available_batches`
+  // and `default_batch` ignore the batch filter by design, and nothing here depends on
+  // sort order -- so switching batch (the most common action on this tab) no longer
+  // re-runs any of these table-wide scans.
+  const fetchFacets = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ category: filterCategory, limit: '500' })
-      params.set('sort', sortAsc ? 'asc' : 'desc')
-      if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
-      if (filterFinalConclusions.length > 0) params.set('final_conclusions', filterFinalConclusions.join(','))
-      // Evaluators are locked to their own rows; managers may filter freely.
-      if (!isManager) {
-        if (userName) params.set('evaluator', userName)
-      } else if (filterEvaluator) {
-        params.set('evaluator', filterEvaluator)
-      }
-      // Filter batch server-side: doing it client-side over the 500-row page meant
-      // batch rows outside the loaded window vanished (and the count flipped with
-      // sort direction). Let the DB filter before LIMIT instead.
-      if (filterBatch) params.set('batch', filterBatch)
-      for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
-      const res = await fetch(`/api/evaluations?${params}`)
+      const res = await fetch(`/api/evaluations/facets?${scopeParams()}`)
       const json = await res.json()
-      if (seq !== fetchSeqRef.current) return
-      setData(json.data || [])
-      setTotal(json.total || 0)
       if (json.available_months) df.setAvailableMonths(json.available_months)
       if (json.available_evaluators) setAvailableEvaluators(json.available_evaluators)
       if (json.available_batches) setAvailableBatches(json.available_batches)
-      let willDefaultBatch = false
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
         if (!batchDefaultedRef.current) {
@@ -584,29 +583,49 @@ function ShortListEvalTab() {
           // Pre-select the team's current batch, but fall back to the most recent
           // batch with games (server-resolved default_batch) when current is empty.
           const def = json.default_batch !== undefined ? json.default_batch : json.current_batch
-          if (def) {
-            willDefaultBatch = true
-            setFilterBatch(def)
-          }
+          if (def) setFilterBatch(def)
         }
-      }
-      if (df.autoMonth && json.applied_month !== undefined) {
-        const ap = json.applied_month as YearMonth | null
-        // Suppress the redundant refetch after resolving month=auto — but NOT when
-        // we're also defaulting the batch filter this render. React batches both
-        // state updates into one fetchData recreation, so a blanket suppress would
-        // swallow the batch-narrowed refetch and leave the full List_Idea showing.
-        if (!willDefaultBatch) df.suppressFetchRef.current = true
-        df.setAutoMonth(false)
-        df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
       if (json.available_conclusions?.length) {
         const merged = Array.from(new Set([...json.available_conclusions, ...filterConclusions]))
         setAvailableConclusions(CONCLUSION_OPTIONS.filter(c => merged.includes(c)).concat(merged.filter(c => !CONCLUSION_OPTIONS.includes(c))))
       }
     } catch { /* ignore */ }
+  }, [scopeParams, filterConclusions])
+
+  const fetchData = useCallback(async () => {
+    const seq = ++fetchSeqRef.current
+    setLoading(true)
+    try {
+      const params = scopeParams()
+      params.set('limit', '500')
+      params.set('sort', sortAsc ? 'asc' : 'desc')
+      // Dropdowns come from /facets now; this request only pays for its own rows.
+      params.set('meta', '0')
+      // Filter batch server-side: doing it client-side over the 500-row page meant
+      // batch rows outside the loaded window vanished (and the count flipped with
+      // sort direction). Let the DB filter before LIMIT instead.
+      if (filterBatch) params.set('batch', filterBatch)
+      const res = await fetch(`/api/evaluations?${params}`)
+      const json = await res.json()
+      if (seq !== fetchSeqRef.current) return
+      setData(json.data || [])
+      setTotal(json.total || 0)
+      if (df.autoMonth && json.applied_month !== undefined) {
+        const ap = json.applied_month as YearMonth | null
+        // Suppress the redundant refetch after resolving month=auto. The batch default
+        // no longer lands in this response (it comes from /facets, on its own effect),
+        // so unlike before there is no batch-narrowed refetch for a blanket suppress to
+        // swallow.
+        df.suppressFetchRef.current = true
+        df.setAutoMonth(false)
+        df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
+      }
+    } catch { /* ignore */ }
     setLoading(false)
-  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, filterBatch, df.value, df.autoMonth, sortAsc, isManager, userName])
+  }, [scopeParams, filterBatch, sortAsc, df.autoMonth])
+
+  useEffect(() => { fetchFacets() }, [fetchFacets])
 
   useEffect(() => {
     if (df.suppressFetchRef.current) { df.suppressFetchRef.current = false; return }
@@ -991,6 +1010,39 @@ function EvaluationsPageInner() {
   const pageRef = useRef(1)
   const sentinelRef = useRef<HTMLDivElement>(null)
 
+  // Pending is always shown all-time on the assigned basis: a game awaiting evaluation
+  // may have been assigned in any earlier month, so the date picker must not narrow it.
+  // (Picker is hidden in this mode.) Shared by the rows and facets requests so the
+  // dropdowns describe the same window the table is showing.
+  const evalDateParams = useCallback(() => (
+    filterStatus === 'pending'
+      ? { date_basis: 'assigned' as const }
+      : dateFilterParams(df.value, df.autoMonth)
+  ), [filterStatus, df.value, df.autoMonth])
+
+  // Dropdown contents: independent of sort and of which page the infinite scroll is on.
+  const fetchFacets = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({ category })
+      const isManager = isManagerRole(role)
+      if (!isManager) {
+        if (userName) params.set('evaluator', userName)
+      } else if (filterEvaluator) {
+        params.set('evaluator', filterEvaluator)
+      }
+      if (filterConclusion) params.set('conclusion', filterConclusion)
+      if (filterStatus) params.set('status', filterStatus)
+      for (const [k, v] of Object.entries(evalDateParams())) params.set(k, v)
+      const res = await fetch(`/api/evaluations/facets?${params}`)
+      const json = await res.json()
+      if (json.available_months) df.setAvailableMonths(json.available_months)
+      if (json.available_conclusions) setConclusionOptions(json.available_conclusions)
+      if (json.available_evaluators) setEvaluatorOptions(json.available_evaluators)
+    } catch { /* ignore */ }
+  }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams, role, userName])
+
+  useEffect(() => { fetchFacets() }, [fetchFacets])
+
   const fetchPage = useCallback(async (page: number, append: boolean) => {
     const seq = ++fetchSeqRef.current
     if (append) setLoadingMore(true); else setLoading(true)
@@ -1008,10 +1060,9 @@ function EvaluationsPageInner() {
       // Pending is always shown all-time on the assigned basis: a game awaiting
       // evaluation may have been assigned in any earlier month, so the date picker
       // must not narrow it. (Picker is hidden in this mode — see below.)
-      const dateParams = filterStatus === 'pending'
-        ? { date_basis: 'assigned' as const }
-        : dateFilterParams(df.value, df.autoMonth)
-      for (const [k, v] of Object.entries(dateParams)) params.set(k, v)
+      for (const [k, v] of Object.entries(evalDateParams())) params.set(k, v)
+      // Dropdowns come from /api/evaluations/facets on their own effect below.
+      params.set('meta', '0')
       const res = await fetch(`/api/evaluations?${params}`)
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return // stale response; a newer fetch owns the state
@@ -1023,9 +1074,6 @@ function EvaluationsPageInner() {
       }
       if (json.total !== undefined) setTotal(json.total)
       if (json.stats) setApiStats(json.stats)
-      if (json.available_conclusions) setConclusionOptions(json.available_conclusions)
-      if (json.available_evaluators) setEvaluatorOptions(json.available_evaluators)
-      if (json.available_months) df.setAvailableMonths(json.available_months)
       if (df.autoMonth && json.applied_month !== undefined) {
         // Lock in the server-resolved month: the picker shows it and all
         // later fetches use explicit params instead of re-resolving auto.
@@ -1038,7 +1086,7 @@ function EvaluationsPageInner() {
     } catch { /* ignore */ }
     setLoading(false)
     setLoadingMore(false)
-  }, [category, filterEvaluator, filterConclusion, filterStatus, df.value, df.autoMonth, role, userName, sortAsc])
+  }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams, df.autoMonth, role, userName, sortAsc])
 
   useEffect(() => {
     if (df.suppressFetchRef.current) {
