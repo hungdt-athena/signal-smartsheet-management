@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { readHandoverLog, appendFlowLog } from '@/lib/google-sheets'
+import { getSession } from '@/lib/session'
 
 export async function GET(_req: NextRequest) {
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.user.role !== 'evaluator') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -27,7 +26,7 @@ export async function GET(_req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.user.role !== 'evaluator') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

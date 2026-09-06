@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 import { requireManager } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { readNotes, type PendingTag } from '@/lib/playtest-tags'
 import { syncTags, type SyncOutput } from '@/lib/playtest-tags-sync'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,7 +40,7 @@ export async function POST(req: NextRequest) {
 
   const notes = readNotes(body.notes)
 
-  const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
+  const session = process.env.SKIP_AUTH === 'true' ? null : await getSession()
   const admin = session?.user?.email || 'skip-auth@local'
 
   let out: SyncOutput = { results: [], skipped: [] }

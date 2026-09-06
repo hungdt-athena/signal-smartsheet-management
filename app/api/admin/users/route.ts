@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 import { requireManager } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +16,7 @@ const VALID_ROLES = ['admin', 'moderator', 'evaluator']
  *  auto-synced tags, no Final Conclusion) would mean nothing. */
 async function callerIsAdmin(): Promise<boolean> {
   if (process.env.SKIP_AUTH === 'true') return true
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   return session?.user?.role === 'admin'
 }
 // Job classification, independent of the access role. Set manually per user;

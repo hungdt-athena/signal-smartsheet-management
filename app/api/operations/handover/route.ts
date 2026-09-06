@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { requireRole } from '@/lib/auth-guard'
 import { isBucket } from '@/lib/buckets'
 import { selectPendingGames, loadRoster, distribute } from '@/lib/reassign-core'
 import { sourceBreakdowns, perEvaluatorPlatform, insertOperationRun, type DistSnapshot } from '@/lib/operation-runs'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -34,7 +33,7 @@ export async function POST(req: NextRequest) {
   const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
 
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   const isEvaluator = session?.user?.role === 'evaluator'
 
   let body: Body
@@ -89,7 +88,7 @@ export async function POST(req: NextRequest) {
 
     // Submit: persist a pending request. No game_evaluations / handover_requests /
     // assignment_history writes here — those happen on approve.
-    const session = await getServerSession(authOptions)
+    const session = await getSession()
     const runId = await insertOperationRun({
       kind: 'handover', category, fromEvaluator: from, status: 'pending',
       params: { start_date: body.start_date, end_date: body.end_date },

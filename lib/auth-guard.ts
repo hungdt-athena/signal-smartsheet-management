@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getSession } from '@/lib/session'
 
 type Role = 'admin' | 'moderator' | 'evaluator'
 
@@ -9,7 +8,7 @@ type Role = 'admin' | 'moderator' | 'evaluator'
  *  Skips all checks when SKIP_AUTH=true (local dev). */
 export async function requireRole(role: Role | Role[]): Promise<NextResponse | null> {
   if (process.env.SKIP_AUTH === 'true') return null
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const allowed = Array.isArray(role) ? role : [role]
   if (!allowed.includes(session.user.role)) {
@@ -35,7 +34,7 @@ export function requireAdmin(): Promise<NextResponse | null> {
  *  Skips all checks when SKIP_AUTH=true (local dev). */
 export async function requireAuth(): Promise<NextResponse | null> {
   if (process.env.SKIP_AUTH === 'true') return null
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   return null
 }

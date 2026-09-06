@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { sanitizeSections, rowToSections } from '@/lib/weekly-feedback'
 import { isManagerRole } from '@/lib/roles'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +11,7 @@ interface SessionInfo { isManager: boolean; name: string }
 
 async function resolveSession(): Promise<SessionInfo> {
   if (process.env.SKIP_AUTH === 'true') return { isManager: true, name: '' }
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   const role = session?.user?.role
   return {
     isManager: isManagerRole(role),

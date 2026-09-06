@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +25,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "kind must be 'reassign', 'rescue' or 'handover'" }, { status: 400 })
   }
 
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   const viewer = session?.user?.email ?? null
   const isEvaluator = session?.user?.role === 'evaluator'
 

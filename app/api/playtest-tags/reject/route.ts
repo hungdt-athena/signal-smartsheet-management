@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 import { requireManager } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { readNotes } from '@/lib/playtest-tags'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +19,7 @@ export async function POST(req: NextRequest) {
   const ids = (body.ids || []).filter(n => Number.isInteger(n))
   if (ids.length === 0) return NextResponse.json({ error: 'ids required' }, { status: 400 })
 
-  const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
+  const session = process.env.SKIP_AUTH === 'true' ? null : await getSession()
   const admin = session?.user?.email || 'skip-auth@local'
 
   const notes = readNotes(body.notes)

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
 import { countQueue, fetchQueue } from '@/lib/playtest-tags-queue'
 import { isManagerRole } from '@/lib/roles'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,7 +30,7 @@ export async function GET(req: NextRequest) {
   const offset = Math.max(0, Number(q.get('offset')) || 0)
   const limit = Math.min(200, Math.max(1, Number(q.get('limit')) || 50))
 
-  const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
+  const session = process.env.SKIP_AUTH === 'true' ? null : await getSession()
   // A non-admin session with no email matches nothing rather than everything:
   // failing open here would hand one evaluator the whole team's queue. The
   // sentinel has to stay truthy as well as unmatchable: an empty string would

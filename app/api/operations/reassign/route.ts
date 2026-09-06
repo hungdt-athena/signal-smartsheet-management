@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { requireManager } from '@/lib/auth-guard'
 import { isBucket } from '@/lib/buckets'
 import { selectPendingGames, loadRoster, commitAssignment, distribute } from '@/lib/reassign-core'
 import { writeAssignmentHistory } from '@/lib/assignment-history'
 import { sourceBreakdowns, perEvaluatorPlatform, insertOperationRun } from '@/lib/operation-runs'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -122,7 +121,7 @@ export async function POST(req: NextRequest) {
     const idToGameId = new Map(candidates.map(c => [c.id, c.game_id]))
     const perEvaluatorGameIds = await commitAssignment(assignment, idToGameId)
 
-    const session = await getServerSession(authOptions)
+    const session = await getSession()
     const createdBy = session?.user?.email ?? 'manual'
     await writeAssignmentHistory({
       category,

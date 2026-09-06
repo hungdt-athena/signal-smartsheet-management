@@ -1,10 +1,9 @@
 // app/api/assign-setup/route.ts — DB-backed evaluator_roster editor (sole writer).
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { requireManager, requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { isBucket, isWeight, normalizeCategory, type Bucket } from '@/lib/buckets'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +33,7 @@ export async function GET() {
   let initial = rows.filter(r => r.list_type === 'initial')
   let final = rows.filter(r => r.list_type === 'final')
 
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   if (session?.user?.role === 'evaluator') {
     const me = (session.user.name || '').toLowerCase()
     initial = initial.filter(r => r.name.toLowerCase() === me)

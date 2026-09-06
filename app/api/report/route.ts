@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
@@ -9,6 +7,7 @@ import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 import { allRounderScore } from '@/lib/report-config'
 import { loadReportConfig } from '@/lib/report-config-db'
 import { isManagerRole } from '@/lib/roles'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -79,7 +78,7 @@ export async function GET(req: NextRequest) {
     // evaluator should know where they sit against the team, without seeing who is
     // who. Their key is their display name, lowercased, exactly like every other
     // self-scoped route (see quick-stats).
-    const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
+    const session = process.env.SKIP_AUTH === 'true' ? null : await getSession()
     // SKIP_AUTH local dev has no session and gets the full admin view on purpose.
     const scoped = !!session && !isManagerRole(session.user?.role)
     const selfKey = (session?.user?.name || '').toLowerCase()
@@ -112,12 +111,27 @@ export async function GET(req: NextRequest) {
 
     // WHERE fragments shared by evaluation queries.
     const catF = category !== 'all' ? sql`AND ge.category_group = ${category}` : sql``
+    // A VN-local calendar date as a timestamptz boundary.
+    //
+    // Window predicates used to read `(ge.evaluate_date AT TIME ZONE VN)::date >= X`,
+    // which wraps the COLUMN in an expression. That costs two things: no plain index on
+    // evaluate_date can ever be used, and -- worse -- the planner loses its statistics
+    // and falls back to a guess. Measured on prod: it estimated 282 rows for a month
+    // that actually holds 15384, a 55x miss, which is exactly the kind of error that
+    // makes it pick a nested loop into game_info (4.8 GB, 19.7% cache hit) and turn a
+    // 40 ms query into seconds.
+    //
+    // Converting the CONSTANT instead of the column is algebraically identical --
+    // verified against prod, both forms return the same 15384 rows -- and the estimate
+    // lands at 15506. Keep new window predicates in this shape.
+    const vnBound = (d: string) => sql`(${d}::timestamp AT TIME ZONE ${VN})`
+
     // Window: batch view filters by label; date views filter evaluate_date.
     const winF = win.batch
       ? sql`AND ge.batch = ${win.batch}`
       : sql`
-        ${win.from ? sql`AND (ge.evaluate_date AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
-        ${win.to ? sql`AND (ge.evaluate_date AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}`
+        ${win.from ? sql`AND ge.evaluate_date >= ${vnBound(win.from)}` : sql``}
+        ${win.to ? sql`AND ge.evaluate_date < ${vnBound(win.to)}` : sql``}`
 
     // Bucket unit for the time series, from the window span.
     const spanDays = win.from && win.to
@@ -160,7 +174,12 @@ export async function GET(req: NextRequest) {
     // screen and Pending on the other. Both now resolve to the same moment: the
     // upload if we have one (migration 034), otherwise the Confirm click.
     const recAt = sql`COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at)`
-    const recAtDate = sql`(COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at) AT TIME ZONE ${VN})::date`
+    // Only ever used as a FILTER, so it compares the raw column against VN-local
+    // boundaries rather than casting the column to a VN date -- same reason as vnBound
+    // above, plus it makes idx_game_evaluations_recorded_at (which indexes exactly this
+    // COALESCE) usable instead of dead weight.
+    const recAtFrom = (d: string) => sql`AND ${recAt} >= ${vnBound(d)}`
+    const recAtTo   = (d: string) => sql`AND ${recAt} < ${vnBound(d)}`
 
     const evalBase = sql`
       FROM game_evaluations ge
@@ -403,8 +422,8 @@ export async function GET(req: NextRequest) {
             ${recOk('record_5min_assignee')}
             ${catF}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
-              ${win.from ? sql`AND ${recAtDate} >= ${win.from}::date` : sql``}
-              ${win.to ? sql`AND ${recAtDate} < ${win.to}::date` : sql``}`}
+              ${win.from ? recAtFrom(win.from) : sql``}
+              ${win.to ? recAtTo(win.to) : sql``}`}
           UNION ALL
           SELECT lower(ge.record_20min_assignee), ge.record_20min_assignee, '20min'
           FROM game_evaluations ge
@@ -412,8 +431,8 @@ export async function GET(req: NextRequest) {
             ${recOk('record_20min_assignee')}
             ${catF}
             ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
-              ${win.from ? sql`AND ${recAtDate} >= ${win.from}::date` : sql``}
-              ${win.to ? sql`AND ${recAtDate} < ${win.to}::date` : sql``}`}
+              ${win.from ? recAtFrom(win.from) : sql``}
+              ${win.to ? recAtTo(win.to) : sql``}`}
         )
         SELECT k, mode() WITHIN GROUP (ORDER BY name) AS name,
           count(*)::int AS recorded,
@@ -460,8 +479,8 @@ export async function GET(req: NextRequest) {
         FROM rec
         WHERE TRUE ${win.batch ? sql`AND batch = ${win.batch}` : sql`
           AND (rec_at IS NULL OR (TRUE
-            ${win.from ? sql`AND (rec_at AT TIME ZONE ${VN})::date >= ${win.from}::date` : sql``}
-            ${win.to ? sql`AND (rec_at AT TIME ZONE ${VN})::date < ${win.to}::date` : sql``}))`}
+            ${win.from ? sql`AND rec_at >= ${vnBound(win.from)}` : sql``}
+            ${win.to ? sql`AND rec_at < ${vnBound(win.to)}` : sql``}))`}
         ORDER BY rec_at DESC NULLS FIRST, slot`,
       // per-evaluator per-DAY initial conclusion counts (Individual → Daily breakdown).
       // Always day grain, whatever the view's bucket unit is: the point of the

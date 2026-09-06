@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { requireManager } from '@/lib/auth-guard'
 import { isBucket } from '@/lib/buckets'
 import { commitAssignment, distribute, type Candidate } from '@/lib/reassign-core'
@@ -10,6 +8,7 @@ import { clampRescueConfig, type RescueConfig } from '@/lib/rescue-config'
 import { loadRescueConfig, saveRescueConfig } from '@/lib/rescue-config-db'
 import { writeAssignmentHistory } from '@/lib/assignment-history'
 import { sourceBreakdowns, perEvaluatorPlatform, insertOperationRun } from '@/lib/operation-runs'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -180,7 +179,7 @@ export async function POST(req: NextRequest) {
     const idToGameId = new Map(allCandidates.map(c => [c.id, c.game_id]))
     await commitAssignment(assignment, idToGameId)
 
-    const session = await getServerSession(authOptions)
+    const session = await getSession()
     const createdBy = session?.user?.email ?? 'manual'
 
     for (const s of perSourceView) {

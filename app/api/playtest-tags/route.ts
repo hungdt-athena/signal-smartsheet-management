@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { isManagerRole } from '@/lib/roles'
 import { classifyTag, TRENDS_FIELD, type PendingTag } from '@/lib/playtest-tags'
@@ -22,6 +20,7 @@ interface ReviewRow {
   conflict: boolean
 }
 import { syncTags } from '@/lib/playtest-tags-sync'
+import { getSession } from '@/lib/session'
 
 
 export const dynamic = 'force-dynamic'
@@ -32,7 +31,7 @@ async function resolveSession(): Promise<SessionInfo> {
   if (process.env.SKIP_AUTH === 'true') {
     return { isManager: true, isAdmin: true, name: '', email: 'skip-auth@local' }
   }
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   const role = session?.user?.role
   return {
     isManager: isManagerRole(role),

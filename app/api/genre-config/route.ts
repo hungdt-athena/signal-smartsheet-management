@@ -4,17 +4,16 @@
 // evaluator_roster and runs at requireManager, while this is a pipeline switch that
 // only an admin may flip. Keeping them apart keeps both rules easy to state.
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { requireAdmin, requireAuth } from '@/lib/auth-guard'
 import { isBucket } from '@/lib/buckets'
 import { loadGenreConfig, loadGenreTargets, saveGenreConfig } from '@/lib/genre-config-db'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
 async function canEdit(): Promise<boolean> {
   if (process.env.SKIP_AUTH === 'true') return true
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   return session?.user?.role === 'admin'
 }
 

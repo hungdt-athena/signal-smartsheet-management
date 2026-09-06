@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +17,7 @@ export async function GET(req: NextRequest) {
   const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
 
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   const isEvaluator = session?.user?.role === 'evaluator'
 
   const p = req.nextUrl.searchParams

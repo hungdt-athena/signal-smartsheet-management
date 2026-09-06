@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { isManagerRole } from '@/lib/roles'
 import {
   isStorageConfigured, uploadScreenshot,
   deleteScreenshotByUrl, deleteGameScreenshots,
 } from '@/lib/supabase-storage'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +21,7 @@ const MIME_EXT: Record<string, string> = {
 /** Allowed: admin, or the game's assigned initial evaluator. Null when allowed. */
 async function checkPermission(gameId: string): Promise<NextResponse | null> {
   if (process.env.SKIP_AUTH === 'true') return null
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   const role = session?.user?.role
   if (isManagerRole(role)) return null
   const rows = await sql`SELECT initial_evaluator FROM game_evaluations WHERE game_id = ${gameId}`

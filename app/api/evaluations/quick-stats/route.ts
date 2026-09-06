@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 import { requireAuth } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 import { isManagerRole } from '@/lib/roles'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +25,7 @@ export async function GET(req: NextRequest) {
 
     let restrictTo = ''
     if (process.env.SKIP_AUTH !== 'true') {
-      const session = await getServerSession(authOptions)
+      const session = await getSession()
       const role = session?.user?.role
       if (!isManagerRole(role)) {
         restrictTo = session?.user?.name || ''

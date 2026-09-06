@@ -2,9 +2,8 @@
  * @jest-environment node
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
 import { requireRole } from '@/lib/auth-guard'
+import { getSession } from '@/lib/session'
 
 function getWebhookMap(): Record<string, string | undefined> {
   return {
@@ -25,7 +24,7 @@ export async function POST(req: NextRequest) {
   const guard = await requireRole(['admin'])
   if (guard) return guard
 
-  const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
+  const session = process.env.SKIP_AUTH === 'true' ? null : await getSession()
   const triggeredBy = session?.user?.email ?? 'dev'
 
   const { workflow, sheet_type } = await req.json()

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
 import { requireManager } from '@/lib/auth-guard'
-import { authOptions } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { applyExistingTagChange, type ExistingTagOutcome } from '@/lib/playtest-tags-existing'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +28,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'id required' }, { status: 400 })
   }
 
-  const session = process.env.SKIP_AUTH === 'true' ? null : await getServerSession(authOptions)
+  const session = process.env.SKIP_AUTH === 'true' ? null : await getSession()
   const admin = session?.user?.email || 'skip-auth@local'
 
   // Returned out of the transaction rather than assigned to a closure variable:
