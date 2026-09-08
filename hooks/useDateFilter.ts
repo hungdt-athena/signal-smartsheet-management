@@ -15,5 +15,15 @@ export function useDateFilter(defaultBasis: DateBasis, initialAutoMonth = true) 
   const [autoMonth, setAutoMonth] = useState(initialAutoMonth)
   const [availableMonths, setAvailableMonths] = useState<YearMonth[]>([])
   const suppressFetchRef = useRef(false)
-  return { value, setValue, autoMonth, setAutoMonth, availableMonths, setAvailableMonths, suppressFetchRef }
+  // Same idea as suppressFetchRef, for the facets request. Resolving month=auto sets
+  // both `value` and `autoMonth`, which changes the identity of every callback built
+  // from them -- the rows fetch AND the facets fetch. Only the rows one was guarded,
+  // so locking in the auto-resolved month fired a second, identical facets request:
+  // the server resolves auto the same way, so the first response already described the
+  // month being locked in.
+  const suppressFacetsRef = useRef(false)
+  return {
+    value, setValue, autoMonth, setAutoMonth, availableMonths, setAvailableMonths,
+    suppressFetchRef, suppressFacetsRef,
+  }
 }

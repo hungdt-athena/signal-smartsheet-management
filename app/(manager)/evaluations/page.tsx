@@ -1,6 +1,6 @@
 'use client'
-import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
-import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
+import type { CSSProperties, MouseEvent as ReactMouseEvent, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useSession } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
@@ -555,15 +555,14 @@ function ShortListEvalTab() {
     const params = new URLSearchParams({ category: filterCategory })
     if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
     if (filterFinalConclusions.length > 0) params.set('final_conclusions', filterFinalConclusions.join(','))
-    // Evaluators are locked to their own rows; managers may filter freely.
-    if (!isManager) {
-      if (userName) params.set('evaluator', userName)
-    } else if (filterEvaluator) {
-      params.set('evaluator', filterEvaluator)
-    }
+    // Evaluators are locked to their own rows -- by the server, from the session, which
+    // ignores this param for them. Sending it added nothing but a dependency on
+    // useSession() having resolved, which duplicated both first-load requests the moment
+    // it did. Managers still send whatever they picked.
+    if (filterEvaluator) params.set('evaluator', filterEvaluator)
     for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
     return params
-  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, df.value, df.autoMonth, isManager, userName])
+  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, df.value, df.autoMonth])
 
   // Dropdown contents. Deliberately NOT dependent on batch or sort: `available_batches`
   // and `default_batch` ignore the batch filter by design, and nothing here depends on
@@ -618,6 +617,7 @@ function ShortListEvalTab() {
         // so unlike before there is no batch-narrowed refetch for a blanket suppress to
         // swallow.
         df.suppressFetchRef.current = true
+        df.suppressFacetsRef.current = true
         df.setAutoMonth(false)
         df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
@@ -625,7 +625,10 @@ function ShortListEvalTab() {
     setLoading(false)
   }, [scopeParams, filterBatch, sortAsc, df.autoMonth])
 
-  useEffect(() => { fetchFacets() }, [fetchFacets])
+  useEffect(() => {
+    if (df.suppressFacetsRef.current) { df.suppressFacetsRef.current = false; return }
+    fetchFacets()
+  }, [fetchFacets, df.suppressFacetsRef])
 
   useEffect(() => {
     if (df.suppressFetchRef.current) { df.suppressFetchRef.current = false; return }
@@ -942,6 +945,102 @@ function fmtDateTime(d: string | null) {
   return `${day} - ${time}`
 }
 
+// One table row, memoised.
+//
+// It is rendered up to PAGE_SIZE at a time and the infinite scroll keeps appending,
+// so a list of 400-600 rows is normal. Every one of them used to re-render whenever
+// `activeGameId` changed -- which is every Prev/Next inside the detail panel, since
+// the panel drives the highlighted row through the parent. Each row carries an
+// <img>, several pills and a TrendTagCell, so that was hundreds of nodes reconciled
+// per keypress: the jank people felt while paging through games.
+//
+// Now only the two rows whose `isActive` actually flipped re-render. `onOpen` is
+// kept stable by the parent (see openDetail) so this holds.
+const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen }: {
+  ev: Evaluation
+  idx: number
+  isActive: boolean
+  activeRowRef: RefObject<HTMLTableRowElement>
+  onOpen: (gameId: string) => void
+}) {
+  const genres = [ev.genre_1, ev.genre_2].filter(Boolean) as string[]
+  return (
+      <tr
+        ref={isActive ? activeRowRef : null}
+        className={`tbl-row-premium${isActive ? ' tbl-row-active' : ''}`}
+        style={{ cursor: 'pointer' }}
+        onClick={() => onOpen(ev.game_id)}>
+        <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>
+          {idx + 1}
+        </td>
+        <td>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 220 }}>
+            {ev.icon_url ? (
+              <img src={ev.icon_url} alt="" width={32} height={32}
+                style={{ borderRadius: 7, flexShrink: 0 }} />
+            ) : (
+              <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
+            )}
+            <div style={{ minWidth: 0 }}>
+              <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{ev.title}</div>
+              <div style={{ display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
+                <span className="pill muted" style={{ padding: '1px 6px', fontSize: 10 }}>
+                  {ev.os?.toUpperCase()}
+                </span>
+                {genres.map(g => (
+                  <span key={g} className="pill tag" style={{ padding: '1px 6px', fontSize: 10 }}>
+                    {g}
+                  </span>
+                ))}
+              </div>
+              {ev.publisher_name && (
+                <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {ev.publisher_name}
+                </div>
+              )}
+            </div>
+          </div>
+        </td>
+        <td style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', color: ev.initial_evaluator ? 'var(--text)' : 'var(--faint)' }}>
+          {ev.initial_evaluator || '—'}
+        </td>
+        <td style={{ fontSize: 12.5, whiteSpace: 'nowrap', color: ev.final_evaluator ? 'var(--text)' : 'var(--faint)' }}>
+          {ev.final_evaluator || '—'}
+        </td>
+        <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+          {fmtDate(ev.assigned_date)}
+        </td>
+        <td>
+          <div style={{ fontSize: 12, color: ev.initial_note ? 'var(--text)' : 'var(--faint)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {ev.initial_note || '—'}
+          </div>
+        </td>
+        <td>{conclusionBadge(ev.initial_conclusion)}</td>
+        <td>
+          <TrendTagCell tags={ev.tags} maxWidth={170} />
+        </td>
+        <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+          {fmtDateTime(ev.evaluate_date)}
+        </td>
+        <td>
+          {ev.drive_link ? (
+            <a href={ev.drive_link} target="_blank" rel="noopener"
+              onClick={e => e.stopPropagation()}
+              className="drive-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+              Video
+            </a>
+          ) : (
+            <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>
+          )}
+        </td>
+      </tr>
+  )
+})
+
 const PAGE_SIZE = 200
 
 // useSearchParams requires a Suspense boundary for static prerendering.
@@ -1024,12 +1123,12 @@ function EvaluationsPageInner() {
   const fetchFacets = useCallback(async () => {
     try {
       const params = new URLSearchParams({ category })
-      const isManager = isManagerRole(role)
-      if (!isManager) {
-        if (userName) params.set('evaluator', userName)
-      } else if (filterEvaluator) {
-        params.set('evaluator', filterEvaluator)
-      }
+      // Deliberately NOT scoped by the signed-in evaluator here. An evaluator only ever
+      // sees their own rows, but that is decided server-side from the session and the
+      // `evaluator` param is ignored for them -- sending it changed nothing except this
+      // request's identity, which made it wait for useSession() to resolve and then fire
+      // a second time when it did. Managers still send their picked filter.
+      if (filterEvaluator) params.set('evaluator', filterEvaluator)
       if (filterConclusion) params.set('conclusion', filterConclusion)
       if (filterStatus) params.set('status', filterStatus)
       for (const [k, v] of Object.entries(evalDateParams())) params.set(k, v)
@@ -1039,21 +1138,22 @@ function EvaluationsPageInner() {
       if (json.available_conclusions) setConclusionOptions(json.available_conclusions)
       if (json.available_evaluators) setEvaluatorOptions(json.available_evaluators)
     } catch { /* ignore */ }
-  }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams, role, userName])
+  }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams])
 
-  useEffect(() => { fetchFacets() }, [fetchFacets])
+  useEffect(() => {
+    if (df.suppressFacetsRef.current) { df.suppressFacetsRef.current = false; return }
+    fetchFacets()
+  }, [fetchFacets, df.suppressFacetsRef])
 
   const fetchPage = useCallback(async (page: number, append: boolean) => {
     const seq = ++fetchSeqRef.current
     if (append) setLoadingMore(true); else setLoading(true)
     try {
       const params = new URLSearchParams({ category, page: String(page), limit: String(PAGE_SIZE) })
-      const isManager = isManagerRole(role)
-      if (!isManager) {
-        if (userName) params.set('evaluator', userName)
-      } else if (filterEvaluator) {
-        params.set('evaluator', filterEvaluator)
-      }
+      // See fetchFacets: the evaluator scope is the server's to enforce, so this request
+      // does not depend on the session having loaded. It used to, and the cost was a
+      // duplicate of every first-load request once useSession() came back.
+      if (filterEvaluator) params.set('evaluator', filterEvaluator)
       if (filterConclusion) params.set('conclusion', filterConclusion)
       if (filterStatus) params.set('status', filterStatus)
       params.set('sort', sortAsc ? 'asc' : 'desc')
@@ -1079,6 +1179,10 @@ function EvaluationsPageInner() {
         // later fetches use explicit params instead of re-resolving auto.
         const ap = json.applied_month as YearMonth | null
         df.suppressFetchRef.current = true
+        // The facets response in flight alongside this one already resolved the same
+        // month, so its contents are the ones for `ap`. Locking `ap` in must not send
+        // an identical request again.
+        df.suppressFacetsRef.current = true
         df.setAutoMonth(false)
         df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
@@ -1086,7 +1190,7 @@ function EvaluationsPageInner() {
     } catch { /* ignore */ }
     setLoading(false)
     setLoadingMore(false)
-  }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams, df.autoMonth, role, userName, sortAsc])
+  }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams, df.autoMonth, sortAsc])
 
   useEffect(() => {
     if (df.suppressFetchRef.current) {
@@ -1122,12 +1226,18 @@ function EvaluationsPageInner() {
     ? evaluatorOptions
     : Array.from(new Set(data.map(d => d.initial_evaluator).filter(Boolean) as string[]))
 
-  const openDetail = (gameId: string) => {
-    const list = filtered.map(d => ({ game_id: d.game_id, title: d.title }))
-    setDetailList(list)
+  // Read through a ref so this callback keeps one identity for the life of the page.
+  // It is the click handler on every row, and EvalRow is memoised on its props: a new
+  // function each render would defeat the memo and put all 400-600 rows back in the
+  // re-render path the memo exists to keep them out of.
+  const filteredRef = useRef(filtered)
+  filteredRef.current = filtered
+
+  const openDetail = useCallback((gameId: string) => {
+    setDetailList(filteredRef.current.map(d => ({ game_id: d.game_id, title: d.title })))
     setDetailGameId(gameId)
     setActiveGameId(gameId)
-  }
+  }, [])
 
   const handleNavigate = (gameId: string) => {
     setActiveGameId(gameId)
@@ -1330,85 +1440,12 @@ function EvaluationsPageInner() {
               {filtered.length === 0 && !loading && (
                 <tr><td colSpan={10} className="empty">{search ? 'No games match your search' : 'No evaluations found'}</td></tr>
               )}
-              {filtered.map((ev, idx) => {
-                const genres = [ev.genre_1, ev.genre_2].filter(Boolean) as string[]
-                const isActive = ev.game_id === activeGameId
-                return (
-                  <tr key={ev.id}
-                    ref={isActive ? activeRowRef : null}
-                    className={`tbl-row-premium${isActive ? ' tbl-row-active' : ''}`}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => openDetail(ev.game_id)}>
-                    <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>
-                      {idx + 1}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 220 }}>
-                        {ev.icon_url ? (
-                          <img src={ev.icon_url} alt="" width={32} height={32}
-                            style={{ borderRadius: 7, flexShrink: 0 }} />
-                        ) : (
-                          <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
-                        )}
-                        <div style={{ minWidth: 0 }}>
-                          <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{ev.title}</div>
-                          <div style={{ display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
-                            <span className="pill muted" style={{ padding: '1px 6px', fontSize: 10 }}>
-                              {ev.os?.toUpperCase()}
-                            </span>
-                            {genres.map(g => (
-                              <span key={g} className="pill tag" style={{ padding: '1px 6px', fontSize: 10 }}>
-                                {g}
-                              </span>
-                            ))}
-                          </div>
-                          {ev.publisher_name && (
-                            <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {ev.publisher_name}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', color: ev.initial_evaluator ? 'var(--text)' : 'var(--faint)' }}>
-                      {ev.initial_evaluator || '—'}
-                    </td>
-                    <td style={{ fontSize: 12.5, whiteSpace: 'nowrap', color: ev.final_evaluator ? 'var(--text)' : 'var(--faint)' }}>
-                      {ev.final_evaluator || '—'}
-                    </td>
-                    <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-                      {fmtDate(ev.assigned_date)}
-                    </td>
-                    <td>
-                      <div style={{ fontSize: 12, color: ev.initial_note ? 'var(--text)' : 'var(--faint)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {ev.initial_note || '—'}
-                      </div>
-                    </td>
-                    <td>{conclusionBadge(ev.initial_conclusion)}</td>
-                    <td>
-                      <TrendTagCell tags={ev.tags} maxWidth={170} />
-                    </td>
-                    <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-                      {fmtDateTime(ev.evaluate_date)}
-                    </td>
-                    <td>
-                      {ev.drive_link ? (
-                        <a href={ev.drive_link} target="_blank" rel="noopener"
-                          onClick={e => e.stopPropagation()}
-                          className="drive-btn">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <polygon points="23 7 16 12 23 17 23 7" />
-                            <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                          </svg>
-                          Video
-                        </a>
-                      ) : (
-                        <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
+              {filtered.map((ev, idx) => (
+                <EvalRow key={ev.id} ev={ev} idx={idx}
+                  isActive={ev.game_id === activeGameId}
+                  activeRowRef={activeRowRef}
+                  onOpen={openDetail} />
+              ))}
             </tbody>
           </table>
           <div ref={sentinelRef} style={{ height: 1 }} />
