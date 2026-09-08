@@ -12,6 +12,10 @@ import { useDateFilter } from '@/hooks/useDateFilter'
 import { useConfig } from '@/hooks/useConfig'
 import EvalDetailPanel, { weekBatches } from '@/components/EvalDetailPanel'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
+import {
+  SEARCH_MIN_CHARS, SEARCH_DEBOUNCE_MS, SEARCH_TOTAL_CAP, SEARCH_PAGE_SIZE,
+} from '@/lib/eval-search'
+import { Highlight } from '@/components/Highlight'
 import { QuickStatsModal } from '@/components/QuickStatsModal'
 import { WeeklyFeedbackTab } from '@/components/weekly-feedback/WeeklyFeedbackTab'
 import { TaggingTab } from '@/components/TaggingTab'
@@ -956,14 +960,20 @@ function fmtDateTime(d: string | null) {
 //
 // Now only the two rows whose `isActive` actually flipped re-render. `onOpen` is
 // kept stable by the parent (see openDetail) so this holds.
-const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen }: {
+const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen, term }: {
   ev: Evaluation
   idx: number
   isActive: boolean
   activeRowRef: RefObject<HTMLTableRowElement>
   onOpen: (gameId: string) => void
+  /** The live search term, '' when there is no search. A string keeps this row inside
+   *  the memo: it only changes when the search does, and then the whole table redraws. */
+  term: string
 }) {
   const genres = [ev.genre_1, ev.genre_2].filter(Boolean) as string[]
+  // The store id is not a column. When a search matched on it rather than on the title,
+  // show it -- otherwise the row appears with no visible reason for being in the results.
+  const idMatched = term !== '' && ev.game_id.toLowerCase().includes(term.toLowerCase())
   return (
       <tr
         ref={isActive ? activeRowRef : null}
@@ -982,7 +992,14 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen 
               <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
             )}
             <div style={{ minWidth: 0 }}>
-              <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{ev.title}</div>
+              <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>
+                <Highlight text={ev.title} term={term} />
+              </div>
+              {idMatched && (
+                <div style={{ fontSize: 10.5, color: 'var(--faint)', fontFamily: 'var(--num)', marginTop: 2 }}>
+                  <Highlight text={ev.game_id} term={term} />
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
                 <span className="pill muted" style={{ padding: '1px 6px', fontSize: 10 }}>
                   {ev.os?.toUpperCase()}
@@ -1091,6 +1108,23 @@ function EvaluationsPageInner() {
   const fetchSeqRef = useRef(0)
 
   const [search, setSearch] = useState('')
+  // The box is debounced before it reaches the server, and only a term long enough for
+  // a trigram index to serve goes there at all -- see lib/eval-search.
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [search])
+  const searchTerm = debouncedSearch.trim()
+  const searching = searchTerm.length >= SEARCH_MIN_CHARS
+  // The term the REQUEST is built from -- '' until it is long enough to be worth
+  // asking the server. Typing below the floor must not change this, or every one of
+  // those keystrokes would re-issue the month query it is not even searching.
+  const activeQuery = searching ? searchTerm : ''
+  const [totalCapped, setTotalCapped] = useState(false)
+  // A search overrides these filters, so they stop taking clicks while one is live --
+  // greyed out rather than hidden, so it is obvious they are coming back.
+  const inertWhileSearching = searching ? { opacity: 0.45 } : undefined
   const [tableExpanded, setTableExpanded] = useState(false)
   const [showQuickStats, setShowQuickStats] = useState(false)
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
@@ -1149,18 +1183,30 @@ function EvaluationsPageInner() {
     const seq = ++fetchSeqRef.current
     if (append) setLoadingMore(true); else setLoading(true)
     try {
-      const params = new URLSearchParams({ category, page: String(page), limit: String(PAGE_SIZE) })
+      // A search asks a different question, so it comes with a different page size:
+      // fewer rows, because relevance puts what you wanted at the top.
+      const pageLimit = activeQuery ? SEARCH_PAGE_SIZE : PAGE_SIZE
+      const params = new URLSearchParams({ category, page: String(page), limit: String(pageLimit) })
       // See fetchFacets: the evaluator scope is the server's to enforce, so this request
       // does not depend on the session having loaded. It used to, and the cost was a
       // duplicate of every first-load request once useSession() came back.
       if (filterEvaluator) params.set('evaluator', filterEvaluator)
-      if (filterConclusion) params.set('conclusion', filterConclusion)
-      if (filterStatus) params.set('status', filterStatus)
       params.set('sort', sortAsc ? 'asc' : 'desc')
-      // Pending is always shown all-time on the assigned basis: a game awaiting
-      // evaluation may have been assigned in any earlier month, so the date picker
-      // must not narrow it. (Picker is hidden in this mode — see below.)
-      for (const [k, v] of Object.entries(evalDateParams())) params.set(k, v)
+      // While a search is live it OVERRIDES the narrowing filters -- date window,
+      // conclusion, status -- rather than mutating them. A search that comes back empty
+      // because the picker was on September is a search that looks broken; and because
+      // nothing is mutated, clearing the box needs no restore step: the untouched state
+      // simply builds the old request again.
+      if (activeQuery) {
+        params.set('q', activeQuery)
+      } else {
+        if (filterConclusion) params.set('conclusion', filterConclusion)
+        if (filterStatus) params.set('status', filterStatus)
+        // Pending is always shown all-time on the assigned basis: a game awaiting
+        // evaluation may have been assigned in any earlier month, so the date picker
+        // must not narrow it. (Picker is hidden in this mode — see below.)
+        for (const [k, v] of Object.entries(evalDateParams())) params.set(k, v)
+      }
       // Dropdowns come from /api/evaluations/facets on their own effect below.
       params.set('meta', '0')
       const res = await fetch(`/api/evaluations?${params}`)
@@ -1173,8 +1219,13 @@ function EvaluationsPageInner() {
         setData(rows)
       }
       if (json.total !== undefined) setTotal(json.total)
-      if (json.stats) setApiStats(json.stats)
-      if (df.autoMonth && json.applied_month !== undefined) {
+      // The cards above the table are the month's workload, not the search's: a lookup
+      // must not rewrite them, least of all with a total the server deliberately capped.
+      if (json.stats && !activeQuery) setApiStats(json.stats)
+      setTotalCapped(!!json.total_capped)
+      // A search sends no month at all, so its response resolves none: letting it
+      // through here would clear the month the picker is on and lose it for good.
+      if (!activeQuery && df.autoMonth && json.applied_month !== undefined) {
         // Lock in the server-resolved month: the picker shows it and all
         // later fetches use explicit params instead of re-resolving auto.
         const ap = json.applied_month as YearMonth | null
@@ -1186,11 +1237,12 @@ function EvaluationsPageInner() {
         df.setAutoMonth(false)
         df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
-      setHasMore(rows.length === PAGE_SIZE)
+      setHasMore(rows.length === pageLimit)
     } catch { /* ignore */ }
     setLoading(false)
     setLoadingMore(false)
-  }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams, df.autoMonth, sortAsc])
+  }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams, df.autoMonth, sortAsc,
+    activeQuery])
 
   useEffect(() => {
     if (df.suppressFetchRef.current) {
@@ -1215,10 +1267,15 @@ function EvaluationsPageInner() {
   }, [hasMore, loading, loadingMore, fetchPage])
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return data
-    const q = search.toLowerCase()
+    // A live search is already the server's answer, over every month. Below the index
+    // floor we keep filtering the rows in hand instead, which is instant and costs
+    // nothing -- and is a subset of what the server would return, so crossing the
+    // threshold only ever widens the list.
+    if (searching) return data
+    const q = search.trim().toLowerCase()
+    if (!q) return data
     return data.filter(d => d.title.toLowerCase().includes(q) || d.game_id.toLowerCase().includes(q))
-  }, [data, search])
+  }, [data, search, searching])
 
   // Server-provided full list for the category (ignores month + pagination);
   // fall back to deriving from loaded rows until the first page-1 response lands.
@@ -1326,8 +1383,10 @@ function EvaluationsPageInner() {
 
         {/* Pending is locked to all-time assigned (see fetchPage), so the date
             picker would be inert — hide it and show the fixed scope instead. */}
-        {filterStatus === 'pending' ? (
-          <span className="btn btn-sm" style={{ cursor: 'default', gap: 6, minWidth: 200, justifyContent: 'flex-start', opacity: 0.7 }}>
+        {filterStatus === 'pending' || searching ? (
+          <span className="btn btn-sm"
+            title={searching ? 'A search looks at every month. Clear it to go back to the date filter.' : undefined}
+            style={{ cursor: 'default', gap: 6, minWidth: 200, justifyContent: 'flex-start', opacity: 0.7 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
               <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
@@ -1341,13 +1400,14 @@ function EvaluationsPageInner() {
           />
         )}
 
-        <div className="seg-wrapper">
+        <div className="seg-wrapper" style={inertWhileSearching}>
           {[
             { value: '', label: 'All' },
             { value: 'pending', label: 'Pending' },
             { value: 'done', label: 'Done' },
           ].map(s => (
             <button key={s.value} className={`seg-btn-premium${filterStatus === s.value ? ' active' : ''}`}
+              disabled={searching}
               onClick={() => setFilterStatus(s.value)}>
               {s.label}
             </button>
@@ -1356,9 +1416,13 @@ function EvaluationsPageInner() {
 
         <button
           className="btn btn-sm"
-          title={sortAsc ? 'Sorted oldest first — click to sort newest first' : 'Sorted newest first — click to sort oldest first'}
+          // Relevance decides a search's order, so there is nothing here to reverse.
+          disabled={searching}
+          title={searching
+            ? 'Search results are ordered by how well they match'
+            : sortAsc ? 'Sorted oldest first — click to sort newest first' : 'Sorted newest first — click to sort oldest first'}
           onClick={() => { setSortAsc(v => !v); pageRef.current = 1 }}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', ...inertWhileSearching }}>
           {sortAsc ? (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 19V5M5 12l7-7 7 7" />
@@ -1382,16 +1446,25 @@ function EvaluationsPageInner() {
           </div>
         )}
 
-        <div style={{ width: 220 }}>
+        <div style={{ width: 220, ...inertWhileSearching }}>
           <StyledSelect
             value={filterConclusion}
             onChange={setFilterConclusion}
+            disabled={searching}
             placeholder="All conclusions"
             options={[{ value: '', label: 'All conclusions' }, ...conclusionOptions.map(c => ({ value: c, label: prettyConclusion(c) }))]}
           />
         </div>
 
-        <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>{loading ? 'Loading...' : `${filtered.length}${search ? ` / ${total}` : ''} results`}</span>
+        <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>
+          {loading
+            ? 'Loading...'
+            : searching
+              // Capped on purpose: an exact all-time count costs more than the rows it
+              // counts, and "500+" is all the header has to say.
+              ? `${totalCapped ? `${SEARCH_TOTAL_CAP}+` : total} results for "${searchTerm}"`
+              : `${filtered.length}${search ? ` / ${total}` : ''} results`}
+        </span>
       </div>
 
       {/* Table */}
@@ -1441,7 +1514,7 @@ function EvaluationsPageInner() {
                 <tr><td colSpan={10} className="empty">{search ? 'No games match your search' : 'No evaluations found'}</td></tr>
               )}
               {filtered.map((ev, idx) => (
-                <EvalRow key={ev.id} ev={ev} idx={idx}
+                <EvalRow key={ev.id} ev={ev} idx={idx} term={searchTerm}
                   isActive={ev.game_id === activeGameId}
                   activeRowRef={activeRowRef}
                   onOpen={openDetail} />

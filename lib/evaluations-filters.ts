@@ -8,6 +8,9 @@
 // the same reason the list and stats queries in the rows route share `listFilters`.
 
 import { sql } from '@/lib/db'
+import {
+  SEARCH_MIN_CHARS, POSITIVE_FINAL_CONCLUSIONS, wordStartPattern,
+} from '@/lib/eval-search'
 import { isManagerRole } from '@/lib/roles'
 import type { Session } from 'next-auth'
 
@@ -246,4 +249,82 @@ export async function loadAvailableMonths(
 /** The cache key for a month list: everything the query is scoped by. */
 export function monthsCacheKey(category: string, basis: DateBasis, evaluator: string) {
   return `${category}|${basis}|${evaluator}`
+}
+
+// ---- Free-text search (?q=) ----
+//
+// The thresholds live in lib/eval-search, which the client shares.
+//
+// The predicate belongs on `game_info`, both halves of it. That table carries the
+// trigram indexes this database already has -- idx_game_info_title_trgm and
+// idx_game_info_game_id_trgm -- and Postgres can only reach them if every branch of
+// the OR is a column they cover. Measured against the production database
+// (2026-09-08, 71k evaluations over 625k games):
+//
+//   (gi.title ILIKE q OR ge.game_id ILIKE q)  -> 1275ms  parallel seq scan, 625k rows
+//   (gi.title ILIKE q OR gi.game_id ILIKE q)  ->  209ms  BitmapOr of both trgm indexes
+//
+// `ge.game_id = gi.game_id` is the join condition, so the two forms are equivalent in
+// meaning and 6x apart in cost. Searching game_id through `gi` is not a detail.
+//
+// The floor of three characters is the trigram size: a one- or two-character pattern
+// produces no trigram, so no index can serve it and the planner falls back to scanning
+// (673ms for '%me%' versus 209ms for '%mer%'). Below the floor the client keeps
+// filtering the rows it already has, which costs nothing.
+/** Escape LIKE metacharacters, so someone typing "100%" searches for a percent sign
+ *  rather than matching every row. Bind parameters carry the backslashes literally. */
+function escapeLike(s: string) {
+  return s.replace(/[\\%_]/g, c => `\\${c}`)
+}
+
+/** The active search term, or '' when there is none to act on. */
+export function readSearch(searchParams: URLSearchParams): string {
+  const q = (searchParams.get('q') || '').trim()
+  return q.length >= SEARCH_MIN_CHARS ? q : ''
+}
+
+/** Match the term against a game's title or its store id. */
+export function searchFilter(term: string) {
+  if (!term) return sql``
+  const contains = `%${escapeLike(term)}%`
+  return sql`AND (gi.title ILIKE ${contains} OR gi.game_id ILIKE ${contains})`
+}
+
+/** The whole ordering for a search, in three tiers.
+ *
+ *  1. How well the term matches. The id you pasted, then a title that IS the term,
+ *     then a title that starts with it, then the term starting any word in the title
+ *     or any segment of the id, then everything that merely contains it somewhere.
+ *  2. How far the game got. A decided game (see POSITIVE_FINAL_CONCLUSIONS) first,
+ *     then one the evaluator shortlisted and the moderator has not ruled on, then
+ *     the rest of the evaluated, then what nobody has looked at yet.
+ *  3. Recency: newest evaluation, then newest assignment so that a pending game still
+ *     sorts by how recent it is rather than falling in among the undated.
+ *
+ *  It ends on ge.id because the infinite scroll pages with OFFSET: a sort key that is
+ *  not unique lets rows repeat or vanish between pages, and every key above this one
+ *  has ties. Measured cost of the whole thing over the plain date ordering: +3-6%
+ *  (10-80ms), on candidate sets from 1.7k to 13.6k rows. */
+export function searchOrder(term: string) {
+  const prefix = `${escapeLike(term)}%`
+  const word = wordStartPattern(term)
+  // Dropped entirely for a term that cannot start a word, rather than passed a pattern
+  // that would match nothing -- see wordStartPattern.
+  const wordTier = word
+    ? sql`WHEN gi.title ~* ${word} OR gi.game_id ~* ${word} THEN 3`
+    : sql``
+
+  return sql`
+    CASE WHEN gi.game_id = ${term} THEN 0
+         WHEN lower(gi.title) = lower(${term}) THEN 1
+         WHEN gi.title ILIKE ${prefix} THEN 2
+         ${wordTier}
+         ELSE 4 END,
+    CASE WHEN ge.final_conclusion IN ${sql(POSITIVE_FINAL_CONCLUSIONS as unknown as string[])} THEN 0
+         WHEN ge.initial_conclusion = 'List_Idea' THEN 1
+         WHEN ge.initial_conclusion IS NOT NULL THEN 2
+         ELSE 3 END,
+    ge.evaluate_date DESC NULLS LAST,
+    ge.assigned_date DESC NULLS LAST,
+    ge.id DESC`
 }

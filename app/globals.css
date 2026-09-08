@@ -2128,3 +2128,13 @@ input:checked + .slider:before {
 }
 .hm-pop-sum-item.net { margin-left: auto; color: var(--accent-strong); }
 .hm-pop-row.out .hm-pop-n { color: var(--bad); }
+
+/* The run a search matched, in the results table. Yellow rather than the accent:
+   the selected row already carries --accent-weak, and a match is a different
+   statement from a selection. */
+.q-hit {
+  background: var(--warn-weak);
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 3px;
+}
