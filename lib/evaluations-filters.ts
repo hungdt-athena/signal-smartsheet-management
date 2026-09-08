@@ -186,11 +186,48 @@ export function rangeFilterFor(pickerDate: ReturnType<typeof pickerDateExpr>, fr
 }
 
 /** Months that have data, for the picker and for resolving month=auto. */
+// Which months have data, cached briefly per (category, basis, evaluator).
+//
+// This read is the one thing month=auto cannot start without: the range it resolves to
+// depends on the answer, so it runs BEFORE the batch that needs the range, and with the
+// database ~225ms away that serialized round-trip is the single most expensive thing
+// about opening a tab. Measured in a production build against the real database, it is
+// worth ~550ms on the rows request and ~450ms on facets -- and they pay it in parallel,
+// so it is ~500ms straight off time-to-table.
+//
+// A cache is the cheap way out. The answer is a list of months: it only moves when an
+// import brings in a month nobody has seen, which is not something a dropdown needs to
+// learn about within the minute. So the first caller per minute pays the round-trip and
+// everyone else gets it free -- including, importantly, the rows request and the facets
+// request of the same page load, which ask for exactly the same list.
+//
+// The key carries the evaluator because the list is scoped by it: an evaluator's month
+// list is not the team's. It is the resolved scope string (see resolveEvaluatorScope),
+// not the raw query param, so one user can never read another's entry.
+//
+// Nothing in the app invalidates this: four different routes insert evaluations, so a
+// hook on one of them would look like a guarantee it is not. The TTL is the contract --
+// a month that appears mid-minute shows up in the picker within the minute. Tests, which
+// change the month list between cases with no minute in between, clear it explicitly.
+const MONTHS_TTL_MS = 60_000
+const monthsCache = new Map<string, { at: number; months: YearMonth[] }>()
+
+/** Forget every cached month list. For tests, which move the clock and the data faster
+ *  than the TTL was ever meant to cope with. */
+export function clearAvailableMonthsCache() {
+  monthsCache.clear()
+}
+
 export async function loadAvailableMonths(
   category: string,
   pickerDate: ReturnType<typeof pickerDateExpr>,
   evaluatorFilter: ReturnType<typeof buildFilters>['evaluatorFilter'],
+  cacheKey?: string,
 ): Promise<YearMonth[]> {
+  if (cacheKey) {
+    const hit = monthsCache.get(cacheKey)
+    if (hit && Date.now() - hit.at < MONTHS_TTL_MS) return hit.months
+  }
   const rows = await sql`
     SELECT DISTINCT
       EXTRACT(YEAR FROM ${pickerDate})::int AS year,
@@ -201,5 +238,12 @@ export async function loadAvailableMonths(
       ${evaluatorFilter}
     ORDER BY year DESC, month DESC
   `
-  return rows as unknown as YearMonth[]
+  const months = rows as unknown as YearMonth[]
+  if (cacheKey) monthsCache.set(cacheKey, { at: Date.now(), months })
+  return months
+}
+
+/** The cache key for a month list: everything the query is scoped by. */
+export function monthsCacheKey(category: string, basis: DateBasis, evaluator: string) {
+  return `${category}|${basis}|${evaluator}`
 }

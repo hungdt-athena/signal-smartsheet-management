@@ -6,7 +6,7 @@ import { getConfigValues } from '@/lib/config'
 import { visibleEvaluators } from '@/lib/people-config'
 import { loadHiddenEvaluatorKeys } from '@/lib/people-config-db'
 import {
-  buildFilters, loadAvailableMonths, rangeFilterFor, readDateBasis,
+  buildFilters, loadAvailableMonths, monthsCacheKey, rangeFilterFor, readDateBasis,
   resolveEvaluatorScope, resolveRange,
 } from '@/lib/evaluations-filters'
 
@@ -37,10 +37,17 @@ export async function GET(req: NextRequest) {
     const basis = readDateBasis(searchParams)
     const f = buildFilters(searchParams, evaluator, basis)
 
-    // month=auto needs the month list before it can pick one, so this one read has to
-    // land first. Everything after it goes out together.
-    const availableMonths = await loadAvailableMonths(category, f.pickerDate, f.evaluatorFilter)
-    const { from, to, appliedMonth } = resolveRange(searchParams, availableMonths)
+    // month=auto is the only mode that needs the month list before it can resolve a
+    // range, and it is a first-load-only mode: every request after it carries explicit
+    // from/to. So the serialized read happens only when it is genuinely a dependency --
+    // otherwise the month list rides along in the batch below, and this endpoint costs
+    // one round-trip instead of two. With the database ~225ms away that is the whole
+    // difference between the dropdowns landing with the table and landing after it.
+    const monthsPromise = loadAvailableMonths(
+      category, f.pickerDate, f.evaluatorFilter, monthsCacheKey(category, basis, evaluator))
+    const autoMonth = searchParams.get('month') === 'auto'
+    const monthsForRange = autoMonth ? await monthsPromise : []
+    const { from, to, appliedMonth } = resolveRange(searchParams, monthsForRange)
     const rangeFilter = rangeFilterFor(f.pickerDate, from, to)
 
     const filtersNoBatch = sql`
@@ -56,9 +63,11 @@ export async function GET(req: NextRequest) {
     `
 
     const [
+      availableMonths,
       conclusionOptions, hiddenEvaluatorKeys, distinctEvaluators,
       distinctConclusions, batchRows, cfg, presentRows,
     ] = await Promise.all([
+      monthsPromise,
       getConfigValues('conclusion'),
       loadHiddenEvaluatorKeys(),
       // Full evaluator list for the category — deliberately ignores month and

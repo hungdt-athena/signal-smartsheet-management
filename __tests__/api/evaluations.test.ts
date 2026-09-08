@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import { NextRequest } from 'next/server'
+import { clearAvailableMonthsCache } from '@/lib/evaluations-filters'
 
 jest.mock('@/lib/db', () => ({ sql: jest.fn() }))
 
@@ -53,6 +54,10 @@ describe('GET /api/evaluations', () => {
   beforeEach(() => {
     // 2026-06-15 in UTC — current month in UTC+7 is June 2026.
     jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-06-15T10:00:00Z').getTime())
+    // The month list is cached for a minute so month=auto does not pay a serialized
+    // round-trip on every page open. These cases hand it a different list each time,
+    // with a frozen clock, so the cache has to be cleared between them.
+    clearAvailableMonthsCache()
   })
   afterEach(() => { jest.restoreAllMocks() })
 
