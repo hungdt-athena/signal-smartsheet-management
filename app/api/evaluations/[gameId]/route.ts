@@ -31,7 +31,14 @@ export async function GET(
     const category = req.nextUrl.searchParams.get('category') || ''
     const categoryFilter = category ? sql`AND ge.category_group = ${category}` : sql``
 
-    const rows = await sql`
+    // The game and the team's current-batch config go out together. The config read
+    // used to come after the game had landed, because the key it wants is built from
+    // that game's category_group -- one more serialized round-trip on the panel's
+    // hottest path (every open, every Next). There are only three categories, so
+    // reading all of them costs nothing on a connection that is otherwise idle and
+    // lets both queries share one round-trip. The right one is picked out below.
+    const [rows, batchCfg] = await Promise.all([
+      sql`
       SELECT ge.id, ge.game_id, ge.category_group, ge.genre_1, ge.genre_2,
         ge.initial_evaluator, ge.final_evaluator, ge.assigned_date,
         ge.evaluate_date, ge.initial_note, ge.final_note, ge.game_alike,
@@ -59,7 +66,11 @@ export async function GET(
       LEFT JOIN developer dev ON gi.publisher_id = dev.id
       WHERE ge.game_id = ${gameId}
         ${categoryFilter}
-    `
+    `,
+      sql<{ key: string; value: string }[]>`
+        SELECT key, value FROM app_config WHERE key LIKE 'current_batch:%'
+      `,
+    ])
 
     if (rows.length === 0) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -74,8 +85,8 @@ export async function GET(
     }
     // Team-wide "current batch" for this game's category — drives the forced
     // batch evaluators get when marking List_Idea (see EvalDetailPanel).
-    const cfg = await sql`SELECT value FROM app_config WHERE key = ${`current_batch:${row.category_group}`}`
-    row.current_batch = cfg[0]?.value ?? null
+    row.current_batch =
+      batchCfg.find(c => c.key === `current_batch:${row.category_group}`)?.value ?? null
     return NextResponse.json({ data: row })
   } catch (err) {
     console.error('GET /api/evaluations/[gameId] error:', err)

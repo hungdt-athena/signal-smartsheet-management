@@ -121,6 +121,20 @@ export async function fetchEvalByGameId(gameId: string): Promise<EvalDetail | nu
   } catch { return null }
 }
 
+/** What GET /api/playtest-tags?gameId= answers with: the game's pending proposals
+ *  and the Trends tags Signal Sense already carries for it. */
+export interface TrendTagsPayload {
+  pending: ReviewTag[]
+  existing: ExistingTrendTag[]
+}
+
+export async function fetchTrendTags(gameId: string): Promise<TrendTagsPayload> {
+  const res = await fetch(`/api/playtest-tags?gameId=${encodeURIComponent(gameId)}`)
+  if (!res.ok) throw new Error('failed')
+  const d = await res.json()
+  return { pending: d.pending || [], existing: d.existing || [] }
+}
+
 function InfoField({ label, value, copyValue, icon }: { label: string; value: string | null | undefined; copyValue?: string; icon?: ReactNode }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
@@ -444,6 +458,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // wipe pending proposals the user never saw.
   const trendTagsLoadedFor = useRef<string | null>(null)
   const trendTagsGen = useRef(0)
+  // One game's tags, kept alongside the panel's detail cache and filled by the same
+  // neighbour prefetch. Before this, Prev/Next always waited a full round-trip for
+  // the Trends section even when the game itself was already cached.
+  const trendTagsCacheRef = useRef<Map<string, TrendTagsPayload>>(new Map())
   const [conclusion, setConclusion] = useState('')
   const [batch, setBatch] = useState('')
   const [driveLink, setDriveLink] = useState('')
@@ -477,6 +495,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   }, [autoSave])
 
   const cacheRef = useRef<Map<string, EvalDetail>>(new Map())
+  // Which loadGame call owns the screen, and whether the form has unsaved edits.
+  // Both are read inside async callbacks that would otherwise close over a stale
+  // render's values.
+  const loadGameGen = useRef(0)
+  const dirtyRef = useRef(false)
+
+  // Mirror `dirty` into a ref so loadGame's late-arriving revalidation can see the
+  // current value rather than the one captured when it started.
+  useEffect(() => { dirtyRef.current = dirty }, [dirty])
 
   useEffect(() => {
     setCurrentGameId(initialGameId)
@@ -519,6 +546,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   }, [generateQR])
 
   const loadGame = useCallback(async (gameId: string) => {
+    const gen = ++loadGameGen.current
     const cached = cacheRef.current.get(gameId)
     if (cached) {
       applyData(cached)
@@ -529,6 +557,19 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     const data = await fetchEvalByGameId(gameId)
     if (!data) return
     cacheRef.current.set(gameId, data)
+    // Drop a response for a game we have already navigated away from. Holding
+    // Next/ArrowRight fires these faster than they come back, and without this the
+    // slowest one wins: an earlier game's data lands on top of the visible one.
+    if (loadGameGen.current !== gen) return
+    // A cached game is already on screen. Re-applying an identical payload is a
+    // second full form reset for no visible change -- it clears `dirty`, resets every
+    // field and blanks the QR while it regenerates, ~half a second after the user
+    // moved on and possibly started typing. Apply the fresh copy only when it says
+    // something different, and never over edits in progress.
+    if (cached) {
+      if (dirtyRef.current) return
+      if (JSON.stringify(data) === JSON.stringify(cached)) return
+    }
     applyData(data)
     setLoading(false)
   }, [applyData])
@@ -572,22 +613,36 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // effect. A failure is recorded rather than swallowed: `trendTagsLoadedFor`
   // stays unset, which blocks the destructive PUT, and `trendTagsError` tells the
   // user why the field went read-only.
-  const loadTrendTags = useCallback((gameId: string) => {
+  const applyTrendTags = useCallback((gameId: string, d: TrendTagsPayload) => {
+    setTrendTags((d.pending || []).map(p => ({ field_value: p.field_value, sub_value_id: p.sub_value_id })))
+    setPendingReview(d.pending || [])
+    setExistingTrends(d.existing || [])
+    setTrendTagsError(false)
+    trendTagsLoadedFor.current = gameId
+  }, [])
+
+  const loadTrendTags = useCallback((gameId: string, force = false) => {
     const gen = ++trendTagsGen.current
+    // Cache hit: the neighbour prefetch below already has this game's tags, so the
+    // section renders filled in the same frame instead of blanking for a round-trip.
+    // Serving it and stopping is deliberate -- a background re-read would land on an
+    // editable list (`trendTags`) and could wipe whatever the user staged meanwhile.
+    // A stale entry is not a risk: every write path drops the game's entry.
+    const cached = force ? undefined : trendTagsCacheRef.current.get(gameId)
+    if (cached) {
+      applyTrendTags(gameId, cached)
+      return
+    }
     trendTagsLoadedFor.current = null
     setTrendTags([]); setPendingReview([]); setExistingTrends([]); setTrendTagsError(false)
-    fetch(`/api/playtest-tags?gameId=${encodeURIComponent(gameId)}`)
-      .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
+    fetchTrendTags(gameId)
       .then(d => {
+        trendTagsCacheRef.current.set(gameId, d)
         if (trendTagsGen.current !== gen) return
-        setTrendTags((d.pending || []).map((p: { field_value: string; sub_value_id: number | null }) =>
-          ({ field_value: p.field_value, sub_value_id: p.sub_value_id })))
-        setPendingReview(d.pending || [])
-        setExistingTrends(d.existing || [])
-        trendTagsLoadedFor.current = gameId
+        applyTrendTags(gameId, d)
       })
       .catch(() => { if (trendTagsGen.current === gen) setTrendTagsError(true) })
-  }, [])
+  }, [applyTrendTags])
 
   // A review action changes the pending set behind the form, so the editable
   // list has to follow it: a confirmed tag left in the list would be proposed all
@@ -600,6 +655,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // the user has staged and not saved is untouched either way.
   const onTagReviewed = useCallback((change: ReviewChange) => {
     const { tag } = change
+    // The cached copy describes the tags as they were before this review; drop it so
+    // navigating away and back re-reads rather than restoring the pre-review list.
+    trendTagsCacheRef.current.delete(tag.game_id)
     if (change.kind === 'edited') {
       setPendingReview(prev => prev.map(p => (p.id === tag.id ? tag : p)))
       setTrendTags(prev => prev.map(t => (t.field_value === change.previous
@@ -627,8 +685,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // the form depends on that list, so the section is all that moves -- and it
   // moves from the response, not from a re-read.
   const onExistingChanged = useCallback((change: ExistingTagChange) => {
+    trendTagsCacheRef.current.delete(currentGameId)
     setExistingTrends(prev => applyExistingChange(prev, change))
-  }, [])
+  }, [currentGameId])
 
   useEffect(() => {
     loadTrendTags(currentGameId)
@@ -647,6 +706,14 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       const gid = gameList[idx].game_id
       if (!cacheRef.current.has(gid)) {
         fetchEvalByGameId(gid).then(data => { if (data) cacheRef.current.set(gid, data) })
+      }
+      // The Trends section is a second request on the same navigation, and it used to
+      // be the one Prev/Next actually waited on: the game itself was prefetched, its
+      // tags never were. Warm both or neither.
+      if (!trendTagsCacheRef.current.has(gid)) {
+        fetchTrendTags(gid)
+          .then(d => { trendTagsCacheRef.current.set(gid, d) })
+          .catch(() => { /* the real load will surface the failure */ })
       }
     })
   }, [currentIdx, hasNav, gameList])
@@ -776,6 +843,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
           setSaving(false)
           return
         }
+        // The pending set just changed; the cached copy is the pre-save one.
+        trendTagsCacheRef.current.delete(ev.game_id)
       }
       const body: Record<string, unknown> = { id: ev.id }
       if (canEditEval) {
@@ -1254,7 +1323,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
                   optionsError={trendOptionsError}
                   onRetryOptions={loadTrendOptions}
                   loadError={trendTagsError}
-                  onRetryLoad={() => loadTrendTags(currentGameId)}
+                  onRetryLoad={() => loadTrendTags(currentGameId, true)}
                   review={pendingReview}
                   canReview={isManager}
                   onReviewed={onTagReviewed}
