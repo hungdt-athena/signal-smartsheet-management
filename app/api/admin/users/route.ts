@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { invalidateUserCache } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -129,6 +130,10 @@ export async function PUT(req: NextRequest) {
       active = ${active !== undefined ? active : sql`active`}
     WHERE id = ${id}
   `
+  // The session callback caches this row for a few seconds so it isn't re-read on
+  // every API request. Drop it here so a role change or a deactivation is in force
+  // on the user's very next request rather than up to the TTL later.
+  invalidateUserCache(user[0].email as string)
   return NextResponse.json({ ok: true })
 }
 

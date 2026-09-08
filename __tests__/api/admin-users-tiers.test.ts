@@ -10,7 +10,10 @@ jest.mock('@/lib/db', () => {
   return { sql: fn }
 })
 jest.mock('next-auth', () => ({ getServerSession: jest.fn() }))
-jest.mock('@/lib/auth', () => ({ authOptions: {} }))
+// invalidateUserCache: the route drops the edited user's cached session row so a role
+// change or a deactivation lands on their next request instead of up to the cache TTL
+// later. Stubbed here — this suite is about the tier rules, not the cache.
+jest.mock('@/lib/auth', () => ({ authOptions: {}, invalidateUserCache: jest.fn() }))
 
 import { POST, PUT } from '@/app/api/admin/users/route'
 import { sql } from '@/lib/db'

@@ -29,6 +29,45 @@ async function fetchRecorderNames(): Promise<string[]> {
   return fetchNamesFromWebhook(process.env.WEBHOOK_TEAM_RECORDERS_GET)
 }
 
+// --- the signed-in user's row, cached for a few seconds -------------------------
+//
+// `session()` below runs on EVERY authenticated request, and it used to read
+// dashboard_users from the database every single time -- one serialized round-trip
+// before the request's own query had even started. With the app in Asia and the
+// database in us-east-2 that is ~225ms of pure waiting added to every API call, paid
+// to re-read a role that changes maybe twice a month.
+//
+// It is cached rather than moved into the JWT because the read is what makes
+// deactivation and role changes take effect on the next request instead of whenever
+// the 30-day token expires. A short TTL keeps that property to within
+// USER_CACHE_TTL_MS; `invalidateUserCache` closes even that window for changes this
+// app makes itself (Users Management), so the TTL only ever covers a row edited
+// directly in the database or by another instance.
+const USER_CACHE_TTL_MS = 30_000
+
+interface CachedUser { id: number; name: string; role: string; active: boolean }
+const userCache = new Map<string, { at: number; row: CachedUser | null }>()
+
+/** Drop a user's cached row so the next request re-reads it. Call after any write
+ *  that changes their role, name or active flag. */
+export function invalidateUserCache(email?: string | null) {
+  if (email) userCache.delete(email.toLowerCase())
+  else userCache.clear()
+}
+
+async function readUser(email: string): Promise<CachedUser | null> {
+  const key = email.toLowerCase()
+  const hit = userCache.get(key)
+  if (hit && Date.now() - hit.at < USER_CACHE_TTL_MS) return hit.row
+
+  const rows = await sql<CachedUser[]>`
+    SELECT id, name, role, active FROM dashboard_users WHERE email = ${email}
+  `
+  const row = rows[0] ?? null
+  userCache.set(key, { at: Date.now(), row })
+  return row
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
@@ -88,15 +127,14 @@ export const authOptions: NextAuthOptions = {
     async session({ session }) {
       if (!session.user?.email) return session
       try {
-        const email = session.user.email
-        const rows = await sql`SELECT id, name, role, active FROM dashboard_users WHERE email = ${email}`
+        const row = await readUser(session.user.email)
         // Deactivating someone must take effect on their next request, not when
         // their JWT happens to expire, so a live session loses its role here and
         // every requireRole guard then turns it away.
-        if (rows.length > 0 && rows[0].active !== false) {
-          session.user.id = rows[0].id
-          session.user.role = rows[0].role
-          session.user.name = rows[0].name
+        if (row && row.active !== false) {
+          session.user.id = row.id
+          session.user.role = row.role as typeof session.user.role
+          session.user.name = row.name
         }
       } catch (e) {
         console.error('[auth] session DB error:', (e as Error).message)
