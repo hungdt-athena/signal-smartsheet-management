@@ -48,3 +48,6 @@ __tests__/deleted.json
 
 # service-account keys (secret — do not commit)
 *.iam.gserviceaccount.json
+
+# local-only screenshot store (SCREENSHOT_STORE=local)
+/.screenshots/

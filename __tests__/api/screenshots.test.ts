@@ -9,7 +9,7 @@ jest.mock('@/lib/db', () => ({
   sql: Object.assign(jest.fn(), { json: (v: unknown) => v }),
 }))
 jest.mock('next-auth', () => ({ getServerSession: jest.fn() }))
-jest.mock('@/lib/supabase-storage', () => ({
+jest.mock('@/lib/screenshot-store', () => ({
   isStorageConfigured: jest.fn(() => true),
   uploadScreenshot: jest.fn(),
   deleteScreenshotByUrl: jest.fn(),
@@ -21,7 +21,7 @@ import { sql } from '@/lib/db'
 import { getServerSession } from 'next-auth'
 import {
   isStorageConfigured, uploadScreenshot, deleteScreenshotByUrl, deleteGameScreenshots,
-} from '@/lib/supabase-storage'
+} from '@/lib/screenshot-store'
 
 const sqlMock = sql as unknown as jest.Mock
 const sessionMock = getServerSession as jest.Mock

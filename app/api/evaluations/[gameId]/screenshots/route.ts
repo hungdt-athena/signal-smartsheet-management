@@ -5,7 +5,7 @@ import { isManagerRole } from '@/lib/roles'
 import {
   isStorageConfigured, uploadScreenshot,
   deleteScreenshotByUrl, deleteGameScreenshots,
-} from '@/lib/supabase-storage'
+} from '@/lib/screenshot-store'
 import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'

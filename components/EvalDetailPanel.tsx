@@ -476,6 +476,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
   // there's no separate "Save screenshots" click (and auto-save picks them up).
   const screenshotRef = useRef<ManualScreenshotsHandle>(null)
   const [stagedShots, setStagedShots] = useState(0)
+  // Staged shots keep `needsSave` true when an upload fails, which would otherwise
+  // make auto-save re-fire every 1.5s forever against a storage backend that is
+  // down. Latched on failure, cleared the moment the staged set changes (or a
+  // manual Save succeeds), so retrying stays the user's call.
+  const shotsFailedRef = useRef(false)
 
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [expandedImg, setExpandedImg] = useState<string | null>(null)
@@ -824,8 +829,14 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     try {
       // Flush staged screenshots first so one Save persists both. Silent success —
       // the eval PATCH below shows the single "Saved" toast; the refetch picks up
-      // the new screenshot URLs from the server.
-      if (canEditEval) await screenshotRef.current?.flush()
+      // the new screenshot URLs from the server. A failure here must survive that
+      // toast: the card's own error message is about to be overwritten, and the
+      // refetch renders server state with none of the staged shots in it, so
+      // swallowing the result reports "Saved" over screenshots that never landed.
+      const shotsOk = canEditEval && screenshotRef.current?.hasStaged()
+        ? await screenshotRef.current.flush()
+        : true
+      shotsFailedRef.current = !shotsOk
       // Trends tags are their own resource (they stage for admin review, they are not
       // evaluation columns), so they save alongside the eval rather than inside it.
       // Only PUT what we actually loaded: the endpoint replaces the game's whole
@@ -879,7 +890,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
         const err = await res.json()
         showToast(err.error || 'Failed', true)
       } else {
-        showToast('Saved')
+        // The evaluation itself is saved either way; only the wording changes, so
+        // a screenshot outage can never make an evaluator think their note was lost.
+        if (shotsOk) showToast('Saved')
+        else showToast('Evaluation saved — screenshots failed to upload', true)
         const fresh = await fetchEvalByGameId(ev.game_id)
         if (fresh) {
           cacheRef.current.set(ev.game_id, fresh)
@@ -928,9 +942,14 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     flush: () => saveRef.current(),
   }), [])
 
+  // Declared before the auto-save effect so a changed staging set clears the latch
+  // in the same commit, letting the next edit try the upload again.
+  useEffect(() => { shotsFailedRef.current = false }, [stagedShots])
+
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (!autoSave || !needsSave || saving || !canEdit || noteTooShort) return
+    if (shotsFailedRef.current) return
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 1500)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }

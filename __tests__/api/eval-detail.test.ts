@@ -4,14 +4,14 @@
 import { NextRequest } from 'next/server'
 
 jest.mock('@/lib/db', () => ({ sql: jest.fn() }))
-jest.mock('@/lib/supabase-storage', () => ({
+jest.mock('@/lib/screenshot-store', () => ({
   isStorageConfigured: jest.fn(() => true),
   deleteGameScreenshots: jest.fn().mockResolvedValue(undefined),
 }))
 
 import { GET } from '@/app/api/evaluations/[gameId]/route'
 import { sql } from '@/lib/db'
-import { isStorageConfigured, deleteGameScreenshots } from '@/lib/supabase-storage'
+import { isStorageConfigured, deleteGameScreenshots } from '@/lib/screenshot-store'
 
 const sqlMock = sql as unknown as jest.Mock
 const PARAMS = { params: { gameId: 'game123' } }

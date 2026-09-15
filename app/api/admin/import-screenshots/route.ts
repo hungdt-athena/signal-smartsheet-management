@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
-import { isStorageConfigured, uploadScreenshot } from '@/lib/supabase-storage'
+import { isStorageConfigured, uploadScreenshot } from '@/lib/screenshot-store'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60

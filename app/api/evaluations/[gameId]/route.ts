@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
-import { isStorageConfigured, deleteGameScreenshots } from '@/lib/supabase-storage'
+import { isStorageConfigured, deleteGameScreenshots } from '@/lib/screenshot-store'
 
 export const dynamic = 'force-dynamic'
 
