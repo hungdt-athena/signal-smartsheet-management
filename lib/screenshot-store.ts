@@ -54,10 +54,14 @@ export function isStorageConfigured(): boolean {
 const LOCAL_DIR = process.env.SCREENSHOT_LOCAL_DIR
   || path.join(process.cwd(), '.screenshots')
 
-/** Which bucket to write to. Unset means "whatever the sidecar calls the default
- *  bucket", which is only correct when the app has exactly one. Set
- *  SCREENSHOT_BUCKET to pin a named bucket instead -- with more than one bucket
- *  in App Storage, relying on the default is a guess. */
+/** Which bucket to write to. Leave SCREENSHOT_BUCKET unset in normal operation:
+ *  the sidecar then serves `[objectStorage] defaultBucketID` from `.replit`,
+ *  which keeps the bucket declared in exactly one place.
+ *
+ *  Set it only to write somewhere other than the app's default bucket. The value
+ *  is the bucket *id* -- `replit-objstore-<uuid>`, as it appears in `.replit` --
+ *  not the name App Storage shows in its dropdown. Those differ, and passing the
+ *  display name fails at the GCS call rather than anywhere informative. */
 export function bucketName(): string | undefined {
   return process.env.SCREENSHOT_BUCKET || undefined
 }
