@@ -13,7 +13,8 @@ export async function GET(req: NextRequest) {
   const like = `%${q}%`
   const users = await sql<{ name: string; email: string }[]>`
     SELECT name, email FROM dashboard_users
-    WHERE name ILIKE ${like} OR email ILIKE ${like}
+    -- A deactivated user must not be suggested back onto the roster.
+    WHERE active = TRUE AND (name ILIKE ${like} OR email ILIKE ${like})
     ORDER BY name ASC
     LIMIT 10
   `

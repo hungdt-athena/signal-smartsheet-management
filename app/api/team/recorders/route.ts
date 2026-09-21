@@ -5,14 +5,19 @@ import { sql } from '@/lib/db'
 export const dynamic = 'force-dynamic'
 
 // GET /api/team/recorders — candidate recorders for assignment.
-// Any dashboard user can be a recorder, ordered evaluators, then admins.
+// Any ACTIVE dashboard user can be a recorder, ordered evaluators, then admins.
+//
+// Deactivating a user in Users Management is the strong form of hiding: no
+// sign-in, gone from Config › People, gone from every evaluator dropdown. This
+// list has to obey it too, or someone who left the team keeps being offered as
+// the person to record a video.
 export async function GET(_req: NextRequest) {
   const guard = await requireAuth()
   if (guard) return guard
 
   const rows = await sql`
     SELECT name FROM dashboard_users
-    WHERE name IS NOT NULL AND name <> ''
+    WHERE active = TRUE AND name IS NOT NULL AND name <> ''
     ORDER BY
       CASE role
         WHEN 'evaluator' THEN 0
