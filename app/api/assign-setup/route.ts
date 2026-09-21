@@ -98,12 +98,16 @@ export async function PATCH(req: NextRequest) {
   const { id, field, value, name, list_type: listType } = await req.json()
 
   try {
-    // Availability, platform and weight are facts about the person, so they are
-    // written by (list_type, name) — every genre of theirs, in one statement.
-    // This is the only place the per-person rule lives, and it lives on the
-    // server so no UI can put a person's genres into disagreeing states.
-    // Sub-genre stays per row: it is the one thing that varies by genre.
-    if (field === 'today_available' || field === 'game_platform' || field === 'weight') {
+    // Availability and platform are facts about the person, so they are written
+    // by (list_type, name) — every genre of theirs, in one statement. This is
+    // the only place the per-person rule lives, and it lives on the server so
+    // no UI can put a person's genres into disagreeing states.
+    //
+    // Sub-genre and weight vary by genre, so both are written by row id below.
+    // Weight was person-level here until the roster started editing it per
+    // genre; the cron has always read it per (name, category_group), so this
+    // widens what the UI can express without changing what the cron does.
+    if (field === 'today_available' || field === 'game_platform') {
       const who = typeof name === 'string' ? name.trim() : ''
       if (!who) return NextResponse.json({ error: 'name is required' }, { status: 400 })
       if (listType !== 'initial' && listType !== 'final') {
@@ -115,16 +119,10 @@ export async function PATCH(req: NextRequest) {
           SET today_available = ${value === true || value === 'Yes'}, updated_at = NOW()
           WHERE list_type = ${listType} AND name = ${who}
         `
-      } else if (field === 'game_platform') {
+      } else {
         if (!PLATFORMS.includes(value)) return NextResponse.json({ error: 'Invalid platform' }, { status: 400 })
         await sql`
           UPDATE evaluator_roster SET game_platform = ${value}, updated_at = NOW()
-          WHERE list_type = ${listType} AND name = ${who}
-        `
-      } else {
-        if (!isWeight(value)) return NextResponse.json({ error: 'weight must be 30/50/70/100' }, { status: 400 })
-        await sql`
-          UPDATE evaluator_roster SET weight = ${value}, updated_at = NOW()
           WHERE list_type = ${listType} AND name = ${who}
         `
       }
@@ -135,6 +133,9 @@ export async function PATCH(req: NextRequest) {
 
     if (field === 'game_category') {
       await sql`UPDATE evaluator_roster SET game_category = ${normalizeCategory(value)}, updated_at = NOW() WHERE id = ${id}`
+    } else if (field === 'weight') {
+      if (!isWeight(value)) return NextResponse.json({ error: 'weight must be 30/50/70/100' }, { status: 400 })
+      await sql`UPDATE evaluator_roster SET weight = ${value}, updated_at = NOW() WHERE id = ${id}`
     } else {
       return NextResponse.json({ error: 'Unknown field' }, { status: 400 })
     }

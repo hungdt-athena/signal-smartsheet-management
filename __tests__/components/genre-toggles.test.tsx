@@ -20,7 +20,8 @@ const sw = (name: string) => within(row(name)).getByRole('switch')
 describe('GenreToggles', () => {
   it('says what the switches actually do', () => {
     setup()
-    expect(screen.getByText(/genres receiving new games today/i)).toBeInTheDocument()
+    expect(screen.getByText(/push targets/i)).toBeInTheDocument()
+    expect(screen.getByText(/^today$/i)).toBeInTheDocument()
   })
 
   it('counts the people ready for each genre, not the database rows', () => {

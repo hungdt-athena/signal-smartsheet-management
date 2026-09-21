@@ -1,14 +1,17 @@
-// components/AssignSetup.tsx — the single-page roster: one row is one
-// (person, genre) pair. No bucket prop; genre is a view filter passed down by the
-// page. Rendering is delegated to RosterTable, leaving fetch and four writes.
+// components/AssignSetup.tsx — the single-page Assign tab: the Initial roster
+// beside the pipeline panel (push targets + next-run preview), with the Final
+// roster below. One roster row is one person; their genres are pills.
+// Rendering is delegated to RosterTable, leaving fetch and the writes.
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { GenreToggles } from '@/components/GenreToggles'
+import { PushPreview } from '@/components/PushPreview'
 import { RosterTable } from '@/components/RosterTable'
 import { useCategoryMappings } from '@/hooks/useCategoryMappings'
 import { groupRosterByPerson, type RosterRow } from '@/lib/assign-roster'
 import type { Bucket } from '@/lib/buckets'
 import type { GenreTarget } from '@/lib/genre-config'
+import { isPushPreview, type PushPreview as Preview } from '@/lib/push-preview'
 
 type ListType = 'initial' | 'final'
 
@@ -22,12 +25,40 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
   const [final, setFinal] = useState<RosterRow[]>([])
   const [genres, setGenres] = useState<GenreTarget[]>([])
   const [canEditGenres, setCanEditGenres] = useState(false)
+  const [preview, setPreview] = useState<Preview | null>(null)
+  // Starts true so the first paint reads "Working it out…" rather than
+  // "Not available." — the panel has not failed, it has not been asked yet.
+  const [previewing, setPreviewing] = useState(!isEvaluator)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // The preview is fetched on its own, NOT alongside the roster. Counting
+  // eligible games is a ~9s scan of game_info (see the route's COST note), and
+  // putting it in the roster's Promise.all made every weight click appear to
+  // hang for that long. It is also the least important thing on the screen, so
+  // it is allowed to arrive late and to fail quietly.
+  //
+  // `fresh` skips the route's one-minute cache; the Refresh button sets it, a
+  // roster edit does not.
+  const refreshPreview = useCallback(async (fresh = false) => {
+    if (isEvaluator) return
+    setPreviewing(true)
+    try {
+      const res = await fetch(`/api/assign-setup/preview${fresh ? '?fresh=1' : ''}`, { cache: 'no-store' })
+      if (!res.ok) return
+      const p = await res.json()
+      // A failed or unreadable preview leaves the last good numbers on screen
+      // rather than blanking the panel. The shape is checked because the panel
+      // must never be what takes the tab down.
+      if (isPushPreview(p)) setPreview(p)
+    } catch { /* keep the last good numbers */ }
+    finally { setPreviewing(false) }
+  }, [isEvaluator])
+
   // Roster and genre state are fetched together: availability is half of what a
-  // genre chip says, so showing one without the other would misreport the pipeline.
-  const refresh = useCallback(async () => {
+  // genre row says, so showing one without the other would misreport the
+  // pipeline. The preview follows separately, for the reason above.
+  const refresh = useCallback(async (fresh = false) => {
     setLoading(true); setError(null)
     try {
       const [rosterRes, genreRes] = await Promise.all([
@@ -43,7 +74,8 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
       }
     } catch { setError('Failed to load roster.') }
     finally { setLoading(false) }
-  }, [])
+    refreshPreview(fresh)
+  }, [refreshPreview])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -66,12 +98,13 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
     if (res.ok) refresh(); else setError(msg)
   }, [refresh])
 
+  // Sub-genre and weight both vary by genre, so they are written by row id.
   const patchRow = (id: number, field: string, value: unknown) =>
     send('PATCH', { id, field, value }, 'Update failed.')
   const patchAvailable = (list_type: ListType) => (name: string, value: boolean) =>
     send('PATCH', { field: 'today_available', list_type, name, value }, 'Update failed.')
-  // Platform and weight are person-level too, so they go by name like
-  // availability — one write covers every genre that person holds.
+  // Platform is person-level, so it goes by name like availability — one write
+  // covers every genre that person holds.
   const patchPerson = (list_type: ListType) => (name: string, field: string, value: unknown) =>
     send('PATCH', { field, list_type, name, value }, 'Update failed.')
   const removeRow = (id: number) => send('DELETE', { id }, 'Delete failed.')
@@ -92,26 +125,40 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
 
   return (
     <div className="assign-setup">
-      {/* Which genres receive games is a fact about the pipeline, not about the
-          roster, so it sits above the roster's own heading. */}
-      {genres.length > 0 && (
-        <GenreToggles genres={genres} canEdit={canEditGenres && !isEvaluator} onToggle={toggleGenre} />
-      )}
-
       <div className="roster-head">
         <span className="card-label">Roster</span>
-        <button className="btn btn-sm" onClick={refresh} disabled={loading}>
+        <button className="btn btn-sm" onClick={() => refresh(true)} disabled={loading}>
           <span className={loading ? 'spin' : ''}>↻</span>{loading ? '...' : 'Refresh'}
         </button>
       </div>
 
       {error && <p className="msg-err">{error}</p>}
 
-      <RosterTable title="Initial Evaluator" groups={initialGroups} subGenres={subGenres}
-        readOnly={isEvaluator}
-        onPatchRow={patchRow} onPatchAvailable={patchAvailable('initial')} onPatchPerson={patchPerson('initial')}
-        onRemoveRow={removeRow}
-        onAddGenre={addGenre('initial')} onAddEvaluator={addEvaluator('initial')} />
+      {/* The Initial roster and the pipeline panel sit side by side because
+          they are two halves of one question: who is taking games today, and
+          what that produces. The genre column leaves slack on the right at any
+          realistic roster width, so the panel costs no space the table wanted.
+          Below 1280px they stack instead. */}
+      <div className="assign-grid">
+        <RosterTable title="Initial Evaluator" groups={initialGroups} subGenres={subGenres}
+          readOnly={isEvaluator}
+          onPatchRow={patchRow} onPatchAvailable={patchAvailable('initial')} onPatchPerson={patchPerson('initial')}
+          onRemoveRow={removeRow}
+          onAddGenre={addGenre('initial')} onAddEvaluator={addEvaluator('initial')} />
+
+        <aside className="assign-side">
+          {genres.length > 0 && (
+            <GenreToggles genres={genres} canEdit={canEditGenres && !isEvaluator} onToggle={toggleGenre} />
+          )}
+          {/* canEdit on /api/genre-config is the admin test, and running the
+              pipeline by hand is admin-only for the same reason. */}
+          {!isEvaluator && (
+            <PushPreview preview={preview} loading={previewing}
+              canRun={canEditGenres} onRan={() => refresh(true)} />
+          )}
+        </aside>
+      </div>
+
       {!isEvaluator && (
         <RosterTable title="Final Evaluator" groups={finalGroups} subGenres={subGenres}
           onPatchRow={patchRow} onPatchAvailable={patchAvailable('final')} onPatchPerson={patchPerson('final')}

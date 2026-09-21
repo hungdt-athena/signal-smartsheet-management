@@ -266,20 +266,135 @@ body {
 .ht-name { font-family: var(--num); font-size: 12.5px; font-weight: 500; }
 .ht-note { font-size: 12px; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; }
 
-/* ===== Assign tab: roster on top, history matrix below, both full width ===== */
+/* ===== Assign tab: roster + pipeline panel side by side, matrix below ===== */
 .assign-setup { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 .roster-head { display: flex; justify-content: space-between; align-items: center; }
 
-/* Genres receiving new games. The switch says what was asked for; the "Ready
-   today" column says whether it can happen. When they disagree the row below
-   names the fix, so the warn colour never appears without an instruction. */
+/* "A full genre list never wraps" is kept by the table, not by this track:
+   .roster-tbl .tbl takes min-width: max-content below, so it is always at
+   least as wide as its widest row and .tbl-wrap scrolls when the track is
+   narrower — a scrollbar, not a clip, and never a wrapped pill row.
+   The track itself is therefore free to be minmax(0, 1fr).
+   The side column does not stretch: two short cards next to a tall table
+   should end where their content ends.
+   The breakpoint counts the 232px sidebar and the page gutters, so it fires
+   while the pair still has room rather than after it has already overflowed. */
+.assign-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(296px, 344px);
+  gap: var(--gap); align-items: start; min-width: 0;
+}
+.assign-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+@media (max-width: 1280px) {
+  .assign-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Push targets. The switch says what was asked for; the "Ready" column says
+   whether it can happen. When they disagree the row below names the fix, so the
+   warn colour never appears without an instruction. */
 .genre-card .tbl th, .genre-card .tbl td { padding: 7px 10px; }
+.assign-side .genre-card .tbl th, .assign-side .genre-card .tbl td { padding: 6px 4px; }
 .genre-tbl td { font-size: 12.5px; }
 .genre-name { font-weight: 600; }
 .genre-none { color: var(--faint); }
 .genre-warn-row td { border-top: 0; padding-top: 0; }
 .genre-warn { font-size: 11.5px; color: var(--warn); }
 .genre-note { font-size: 11.5px; color: var(--faint); padding: 0 10px 8px; margin: 0; }
+
+/* ===== Next-run preview ===== */
+.pp-src { font-size: 11.5px; color: var(--faint); margin: 7px 0 0; }
+.pp-pool { font-size: 11.5px; color: var(--muted); margin: 10px 0 8px; }
+.pp-pool span { color: var(--faint); }
+
+/* Tabs: one genre at a time, with its live figure on the tab so switching is
+   not the only way to compare them. */
+.pp-tabs { display: flex; gap: 3px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+.pp-tab {
+  display: flex; align-items: baseline; gap: 6px; flex: 1; justify-content: center;
+  border: none; background: none; cursor: pointer; padding: 7px 6px; margin-bottom: -1px;
+  border-bottom: 2px solid transparent; font-family: var(--font); font-size: 11.5px;
+  font-weight: 600; color: var(--faint); white-space: nowrap;
+}
+.pp-tab:hover { color: var(--text); }
+.pp-tab.on { color: var(--accent-strong); border-bottom-color: var(--accent); }
+.pp-tab.idle { color: var(--faint); opacity: .65; }
+.pp-tab-n { font-family: var(--num); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+.pp-crew { list-style: none; margin: 0; padding: 0; }
+.pp-crew li { display: grid; grid-template-columns: 1fr auto 90px 42px; gap: 10px; align-items: center; padding: 4px 0; }
+.pp-pick { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; min-width: 0; }
+.pp-pick input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+.pp-meta { font-family: var(--num); font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+/* Unticked: still listed, because the row is how you tick it back on. */
+.pp-out .pp-name, .pp-out .pp-meta, .pp-out .pp-c { color: var(--faint); text-decoration: line-through; }
+.pp-out .pp-bar { background: var(--surface-3); }
+
+/* The breakdown is a modal: a tab strip, a row per evaluator and a run button
+   do not fit the side column, and it is opened to decide with. */
+.pp-modal { max-width: 620px; }
+.pp-modal-body { gap: 0; }
+.pp-head-acts { display: flex; align-items: center; gap: 8px; }
+.pp-foot { flex-direction: column; align-items: stretch; gap: 10px; }
+.pp-foot-msg:empty { display: none; }
+.pp-note { font-size: 11.5px; color: var(--muted); margin: 0 0 6px; line-height: 1.45; }
+.pp-note:last-child { margin-bottom: 0; }
+.pp-fine { font-size: 11px; color: var(--faint); margin: 12px 0 0; line-height: 1.45; }
+.pp-go { align-self: flex-end; }
+/* The run is irreversible from here, so it costs a second, deliberate click. */
+.pp-confirm {
+  border: 1px solid var(--warn); background: var(--warn-weak);
+  border-radius: 9px; padding: 11px 12px;
+}
+.pp-confirm p { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--text); }
+.pp-confirm-acts { display: flex; gap: 8px; }
+
+/* The window sits on the genre name, because it is the reason the number next
+   to it is what it is. Emphasised only when it is not the default. */
+.pp-win {
+  font-family: var(--num); font-size: 10px; font-weight: 600; margin-left: 6px;
+  padding: 1px 5px; border-radius: 4px; background: var(--surface-3); color: var(--faint);
+}
+.pp-win.set { background: var(--accent-weak); color: var(--accent-strong); }
+
+/* ===== Next-run figures ===== */
+/* The count is the point of the card, so it gets the big type; everything else
+   exists to say where it came from. */
+.pp-total { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; transition: opacity .15s; }
+.pp-stale { opacity: .45; }
+.pp-n { font-family: var(--num); font-size: 34px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.pp-unit { font-size: 12.5px; color: var(--muted); }
+.pp-empty { font-size: 12.5px; color: var(--faint); margin: 0; }
+
+.pp-rows { list-style: none; margin: 14px 0 0; padding: 0; }
+.pp-rows li {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 10px;
+  align-items: baseline; padding: 6px 0; border-top: 1px solid var(--border);
+}
+.pp-g { font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; }
+.pp-v { font-family: var(--num); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pp-why { font-size: 11px; color: var(--faint); min-width: 74px; text-align: right; }
+.pp-idle .pp-g, .pp-idle .pp-v { color: var(--faint); font-weight: 500; }
+
+.pp-warn { font-size: 11.5px; color: var(--warn); margin: 8px 0 0; }
+
+.pp-toggle {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; margin-top: 12px; padding: 7px; border-radius: 8px;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  font-family: var(--font); font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer;
+}
+.pp-toggle:hover { background: var(--surface-2); color: var(--text); }
+.pp-chev { font-size: 10px; transition: transform .15s; }
+.pp-chev.up { transform: rotate(180deg); }
+
+.pp-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A bar, not just a number: the split is the thing being judged, and a set of
+   bars shows an uneven one at a glance. */
+.pp-bar { height: 5px; border-radius: 99px; background: var(--track); overflow: hidden; }
+.pp-bar > span { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+.pp-c { font-family: var(--num); font-size: 12px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+/* Rostered but getting nothing — the case the totals hide. */
+.pp-zero .pp-name, .pp-zero .pp-c { color: var(--faint); }
+.pp-zero .pp-bar { background: var(--surface-3); }
 
 /* Switch: a track the knob slides in, plus the word, so state survives both a
    glance and a screen reader. */
@@ -309,48 +424,122 @@ body {
 .sw:not(:disabled):hover .sw-track { box-shadow: inset 0 0 0 1px var(--accent-border); }
 .sw:disabled .sw-track { opacity: .6; }
 
-/* Compact roster cells — the table carries 7 columns now that Genre is one. */
+/* Compact roster cells — one row is one person, genres ride in the last cell. */
+/* max-content is the guarantee that a genre row is never squeezed: the table
+   fills the space it is given, but never shrinks below its widest row, so the
+   pills keep their size and .tbl-wrap scrolls instead. */
+.roster-tbl .tbl { min-width: max-content; }
 .roster-tbl .tbl th, .roster-tbl .tbl td { padding: 6px 8px; }
-.roster-tbl .tbl td { font-size: 12.5px; }
+.roster-tbl .tbl td { font-size: 12.5px; vertical-align: middle; }
 .roster-tbl .ssel-btn { padding: 5px 8px; font-size: 12px; }
 
-/* One person is one band. A row on its own carries no clue whose genre it is once
-   the name cell has been spanned away, so alternating people — not alternating
-   rows — is what makes the grouping legible. The stronger rule on the first row
-   closes the band. */
+/* One person is one band: their row, plus whichever genre panels they have
+   open. Alternating people — not alternating rows — is what makes the grouping
+   legible, and the stronger rule on the person row closes the band before it. */
 .roster-tbl .tbl tr.person-first > td { border-top: 1px solid var(--border-strong); }
 .roster-tbl .tbl tr.person-alt > td { background: var(--surface-2); }
-.roster-tbl .tbl tr:not(.person-first):not(.person-add) > td { border-top-color: var(--border); }
-.roster-tbl .cell-name { font-weight: 600; white-space: nowrap; vertical-align: middle; }
-.roster-tbl .cell-genre { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
-.roster-tbl .tbl td { vertical-align: middle; }
+.roster-tbl .cell-name { font-weight: 600; white-space: nowrap; }
 
 /* "Who, and are they in" on the left; "on what, and how much" on the right. This
-   rule is that boundary, which is why it sits on Genre and not mid-table. */
+   rule is that boundary, which is why it sits on Genres and not mid-table. */
 .roster-tbl .tbl .col-split { border-left: 1px solid var(--border); padding-left: 16px; }
 
-/* "+ genre" is a secondary action: a quiet band closing the person's block,
-   centred across Genre..Weight rather than crowding the Genre column. */
-.roster-tbl .person-add > td {
-  border-top: 1px dashed var(--border); text-align: center;
-  padding-top: 4px; padding-bottom: 4px;
+/* ===== Genre pills ===== */
+/* The pill carries this person's whole (person, genre) row: availability as the
+   dot, the genre, its weight, and a badge only when sub-genres are cut. Weight
+   always shows so the column can be scanned; the badge only shows when there is
+   something to say, so an unrestricted roster stays quiet. */
+/* nowrap, not wrap: a person's genres are one fact and reading them down a
+   column only works while every row is one line tall. If the column runs out
+   of room the table scrolls sideways inside .tbl-wrap instead. */
+.gpills { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; }
+.gpills > * { flex: 0 0 auto; }
+.gpill {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  border-radius: 99px; padding: 4px 11px 4px 9px;
+  font-family: var(--font); font-size: 12px; color: var(--text);
+  cursor: pointer; transition: border-color .13s, background .13s, box-shadow .13s;
 }
-.roster-tbl .person-add .ssel { display: inline-block; width: 110px; text-align: left; }
-.roster-tbl .person-add .ssel-btn {
-  border-color: transparent; background: none; color: var(--faint); font-size: 11.5px;
+.gpill:hover { border-color: var(--accent-border); background: var(--accent-weak); }
+.gpill[aria-expanded="true"] {
+  border-color: var(--accent); background: var(--accent-weak);
+  box-shadow: 0 0 0 3px var(--accent-weak);
 }
-.roster-tbl .person-add .ssel-btn:hover { color: var(--accent-strong); }
+.gpill .gdot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); flex-shrink: 0; }
+.gpill .gname { font-weight: 600; }
+.gpill .gw { font-family: var(--num); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.gpill .gsub {
+  font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  color: var(--warn); background: var(--warn-weak); border-radius: 4px; padding: 1px 6px;
+}
+/* Availability is a fact about the person, so all of their pills dim together. */
+.gpill-off { opacity: .55; }
+.gpill-off .gdot { background: var(--border-strong); }
 
-/* Sub-genre as inline checkboxes. A bucket has two to five of them, so the whole
-   set fits on one line and the row's state is readable without a click. */
-.subg { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.gpill-add .ssel { display: inline-block; width: 104px; }
+.gpill-add .ssel-btn {
+  border-style: dashed; border-radius: 99px; padding: 4px 10px;
+  color: var(--faint); font-size: 11.5px; background: none;
+}
+.gpill-add .ssel-btn:hover { color: var(--accent-strong); border-color: var(--accent-border); }
+
+/* ===== Expanded genre panel ===== */
+/* A row of its own under the person, so it gets the full table width and lands
+   in the tab order without a portal. The accent band is what ties it back to
+   the pill that opened it — several can be open at once, and each has to say
+   which pill it belongs to. */
+.roster-tbl .tbl tr.genre-xrow > td {
+  background: var(--accent-weak); border-top: 1px solid var(--accent-border);
+  padding: 11px 16px;
+}
+.gpanel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 26px; }
+.gpanel-title {
+  font-size: 11px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--accent-strong);
+}
+.gpanel-field { display: flex; align-items: center; gap: 10px; }
+.gpanel-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--faint); white-space: nowrap;
+}
+.gpanel-acts { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+
+/* Weight as four buttons: WEIGHTS has exactly four members, so the whole scale
+   fits on one line and picking one costs a single click. */
+.wsteps { display: inline-flex; gap: 3px; }
+.wstep {
+  font-family: var(--num); font-size: 11px; font-weight: 600;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--muted);
+  border-radius: 6px; padding: 4px 8px; cursor: pointer;
+  transition: background .13s, border-color .13s, color .13s;
+}
+.wstep:hover:not([aria-pressed="true"]):not(:disabled) { border-color: var(--accent-border); color: var(--text); }
+.wstep[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.wstep:disabled { cursor: default; opacity: .6; }
+
+.glink {
+  border: none; background: none; font-family: var(--font); font-size: 11.5px;
+  font-weight: 600; color: var(--accent); cursor: pointer; padding: 4px 8px; border-radius: 6px;
+}
+.glink:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.glink:disabled { color: var(--faint); cursor: default; }
+.glink-danger { color: var(--bad); }
+.glink-danger:hover:not(:disabled) { background: var(--bad-weak); }
+.glink-quiet { color: var(--muted); }
+.glink-quiet:hover:not(:disabled) { background: var(--surface-3); }
+
+/* Sub-genre as inline checkboxes inside the panel. A bucket has two to five of
+   them, so the whole set fits on one line. 8px of vertical gap keeps two wrapped
+   rows from becoming adjacent targets. */
+.subg { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
 .subg-item {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap;
 }
 .subg-item.on { color: var(--text); }
 .subg-item input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
-.subg-item input:disabled { cursor: default; }
+.subg-item input:disabled { cursor: not-allowed; }
 
 .hist-card { display: flex; flex-direction: column; min-height: 0; }
 .hist-sub { color: var(--faint); font-weight: 400; margin-left: 8px; font-variant-numeric: tabular-nums; }

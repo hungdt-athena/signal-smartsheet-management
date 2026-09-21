@@ -1,29 +1,45 @@
 // components/RosterTable.tsx — the single-page roster table: one row is one
-// (person, genre) pair. Presentational, with every action leaving through props,
-// so a fixture-driven page and the live page share exactly one component.
+// PERSON. Their (person, genre) pairs ride in the last cell as genre pills, and
+// the pill expands into a panel row underneath. Presentational, with every
+// action leaving through props, so a fixture-driven page and the live page
+// share exactly one component.
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { MultiSelect } from '@/components/MultiSelect'
 import { BUCKETS, WEIGHTS, type Bucket } from '@/lib/buckets'
-import type { PersonGroup } from '@/lib/assign-roster'
+import type { PersonGroup, RosterRow } from '@/lib/assign-roster'
 
 export const BUCKET_LABELS: Record<Bucket, string> = {
   puzzle: 'Puzzle', arcade: 'Arcade', simulation: 'Simulation',
 }
 
-const WEIGHT_OPTS = WEIGHTS.map(w => ({ value: String(w), label: String(w) }))
 const PLATFORM_OPTS = ['all', 'ios', 'android'].map(p => ({ value: p, label: p }))
 const AVAIL_OPTS = [{ value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }]
+
+/**
+ * The sub-genres a row actually covers, given its genre's full list.
+ *
+ * 'All' is the stored value for "no restriction" — the cron reads it, so it is
+ * not ours to change — and a list naming every option means the same thing.
+ * Both resolve to the full list, which is what lets one predicate
+ * (`length < options.length`) answer "is this row restricted".
+ */
+export function pickedSubGenres(stored: string, options: string[]): string[] {
+  const parts = stored && stored.toLowerCase() !== 'all'
+    ? stored.split(',').map(s => s.trim()).filter(Boolean)
+    : []
+  return parts.length === 0 || parts.length >= options.length ? options : parts
+}
 
 export interface RosterTableProps {
   title: string
   groups: PersonGroup[]
   subGenres: Record<Bucket, string[]>
   readOnly?: boolean
-  onPatchRow: (id: number, field: 'game_category', value: unknown) => void
+  onPatchRow: (id: number, field: 'game_category' | 'weight', value: unknown) => void
   onPatchAvailable: (name: string, value: boolean) => void
-  onPatchPerson: (name: string, field: 'game_platform' | 'weight', value: unknown) => void
+  onPatchPerson: (name: string, field: 'game_platform', value: unknown) => void
   onRemoveRow: (id: number) => void
   onAddGenre: (name: string, genre: Bucket) => void
   onAddEvaluator: (p: { name: string; provision: boolean; genres: Bucket[] }) => void
@@ -33,7 +49,30 @@ export function RosterTable({
   title, groups, subGenres, readOnly = false,
   onPatchRow, onPatchAvailable, onPatchPerson, onRemoveRow, onAddGenre, onAddEvaluator,
 }: RosterTableProps) {
-  const colSpan = readOnly ? 6 : 7
+  // Which genre panels are expanded, keyed by roster row id. Several may be
+  // open at once on purpose: two people's sub-genres are only comparable when
+  // both are on screen, which a panel floating over the table cannot do.
+  //
+  // Row ids survive the parent's refetch-after-write, so an open panel stays
+  // open across a save.
+  const [openIds, setOpenIds] = useState<ReadonlySet<number>>(() => new Set())
+  const toggleOpen = useCallback((id: number) => {
+    setOpenIds(prev => {
+      const next = new Set(prev)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
+  }, [])
+
+  // Esc closes every panel. Without it the only way out is hunting for each
+  // Close button, and a keyboard user who opened four has no exit at all.
+  useEffect(() => {
+    if (openIds.size === 0) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenIds(new Set()) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [openIds])
+
   return (
     <div className="card">
       <div className="card-head"><span className="card-label">{title}</span></div>
@@ -42,30 +81,24 @@ export function RosterTable({
       <div className="tbl-wrap roster-tbl">
         <table className="tbl">
           <thead>
-            {/* The four person-level facts come first and read left to right;
-                genre and its sub-genres read as one thing, so they share a
-                header. The sub-genre column is the only one without a width, so
-                the table's slack collects there instead of stretching the name. */}
+            {/* The three person-level facts come first and read left to right.
+                Genres is the only column without a width, so the table's slack
+                collects in the pills instead of stretching the name. */}
             <tr>
-              <th style={{ width: 160 }}>Evaluator Name</th>
+              <th style={{ width: 170 }}>Evaluator Name</th>
               <th style={{ width: 92 }}>Available</th>
               <th style={{ width: 96 }}>Platform</th>
-              <th style={{ width: 76 }}>Weight</th>
-              <th className="col-split" colSpan={2}>Genre &amp; sub-genre details</th>
-              {!readOnly && <th style={{ width: 80 }} />}
+              <th className="col-split">Genres</th>
             </tr>
           </thead>
           <tbody>
-            {groups.length === 0 && <tr><td colSpan={colSpan} className="empty">No evaluators yet</td></tr>}
-            {groups.map((g, gi) => {
-              const showAdd = !readOnly && g.missingGenres.length > 0
-              return (
-                <PersonRows key={g.name} group={g} span={g.rows.length + (showAdd ? 1 : 0)} showAdd={showAdd}
-                  alt={gi % 2 === 1} subGenres={subGenres} readOnly={readOnly}
-                  onPatchRow={onPatchRow} onPatchAvailable={onPatchAvailable} onPatchPerson={onPatchPerson}
-                  onRemoveRow={onRemoveRow} onAddGenre={onAddGenre} />
-              )
-            })}
+            {groups.length === 0 && <tr><td colSpan={4} className="empty">No evaluators yet</td></tr>}
+            {groups.map((g, gi) => (
+              <PersonRow key={g.name} group={g} alt={gi % 2 === 1} subGenres={subGenres} readOnly={readOnly}
+                openIds={openIds} onToggleOpen={toggleOpen}
+                onPatchRow={onPatchRow} onPatchAvailable={onPatchAvailable} onPatchPerson={onPatchPerson}
+                onRemoveRow={onRemoveRow} onAddGenre={onAddGenre} />
+            ))}
           </tbody>
         </table>
       </div>
@@ -74,113 +107,175 @@ export function RosterTable({
   )
 }
 
-// A person renders as several <tr>. Evaluator, Available, Platform and Weight
-// exist only on the first row and span the rest, so there is physically one
-// control each per person — the UI cannot put a person's genres into
-// disagreeing states. Only genre and sub-genre vary row by row.
-function PersonRows({ group, span, showAdd, alt, subGenres, readOnly, onPatchRow, onPatchAvailable, onPatchPerson, onRemoveRow, onAddGenre }: {
+// A person is one <tr>, plus one <tr> per genre panel they have open. Evaluator,
+// Available and Platform exist once, so there is physically one control each per
+// person — the UI cannot put a person's genres into disagreeing states. Weight
+// and sub-genre live on the pill's panel, because both vary by genre.
+function PersonRow({ group, alt, subGenres, readOnly, openIds, onToggleOpen, onPatchRow, onPatchAvailable, onPatchPerson, onRemoveRow, onAddGenre }: {
   group: PersonGroup
-  span: number
-  showAdd: boolean
   alt: boolean
   subGenres: Record<Bucket, string[]>
   readOnly: boolean
+  openIds: ReadonlySet<number>
+  onToggleOpen: (id: number) => void
   onPatchRow: RosterTableProps['onPatchRow']
   onPatchAvailable: RosterTableProps['onPatchAvailable']
   onPatchPerson: RosterTableProps['onPatchPerson']
   onRemoveRow: RosterTableProps['onRemoveRow']
   onAddGenre: RosterTableProps['onAddGenre']
 }) {
+  const expanded = group.rows.filter(r => openIds.has(r.id))
   return (
     <>
-      {group.rows.map((r, i) => (
-        <tr key={r.id} className={`${alt ? 'person-alt' : ''}${i === 0 ? ' person-first' : ''}`}>
-          {i === 0 && <td className="cell-name" rowSpan={span}>{group.name}</td>}
-          {i === 0 && (
-            <td rowSpan={span} data-testid="avail-cell">
-              <StyledSelect value={group.today_available ? 'Yes' : 'No'} options={AVAIL_OPTS} disabled={readOnly}
-                onChange={v => onPatchAvailable(group.name, v === 'Yes')} />
-            </td>
-          )}
-          {i === 0 && (
-            <td rowSpan={span} data-testid="platform-cell">
-              <StyledSelect value={group.game_platform || 'all'} options={PLATFORM_OPTS} disabled={readOnly}
-                onChange={v => onPatchPerson(group.name, 'game_platform', v)} />
-            </td>
-          )}
-          {i === 0 && (
-            <td rowSpan={span} data-testid="weight-cell">
-              <StyledSelect value={String(group.weight ?? 100)} options={WEIGHT_OPTS} disabled={readOnly}
-                onChange={v => onPatchPerson(group.name, 'weight', Number(v))} />
-            </td>
-          )}
-          <td className="cell-genre col-split">{BUCKET_LABELS[r.category_group]}</td>
-          <td>
-            <SubGenrePicker value={r.game_category} options={subGenres[r.category_group] ?? []} disabled={readOnly}
-              onChange={v => onPatchRow(r.id, 'game_category', v)} />
+      <tr className={`person-first${alt ? ' person-alt' : ''}`}>
+        <td className="cell-name">{group.name}</td>
+        <td data-testid="avail-cell">
+          <StyledSelect value={group.today_available ? 'Yes' : 'No'} options={AVAIL_OPTS} disabled={readOnly}
+            onChange={v => onPatchAvailable(group.name, v === 'Yes')} />
+        </td>
+        <td data-testid="platform-cell">
+          <StyledSelect value={group.game_platform || 'all'} options={PLATFORM_OPTS} disabled={readOnly}
+            onChange={v => onPatchPerson(group.name, 'game_platform', v)} />
+        </td>
+        <td className="col-split">
+          <div className="gpills">
+            {group.rows.map(r => (
+              <GenrePill key={r.id} row={r} available={group.today_available}
+                options={subGenres[r.category_group] ?? []}
+                expanded={openIds.has(r.id)} onToggle={() => onToggleOpen(r.id)} />
+            ))}
+            {!readOnly && group.missingGenres.length > 0 && (
+              <span className="gpill-add" data-testid={`add-genre-${group.name}`}>
+                <StyledSelect value="" placeholder="+ genre"
+                  options={group.missingGenres.map(b => ({ value: b, label: BUCKET_LABELS[b] }))}
+                  onChange={v => onAddGenre(group.name, v as Bucket)} />
+              </span>
+            )}
+          </div>
+        </td>
+      </tr>
+      {expanded.map(r => (
+        <tr key={`panel-${r.id}`} className="genre-xrow">
+          <td colSpan={4}>
+            <GenrePanel row={r} options={subGenres[r.category_group] ?? []} readOnly={readOnly}
+              onPatchRow={onPatchRow} onRemove={() => onRemoveRow(r.id)} onClose={() => onToggleOpen(r.id)} />
           </td>
-          {!readOnly && (
-            <td><button className="btn btn-sm btn-danger" onClick={() => onRemoveRow(r.id)}>Remove</button></td>
-          )}
         </tr>
       ))}
-      {showAdd && (
-        <tr className={`person-add${alt ? ' person-alt' : ''}`}>
-          <td className="col-split" colSpan={2}>
-            <span data-testid={`add-genre-${group.name}`}>
-              <StyledSelect value="" placeholder="+ genre"
-                options={group.missingGenres.map(b => ({ value: b, label: BUCKET_LABELS[b] }))}
-                onChange={v => onAddGenre(group.name, v as Bucket)} />
-            </span>
-          </td>
-          {!readOnly && <td />}
-        </tr>
-      )}
     </>
   )
 }
 
-// Sub-genres of this row's own genre, as inline checkboxes. A dropdown hid the
-// choice behind a click and read "All" on every row.
+// The pill answers four questions without a click: which genre, is this person
+// on today, what weight, and are sub-genres cut.
 //
-// 'All' stays the stored value for "no restriction" — the cron reads it, so it is
-// not ours to change — but it renders as every box ticked rather than as a
-// separate All box, because that is what it means. Ticking every box stores 'All'
-// again. Unticking the last remaining box is refused: an empty list would
-// normalize back to 'All' on the server and silently mean the opposite.
-function SubGenrePicker({ value, options, onChange, disabled }: {
-  value: string; options: string[]; onChange: (v: string) => void; disabled?: boolean
+// Weight always shows, including 100. The roster is read to compare weights
+// down a column, and a blank in the common case would turn that scan into a
+// lookup. The sub-genre badge is the opposite: it only appears when the row is
+// restricted, because "all of them" is what the absence of a badge means.
+function GenrePill({ row, available, options, expanded, onToggle }: {
+  row: RosterRow
+  available: boolean
+  options: string[]
+  expanded: boolean
+  onToggle: () => void
 }) {
-  const picked = useMemo(
-    () => (value && value.toLowerCase() !== 'all' ? value.split(',').map(s => s.trim()).filter(Boolean) : []),
-    [value],
-  )
-  const all = picked.length === 0 || picked.length >= options.length
-  const checked = (g: string) => all || picked.includes(g)
+  const picked = pickedSubGenres(row.game_category, options)
+  const restricted = picked.length < options.length
+  const genre = BUCKET_LABELS[row.category_group]
+  // The visible text is abbreviated for width; the label spells it out, since
+  // "2/3 sub-genres" read aloud character by character is not a sentence.
+  const label = `${genre}, weight ${row.weight}`
+    + (restricted ? `, ${picked.length} of ${options.length} sub-genres` : ', all sub-genres')
 
+  return (
+    <button type="button" aria-expanded={expanded} aria-label={label} onClick={onToggle}
+      className={`gpill${available ? '' : ' gpill-off'}`}>
+      <span className="gdot" aria-hidden="true" />
+      <span className="gname">{genre}</span>
+      <span className="gw">{row.weight}</span>
+      {restricted && (
+        <span className="gsub" aria-hidden="true">{picked.length}/{options.length} sub-genres</span>
+      )}
+    </button>
+  )
+}
+
+// The expanded panel is a row of its own directly under the person, so it gets
+// the full table width and joins the tab order without a portal, a coordinate
+// calculation or a flip-up rule. Everything that varies by genre lives here.
+function GenrePanel({ row, options, readOnly, onPatchRow, onRemove, onClose }: {
+  row: RosterRow
+  options: string[]
+  readOnly: boolean
+  onPatchRow: RosterTableProps['onPatchRow']
+  onRemove: () => void
+  onClose: () => void
+}) {
+  const picked = useMemo(() => pickedSubGenres(row.game_category, options), [row.game_category, options])
+  const genre = BUCKET_LABELS[row.category_group]
+  const allOn = picked.length >= options.length
+
+  // Unticking the last remaining box is refused at the control rather than
+  // here: an empty list normalizes back to 'All' on the server and would
+  // silently mean the opposite of what was clicked.
   function toggle(g: string) {
-    const current = all ? [...options] : picked
-    const next = current.includes(g) ? current.filter(x => x !== g) : [...current, g]
+    const next = picked.includes(g) ? picked.filter(x => x !== g) : [...picked, g]
     if (next.length === 0) return
-    onChange(next.length >= options.length ? 'All' : next.join(','))
+    onPatchRow(row.id, 'game_category', next.length >= options.length ? 'All' : next.join(','))
   }
 
   return (
-    <div className="subg">
-      {options.map(g => (
-        <label key={g} className={`subg-item${checked(g) ? ' on' : ''}`}>
-          <input type="checkbox" checked={checked(g)} disabled={disabled}
-            onChange={() => toggle(g)} />
-          <span>{g}</span>
-        </label>
-      ))}
+    <div className="gpanel">
+      <span className="gpanel-title">{genre}</span>
+
+      <div className="gpanel-field">
+        <span className="gpanel-label" id={`w-lab-${row.id}`}>Weight</span>
+        {/* Four buttons, not a dropdown: WEIGHTS has exactly four members, so a
+            menu costs two clicks to show a scale that fits on one line. */}
+        <div className="wsteps" role="group" aria-labelledby={`w-lab-${row.id}`}>
+          {WEIGHTS.map(w => (
+            <button key={w} type="button" className="wstep" aria-pressed={row.weight === w}
+              disabled={readOnly} onClick={() => onPatchRow(row.id, 'weight', w)}>{w}</button>
+          ))}
+        </div>
+      </div>
+
+      <div className="gpanel-field">
+        <span className="gpanel-label">Sub-genre</span>
+        <div className="subg">
+          {options.map(g => {
+            const on = picked.includes(g)
+            const last = on && picked.length === 1
+            return (
+              <label key={g} className={`subg-item${on ? ' on' : ''}`}
+                title={last ? 'Keep at least one sub-genre' : undefined}>
+                <input type="checkbox" checked={on} disabled={readOnly || last}
+                  onChange={() => toggle(g)} />
+                <span>{g}</span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="gpanel-acts">
+        {!readOnly && (
+          <button type="button" className="glink" disabled={allOn}
+            onClick={() => onPatchRow(row.id, 'game_category', 'All')}>Select all</button>
+        )}
+        {!readOnly && (
+          <button type="button" className="glink glink-danger" onClick={onRemove}>Remove genre</button>
+        )}
+        <button type="button" className="glink glink-quiet" onClick={onClose}>Close</button>
+      </div>
     </div>
   )
 }
 
 // Add-eval input with dashboard_users autocomplete; an unknown id sets the
-// provision flag. Unlike the old one it takes several genres at once, each of
-// which becomes its own roster row.
+// provision flag. It takes several genres at once, each of which becomes its
+// own roster row.
 function AddEvalRow({ onAdd }: { onAdd: RosterTableProps['onAddEvaluator'] }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')

@@ -1,4 +1,5 @@
-// components/GenreToggles.tsx — which genres receive new games, above the roster.
+// components/GenreToggles.tsx — which genres receive new games. Lives in the
+// Assign tab's side column, above the Next-assignment preview.
 //
 // A genre only receives games when it is switched on AND somebody is available
 // for it, so the table shows both halves side by side: the switch says what was
@@ -21,15 +22,16 @@ export function GenreToggles({ genres, canEdit, onToggle }: {
   return (
     <div className="card genre-card">
       <div className="card-head">
-        <span className="card-label">Genres receiving new games today</span>
+        <span className="card-label">Push targets</span>
+        <span className="card-note">today</span>
       </div>
       <div className="tbl-wrap">
         <table className="tbl genre-tbl">
           <thead>
             <tr>
-              <th style={{ width: 160 }}>Genre</th>
-              <th style={{ width: 180 }}>Ready today</th>
-              <th>New games</th>
+              <th>Genre</th>
+              <th>Ready</th>
+              <th style={{ textAlign: 'right' }}>Push</th>
             </tr>
           </thead>
           <tbody>
@@ -45,7 +47,7 @@ export function GenreToggles({ genres, canEdit, onToggle }: {
                         ? `${g.available} evaluator${g.available === 1 ? '' : 's'}`
                         : 'no one available'}
                     </td>
-                    <td>
+                    <td style={{ textAlign: 'right' }}>
                       <button
                         type="button"
                         role="switch"
@@ -65,7 +67,7 @@ export function GenreToggles({ genres, canEdit, onToggle }: {
                       <td />
                       <td colSpan={2}>
                         <div role="alert" className="genre-warn">
-                          Nothing will be pushed. Mark someone available for {label} below.
+                          Nothing will be pushed. Mark someone available for {label} in the roster.
                         </div>
                       </td>
                     </tr>

@@ -47,14 +47,24 @@ describe('groupRosterByPerson', () => {
     expect(g.today_available).toBe(false)
   })
 
-  it('platform and weight are per person: the first genre row wins', () => {
+  it('platform is per person: the first genre row wins', () => {
     const [g] = groupRosterByPerson([
       // Genre order decides, not input order: puzzle sorts first.
-      row({ id: 1, name: 'A', category_group: 'arcade', game_platform: 'android', weight: 30 }),
-      row({ id: 2, name: 'A', category_group: 'puzzle', game_platform: 'ios', weight: 70 }),
+      row({ id: 1, name: 'A', category_group: 'arcade', game_platform: 'android' }),
+      row({ id: 2, name: 'A', category_group: 'puzzle', game_platform: 'ios' }),
     ])
     expect(g.game_platform).toBe('ios')
-    expect(g.weight).toBe(70)
+  })
+
+  it('weight stays on the row, so two genres of one person can differ', () => {
+    const [g] = groupRosterByPerson([
+      row({ id: 1, name: 'A', category_group: 'arcade', weight: 30 }),
+      row({ id: 2, name: 'A', category_group: 'puzzle', weight: 70 }),
+    ])
+    // No person-level weight to collapse them onto — the cron reads weight per
+    // (name, category_group), so the group must not flatten it.
+    expect(g).not.toHaveProperty('weight')
+    expect(g.rows.map(r => [r.category_group, r.weight])).toEqual([['puzzle', 70], ['arcade', 30]])
   })
 
   it('an empty roster yields an empty list', () => {

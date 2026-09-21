@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     if (guard) return guard
   }
 
-  let body: { category?: string; dryRun?: boolean } | null
+  let body: { category?: string; dryRun?: boolean; exclude?: unknown } | null
   try {
     body = await req.json()
   } catch {
@@ -86,11 +86,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, dryRun: !!body.dryRun, category, assigned: 0, per_evaluator: {}, skipped: 'no-evaluator' })
     }
 
+    // A manual run may exclude people the operator unticked in the preview.
+    // This is a parameter of the run, never a change to evaluator_roster, so
+    // the next scheduled run is unaffected. The cron itself never sends it.
+    const exclude = new Set(
+      (Array.isArray(body.exclude) ? body.exclude : [])
+        .map(v => String(v).trim().toLowerCase())
+        .filter(Boolean),
+    )
+    const crew = exclude.size === 0
+      ? roster
+      : roster.filter(r => !exclude.has(String(r.name).trim().toLowerCase()))
+    if (crew.length === 0) {
+      // Excluding everyone is a no-op, not an assignment to nobody.
+      return NextResponse.json({
+        ok: true, dryRun: !!body.dryRun, category, assigned: 0, per_evaluator: {}, skipped: 'no-evaluator',
+      })
+    }
+
     let assignment: Map<number, string>
     try {
       assignment = assignGames(
         games.map(g => ({ id: g.id, os: g.os })),
-        roster.map(r => ({ name: r.name, platform: r.game_platform, weight: r.weight })),
+        crew.map(r => ({ name: r.name, platform: r.game_platform, weight: r.weight })),
       )
     } catch (e) {
       if (e instanceof Error && e.message === 'evaluator list empty') {

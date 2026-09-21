@@ -16,12 +16,15 @@ export interface RosterRow {
 export interface PersonGroup {
   name: string
   today_available: boolean
-  // Platform and weight are facts about the person, like availability: one
-  // control each, spanning their genres. The group takes the first row's value
-  // and every write updates all rows with that name, so any leftover
-  // disagreement between genres clears itself on the first edit.
+  // Platform is a fact about the person, like availability: one control each,
+  // spanning their genres. The group takes the first row's value and every
+  // write updates all rows with that name, so any leftover disagreement
+  // between genres clears itself on the first edit.
+  //
+  // Weight is NOT here. It belongs to a (person, genre) pair — the cron already
+  // reads it that way, filtering by category_group before it sums weights — so
+  // it stays on the row and is edited per genre.
   game_platform: string
-  weight: number
   rows: RosterRow[]
   missingGenres: Bucket[]
 }
@@ -48,11 +51,10 @@ export function groupRosterByPerson(rows: RosterRow[]): PersonGroup[] {
       const have = new Set(sorted.map(r => r.category_group))
       return {
         name,
-        // Availability, platform and weight are facts about the person; see
-        // PersonGroup on why the first row wins.
+        // Availability and platform are facts about the person; see PersonGroup
+        // on why the first row wins. Weight is per genre and stays on the row.
         today_available: sorted[0].today_available,
         game_platform: sorted[0].game_platform || 'all',
-        weight: sorted[0].weight ?? 100,
         rows: sorted,
         missingGenres: BUCKETS.filter(b => !have.has(b)),
       }
