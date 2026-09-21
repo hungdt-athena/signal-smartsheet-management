@@ -24,12 +24,18 @@ function setupSql({
     { category_group: 'simulation', available: '5' },
   ] as Record<string, unknown>[],
   pushed = [] as Record<string, unknown>[],
+  // The per-genre push window, read from the same app_config table as the genre
+  // toggles — so the mock has to branch on the KEY, not on the SQL text.
+  pushWindow = null as string | null,
 } = {}) {
   sqlMock.mockReset()
-  sqlMock.mockImplementation((strings: unknown) => {
+  sqlMock.mockImplementation((strings: unknown, ...values: unknown[]) => {
     if (!Array.isArray(strings)) return Promise.resolve([])
     const q = (strings as string[]).join(' ')
-    if (q.includes('FROM app_config')) return Promise.resolve(config === null ? [] : [{ value: config }])
+    if (q.includes('FROM app_config')) {
+      const blob = values[0] === 'push_window_config' ? pushWindow : config
+      return Promise.resolve(blob === null ? [] : [{ value: blob }])
+    }
     if (q.includes('FROM evaluator_roster')) return Promise.resolve(roster)
     if (q.includes('FROM category_mappings')) return Promise.resolve([{ genre: 'puzzle' }])
     return Promise.resolve(pushed)
@@ -84,7 +90,7 @@ describe('POST /api/cron/push-evaluations', () => {
     const q = queries()
     expect(q).toContain('INSERT INTO game_evaluations')
     expect(q).toContain('ON CONFLICT (game_id, category_group) DO NOTHING')
-    expect(q).toContain("INTERVAL '30 days'")
+    expect(q).toContain("|| ' days')::interval")
   })
 
   it('copies the genres from game_info metadata into the new row', async () => {
@@ -112,9 +118,25 @@ describe('POST /api/cron/push-evaluations', () => {
   // 2026-08-19. Games with no release date at all still get in on created_date,
   // because a brand-new store listing often has no date yet.
   describe('eligibility window', () => {
-    it('admits games released inside the 30-day window', async () => {
-      await post({ category: 'puzzle', categories: ['puzzle'] })
-      expect(queries()).toContain("INTERVAL '30 days'")
+    it('admits games released inside the window, which defaults to 30 days', async () => {
+      const res = await post({ category: 'puzzle', categories: ['puzzle'] })
+      // The length is a bind parameter now, so the SQL text carries the shape
+      // and the response carries the value.
+      expect(queries()).toContain("|| ' days')::interval")
+      expect((await res.json()).windowDays).toBe(30)
+    })
+
+    it('uses the window Config set for THAT genre', async () => {
+      setupSql({ pushWindow: '{"puzzle":7,"arcade":14,"simulation":3}' })
+      expect((await (await post({ category: 'puzzle', categories: ['puzzle'] })).json()).windowDays).toBe(7)
+      setupSql({ pushWindow: '{"puzzle":7,"arcade":14,"simulation":3}' })
+      expect((await (await post({ category: 'arcade', categories: ['arcade'] })).json()).windowDays).toBe(14)
+    })
+
+    it('falls back to 30 days when the stored window is junk', async () => {
+      // This row must never be able to stop the daily push.
+      setupSql({ pushWindow: '{"puzzle":45}' })
+      expect((await (await post({ category: 'puzzle', categories: ['puzzle'] })).json()).windowDays).toBe(30)
     })
 
     it('only consults created_date for games with no release date', async () => {

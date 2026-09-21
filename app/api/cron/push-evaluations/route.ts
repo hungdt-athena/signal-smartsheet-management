@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import type { Bucket } from '@/lib/buckets'
 import { loadGenreTargets } from '@/lib/genre-config-db'
+import { loadPushWindowConfig } from '@/lib/push-window-db'
+import { pushWindowFor } from '@/lib/push-window'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -74,12 +77,16 @@ export async function POST(req: NextRequest) {
     // Eligibility window (both branches below carry an identical copy; postgres.js
     // template literals do not compose cleanly and the dry-run count is only worth
     // reading if it filters exactly like the insert):
-    //   released in the last 30 days, OR — only when the store gave us no release
-    //   date at all — crawled in the last 30 days.
+    //   released in the last `windowDays` days, OR — only when the store gave us no
+    //   release date at all — first seen in the last `windowDays` days.
     // A game released long ago that merely got crawled today is back catalogue, not
     // a new release. Admitting it on created_date alone is what put 2,876 games in
     // the queue on 2026-08-19 when the apkcombo scraper reached a publisher's
     // archive.
+    //
+    // The length is per genre and set in Config › Push window (3/7/14/30, default
+    // 30 — what every genre used before it was configurable).
+    const windowDays = pushWindowFor(await loadPushWindowConfig(), category as Bucket)
 
     if (body.dryRun) {
       // DryRun: SELECT only, no INSERT.
@@ -91,8 +98,8 @@ export async function POST(req: NextRequest) {
                  (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS today
         ) w
         WHERE (
-                w.rel BETWEEN (w.today - INTERVAL '30 days') AND w.today
-                OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - INTERVAL '30 days') AND w.today)
+                w.rel BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today
+                OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today)
               )
           AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
                OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
@@ -123,8 +130,8 @@ export async function POST(req: NextRequest) {
                  (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS today
         ) w
         WHERE (
-                w.rel BETWEEN (w.today - INTERVAL '30 days') AND w.today
-                OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - INTERVAL '30 days') AND w.today)
+                w.rel BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today
+                OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today)
               )
           AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
                OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
@@ -147,6 +154,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       dryRun: !!body.dryRun,
       category,
+      windowDays,
       pushed: rows.length,
       game_ids: rows.map(r => r.game_id),
     })

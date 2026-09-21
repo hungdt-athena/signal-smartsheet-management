@@ -1,8 +1,28 @@
 'use client'
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { Suspense, useEffect, useState, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 import { OptionRows } from '@/components/OptionRows'
 import { PeopleSection } from '@/components/config/PeopleSection'
+import { PushWindowSection } from '@/components/config/PushWindowSection'
+
+// Another screen can send the reader straight to one setting — the Assign tab's
+// next-run panel links here to change how many days get pushed. ?highlight=<id>
+// scrolls that card into view and flashes it, because "we took you to the right
+// page" is not the same as "we showed you the control".
+function useHighlight(): string | null {
+  const params = useSearchParams()
+  const target = params.get('highlight')
+  useEffect(() => {
+    if (!target) return
+    // One frame, so the card is mounted before we try to scroll to it.
+    const t = setTimeout(() => {
+      document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 60)
+    return () => clearTimeout(t)
+  }, [target])
+  return target
+}
 
 type Field = 'conclusion' | 'final_conclusion'
 
@@ -15,6 +35,19 @@ const FIELDS: { key: Field; label: string; note: string }[] = [
 ]
 
 export default function ConfigPage() {
+  // useSearchParams needs a Suspense boundary in the App Router.
+  return (
+    <Suspense fallback={<ConfigBody highlight={null} />}>
+      <ConfigWithHighlight />
+    </Suspense>
+  )
+}
+
+function ConfigWithHighlight() {
+  return <ConfigBody highlight={useHighlight()} />
+}
+
+function ConfigBody({ highlight }: { highlight: string | null }) {
   const [data, setData] = useState<Record<Field, OptionRow[]>>({ conclusion: [], final_conclusion: [] })
   const [usage, setUsage] = useState<UsageMap>({})
   const [loading, setLoading] = useState(false)
@@ -68,6 +101,8 @@ export default function ConfigPage() {
           {message.text}
         </p>
       )}
+
+      <PushWindowSection highlight={highlight === 'push-window'} />
 
       <PeopleSection />
 
