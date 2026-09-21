@@ -48,6 +48,11 @@ __tests__/deleted.json
 
 # service-account keys (secret — do not commit)
 *.iam.gserviceaccount.json
+# The Google Cloud console names a downloaded key <project-id>-<12 hex>.json,
+# which the pattern above does not match. Catch that shape too, so the next key
+# someone downloads into the repo root is ignored before `git add .` finds it.
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
+sunflower-alert-21611001cc3c.json
 
 # local-only screenshot store (SCREENSHOT_STORE=local)
 /.screenshots/
