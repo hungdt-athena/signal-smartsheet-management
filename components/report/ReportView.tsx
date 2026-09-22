@@ -1991,7 +1991,10 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
     ...(calWords ? [{
       key: 'cal',
       tone: (calSpread! > LB_T.calSpread ? 'bad' : calSpread! > LB_T.calSpread / 2 ? 'warn' : 'good') as 'good' | 'warn' | 'bad',
-      text: <><b>{strict.name}</b> shortlists {calWords.clause1} of the games they judge; <b>{loose.name}</b> keeps {calWords.clause2}</>,
+      // Both RATES bold, not just the names: the spec's rule for every chip on every
+      // tab is that the number is bold and the sentence around it carries the meaning,
+      // and this chip sits on the same screen as `people` and `top`, which both do it.
+      text: <><b>{strict.name}</b> shortlists <b>{calWords.clause1}</b> of the games they judge; <b>{loose.name}</b> keeps <b>{calWords.clause2}</b></>,
     }] : []),
   ] : []
   // Same rule as Overview's banner: the verdict takes the colour of its worst chip,
@@ -2518,7 +2521,9 @@ function Individual({ d }: { d: Bundle }) {
   const chips: Array<{ key: string; text: React.ReactNode; tone: 'good' | 'warn' | 'bad' }> = e.evaluated > 0 || e.assigned > 0 ? [
     ...(multi && tf.evaluated > 0 ? [{
       key: 'share', tone: 'good' as const,
-      text: <>Judged {fmt.pct(outShare)} of the team&apos;s games this {winName}</>,
+      // Bold percentage, same rule as every other chip: it was the one chip on these
+      // two tabs with no emphasis at all.
+      text: <>Judged <b>{fmt.pct(outShare)}</b> of the team&apos;s games this {winName}</>,
     }] : []),
     // Three sentences, not one with a sign in front of it, same as Overview's growth
     // chip: "0 games joined their backlog" is arithmetic, not English, and "-12 games

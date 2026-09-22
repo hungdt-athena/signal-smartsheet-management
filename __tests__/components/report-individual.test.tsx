@@ -288,6 +288,22 @@ describe('Individual tab', () => {
       .find((chip) => chip.querySelector('.rp-chip-kicker')?.textContent === IND_KICKER[key])
       ?.querySelector('.rp-chip-text') ?? null)
 
+  const verdictChipBolds = (c: HTMLElement, key: string) =>
+    Array.from(Array.from(c.querySelectorAll('.rp-verdict .rp-chip'))
+      .find((chip) => chip.querySelector('.rp-chip-kicker')?.textContent === IND_KICKER[key])
+      ?.querySelector('.rp-chip-text')?.querySelectorAll('b') ?? []).map((b) => b.textContent)
+
+  // The spec the plan's Design A table sits under: "the number is bold and the
+  // sentence around it carries the meaning." `share` was the one chip on this tab
+  // and the Leaderboard with no emphasis at all, next to two that had it.
+  it('bolds the number in all three banner chips, share included', async () => {
+    const grew = [person('Alpha', { assigned: 636, evaluated: 600 }), person('Beta')]
+    const { container } = await individual(bundleOf(grew))
+    expect(verdictChipBolds(container, 'share')).toEqual(['50%'])
+    expect(verdictChipBolds(container, 'net')).toEqual(['36 games'])
+    expect(verdictChipBolds(container, 'wait')).toEqual(['120 games', '2 days'])
+  })
+
   // Task 1: "Backlog +33 this week" and "Backlog 763, oldest 13d" were shorthand -
   // a number with no noun. Both now read as sentences, and zero/negative get their
   // own wording rather than a sign in front of the same clause (Overview's `growth`

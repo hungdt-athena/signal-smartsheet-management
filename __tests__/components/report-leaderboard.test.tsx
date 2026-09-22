@@ -233,10 +233,16 @@ describe('Leaderboard tab', () => {
   // games", "ThuDT judged 16% of all games"). Each one now has to read as a full
   // sentence that names its own unit, on the same rule Overview's chips already
   // follow: the number is bold, the sentence around it carries the meaning.
-  const chipText = (container: HTMLElement, kickerLabel: string) =>
+  const chipTextEl = (container: HTMLElement, kickerLabel: string) =>
     Array.from(container.querySelectorAll('.rp-verdict .rp-chip'))
       .find((c) => c.querySelector('.rp-chip-kicker')?.textContent === kickerLabel)
-      ?.querySelector('.rp-chip-text')?.textContent || ''
+      ?.querySelector('.rp-chip-text') || null
+  const chipText = (container: HTMLElement, kickerLabel: string) =>
+    chipTextEl(container, kickerLabel)?.textContent || ''
+  // What is actually emphasised, in order. The spec's standing rule for every chip on
+  // every tab: the number is bold and the sentence around it carries the meaning.
+  const chipBolds = (container: HTMLElement, kickerLabel: string) =>
+    Array.from(chipTextEl(container, kickerLabel)?.querySelectorAll('b') ?? []).map((b) => b.textContent)
 
   it('reads the people and top chips as full sentences that name their unit', async () => {
     const { container } = await leaderboard(bundleOf(FOUR()))
@@ -271,6 +277,24 @@ describe('Leaderboard tab', () => {
     expect(cal).not.toContain('keeps nothing,')
     expect(cal).toBe('NhiLV shortlists none of the games they judge; QuangVN keeps 1 in every 11')
     expect(cal.length).toBeLessThanOrEqual(150)
+  })
+
+  // The spec the plan's Design A table sits under: "the number is bold and the
+  // sentence around it carries the meaning." `cal` used to bold only the two names,
+  // leaving both rates plain, while `people` and `top` bolded their number right
+  // beside it on the same screen. Three chips, one rule.
+  it('bolds the number in all three banner chips, not the names alone', async () => {
+    const people = [
+      even('NhiLV', { evaluated: 250, bypass: 250, listIdea: 0, cells: { d1: 250 } }),
+      even('QuangVN', { evaluated: 220, bypass: 200, listIdea: 20, cells: { d1: 220 } }),
+      even('Gamma', { evaluated: 10, bypass: 8, listIdea: 2, cells: { d1: 10 } }),
+      even('Delta', { evaluated: 10, bypass: 8, listIdea: 2, cells: { d1: 10 } }),
+    ]
+    const { container } = await leaderboard(bundleOf(people))
+    expect(chipBolds(container, 'COVERAGE')).toEqual(['4 of 4 people'])
+    expect(chipBolds(container, 'CONCENTRATION')).toEqual(['NhiLV', '51%'])
+    // name, rate, name, rate - the rates are the point, and they were plain before
+    expect(chipBolds(container, 'CALIBRATION')).toEqual(['NhiLV', 'none', 'QuangVN', '1 in every 11'])
   })
 
   // The `cal` chip must stay true for the whole range `keepPair` can return, not just
