@@ -196,7 +196,15 @@ describe('ReviewTable', () => {
     expect((lightboxImgs[1] as HTMLImageElement).style.border).toContain('var(--accent)')
   })
 
-  it('expands the table out of the content column and can be toggled back', async () => {
+  // NAME IS THE POINT. This asserts the class toggle and the button's label flip,
+  // and NOTHING about painted width: jsdom loads no stylesheet, so
+  // `.rp-review-table-expanded`'s actual box is unobservable here. The old name
+  // ("expands the table out of the content column") claimed the paint, and under
+  // that name a version of the rule that gained exactly zero content width -- a
+  // +60px border-box spent entirely on 60px of its own padding -- passed this test
+  // through seven reviews. Whether Expand widens anything is a browser check, not
+  // a jsdom one.
+  it('toggles the expanded class and the button label, and can be toggled back', async () => {
     const fetchMock = mockApi({ list: [row()] })
     global.fetch = fetchMock as unknown as typeof fetch
 
