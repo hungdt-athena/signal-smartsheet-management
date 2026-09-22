@@ -110,6 +110,77 @@ function dump(label: string) {
   return { headline, lines }
 }
 
+// Task 7: the six rewritten chips (Leaderboard's cal/people/top, Individual's
+// net/wait/share), the section titles, and the KPI sub-lines that now carry the
+// figures the three removed blocks used to show - everything Task 1/2's own unit
+// suites already asserted on synthetic fixtures, read back here on the REAL payloads
+// this file exists for. Printed alongside `dump()`'s output, not instead of it: the
+// brief's deliverable is the full text, and a human reads all of it, not just the
+// bit a regex happens to check.
+function dumpChipsAndKpis(label: string) {
+  const chips = Array.from(document.querySelectorAll('.rp-chip-text')).map((n) => n.textContent!.trim())
+  const sectionTitles = Array.from(document.querySelectorAll('.rp-section-title')).map((n) => n.textContent!.trim())
+  const kpis = Array.from(document.querySelectorAll('.rp-kpi')).map((k) => {
+    const label = k.querySelector('.rp-kpi-label')?.textContent?.trim() ?? ''
+    const value = k.querySelector('.rp-kpi-value')?.textContent?.trim() ?? ''
+    const sub = k.querySelector('.rp-kpi-sub')?.textContent?.trim() ?? ''
+    return `${label}: ${value} (${sub})`
+  })
+  const reviewNote = document.querySelector('.rp-review-scope-note')?.textContent?.trim() ?? null
+  // eslint-disable-next-line no-console
+  console.log(`\n----- ${label} / chips+kpis -----\nchips:\n${chips.length ? chips.join('\n') : '(none)'}\nsection titles:\n${sectionTitles.length ? sectionTitles.join('\n') : '(none)'}\nkpis:\n${kpis.length ? kpis.join('\n') : '(none)'}\nreview scope note: ${reviewNote ?? '(absent)'}\n`)
+  return { chips, sectionTitles, kpis, reviewNote }
+}
+
+// Task 2 removed these three blocks from Individual. This is a regression guard, not
+// a smoke test on the current tree: the exact strings and selectors below are the
+// ones review-task2.diff's own unit test anchored on when it deleted the blocks
+// (`performance shape`, `.rp-radar-wrap`, the "Pick funnel" card-label, the "Daily
+// breakdown" button, `.rp-daily-modal`). Proven to actually catch a regression, not
+// just always-pass: markup carrying all five markers was temporarily reinserted into
+// ReportView.tsx's Individual render (uncommitted) and this suite was re-run against
+// report-prod.json - `assertRemovedBlocksAbsent` failed on the `performance shape`
+// check as expected, the markup was then reverted, and the suite was confirmed green
+// again before committing (see task-7-report.md for the failure output and the diff
+// that was reverted). Checking out the actual pre-Task-2 commit was not usable for
+// this proof: the ReviewTable this function also depends on (`waitForReviewTableSettled`
+// finding `.rp-review-empty`/`.rp-review-row`) did not exist until Task 5/6, two
+// commits later, so that commit fails for an unrelated reason (no review table at
+// all) rather than proving this specific guard.
+function assertRemovedBlocksAbsent() {
+  const bodyText = document.body.textContent || ''
+  expect(bodyText.toLowerCase()).not.toContain('performance shape')
+  expect(document.querySelector('.rp-radar-wrap')).toBeNull()
+  const cardLabels = Array.from(document.querySelectorAll('.card-label')).map((n) => n.textContent!.trim())
+  expect(cardLabels).not.toContain('Pick funnel')
+  expect(screen.queryByRole('button', { name: /Daily breakdown/i })).toBeNull()
+  expect(document.querySelector('.rp-daily-modal')).toBeNull()
+}
+
+// The separator + its scope note must exist, and must sit AFTER every other section
+// on the tab (Design section C: "Last block on the tab, after the recording list").
+// Checking the note's plain text, not just its presence, is the point: a reader who
+// only sees the review table with no note above it reads the tab as contradicting
+// itself (numbers not matching the window/genre bar at the top).
+function assertReviewSeparatorIsLast() {
+  const titles = Array.from(document.querySelectorAll('.rp-section-title')).map((n) => n.textContent!.trim())
+  expect(titles.length).toBeGreaterThan(0)
+  expect(titles[titles.length - 1]).toMatch(/^Review /)
+  const rule = document.querySelector('.rp-review-rule')
+  expect(rule).not.toBeNull()
+  const note = document.querySelector('.rp-review-scope-note')
+  expect(note?.textContent?.trim()).toBe(
+    'This table has its own filters and ignores the window and genre at the top of the page.',
+  )
+  // DOM order: the rule/title/note must precede the ReviewTable's own toolbar, i.e.
+  // live inside the same `.rp-review-section` wrapper, not just appear somewhere on
+  // the page.
+  const section = document.querySelector('.rp-review-section')
+  expect(section?.contains(rule!)).toBe(true)
+  expect(section?.contains(note!)).toBe(true)
+  expect(section?.querySelector('.rp-review-toolbar')).not.toBeNull()
+}
+
 // `rec`'s admin-voice why is a known, pre-existing ~158-char exception to the 150-char
 // evidence budget (see the plan's self-review notes); every other `why` must fit.
 //
@@ -136,6 +207,35 @@ function assertClean(lines: string[]) {
     expect(t).not.toMatch(/\b0 of 0\b/)
     expect(t).not.toMatch(/—/) // no em dashes in screen copy
   })
+}
+
+// The ReviewTable fetches `/api/evaluations` itself, on mount, twice (the
+// newest-3-days probe, then the paginated page-1 fetch) - see fetchNewestDays and
+// fetchPage in components/report/ReviewTable.tsx. This suite's `global.fetch` mock
+// (set once in `renderTab`, for the WHOLE page) answers every call with the report
+// bundle, which has no `.data` array, so both of those calls resolve to zero rows
+// and the table settles on its own empty-state sentence. That sentence is real copy
+// worth reading, not a stub artifact this test papers over - see task-7-report.md
+// for what it says on each fixture. Waiting for `.rp-review-empty` (rather than
+// asserting immediately) is what proves the two fetches actually resolved rather
+// than the assertion running against the pre-fetch, still-loading frame.
+async function waitForReviewTableSettled() {
+  await waitFor(() => {
+    const settled = document.querySelector('.rp-review-empty') || document.querySelector('.rp-review-row')
+    expect(settled).not.toBeNull()
+  }, { timeout: 10000 })
+}
+
+// The ReviewTable's own settled state, read back and logged - since `global.fetch`
+// is not stubbed to answer `/api/evaluations` with a real evaluations shape (see
+// waitForReviewTableSettled above), this is always the empty-state sentence in this
+// suite, never a populated row. Printed so a human reads exactly what it says, not
+// just that "something" rendered.
+function dumpReviewTableState(label: string) {
+  const empty = document.querySelector('.rp-review-empty')?.textContent?.trim() ?? null
+  const rowCount = document.querySelectorAll('.rp-review-row').length
+  // eslint-disable-next-line no-console
+  console.log(`\n----- ${label} / ReviewTable state -----\n${empty ? `empty-state sentence: "${empty}"` : `${rowCount} row(s) rendered`}\n`)
 }
 
 // File-level, not per-test: rendering six real prod payloads through three tabs each
@@ -179,6 +279,18 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
         expect(ageWhy).toBeDefined()
         expect(ageWhy).toMatch(/past 7 days/)
       }
+      // Task 7: the rewritten chips + KPI sub-lines, read back on this real payload.
+      if (tab === 'Leaderboard' || tab === 'Individual') {
+        const { chips, kpis } = dumpChipsAndKpis(`report-prod.json / ${tab}`)
+        assertClean([...chips, ...kpis])
+      }
+      if (tab === 'Individual') {
+        await waitForReviewTableSettled()
+        dumpChipsAndKpis(`report-prod.json / ${tab} (after ReviewTable settled)`)
+        dumpReviewTableState(`report-prod.json / ${tab}`)
+        assertRemovedBlocksAbsent()
+        assertReviewSeparatorIsLast()
+      }
       unmount()
     }
   })
@@ -189,6 +301,16 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       const { unmount } = await renderTab(bundle, tab)
       const { lines } = dump(`report-prod-batch-latest.json / ${tab}`)
       assertClean(lines)
+      if (tab === 'Leaderboard' || tab === 'Individual') {
+        const { chips, kpis } = dumpChipsAndKpis(`report-prod-batch-latest.json / ${tab}`)
+        assertClean([...chips, ...kpis])
+      }
+      if (tab === 'Individual') {
+        await waitForReviewTableSettled()
+        dumpReviewTableState(`report-prod-batch-latest.json / ${tab}`)
+        assertRemovedBlocksAbsent()
+        assertReviewSeparatorIsLast()
+      }
       unmount()
     }
   })
@@ -200,6 +322,16 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       const { unmount } = await renderTab(bundle, tab)
       const { lines } = dump(`report-prod-batch-all.json / ${tab}`)
       assertClean(lines)
+      if (tab === 'Leaderboard' || tab === 'Individual') {
+        const { chips, kpis } = dumpChipsAndKpis(`report-prod-batch-all.json / ${tab}`)
+        assertClean([...chips, ...kpis])
+      }
+      if (tab === 'Individual') {
+        await waitForReviewTableSettled()
+        dumpReviewTableState(`report-prod-batch-all.json / ${tab}`)
+        assertRemovedBlocksAbsent()
+        assertReviewSeparatorIsLast()
+      }
       unmount()
     }
   })
@@ -243,6 +375,16 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
     links.forEach((href) => {
       expect(href).not.toMatch(/tab=rescue|tab=reassign|tab=assign/)
     })
+    // A contractor's whole page IS the Individual tab, in the contractor (second-
+    // person) voice - `self` is true throughout ReportView's Individual render, so
+    // this is the one fixture that actually exercises the "you" wording (net/wait)
+    // rather than the admin ("their name") wording every other fixture above reads.
+    const { chips, kpis } = dumpChipsAndKpis('report-prod-contractor.json / self view')
+    assertClean([...chips, ...kpis])
+    await waitForReviewTableSettled()
+    dumpReviewTableState('report-prod-contractor.json / self view')
+    assertRemovedBlocksAbsent()
+    assertReviewSeparatorIsLast()
     unmount()
   })
 
@@ -252,6 +394,16 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       const { unmount } = await renderTab(bundle, tab)
       const { lines } = dump(`report-prod-healthy.json / ${tab}`)
       expect(lines).toHaveLength(0)
+      if (tab === 'Leaderboard' || tab === 'Individual') {
+        const { chips, kpis } = dumpChipsAndKpis(`report-prod-healthy.json / ${tab}`)
+        assertClean([...chips, ...kpis])
+      }
+      if (tab === 'Individual') {
+        await waitForReviewTableSettled()
+        dumpReviewTableState(`report-prod-healthy.json / ${tab}`)
+        assertRemovedBlocksAbsent()
+        assertReviewSeparatorIsLast()
+      }
       unmount()
     }
   })
