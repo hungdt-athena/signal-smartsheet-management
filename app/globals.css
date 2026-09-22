@@ -2007,6 +2007,12 @@ input:checked + .slider:before {
    the sentence, not as a second KPI row: the KPI cards carry levels, these carry the
    three numbers that decide which sentence gets printed. */
 .rp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+/* This bare rule is NOT the only `.rp-chip`: Individual's person-switcher
+   (`.rp-people .rp-chip`, further down this file) reuses the same class name for an
+   unrelated control. The later bare `.rp-chip` rule in the `.rp-people` section wins
+   there on SOURCE ORDER at equal specificity, not on scoping - reordering either
+   rule, or adding a third bare `.rp-chip` rule anywhere in the cascade, changes which
+   one the switcher renders with. */
 .rp-chip { font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums;
   padding: 3px 9px; border-radius: 99px; border: 1px solid transparent; white-space: nowrap; }
 .rp-chip.good { color: var(--good); background: var(--good-weak); border-color: var(--good-weak); }
@@ -2304,6 +2310,12 @@ input:checked + .slider:before {
   font-size: 11px; padding: 4px 7px; border-radius: 6px; white-space: nowrap; z-index: 5; pointer-events: none; }
 
 .rp-people { display: flex; flex-wrap: wrap; gap: 6px; }
+/* This is the person-switcher's OWN look for the `.rp-chip` class it shares with the
+   verdict banner's chips (the bare `.rp-chip` rule up near `.rp-chips`, unrelated to
+   this control). It has to come AFTER that rule in the file: at equal specificity the
+   later rule wins, and that ordering is what keeps this switcher's pill from picking
+   up the verdict chip's look. Moving this rule earlier, or the other one later,
+   silently changes which one the switcher renders with. */
 .rp-chip { border: 1px solid var(--border-strong); background: var(--surface); font-family: var(--font); font-size: 12px; font-weight: 600;
   color: var(--muted); padding: 5px 11px; border-radius: 99px; cursor: pointer; transition: all .12s; }
 .rp-chip:hover { border-color: var(--accent); color: var(--text); }
