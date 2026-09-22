@@ -13,9 +13,66 @@ import { isManagerRole } from '@/lib/roles'
 import { getSession } from '@/lib/session'
 import { loadRescueConfig } from '@/lib/rescue-config-db'
 import { scanRoster } from '@/lib/rescue-core'
-import { classifyRoster } from '@/lib/rescue-rules'
+import { classifyRoster, type RescueStats } from '@/lib/rescue-rules'
+import type { RescueConfig } from '@/lib/rescue-config'
+import { BUCKETS } from '@/lib/buckets'
 
 export const dynamic = 'force-dynamic'
+
+/* The Rescue scan, for whatever the Category filter is set to.
+
+   `scanRoster` is per bucket - every one of its WHERE clauses reads
+   `category_group = $1`, and that column only ever holds puzzle / arcade /
+   simulation. Handed the API's own default of 'all' (also the filter bar's "All"
+   segment) it therefore matched nothing and returned an empty roster, which the
+   Overview read as "sources and receivers do not exist" and answered with the
+   no-receivers fallback - on the filter most likely to be set, and while every
+   bucket demonstrably had receivers in it.
+
+   So 'all' scans all three and adds the rosters up per person. The merge is done on
+   the STATS, before `classifyRoster` runs, which is what makes it honest:
+
+   - `pending` / `stale` / `movable` / `evaluatedRecent` are counts of games, so they
+     add across buckets the way the sentence on screen reads them.
+   - One person appears once, keyed by name, so `receivers` cannot list the same
+     person three times.
+   - Somebody who is a source in one bucket and a receiver in another comes out a
+     SOURCE: their summed `pending` is at least their pending in the bucket that made
+     them a source and their summed `movable` is at least that bucket's, so the
+     source test in `classifyRoster` still holds, and it is resolved first.
+   - And a receiver's stale count is their stale count everywhere, not in one bucket,
+     so "N others have nothing stale" stays true of the person rather than of a
+     column. Classifying each bucket separately and de-duplicating afterwards would
+     have printed that sentence over somebody with a stale pile in another genre.
+
+   Cost: three queries instead of one, issued inside the SAME `Promise.all` as
+   everything else on this route. The app and the database are on different
+   continents, so the unit that hurts is the round trip, not the query - and these
+   three share one. See [[app-db-region-latency]]. */
+async function scanRescueRoster(category: string, config: RescueConfig): Promise<RescueStats[]> {
+  // Same test the rest of this route's `catF` uses, so the scan and every other
+  // query on the page agree about what the filter means.
+  if (category !== 'all') return scanRoster({ category, config })
+  const perBucket = await Promise.all(BUCKETS.map((b) => scanRoster({ category: b, config })))
+  const by = new Map<string, RescueStats>()
+  for (const rows of perBucket) {
+    for (const r of rows) {
+      const cur = by.get(r.name)
+      if (!cur) { by.set(r.name, { ...r }); continue }
+      cur.pending += r.pending
+      cur.stale += r.stale
+      cur.movable += r.movable
+      cur.evaluatedRecent += r.evaluatedRecent
+      // Available on ANY roster they are on: today_available is a fact about the
+      // person's day, not about a genre, and a roster row that omits it should not
+      // veto one that has it.
+      cur.available = cur.available || r.available
+      cur.platform = cur.platform ?? r.platform
+      cur.weight = cur.weight ?? r.weight
+    }
+  }
+  return Array.from(by.values())
+}
 
 // Lowercase names kept out of every report aggregation (evaluation + recording).
 const EXCLUDED = SYSTEM_EVALUATOR_KEY_LIST
@@ -824,7 +881,7 @@ export async function GET(req: NextRequest) {
       stockPromise,
       // The Rescue scan itself. Guarded so an evaluator never pays for a query whose
       // result is thrown away below (rescue is manager-only).
-      !scoped ? scanRoster({ category, config: rescueCfg }) : Promise.resolve([]),
+      !scoped ? scanRescueRoster(category, rescueCfg) : Promise.resolve([]),
     ])
 
     // fold conclusion maps
