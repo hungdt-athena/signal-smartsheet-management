@@ -2781,11 +2781,29 @@ input:checked + .slider:before {
 .rp-review-rule { border: none; border-top: 1px solid var(--border); margin: 30px 0 14px; }
 .rp-review-scope-note { font-size: 12px; color: var(--muted); margin: 4px 2px 16px; }
 .rp-review-table { border-top: 1px solid var(--border); padding-top: 20px; margin-top: 4px; }
-/* Expand: break out of the page's max-width content column without touching it --
-   the standard full-bleed trick, no new tokens. */
+/* Expand: fill .page's own box instead of the viewport. The old rule used
+   100vw/50vw, which measures the whole browser window including the sidebar;
+   .page does not span that width (.content, its parent, is a flex sibling of
+   the 232px sidebar), so the table came out wider than the scroll container
+   it actually sits in (.content has `overflow-y: auto`, which per the
+   overflow spec also computes `overflow-x` to `auto` -- a horizontal scrollbar
+   or sidebar-misaligned table, not a filled column).
+   This version cancels only what .page itself imposes on this one section:
+   its horizontal padding (30px each side, the same number .page declares
+   above). 100% and 30px here are both measured against .page's own box, so
+   the result can never exceed .page -- and therefore never exceeds .content
+   either. .page's max-width (1400px, or 90% at >=1600px) is left in place:
+   escaping that too would need the table's width measured against .content
+   rather than .page, which is not reachable from inside .page with plain
+   CSS box values (no viewport units allowed, and no JS measurement here).
+   On any screen where .page isn't currently capped by that max-width (i.e.
+   most of them -- .page already equals .content's width below ~1460px), this
+   already reaches .content's true edge; on wider screens it fills .page's
+   box and stops at .page's own margin, which is the honest, achievable target
+   this fix aims for rather than the viewport. */
 .rp-review-table-expanded {
-  width: 100vw; max-width: 100vw;
-  margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw);
+  width: calc(100% + 60px); max-width: calc(100% + 60px);
+  margin-left: -30px; margin-right: -30px;
   padding-left: 30px; padding-right: 30px;
 }
 .rp-review-toolbar { display: flex; align-items: flex-end; justify-content: space-between;
