@@ -2801,3 +2801,40 @@ input:checked + .slider:before {
   /* No flash, but still say which card: a steady ring instead of an animation. */
   .cfg-highlight { animation: none; box-shadow: 0 0 0 3px var(--accent), var(--shadow-md); border-color: var(--accent); }
 }
+
+/* ===== Individual tab › review table (its own filters, own pace) ===== */
+.rp-review-table { border-top: 1px solid var(--border); padding-top: 20px; margin-top: 4px; }
+/* Expand: break out of the page's max-width content column without touching it --
+   the standard full-bleed trick, no new tokens. */
+.rp-review-table-expanded {
+  width: 100vw; max-width: 100vw;
+  margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw);
+  padding-left: 30px; padding-right: 30px;
+}
+.rp-review-toolbar { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.rp-review-filters { display: flex; gap: 14px; flex-wrap: wrap; }
+.rp-review-filter { display: flex; flex-direction: column; gap: 4px; font-size: 11px;
+  font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.rp-review-filter select, .rp-review-filter input {
+  font-family: var(--font); font-size: 13px; font-weight: 500; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+}
+.rp-review-rows { display: flex; flex-direction: column; gap: 10px; }
+.rp-review-row { display: flex; align-items: center; gap: 14px; padding: 10px 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.rp-review-icon img, .rp-review-icon-fallback { width: 40px; height: 40px; border-radius: 9px; flex-shrink: 0; }
+.rp-review-icon-fallback { background: var(--surface-3); }
+.rp-review-info { flex: 1 1 220px; min-width: 160px; }
+.rp-review-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.rp-review-title a { color: var(--accent); text-decoration: none; }
+.rp-review-meta { display: flex; gap: 10px; font-size: 11.5px; color: var(--faint); margin-top: 3px; flex-wrap: wrap; }
+.rp-review-conclusion { display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+  flex-shrink: 0; min-width: 120px; }
+.rp-review-judged { font-size: 11px; color: var(--faint); }
+/* Shorter than a full phone screenshot, and scrolls horizontally within the row. */
+.rp-review-shots { display: flex; gap: 8px; overflow-x: auto; max-width: 340px; flex-shrink: 0; padding-bottom: 2px; }
+.rp-review-shot { height: 96px; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; cursor: pointer; }
+.rp-review-loading { text-align: center; font-size: 12px; color: var(--faint); padding: 10px 0; }
+.rp-review-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--muted);
+  background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius); }
