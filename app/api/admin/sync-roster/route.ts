@@ -4,9 +4,12 @@ import { sql } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
-// Mirror the "Evaluator List" Google Sheet into evaluator_roster (list_type
-// 'initial'). n8n POSTs the sheet rows (keyed by column title) before each
-// assign run, so the DB roster always matches what managers edit in the sheet.
+// DEAD — do not call. This mirrored the "Evaluator List" Google Sheet into
+// evaluator_roster back when a person had one row. Since migration 016 the
+// roster is per genre: the unique key is (list_type, category_group, name) and
+// category_group is NOT NULL, neither of which a sheet row can supply, so every
+// write here fails. The roster is now owned by the app (Assign Setup is its
+// only editor) and n8n no longer reads the sheet. Delete this route.
 
 function hasWebhookSecret(req: NextRequest): boolean {
   const secret = process.env.WEBHOOK_SECRET

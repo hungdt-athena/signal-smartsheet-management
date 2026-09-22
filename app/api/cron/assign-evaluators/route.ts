@@ -11,7 +11,8 @@ export const maxDuration = 60
 // DB replacement for the "auto-assign-game-evaluator" n8n flow: distribute
 // unassigned game_evaluations rows among today's available evaluators
 // (evaluator_roster, list_type 'initial') by weight, platform-aware.
-// Run AFTER /api/cron/push-evaluations and /api/admin/sync-roster.
+// Run AFTER /api/cron/push-evaluations. The roster lives in the app (Assign
+// Setup is its only editor), so there is nothing to sync in from a sheet.
 
 const CATEGORIES = ['puzzle', 'arcade', 'simulation']
 
