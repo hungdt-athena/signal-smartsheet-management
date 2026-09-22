@@ -43,7 +43,7 @@ Three, all for one reason: they describe a distribution and cannot be acted on.
 
 **Placement.** Last block on the tab, after the recording list.
 
-**Separator, and why it exists.** Every other block on the tab obeys the window and genre filter at the top of the page. This one does not. So it is introduced by a full-width rule and a section title, with one line underneath saying so in plain words: *"This table has its own filters and ignores the window and genre at the top of the page."* Without that line the reader will assume the table is the same selection as the charts above it and read a contradiction.
+**Separator, and why it exists.** Every other block on the tab obeys the window and genre filter at the top of the page. This one does not. So it is introduced by a full-width rule and a section title, with one line underneath saying so in plain words: *"This table has its own filters. It ignores the View by, period and Category filters at the top of the page."* Without that line the reader will assume the table is the same selection as the charts above it and read a contradiction.
 
 **Filters**, its own, defaulting to the newest work rather than the selected window:
 
@@ -173,7 +173,7 @@ It owns its own filter state and fetches `GET /api/evaluations` with `evaluator`
 
 - [ ] **Step 1: Write the failing tests.** The table renders last, after the recording list; the separator and its sentence are present and say the table has its own filters; the contractor view renders it for their own name; changing the person switcher re-targets it.
 - [ ] **Step 2: Run them, see them fail.**
-- [ ] **Step 3: Implement.** A full-width rule, a section title, and one muted line: *"This table has its own filters and ignores the window and genre at the top of the page."* Then `<ReviewTable evaluator={e.name} canSeeTeam={d.canSeeTeam} />`.
+- [ ] **Step 3: Implement.** A full-width rule, a section title, and one muted line: *"This table has its own filters. It ignores the View by, period and Category filters at the top of the page."* Then `<ReviewTable evaluator={e.name} canSeeTeam={d.canSeeTeam} />`.
 - [ ] **Step 4: Run the Individual suites and the real-payload suite.**
 - [ ] **Step 5: Commit.**
 

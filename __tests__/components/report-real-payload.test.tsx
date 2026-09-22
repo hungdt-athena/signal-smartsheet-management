@@ -61,7 +61,7 @@ import { ReportView } from '@/components/report/ReportView'
 // which merging would write into permanent history, where deleting them later does not
 // remove them. One real name maps to one pseudonym across ALL SIX files and every field
 // that holds one (`rescue.sources`/`receivers`, `backlogBy`, `evaluators`, `radar`,
-// `heatmap.rows`, and the object KEYS of `personSeries`, `videos`, `dailyMix`,
+// `heatmap.rows`, and the object KEYS of `personSeries`, `videos`,
 // `personMoves`), so the fixtures still join up. `Alpha`/`Beta` in the synthetic
 // healthy fixture were never real and are untouched. No test reads a name, and the
 // rename changed no number.
@@ -180,7 +180,7 @@ function assertReviewSeparatorIsLast() {
   expect(rule).not.toBeNull()
   const note = document.querySelector('.rp-review-scope-note')
   expect(note?.textContent?.trim()).toBe(
-    'This table has its own filters. It ignores the View by and Category filters at the top of the page.',
+    'This table has its own filters. It ignores the View by, period and Category filters at the top of the page.',
   )
   // DOM order: the rule/title/note must precede the ReviewTable's own toolbar, i.e.
   // live inside the same `.rp-review-section` wrapper, not just appear somewhere on

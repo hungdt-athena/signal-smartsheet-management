@@ -404,6 +404,29 @@ describe('ReviewTable', () => {
     expect(listCall.from).toBe('2025-01-05')
   })
 
+  // A FAILED bounded probe (network error) must not be read the same as a bounded
+  // probe that genuinely answered "no rows here": that pair is what licenses the
+  // one-extra-round-trip unbounded retry, and a failure escalating into it means a
+  // network hiccup on the cheap bounded probe reaches the expensive unbounded query.
+  it('does not escalate to the unbounded probe when the bounded one FAILS, only when it genuinely answers empty', async () => {
+    const fetchMock = jest.fn(async (url: string) => {
+      const u = new URL(String(url), 'http://x')
+      if (u.pathname.endsWith('/facets')) return { ok: true, json: async () => ({ available_conclusions: [] }) } as Response
+      if (u.searchParams.get('limit') === '100') throw new Error('network error')
+      return { ok: true, json: async () => ({ data: [row()] }) } as Response
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => {
+      const calls = parseCalls(fetchMock)
+      expect(calls.some(c => c.limit === '20')).toBe(true)
+    })
+
+    const probes = parseCalls(fetchMock).filter(c => c.limit === '100')
+    expect(probes).toHaveLength(1)
+  })
+
   // ---- Filters that own the window --------------------------------------------
 
   it('re-resolves the newest-days window when the category changes', async () => {
@@ -500,6 +523,73 @@ describe('ReviewTable', () => {
     // through the name chips must never see one person's games under another's.
     expect(screen.queryByText('Alpha Game')).toBeNull()
     await waitFor(() => expect(screen.getByText('Beta Game')).toBeInTheDocument())
+  })
+
+  // The bug above is fixed by resetting `rows` on the render that changes `evaluator`.
+  // That is not the whole story: the OUTGOING person's page-1 request can still be
+  // in flight when the switch happens (it awaited the newest-days probe before this
+  // reset ran), and the render-phase reset used to leave `fetchSeqRef` untouched --
+  // so that stale response's `seq` still equalled `fetchSeqRef.current` (no NEW
+  // fetch had bumped it yet, because the new person's own fetchPage does not fire
+  // until ITS probe resolves) and would repopulate `rows` with the outgoing
+  // person's games under the new name. This test switches WHILE that request is
+  // still pending, which the existing test above does not: it waits for the first
+  // fetch to settle before switching.
+  it('drops a stale in-flight response from the OUTGOING person, even when it lands before the new person\'s own probe resolves', async () => {
+    const alphaRow = row({ id: 1, title: 'Alpha Game' })
+    const betaRow = row({ id: 2, title: 'Beta Game' })
+
+    function deferred() {
+      let resolve!: (v: unknown) => void
+      const promise = new Promise((res) => { resolve = res })
+      return { promise, resolve }
+    }
+    const alphaList = deferred()
+    const betaProbe = deferred()
+
+    const fetchMock = jest.fn(async (url: string) => {
+      const u = new URL(String(url), 'http://x')
+      if (u.pathname.endsWith('/facets')) return { ok: true, json: async () => ({ available_conclusions: [] }) } as Response
+      const who = u.searchParams.get('evaluator')
+      const isProbe = u.searchParams.get('limit') === '100'
+      if (isProbe) {
+        if (who === 'Alpha') return { ok: true, json: async () => ({ data: [alphaRow] }) } as Response
+        // Beta's probe hangs until the test resolves it: this is the exact window
+        // during which Beta's own fetchPage has NOT yet been called, and so has
+        // not yet bumped fetchSeqRef past Alpha's in-flight request.
+        await betaProbe.promise
+        return { ok: true, json: async () => ({ data: [betaRow] }) } as Response
+      }
+      if (who === 'Alpha') {
+        await alphaList.promise
+        return { ok: true, json: async () => ({ data: [alphaRow] }) } as Response
+      }
+      return { ok: true, json: async () => ({ data: [betaRow] }) } as Response
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { rerender } = render(<ReviewTable evaluator="Alpha" canSeeTeam />)
+    // Confirm Alpha's page-1 request has genuinely been issued (and is hanging).
+    await waitFor(() => {
+      const calls = parseCalls(fetchMock)
+      expect(calls.some(c => c.limit === '20' && c.evaluator === 'Alpha')).toBe(true)
+    })
+
+    rerender(<ReviewTable evaluator="Beta" canSeeTeam />)
+    // Beta's probe is still pending -- Beta's own fetchPage has not run yet.
+
+    // Now let the outgoing Alpha response land.
+    alphaList.resolve(undefined)
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+
+    // It must not have repopulated the table with Alpha's game under Beta's name.
+    expect(screen.queryByText('Alpha Game')).toBeNull()
+
+    // Only once Beta's own probe resolves does Beta's row show.
+    betaProbe.resolve(undefined)
+    await waitFor(() => expect(screen.getByText('Beta Game')).toBeInTheDocument())
+    expect(screen.queryByText('Alpha Game')).toBeNull()
   })
 
   // ---- A failed append must not retry forever ----------------------------------

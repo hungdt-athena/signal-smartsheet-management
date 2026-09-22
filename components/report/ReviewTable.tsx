@@ -130,10 +130,13 @@ function shiftDays(iso: string, delta: number): string {
 
 // One probe request: up to 100 rows, newest first, no screenshots, read purely for
 // which calendar days are present.
+// `ok: false` marks a probe that never got an answer (network/parse failure), which
+// callers must NOT treat the same as `ok: true` with no days -- that pair is a real
+// answer ("nothing in this range") and is what licenses the unbounded retry below.
 async function probeDays(
   evaluator: string, category: string, conclusion: string,
   range: { from: string; to: string } | null,
-): Promise<{ from: string | null; to: string | null }> {
+): Promise<{ from: string | null; to: string | null; ok: boolean }> {
   const params = new URLSearchParams({
     evaluator, category, conclusion, date_basis: 'evaluated',
     sort: 'desc', page: '1', limit: '100', meta: '0',
@@ -151,12 +154,12 @@ async function probeDays(
       if (!days.includes(day)) days.push(day)
       if (days.length === 3) break
     }
-    if (days.length === 0) return { from: null, to: null }
+    if (days.length === 0) return { from: null, to: null, ok: true }
     // Rows arrive newest-first, so the first distinct day found is the newest and
     // the last one collected (up to 3) is the oldest of that set.
-    return { from: days[days.length - 1], to: days[0] }
+    return { from: days[days.length - 1], to: days[0], ok: true }
   } catch {
-    return { from: null, to: null }
+    return { from: null, to: null, ok: false }
   }
 }
 
@@ -178,9 +181,12 @@ async function probeDays(
 // The database is on another continent from the app, so a heavy scan here is paid
 // in full, every time the Individual tab opens.
 //
-// Only if 90 days comes back empty do we ask all-time -- one extra round trip, in
-// the rare case of a person with no work in a quarter, in exchange for never paying
-// the unbounded scan on the common path.
+// Only if 90 days comes back GENUINELY empty (`ok: true`, no `from`) do we ask
+// all-time -- one extra round trip, in the rare case of a person with no work in a
+// quarter, in exchange for never paying the unbounded scan on the common path. A
+// FAILED bounded probe (`ok: false`) must not take that branch: it is not evidence
+// of "no rows here", and escalating it would mean a network hiccup on the cheap
+// bounded probe reaches the expensive unbounded one every time.
 async function fetchNewestDays(
   evaluator: string, category: string, conclusion: string,
 ): Promise<{ from: string | null; to: string | null }> {
@@ -191,7 +197,9 @@ async function fetchNewestDays(
   const bounded = await probeDays(evaluator, category, conclusion,
     { from: shiftDays(today, -PROBE_DAYS), to: shiftDays(today, 1) })
   if (bounded.from) return bounded
-  return probeDays(evaluator, category, conclusion, null)
+  if (!bounded.ok) return { from: null, to: null }
+  const unbounded = await probeDays(evaluator, category, conclusion, null)
+  return { from: unbounded.from, to: unbounded.to }
 }
 
 export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canSeeTeam: boolean }): JSX.Element {
@@ -237,6 +245,13 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
   const [lastEvaluator, setLastEvaluator] = useState(evaluator)
   if (evaluator !== lastEvaluator) {
     setLastEvaluator(evaluator)
+    // Bump the sequence too, not just the visible state: an outgoing person's
+    // page-1 fetchPage may still be in flight (it awaited the probe before this
+    // reset ran), and until a new fetchPage call bumps fetchSeqRef itself -- which
+    // does not happen until the probe below resolves -- that stale response's
+    // `seq` still equals fetchSeqRef.current and would repopulate `rows` with the
+    // previous person's games under the new name.
+    fetchSeqRef.current++
     setCategory('puzzle')
     setConclusion('List_Idea')
     setFrom(null)

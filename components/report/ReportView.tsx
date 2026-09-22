@@ -2743,11 +2743,15 @@ function Individual({ d }: { d: Bundle }) {
       <div className="rp-review-section">
         <div className="rp-review-rule" />
         <div className="rp-section-title">Review - check the calls themselves, screenshots included</div>
-        {/* Names the two controls by the labels the filter bar actually prints -
-            "View by" and "Category" - not "window"/"genre", which appear nowhere in
-            the Report's screen text. A reader who goes looking for a "genre" control
-            will not find one, and this table's own filter is labelled Category too. */}
-        <p className="rp-review-scope-note">This table has its own filters. It ignores the View by and Category filters at the top of the page.</p>
+        {/* Names the controls by the labels the filter bar actually prints - "View
+            by" and "Category" - not "window"/"genre", which appear nowhere in the
+            Report's screen text. A reader who goes looking for a "genre" control
+            will not find one, and this table's own filter is labelled Category too.
+            The middle control isn't named literally: its label changes with the
+            view (Batch/Week/Month/Quarter/Year, or Range on a custom window), so
+            "period" stands in for whichever one is showing rather than one that
+            would only be true some of the time. */}
+        <p className="rp-review-scope-note">This table has its own filters. It ignores the View by, period and Category filters at the top of the page.</p>
         <ReviewTable evaluator={e.name} canSeeTeam={d.canSeeTeam} />
       </div>
     </>
