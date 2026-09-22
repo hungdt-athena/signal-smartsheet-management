@@ -11,6 +11,12 @@
 
 # next.js
 /.next/
+# Isolated build/probe dists. A second `next build` or `next dev` on the shared
+# /.next/ corrupts it (see [[build-exit0-not-proof]]), so verification runs point
+# NEXT_DIST_DIR at a directory of their own - which must never be committed.
+/.next-check/
+/.next-probe/
+/.next-dryrun-check/
 /out/
 
 # production
