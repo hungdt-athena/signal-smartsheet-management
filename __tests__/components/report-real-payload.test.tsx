@@ -55,6 +55,17 @@ import { ReportView } from '@/components/report/ReportView'
 //                                here - the "not 8" requirement is covered by the four
 //                                REAL fixtures above, all of which are 7.
 //
+// PSEUDONYMS. Every evaluator name in all six fixtures is `Ev1`..`Ev11`. The captured
+// payloads carried the team's real names, and with them performance judgements about
+// named individuals ("keeps 1 game in 42 where the rest of the team keeps 1 in 17") -
+// which merging would write into permanent history, where deleting them later does not
+// remove them. One real name maps to one pseudonym across ALL SIX files and every field
+// that holds one (`rescue.sources`/`receivers`, `backlogBy`, `evaluators`, `radar`,
+// `heatmap.rows`, and the object KEYS of `personSeries`, `videos`, `dailyMix`,
+// `personMoves`), so the fixtures still join up. `Alpha`/`Beta` in the synthetic
+// healthy fixture were never real and are untouched. No test reads a name, and the
+// rename changed no number.
+//
 // See __tests__/fixtures/*.json for the raw bytes, and task-11-report.md for the full
 // dumped text of every case and the hand-read findings against it.
 
@@ -79,8 +90,10 @@ async function renderTab(bundle: Bundle, tab?: 'Overview' | 'Leaderboard' | 'Ind
   const view = render(<ReportView />)
   await waitFor(() => expect(screen.queryByText('Loading…')).not.toBeInTheDocument())
   if (tab) {
-    const btn = screen.queryByRole('button', { name: tab })
-    if (btn) fireEvent.click(btn)
+    // getByRole, not queryByRole-and-maybe-click: a tab bar that stopped rendering
+    // would have silently collapsed all three dumps into three copies of Overview,
+    // and every assertion downstream would still have passed.
+    fireEvent.click(screen.getByRole('button', { name: tab }))
   }
   return view
 }
@@ -100,30 +113,22 @@ function dump(label: string) {
 // `rec`'s admin-voice why is a known, pre-existing ~158-char exception to the 150-char
 // evidence budget (see the plan's self-review notes); every other `why` must fit.
 //
-// A SECOND, NEW overage surfaced by this task against real prod data: Leaderboard's
-// `outlow` calibration-outlier act (components/report/ReportView.tsx ~line 1745)
-// builds its `why` from a keepPair() sentence plus a projected-games clause, and on
-// a person with a large `evaluated` count (10,772 games, real prod number) the
-// combined sentence runs to 153 chars - e.g. "ThuDT keeps 1 game in 42 where the rest
-// of the team keeps 1 in 17, over 10,772 games. At the others' rate that is about 633
-// games sent on instead of 258." No synthetic-fixture test ever caught this because
-// none used a four/five-digit evaluated count. This is NOT sanctioned the way `rec`
-// is - it is excluded here only so the rest of this file's real assertions still run;
-// task-11-report.md flags it as a real, unfixed budget violation for the
-// Leaderboard/Task-8 owner.
+// Leaderboard's `outlow` used to be exempted here too: on a real five-digit evaluated
+// count it ran to 153 characters, and the exemption was added so the rest of this
+// file's assertions could run while the overage was reported. The sentence has since
+// been trimmed (it said "games" twice, once over the evaluated count and once over the
+// projection), so the exemption is GONE and the gate covers that act again.
 //
-// Neither exception can be anchored to a stable DOM attribute (`.rp-do` carries only
-// a React `key`, never rendered to an attribute - see the `.map((a) => ...)` in
-// ReportView.tsx's DoBlock), so both patterns match the FULL distinctive clause each
-// act's copy is built from, not a loose keyword, and are verified (by grep against
-// ReportView.tsx, 2026-09-22) to appear nowhere else in the component: `rec`'s is the
-// exact fixed sentence "no video has ever matched"; `outlow`'s is the exact fixed
-// clause "At the others' rate that is about" (line 1745 only - the `cal` act's why
-// two lines below it says "At {loose.name}'s rate", a different string, and does not
-// match). If either act's copy changes, this regex must be revisited - it is
-// deliberately narrow rather than a loose keyword so a future, unrelated `why` cannot
-// coincidentally slip through it and mask a real new overage.
-const KNOWN_OVER_BUDGET_WHY = /no video has ever matched|At the others&?'? ?rate that is about/i
+// The remaining exception cannot be anchored to a stable DOM attribute (`.rp-do`
+// carries only a React `key`, never rendered to an attribute - see the `.map((a) =>
+// ...)` in ReportView.tsx's DoBlock), so the pattern matches the FULL distinctive
+// clause `rec`'s copy is built from, not a loose keyword, and is verified (by grep
+// against ReportView.tsx, 2026-09-22) to appear nowhere else in the component: the
+// exact fixed sentence "no video has ever matched". If that act's copy changes, this
+// regex must be revisited - it is deliberately narrow rather than a loose keyword so a
+// future, unrelated `why` cannot coincidentally slip through it and mask a real
+// overage.
+const KNOWN_OVER_BUDGET_WHY = /no video has ever matched/i
 
 function assertClean(lines: string[]) {
   lines.forEach((t) => {
@@ -156,7 +161,7 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       // Asserted only on Overview and Leaderboard, where a "past N days" why reliably
       // fires on THIS fixture (see the dump in task-11-report.md: Overview's `age`
       // rebalance act and Leaderboard's `queue` reassign act both name it; Individual
-      // shows a different person - HuyDD - whose only act this window is `rec`, with
+      // shows a different person - Ev2 - whose only act this window is `rec`, with
       // no stale-days sentence at all). Asserting `ageWhy` is found, not just `if
       // (ageWhy)`, keeps this from silently no-opping if either act stops rendering.
       if (tab === 'Overview' || tab === 'Leaderboard') {
