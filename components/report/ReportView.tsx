@@ -1769,7 +1769,7 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
     // where Overview's Rescue button scans and picks both sides itself. Two different
     // operations for two different altitudes - see law 2.
     do: <>Reassign {queueStuck.name}&apos;s backlog</>,
-    why: <>{fmt.int(queueStuck.stale)} of {queueStuck.name}&apos;s {fmt.int(queueStuck.n)} games sat past {sd} days ({fmt.pct(queueStuck.stale / queueStuck.n)} of their backlog, {fmt.pct(queueStuck.stale / Math.max(1, queueStale))} of the team&apos;s). Oldest is {queueStuck.oldest} days.</>,
+    why: <>{fmt.int(queueStuck.stale)} of {queueStuck.name}&apos;s {fmt.int(queueStuck.n)} games sat past {sd} days ({fmt.pct(queueStuck.stale / queueStuck.n)} of their backlog, {fmt.pct(queueStuck.stale / Math.max(1, queueStale))} of the team&apos;s stale total). Oldest is {queueStuck.oldest} days.</>,
     cta: { label: `Reassign ${queueStuck.name}`, href: `/team-ops?tab=reassign&from=${encodeURIComponent(queueStuck.name)}` },
   })
   else if (stuckFree.length) acts.push({

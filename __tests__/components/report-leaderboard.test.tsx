@@ -326,8 +326,17 @@ describe('Leaderboard tab', () => {
     }))
     const shown = actions(container)
     // Alpha is already named by the calibration line, so the backlog line names Beta
-    expect(shown.find((a) => a.do.includes('Reassign'))!.do).toContain('Beta')
+    const beta = shown.find((a) => a.do.includes('Reassign'))!
+    expect(beta.do).toContain('Beta')
     expect(shown.filter((a) => a.do.includes('Alpha'))).toHaveLength(1)
+    // The line carries two percentages - a share of Beta's own backlog, and a share of
+    // the team's stale total (queueStale, not the team's whole backlog). Printed as
+    // "X% of their backlog, Y% of the team's" with no noun on the second one, a reader
+    // parses it as two backlog shares, when the second is actually a share of a
+    // smaller, different pool - the denominator has to be named.
+    expect(beta.why).toMatch(/of their backlog/)
+    expect(beta.why).toMatch(/of the team's stale total/)
+    expect(beta.why.length).toBeLessThanOrEqual(150)
   })
 
   it('sends a stuck backlog to Reassign, not to Rescue', async () => {
