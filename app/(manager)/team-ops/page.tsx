@@ -8,6 +8,7 @@ import { ReassignPanel } from '@/components/ReassignPanel'
 import { RescuePanel } from '@/components/RescuePanel'
 import { HandoverPanel } from '@/components/HandoverPanel'
 import { ReportView } from '@/components/report/ReportView'
+import { isBucket } from '@/lib/buckets'
 
 type Tab = 'assign' | 'reassign' | 'rescue' | 'handover' | 'performance'
 const TABS: { value: Tab; pageTitle: string }[] = [
@@ -50,6 +51,13 @@ function TeamOpsInner() {
   // link may say WHICH rows it meant, never what the tool's settings should be.
   const flash = (searchParams.get('flash') || '').split(',').map(s => s.trim()).filter(Boolean)
   const fromParam = searchParams.get('from') || undefined
+  // Which genre the sentence that linked here was read on. A category picks the view,
+  // the way `tab` does, and is never written back to app_config — so it may travel in
+  // a URL where a Rescue THRESHOLD may not. Validated against the bucket list, and
+  // anything else is dropped so the panel keeps its own default rather than opening
+  // on a genre nobody asked for.
+  const catParam = searchParams.get('cat')
+  const initialCategory = isBucket(catParam) ? catParam : undefined
 
   // Performance renders its own page chrome (header, filters, sub-tabs)
   if (active === 'performance') return <ReportView />
@@ -61,8 +69,8 @@ function TeamOpsInner() {
       </div>
 
       {active === 'assign' && <AssignTab />}
-      {active === 'reassign' && <ReassignPanel initialFrom={fromParam} />}
-      {active === 'rescue' && <RescuePanel flash={flash} />}
+      {active === 'reassign' && <ReassignPanel initialFrom={fromParam} initialCategory={initialCategory} />}
+      {active === 'rescue' && <RescuePanel flash={flash} initialCategory={initialCategory} />}
       {active === 'handover' && <HandoverPanel />}
     </div>
   )

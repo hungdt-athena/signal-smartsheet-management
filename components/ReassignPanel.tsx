@@ -19,10 +19,14 @@ const WEIGHT_OPTS = WEIGHTS.map(w => ({ value: String(w), label: String(w) }))
 // initialFrom: who the Report's "Reassign PhuongNT1's backlog" link meant. It only
 // preselects the source — it can never carry a date range, a quantity or a target
 // pick, because those are decisions the manager still has to make here.
-export function ReassignPanel({ initialFrom }: { initialFrom?: string } = {}) {
+//
+// initialCategory: which bucket that sentence was read on. Same rule as `initialFrom`
+// — it picks the VIEW, never a setting — and without it a Reassign link from an
+// Arcade report opened a puzzle roster that does not contain the named person.
+export function ReassignPanel({ initialFrom, initialCategory }: { initialFrom?: string; initialCategory?: Bucket } = {}) {
   const { data: session } = useSession()
   const isEvaluator = session?.user?.role === 'evaluator'
-  const [category, setCategory] = useState<Bucket>('puzzle')
+  const [category, setCategory] = useState<Bucket>(initialCategory ?? 'puzzle')
   const [roster, setRoster] = useState<RosterRow[]>([])
   const [from, setFrom] = useState(initialFrom ?? '')
   const [mode, setMode] = useState<Mode>('range')

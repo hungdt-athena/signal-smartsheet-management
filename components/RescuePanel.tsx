@@ -112,8 +112,15 @@ const RESULT_MSG: Record<NonNullable<RescueResult['reason']>, string> = {
 // URL at all: POST /api/operations/rescue persists whatever config it is handed, so
 // a link carrying one would silently rewrite the admin's saved settings the next
 // time this panel scans.
-export function RescuePanel({ flash = [] }: { flash?: string[] } = {}) {
-  const [category, setCategory] = useState<Bucket>('puzzle')
+//
+// initialCategory: which bucket the sentence that sent them here was about. A
+// category is a VIEW SELECTOR, not a setting — it decides which scan is on screen and
+// is never written back to app_config — so unlike a threshold it is safe in a URL.
+// Without it a reader on Arcade landed on a puzzle scan where none of the flashed
+// names appear and none of the numbers in the sentence exist. The caller validates it
+// against the bucket list; anything else falls back to this panel's own default.
+export function RescuePanel({ flash = [], initialCategory }: { flash?: string[]; initialCategory?: Bucket } = {}) {
+  const [category, setCategory] = useState<Bucket>(initialCategory ?? 'puzzle')
   const [config, setConfig] = useState<RescueConfig>(DEFAULT_RESCUE_CONFIG)
   const [rows, setRows] = useState<ScanRow[] | null>(null)
   const [pickedSources, setPickedSources] = useState<Record<string, boolean>>({})

@@ -7,7 +7,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 //   1. ?from=<name> preselects Reassign's source evaluator.
 //   2. ?flash=<comma,separated,names> rings the matching rows on Rescue, same idiom
 //      as the Config page's ?highlight=.
-//   3. Nothing else in the URL is allowed near Rescue's saved thresholds.
+//   3. ?cat=<bucket> opens both panels on the genre the sentence was read on. Without
+//      it, a Report read on Arcade sent the reader to a puzzle scan where none of the
+//      flashed names appear and none of the numbers in the sentence exist. A category
+//      picks the VIEW - it is never written back to app_config - which is exactly why
+//      it may travel in a URL where a threshold may not.
+//   4. Nothing else in the URL is allowed near Rescue's saved thresholds.
 //      POST /api/operations/rescue with action:'scan' PERSISTS whatever config it is
 //      handed into app_config, so a link carrying ?staleDays= must never reach it —
 //      that would let a Report link silently rewrite the admin's saved settings.
@@ -106,6 +111,35 @@ describe('team-ops deep links', () => {
       expect(screen.getByText('ThuDT').closest('tr')!.className).toContain('cfg-highlight')
       expect(screen.getByText('KietCD').closest('tr')!.className).not.toContain('cfg-highlight')
     })
+  })
+
+  // Which genre a panel opens on. `fetched` reads the panel's own initial load, which
+  // is keyed on its bucket, so this asserts the state the panel actually came up in
+  // rather than something painted next to it.
+  const fetched = (url: string) =>
+    (global.fetch as jest.Mock).mock.calls.some(([input]) => String(input) === url)
+
+  it('opens Rescue on the genre the Report link named', async () => {
+    params = new URLSearchParams('tab=rescue&cat=arcade&flash=PhuongNT1')
+    render(<TeamOpsPage />)
+    await waitFor(() => expect(fetched('/api/operations/rescue?category=arcade')).toBe(true))
+    expect(fetched('/api/operations/rescue?category=puzzle')).toBe(false)
+  })
+
+  it('opens Reassign on the genre the Report link named', async () => {
+    params = new URLSearchParams('tab=reassign&cat=simulation&from=PhuongNT1')
+    render(<TeamOpsPage />)
+    await waitFor(() => expect(fetched('/api/assign-setup?group=simulation')).toBe(true))
+    expect(fetched('/api/assign-setup?group=puzzle')).toBe(false)
+  })
+
+  it('ignores a ?cat= that is not one of the three buckets', async () => {
+    params = new URLSearchParams('tab=rescue&cat=everything')
+    render(<TeamOpsPage />)
+    // falls back to the panel's own default rather than querying a genre that does
+    // not exist
+    await waitFor(() => expect(fetched('/api/operations/rescue?category=puzzle')).toBe(true))
+    expect(fetched('/api/operations/rescue?category=everything')).toBe(false)
   })
 
   it('never lets a URL change the saved rescue threshold', async () => {
