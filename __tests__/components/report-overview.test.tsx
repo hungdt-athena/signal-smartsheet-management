@@ -74,7 +74,7 @@ function healthy(): Bundle {
       { key: 'b', name: 'Beta', title: null, assigned: 500, evaluated: 500, activeDays: 5, throughput: 100, turnaround: 2, signalRate: 0.015, consistency: 1, shortlisted: 40, priorityIV: 5, insight: 2, finalPriority: 7, survivalRate: 0.08, linkDead: 0, noted: 475, noteRate: 0.95, recorded: 5, rec5: 3, rec20: 2, initialConclusions: { Bypass: 460, List_Idea: 40 }, finalConclusions: { 'Theme/Art': 4 } },
     ],
     radar: [],
-    // The waiting pile, outside the pipeline: it has no window in it, so it is sent on
+    // The backlog, outside the pipeline: it has no window in it, so it is sent on
     // every view including batch, where the pipeline is null.
     stock: { backlog: 400, age },
     pipeline: {
@@ -131,7 +131,7 @@ describe('Overview tab', () => {
 
   it('reads guide, then sentence, then chips, then five numbers, and folds nothing away', async () => {
     const { container } = await renderTab(healthy())
-    expect(container.querySelector('.rp-headline')).toHaveTextContent('The team is on top of the queue.')
+    expect(container.querySelector('.rp-headline')).toHaveTextContent('The team is on top of the backlog.')
 
     // In / out / stock / speed / quality, left to right. Assigned used to appear ONLY
     // on batch view - where the pipeline is null - so the row changed shape depending
@@ -151,7 +151,7 @@ describe('Overview tab', () => {
 
   /* Batch is the view the tab OPENS on, and it was the one view with no time axis, so
      the server sent `pipeline: null` for it - which took the Backlog KPI, the age bar
-     and all three summary chips with it. The waiting pile never needed a window (it is
+     and all three summary chips with it. The backlog never needed a window (it is
      "everything unevaluated, right now"), and a batch does happen on real days even
      though its label is not a date, so both now arrive on batch too. */
   it('keeps the stock numbers on batch view, where there is no pipeline', async () => {
@@ -165,7 +165,7 @@ describe('Overview tab', () => {
     const kpis = Array.from(container.querySelectorAll('.rp-kpi'))
       .map((k) => k.querySelector('.rp-kpi-label')?.textContent?.replace('?', ''))
     expect(kpis).toEqual(['Assigned', 'Evaluated', 'Backlog', 'Games per day', 'Shortlist rate'])
-    // the stock reads the same on batch as on any other view - it is the same pile
+    // the stock reads the same on batch as on any other view - it is the same backlog
     expect(container.querySelector('[data-rp-focus="growth"] .rp-kpi-value')!.textContent).toBe('400')
     expect(container.querySelector('[data-rp-focus="age"]')!.textContent).toContain('400 waiting')
     // and the banner still carries its three chips
@@ -215,11 +215,11 @@ describe('Overview tab', () => {
     expect(body(chips[0])).toBe('As many games were cleared as arrived this week')
     expect(body(chips[1])).toBe('2.0 days to clear the whole backlog at the current 200 games/day')
     expect(body(chips[2])).toBe('40 games have waited 8+ days - 10% of the backlog')
-    // a healthy queue reads green, not "no colour"
+    // a healthy backlog reads green, not "no colour"
     expect(chips.every((c) => c.classList.contains('good'))).toBe(true)
   })
 
-  // A queue that is growing has to say so in words, in both directions - the balanced
+  // A backlog that is growing has to say so in words, in both directions - the balanced
   // case above reads fine only because it is a third sentence, not a "+0".
   it('says which way the backlog moved, in words', async () => {
     const flow = (newGames: number) => withPatch({
@@ -266,7 +266,7 @@ describe('Overview tab', () => {
   // Headline -> chips -> KPI -> action is one chain, and an action with no topic on it
   // is a link missing from that chain: the reader has to re-derive which of the three
   // problems it answers. Quality is a fourth topic because two actions are about how
-  // well games are judged, not about the queue - those have no chip, but they still
+  // well games are judged, not about the backlog - those have no chip, but they still
   // need to say what they are about.
   it('labels every action with the topic it answers', async () => {
     const { container } = await renderTab(withPatch({
@@ -306,7 +306,7 @@ describe('Overview tab', () => {
     // no raw person-days anywhere in the line the reader acts on
     expect(cap.do).not.toMatch(/person-day/)
     // and the evidence reads as a sentence, not three numbers separated by dots
-    expect(cap.why).toBe('3,747 games waiting · the team clears 200 a day · that is 18.7 days of work in the pile')
+    expect(cap.why).toBe('3,747 games waiting · the team clears 200 a day · that is 18.7 days of work in the backlog')
   })
 
   it('says nothing when nothing is wrong', async () => {
@@ -317,7 +317,7 @@ describe('Overview tab', () => {
   })
 
   it('caps the action list at three, worst first, and never asks for a smaller push', async () => {
-    // four things wrong at once: intake gap, a rotting tail, a queue worth weeks of
+    // four things wrong at once: intake gap, a rotting tail, a backlog worth weeks of
     // work, and a source producing nothing (which must NOT become an action)
     const { container } = await renderTab(withPatch({
       // The stock the KPI and the chips read is the top-level one; `pipeline.current`
@@ -343,11 +343,11 @@ describe('Overview tab', () => {
     expect(shown[0].do).toBe('Clear 1,000 more games to break even on intake')
     expect(shown[0].why).toMatch(/^2,000 in against 1,000 out · about 10.0 person-days/)
     expect(shown[1].do).toMatch(/games past 15 days/)
-    // The queue is 30 days of work and the ask is capacity - stated in people and
+    // The backlog is 30 days of work and the ask is capacity - stated in people and
     // weeks, because "add 50 person-days" is a unit nobody hires in. 50 person-days
     // over a team of 2 is 2 more people for 5 weeks.
     expect(shown[2].do).toBe('Add 2 more people for 5 weeks to get the backlog under 5 days of work')
-    expect(shown[2].why).toBe('6,000 games waiting · the team clears 200 a day · that is 30.0 days of work in the pile')
+    expect(shown[2].why).toBe('6,000 games waiting · the team clears 200 a day · that is 30.0 days of work in the backlog')
     // every action leads with the move, and no action reaches for the push filter
     for (const a of shown) {
       expect(a.do).toMatch(/^(Clear|Add|Find|Re-judge|Ask|Put)\b/)
@@ -356,7 +356,7 @@ describe('Overview tab', () => {
   })
 
   it('never asks for more people in the same breath as asking what went wrong', async () => {
-    // The team is at a third of its own pace AND the queue is weeks of work. The list
+    // The team is at a third of its own pace AND the backlog is weeks of work. The list
     // used to print "add 98 person-days" directly under "find what changed before
     // adding people" - two answers to the same question, pointing opposite ways.
     const { container } = await renderTab(withPatch({
@@ -376,7 +376,7 @@ describe('Overview tab', () => {
     // above compares with the previous window, so an unnamed figure here is the same
     // metric shown twice against two different bars with nothing saying which is which.
     expect(shown[0].why).toBe('The team cleared 200 games a day against 129 last week, and 600 over the 90 days before this week')
-    expect(shown.some((a) => /person-days to get the queue under/.test(a.do))).toBe(false)
+    expect(shown.some((a) => /person-days to get the backlog under/.test(a.do))).toBe(false)
     // and the catch-up line drops its person-day estimate too, for the same reason
     expect(shown.find((a) => a.do.startsWith('Clear'))!.why).toBe('2,000 in against 1,000 out this week')
   })
@@ -410,7 +410,7 @@ describe('Overview tab', () => {
     expect(gpd.querySelector('.rp-kpi-bench')).toBeNull()
   })
 
-  it('names who is holding the old work, without waiting for the team to cross a line', async () => {
+  it('names who is holding the stale work, without waiting for the team to cross a line', async () => {
     // These are different questions and the aggregate hides the answer to this one: on a
     // real September the team sat at 33% old against a 35% threshold, so nothing fired,
     // while three people were each over a quarter of their own backlog and held 871
@@ -447,8 +447,8 @@ describe('Overview tab', () => {
     for (const k of sparked) expect(k.querySelector('.rp-kpi-sparknote')?.textContent).toBeTruthy()
   })
 
-  it('does not judge signal rate on a window the moderators have not finished', async () => {
-    // Signal rate is stamped days after the evaluation, so an open window reads 0%
+  it('does not judge hit rate on a window the moderators have not finished', async () => {
+    // Hit rate is stamped days after the evaluation, so an open window reads 0%
     // whatever the work was worth. That used to print as the worst quality gauge on
     // every fresh week; the honest line there is the triage one.
     const { container } = await renderTab(withPatch({
@@ -457,7 +457,7 @@ describe('Overview tab', () => {
       teamTotals: { ...healthy().teamTotals as object, signalRate: 0 },
     }))
     const shown = actions(container)
-    expect(shown.some((a) => /Signal rate/.test(a.why))).toBe(false)
+    expect(shown.some((a) => /Hit rate/.test(a.why))).toBe(false)
     expect(shown.some((a) => a.do === "Ask a moderator to triage this week's shortlist")).toBe(true)
   })
 
@@ -550,7 +550,7 @@ describe('Overview tab', () => {
     expect(byAge.textContent).not.toMatch(/Median wait\s*$/)
     // ...but the age numbers survive, computed, in the note
     expect(byAge.querySelector('.rp-readnote')!.textContent)
-      .toBe('Median wait went 3d → 5d across the window, and the slowest tenth is at 14d: games are being added to the queue faster than the middle of it moves.')
+      .toBe('Median wait went 3d → 5d across the window, and the slowest tenth is at 14d: games are being added to the backlog faster than the middle of it moves.')
   })
 
   it('charts the headcount that Games per day divides by', async () => {
@@ -600,11 +600,11 @@ describe('Overview tab', () => {
 
     expect(card.querySelector('.rp-div-heads .left')!.textContent).toBe('◀ Aged into')
     expect(card.querySelector('.rp-div-heads .right')!.textContent).toBe('Judged ▶')
-    // The verdict weighs old work CLEARED against old work CREATED - both counted on
-    // the 8+ day pile. Weighing all-ages-cleared against crossings-into-15d+ once
-    // printed "cleared faster than created" over a window where the pile grew.
+    // The verdict weighs stale work CLEARED against stale work CREATED - both counted on
+    // the 8+ day backlog. Weighing all-ages-cleared against crossings-into-15d+ once
+    // printed "cleared faster than created" over a window where the backlog grew.
     expect(card.querySelector('.rp-readnote')!.textContent).toMatch(
-      /^1,000 judged this week against 300 that crossed into an older band, 100 of them past 15 days\. On the 8\+ day pile alone: 100 cleared, 150 created – the old work is growing\./)
+      /^1,000 judged this week against 300 that crossed into an older band, 100 of them past 15 days\. On the 8\+ day backlog alone: 100 cleared, 150 created – the stale backlog is growing\./)
   })
 
   it('still counts a bucket where games aged but nothing was judged', async () => {
@@ -624,7 +624,7 @@ describe('Overview tab', () => {
     expect(rows[0].querySelector('.rp-div-num.left')!.textContent).toBe('40')
     expect(rows[0].querySelector('.rp-div-num.right')!.textContent).toBe('')
     expect(card.querySelector('.rp-readnote')!.textContent).toBe(
-      '0 judged this week against 40 that crossed into an older band, 40 of them past 15 days. On the 8+ day pile alone: 0 cleared, 40 created – the old work is growing.')
+      '0 judged this week against 40 that crossed into an older band, 40 of them past 15 days. On the 8+ day backlog alone: 0 cleared, 40 created – the stale backlog is growing.')
   })
 
   it('has no Pipeline tab - it lives here now', async () => {

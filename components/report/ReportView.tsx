@@ -10,6 +10,12 @@ import type { BenchStats } from '@/lib/report'
 
 type View = 'week' | 'month' | 'quarter' | 'year' | 'batch' | 'custom'
 const RADAR_AXES = ['Volume', 'Consistency', 'Signal', 'Survival', 'Recording'] as const
+// The axis keys above have to stay 'Signal'/'Survival' - they index the `axes` map the
+// API sends and the all-rounder weights in lib/report-config.ts. What the reader sees
+// is the lexicon's own word for each: this is the ONLY place that translation happens.
+const AXIS_LABEL: Record<string, string> = {
+  Volume: 'Volume', Consistency: 'Consistency', Signal: 'Hit rate', Survival: 'Shortlist rate', Recording: 'Recording',
+}
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
@@ -50,7 +56,7 @@ function rangeText(from?: string | null, to?: string | null): string {
 // this week" across an all-time report.
 // When a game has been on the SAME desk too long. Defined once because three tabs read
 // it - Overview names the people holding stale work, the Leaderboard flags their bars,
-// and Individual fires its own queue action - and three copies of a threshold is three
+// and Individual fires its own backlog action - and three copies of a threshold is three
 // chances for the tabs to flag different people off the same data.
 //
 // Both gates always, never one: 40 stale games is noise on a team judging thousands a
@@ -111,21 +117,21 @@ const TIP = {
   assigned: <><F>= count(games first assigned in window)</F>Counts a game the first time it reaches anyone. A reassign or a handover moves a game between people, so it does not add to this.</>,
   assignedPerson: <><F>= count(games assigned to this person in window)</F>Includes games received via reassign/handover, so the column does not add up to the team Assigned total.</>,
   evaluated: <><F>= count(initial_conclusion ≠ ∅, ≠ Link_dead)</F>Counted on the day the evaluation was saved.</>,
-  gppd: <><F>= Σ evaluated ÷ calendar days in the window</F>How fast the queue actually drains, which is the number “days to clear” is computed from. Calendar days, not working days: the backlog does not pause at the weekend. The per-evaluator version of this - games on a day someone worked - is on the Leaderboard, where every row is a person.</>,
-  turnaround: <><F>= avg( evaluate date − assigned date )</F>How long a game sits with someone before they judge it. When it climbs, queues are waiting.</>,
-  survival: <><F>= shortlist ÷ evaluated</F>Shortlist means the initial conclusion was anything other than bypass. Both halves count the same games, the ones judged in this window, so the size of the queue behind them leaves the rate alone.</>,
+  gppd: <><F>= Σ evaluated ÷ calendar days in the window</F>How fast the backlog actually drains, which is the number “days to clear” is computed from. Calendar days, not working days: the backlog does not pause at the weekend. The per-evaluator version of this - games on a day someone worked - is on the Leaderboard, where every row is a person.</>,
+  turnaround: <><F>= avg( evaluate date − assigned date )</F>How long a game sits with someone before they judge it. When it climbs, the backlog grows.</>,
+  survival: <><F>= shortlist ÷ evaluated</F>Shortlist means the initial conclusion was anything other than bypass. Both halves count the same games, the ones judged in this window, so the size of the backlog behind them leaves the rate alone.</>,
   signal: <><F>= (Priority IV + Insight) ÷ evaluated</F>How much of what they judged turned into a real pick. It usually sits under 1%, so the trend matters more than the number. A window that just opened reads low, because a moderator stamps the final conclusion days after the evaluation.</>,
   finalPriority: <><F>= count(final ∈ {'{'}Priority IV, Insight{'}'})</F>Priority V is left out, by the team&apos;s own convention.</>,
   noteCoverage: <><F>= noted ÷ evaluated</F>The team&apos;s rule is 90%. A conclusion with no note cannot be audited afterwards.</>,
   linkDead: <><F>= count(initial_conclusion = Link_dead)</F>Housekeeping. It measures the state of the source links, so it says nothing about how well someone picks.</>,
   perDay: (what: string) => <><F>= {what} ÷ active days</F>An active day is a day with at least one evaluation, so a four-day week is not read as a slow one.</>,
   backlog: <><F>= count(no evaluate date AND no conclusion)</F>Every game still waiting, across all history. The window filter does not reach it. Games that arrived already evaluated never enter the stock.</>,
-  personBacklog: <><F>= count(waiting games assigned to this person)</F>Their slice of the same pile the Backlog number on Overview counts, so every evaluator&apos;s slice adds up to it. The window filter does not reach it - this is a snapshot of right now.<br />Age is counted from the day the game was <b>assigned to them</b>, not from when it was imported the way Overview&apos;s &ldquo;Backlog by age&rdquo; counts it. The question here is how long it has been on this desk, and a reassign or handover restarts that clock on purpose - the same clock &ldquo;Days waiting&rdquo; uses. So the two agree on the total and can differ on the age split.</>,
+  personBacklog: <><F>= count(backlog games assigned to this person)</F>Their slice of the same total the Backlog number on Overview counts, so every evaluator&apos;s slice adds up to it. The window filter does not reach it - this is a snapshot of right now.<br />Age is counted from the day the game was <b>assigned to them</b>, not from when it was imported the way Overview&apos;s &ldquo;Backlog by age&rdquo; counts it. The question here is how long it has been on this desk, and a reassign or handover restarts that clock on purpose - the same clock &ldquo;Days waiting&rdquo; uses. So the two agree on the total and can differ on the age split.</>,
   recorded: <><F>= count(5min) + count(20min)</F>Credited to whoever actually uploaded the video, taken from the upload sheet.</>,
-  radar: <><F>axis = value ÷ team best × 100</F>Volume = games evaluated · Consistency = active days ÷ weekdays (weekend counts as bonus) · Signal & Survival = rates ÷ evaluated · Recording = videos. Every axis normalized to the best person.</>,
+  radar: <><F>axis = value ÷ team best × 100</F>Volume = games evaluated · Consistency = active days ÷ weekdays (weekend counts as bonus) · Hit rate & Shortlist rate = rates ÷ evaluated · Recording = videos. Every axis normalized to the best person.</>,
   // Named "all-rounder score" until the redesign: one word of jargon that had to be
   // translated before the number could be read. The formula is unchanged.
-  overall: <><F>= 0.4×Volume + 0.6×avg(Consistency, Signal, Survival, Recording)×sample weight</F>How much someone did, at 40%, and how well, at 60%. The quality half is scaled by sample weight, so 35 games on a good run cannot outrank 700 steady ones. Volume itself is never discounted. On each axis the team&apos;s best scores 100.</>,
+  overall: <><F>= 0.4×Volume + 0.6×avg(Consistency, Hit rate, Shortlist rate, Recording)×sample weight</F>How much someone did, at 40%, and how well, at 60%. The quality half is scaled by sample weight, so 35 games on a good run cannot outrank 700 steady ones. Volume itself is never discounted. On each axis the team&apos;s best scores 100.</>,
 }
 
 // Quality orderings (user-defined weights). Initial: List_Idea is the strongest
@@ -170,7 +176,7 @@ interface Bundle {
   // reaches - which is exactly why it is not inside `pipeline`, whose contents all need
   // a time axis and are therefore null on batch view.
   stock: { backlog: number; age: { a0: number; a1: number; a2: number; a3: number } }
-  // Who the unevaluated queue is sitting with, as of NOW (never window-sliced - it
+  // Who the unevaluated backlog is sitting with, as of NOW (never window-sliced - it
   // is the same stock as Overview's Backlog KPI and sums to the same total). Age
   // bands are days since `assigned_date`, i.e. how long THIS person has held it.
   backlogBy: Array<{ key: string; name: string; n: number; a0: number; a1: number; a2: number; a3: number; oldest: number }>
@@ -415,16 +421,16 @@ function ReportInner() {
 const T = {
   intakeGap: 0.15,      // |in − out| ÷ in before the flow counts as out of balance
   agedShare: 0.35,      // share of the waiting stock that is 8 days or older
-  clearDays: 5,         // days of work the queue may hold before it needs a call
+  clearDays: 5,         // days of work the backlog may hold before it needs a call
   rateDriftPts: 2,      // move in shortlist rate across the window, in points
   healthShortPts: 10,   // how far below its own baseline a gauge must sit to matter
 }
 /* The four questions this tab answers. Every chip, every KPI the chips point at, and
    every action carries one of these, so a reader can follow one problem from the
    sentence at the top to the thing they are being asked to do about it without having
-   to work out which is which. Growth/Speed/Age are the queue; Quality is how well the
+   to work out which is which. Growth/Speed/Age are the backlog; Quality is how well the
    games that DO get judged are judged - it has no chip, because the sentence at the top
-   is about the queue, but its two actions still have to say what they are about. */
+   is about the backlog, but its two actions still have to say what they are about. */
 const TOPIC = {
   growth: 'Growth',
   speed: 'Speed',
@@ -448,7 +454,7 @@ function Overview({ d }: { d: Bundle }) {
   const rated = ms.filter((m) => m.evaluated > 0)
   const last = rated[rated.length - 1], prevB = rated[rated.length - 2]
   const unitName = d.bucketUnit === 'day' ? 'day' : d.bucketUnit === 'week' ? 'week' : 'month'
-  // The bucket and the window are different nouns, and mixing them printed "Queue
+  // The bucket and the window are different nouns, and mixing them printed "Backlog
   // +1,413 this day" for a week viewed by day. Buckets are the chart's x axis;
   // everything that talks about the selection uses this.
   const winName = windowNoun(d)
@@ -573,7 +579,7 @@ function Overview({ d }: { d: Bundle }) {
       status: vsRef(t.survivalRate, ref.survival),
     },
     {
-      label: 'Signal rate', value: fmt.pct(t.signalRate),
+      label: 'Hit rate', value: fmt.pct(t.signalRate),
       detail: `${fmt.int(f.finalPriority)} final priority of ${fmt.int(f.evaluated)} evaluated`,
       pct: gauge(t.signalRate, ref.signal), target: 66, targetLabel: `${refNote} ${fmt.pct(ref.signal)}`,
       spark: rated.length >= 2 ? rated.map((m) => Math.round(m.signalRate * 1000)) : undefined,
@@ -614,13 +620,13 @@ function Overview({ d }: { d: Bundle }) {
     return h && h.target != null ? 66 - Math.min(66, h.pct) : 0
   }
   const paceShort = shortOf('Games per day')
-  // Signal rate is stamped by a moderator days after the evaluation, so a window that
+  // Hit rate is stamped by a moderator days after the evaluation, so a window that
   // has not closed yet reads 0% no matter how good the work was. Judging it there
-  // produced "Signal rate is the furthest below its baseline" on every fresh week,
+  // produced "Hit rate is the furthest below its baseline" on every fresh week,
   // which is a fact about the calendar. The right line in that case is the triage one.
   const signalTooEarly = partialTail && f.finalPriority === 0
-  const qualityWorst = (['Shortlist rate', 'Signal rate'] as const)
-    .filter((label) => !(label === 'Signal rate' && signalTooEarly))
+  const qualityWorst = (['Shortlist rate', 'Hit rate'] as const)
+    .filter((label) => !(label === 'Hit rate' && signalTooEarly))
     .map((label) => ({ label, short: shortOf(label), ref: health.find((h) => h.label === label)?.targetLabel ?? refNote }))
     .sort((a, b) => b.short - a.short)[0]
 
@@ -644,7 +650,7 @@ function Overview({ d }: { d: Bundle }) {
   // ---- charts over time ----
   const rateSeries = [
     { name: 'Shortlist rate %', color: CAT[3], points: pts((m) => m.survivalRate * 100) },
-    { name: 'Signal rate %', color: CAT[1], points: pts((m) => m.signalRate * 100) },
+    { name: 'Hit rate %', color: CAT[1], points: pts((m) => m.signalRate * 100) },
   ]
   // Flow AND stock in one chart: they are two halves of one sentence, and the stock
   // is just the running total of the gap between the other two lines. Backlog rides
@@ -711,7 +717,7 @@ function Overview({ d }: { d: Bundle }) {
   const peopleLow = peopleCols.length >= 2 ? peopleCols.reduce((a, b) => (b.value < a.value ? b : a)) : null
   const peopleHigh = peopleCols.length ? Math.max(...peopleCols.map((r) => r.value)) : 0
 
-  // ---- how long the queue has been waiting ----
+  // ---- how long the backlog has been waiting ----
   // The chart stays a four-band stack so it reads as a PAIR with "Cleared - old vs
   // new" beside it: same bands, same colours, left is what is waiting and right is
   // what got done. A version of this drawn in days (median / p90 / oldest) broke that
@@ -731,18 +737,18 @@ function Overview({ d }: { d: Bundle }) {
   for (const a of p?.aged ?? []) if (!divRows.some((r) => r.name === a.label)) divRows.push({ name: a.label, right: {}, left: agedParts(a.parts) })
   const agedTot = (p?.aged ?? []).reduce((s, r) => s + ageKeysSum(agedParts(r.parts)), 0)
   const rotted = (p?.aged ?? []).reduce((s, r) => s + (r.parts.a3 || 0), 0)
-  // Old work CREATED is the count crossing into 8-14d or 15d+, which is the only thing
-  // comparable with old work cleared. An earlier version weighed all-ages-cleared
-  // against crossings-into-15d+ and printed "old work is being cleared faster" over a
-  // window where the 8+ pile grew by 600.
+  // Stale work CREATED is the count crossing into 8-14d or 15d+, which is the only thing
+  // comparable with stale work cleared. An earlier version weighed all-ages-cleared
+  // against crossings-into-15d+ and printed "stale work is being cleared faster" over a
+  // window where the 8+ day backlog grew by 600.
   const agedIntoOld = (p?.aged ?? []).reduce((s, r) => s + (r.parts.a2 || 0) + (r.parts.a3 || 0), 0)
   const divInsight = agedTot > 0
-    ? <>{fmt.int(clearedTot)} judged this {winName} against {fmt.int(agedTot)} that crossed into an older band{rotted > 0 && <>, {fmt.int(rotted)} of them past 15 days</>}. On the 8+ day pile alone: {fmt.int(clearedOld)} cleared, {fmt.int(agedIntoOld)} created &ndash; <b>the old work is {clearedOld >= agedIntoOld ? 'shrinking' : 'growing'}</b>.</>
-    : <>Nothing aged past a boundary this {winName}.</>
+    ? <>{fmt.int(clearedTot)} judged this {winName} against {fmt.int(agedTot)} that crossed into an older band{rotted > 0 && <>, {fmt.int(rotted)} of them past 15 days</>}. On the 8+ day backlog alone: {fmt.int(clearedOld)} cleared, {fmt.int(agedIntoOld)} created &ndash; <b>the stale backlog is {clearedOld >= agedIntoOld ? 'shrinking' : 'growing'}</b>.</>
+    : <>Nothing crossed into a new stale band this {winName}.</>
 
   const ageInsight = ageFirst && ageLast && aging.length >= 2
     ? ageLast.medAge > ageFirst.medAge
-      ? <>Median wait went {ageFirst.medAge}d → <b>{ageLast.medAge}d</b> across the window, and the slowest tenth is at <b>{ageLast.p90Age}d</b>: games are being added to the queue faster than the middle of it moves.</>
+      ? <>Median wait went {ageFirst.medAge}d → <b>{ageLast.medAge}d</b> across the window, and the slowest tenth is at <b>{ageLast.p90Age}d</b>: games are being added to the backlog faster than the middle of it moves.</>
       : ageLast.medAge < ageFirst.medAge
         ? <>Median wait came down {ageFirst.medAge}d → <b>{ageLast.medAge}d</b>, with the slowest tenth at <b>{ageLast.p90Age}d</b>.</>
         : <>Median wait held at <b>{ageLast.medAge}d</b>, with the slowest tenth at <b>{ageLast.p90Age}d</b> and the oldest game at {ageLast.maxAge}d.</>
@@ -802,7 +808,7 @@ function Overview({ d }: { d: Bundle }) {
     // people, for how long. `headcount` is what the team actually runs on, so the ask
     // is expressed as more of that, over whole weeks.
     do: <>Add {peopleAsk} to get the backlog under {T.clearDays} days of work</>,
-    why: <>{fmt.int(stock)} games waiting · the team clears {perDayFmt(perDay)} a day · that is {fmt.dec(daysToClear)} days of work in the pile</>,
+    why: <>{fmt.int(stock)} games waiting · the team clears {perDayFmt(perDay)} a day · that is {fmt.dec(daysToClear)} days of work in the backlog</>,
   })
 
   // -- quality --
@@ -820,9 +826,9 @@ function Overview({ d }: { d: Bundle }) {
   })
 
   // -- age --
-  // Who is actually holding the old work. This action used to say "into the next assign
+  // Who is actually holding the stale work. This action used to say "into the next assign
   // run BY NAME" without naming anyone, so the first thing a reader doing it had to do
-  // was go to another tab and work out who. Same test the Leaderboard's queue flag
+  // was go to another tab and work out who. Same test the Leaderboard's backlog flag
   // uses, so the two tabs never point at different people.
   const holderRows = (d.backlogBy || []).map((b) => ({ name: b.name, stale: b.a2 + b.a3, n: b.n }))
   // The denominator comes from the SAME source as the holders, never from `oldStock`.
@@ -842,7 +848,7 @@ function Overview({ d }: { d: Bundle }) {
   // questions and the aggregate hides the answer to this one: on a real September the
   // team sat at 33% old against a 35% threshold - so nothing fired - while three
   // people were each over 25% of their own backlog, holding 871 stale games between
-  // them. A queue problem belonging to three named desks should not need the whole
+  // them. A backlog problem belonging to three named desks should not need the whole
   // team to cross a line before anyone is told.
   if (oldHolders.length > 0) acts.push({
     sev: 3, key: 'holders', topic: 'age',
@@ -853,7 +859,7 @@ function Overview({ d }: { d: Bundle }) {
   else if (tailGrowing && agedShare > T.agedShare) acts.push({
     sev: 3, key: 'tail', topic: 'age',
     do: <>Put the {fmt.int(p!.current.age.a3)} games past 15 days into the next assign run by name</>,
-    why: <>{fmt.pct(agedShare)} of the queue is 8d+, but only {fmt.pct(clearedOldShare)} of what cleared was</>,
+    why: <>{fmt.pct(agedShare)} of the backlog is 8d+, but only {fmt.pct(clearedOldShare)} of what cleared was</>,
   })
   const shown = acts.sort((a, b) => b.sev - a.sev).slice(0, 3)
 
@@ -862,12 +868,12 @@ function Overview({ d }: { d: Bundle }) {
   // that produced it, so the sentence never has to defend itself in its own words.
   const headline = daysToClear == null
     ? (outTotal >= inTotal ? 'The team is clearing more than it takes in.' : 'The team is taking in more than it clears.')
-    : daysToClear <= T.clearDays ? 'The team is on top of the queue.'
-      : net <= 0 ? 'The queue is large, but the team is pulling it down.'
+    : daysToClear <= T.clearDays ? 'The team is on top of the backlog.'
+      : net <= 0 ? 'The backlog is large, but the team is pulling it down.'
         // same test the tail action uses, so the sentence never claims the old games
         // are sitting on a window where the team is demonstrably working through them
-        : tailGrowing && agedShare > T.agedShare ? 'The queue is outgrowing the team, and the oldest games are sitting.'
-          : 'The queue is outgrowing the team.'
+        : tailGrowing && agedShare > T.agedShare ? 'The backlog is outgrowing the team, and the oldest games are sitting.'
+          : 'The backlog is outgrowing the team.'
   /* Each chip is the arithmetic behind one clause of the sentence, and each one has to
      read as a sentence itself. The shorthand they replace was written for the person
      who already knew: "Backlog +927 this month" never says whether 927 IS the backlog
@@ -926,7 +932,7 @@ function Overview({ d }: { d: Bundle }) {
         read={[
           <span key="1">One sentence, three chips and four numbers are the answer. Every chart below is where they came from.</span>,
           <span key="1c">The small line inside a KPI is that number {unitName} by {unitName} across the window - the caption under it says what it counts. The grey line below is the comparison{pv ? <> against <b>{pv.label}</b></> : null}.</span>,
-          <span key="2">Flow &amp; stock: blue arriving, amber finished, dashed line the queue behind both.</span>,
+          <span key="2">Flow &amp; stock: blue arriving, amber finished, dashed line the backlog behind both.</span>,
           <span key="3">Two different references, on purpose: the KPI row compares with {pv ? <b>{pv.label}</b> : <>the period before</>}, because that is the window you picked. <b>Team health</b> compares with the 90 days before it - a standing bar should not move when you change the filter.</span>,
         ]}
         act={[
@@ -980,7 +986,7 @@ function Overview({ d }: { d: Bundle }) {
             looking at, and it is the only one of the three that is a level. */}
         <Kpi label="Backlog" value={fmt.int(stock)} sub="unevaluated, all history" noTrend focusKey="growth"
           spark={p && p.series.length >= 2 ? p.series.map((r) => r.backlog) : undefined}
-          sparkNote={`queue at each ${unitName}'s end`} sparkColor={CAT[3]} tip={TIP.backlog} />
+          sparkNote={`backlog at each ${unitName}'s end`} sparkColor={CAT[3]} tip={TIP.backlog} />
         {/* The team's pace, not a person's - see `perDay`. No sparkline: per bucket it
             would be `evaluated ÷ a constant`, which is the Evaluated spark two cards to
             the left with a different y scale. Drawing the same shape twice and calling
@@ -1094,8 +1100,8 @@ function Overview({ d }: { d: Bundle }) {
       </div>
 
       <div className="rp-grid-70-30">
-        <Card label="Quality rates over time" note="shortlist &amp; signal %, per bucket"
-          tip={<><F>shortlist rate = shortlist ÷ evaluated</F><F>signal rate = final priority ÷ evaluated</F>Each point covers only the games judged in that {unitName}, both halves of the ratio. The line therefore tracks pick quality on its own, free of how much intake happened to land.</>}>
+        <Card label="Quality rates over time" note="shortlist &amp; hit %, per bucket"
+          tip={<><F>shortlist rate = shortlist ÷ evaluated</F><F>hit rate = final priority ÷ evaluated</F>Each point covers only the games judged in that {unitName}, both halves of the ratio. The line therefore tracks pick quality on its own, free of how much intake happened to land.</>}>
           {ms.length >= 2 ? <LineChart series={rateSeries} format={(v) => `${v.toFixed(1)}%`} /> : <Empty text="Need more than one period" />}
         </Card>
         <Card label="Final conclusions" note="moderator outcomes"
@@ -1104,10 +1110,10 @@ function Overview({ d }: { d: Bundle }) {
         </Card>
       </div>
 
-      <div className="rp-section-title">Backlog - is the tail rotting or clearing?</div>
+      <div className="rp-section-title">Backlog - is the stale end rotting or clearing?</div>
       <div className="rp-grid-2">
         <Card label="Backlog by age over time" note="how old the games still waiting were, end of each bucket"
-          tip={<><F>age = bucket end day − import day, for games still unevaluated</F><F>median = half the queue has waited less than this</F>The same stock the backlog line draws, split into age groups instead of one total. Read it beside the chart on the right: same bands, same colours, so the two say what is waiting against what actually got done.</>}>
+          tip={<><F>age = bucket end day − import day, for games still unevaluated</F><F>median = half the backlog has waited less than this</F>The same stock the backlog line draws, split into age groups instead of one total. Read it beside the chart on the right: same bands, same colours, so the two say what is waiting against what actually got done.</>}>
           {aging.length ? <StackedBars rows={aging.map((r) => ({ name: r.label, parts: ageParts(r) }))} keys={AGE_KEYS} colors={AGE_COLORS} unit="that bucket's" /> : <Empty text="Needs a time axis" />}
           <ReadNote>{ageInsight}</ReadNote>
         </Card>
@@ -1224,7 +1230,7 @@ function Leaderboard({ d }: { d: Bundle }) {
   const strict = calPool[0], loose = calPool[calPool.length - 1]
   const calSpread = calPool.length >= 2 ? bypassShare(strict) - bypassShare(loose) : null
 
-  // ---- whose queue is not moving ----
+  // ---- whose backlog is not moving ----
   const teamTa = d.teamTotals.avgTurnaround
   const stuck = teamTa != null
     ? active.filter((e) => e.turnaround != null && e.turnaround > teamTa * LB_T.turnMult && e.evaluated >= LB_T.turnMin)
@@ -1255,7 +1261,7 @@ function Leaderboard({ d }: { d: Bundle }) {
     return n
   }
   // Anyone the speed line already names is out of the running here: "unblock NhiLV's
-  // queue" directly above "ask NhiLV whether it is leave or a stalled queue" is one
+  // backlog" directly above "ask NhiLV whether it is leave or a stalled backlog" is one
   // problem spending two of the three lines, and the second asks a question the first
   // already answered. Dropping them from the pool rather than suppressing the line
   // means the next-most-silent person still gets said.
@@ -1378,11 +1384,11 @@ function Leaderboard({ d }: { d: Bundle }) {
   const finJudged = active.filter((e) => finTot(e) > 0)
   const finGames = active.reduce((s2, e) => s2 + finTot(e), 0)
 
-  // ---- who is holding the unevaluated queue ----
-  // A STOCK, read as of now and never sliced by the window - it is the same pile
+  // ---- who is holding the unevaluated backlog ----
+  // A STOCK, read as of now and never sliced by the window - it is the same backlog
   // Overview's Backlog KPI counts, and the rows sum to that number. `net` is the
   // person's flow across the window on screen, which is the only part of this card
-  // the filter bar moves: the size of the pile is a fact about today, the direction
+  // the filter bar moves: the size of the backlog is a fact about today, the direction
   // of travel is a fact about the window.
   const evByKey = new Map(ev.map((e) => [e.key, e]))
   const queueRows = (d.backlogBy || []).map((b) => {
@@ -1400,7 +1406,7 @@ function Leaderboard({ d }: { d: Bundle }) {
   const queueStale = queueRows.reduce((s2, r) => s2 + r.stale, 0)
   const queueTop = queueRows[0] || null
   const queueGrowing = queueRows.filter((r) => (r.net ?? 0) > 0).sort((a, b) => (b.net ?? 0) - (a.net ?? 0))
-  // ONE definition of "this person's queue is in trouble", used by the bars, by the
+  // ONE definition of "this person's backlog is in trouble", used by the bars, by the
   // footer and by the action below. Three places deciding it separately is how a chart
   // ends up flagging one set of people while the sentence under it names another.
   const queueWarn = queueRows
@@ -1411,14 +1417,14 @@ function Leaderboard({ d }: { d: Bundle }) {
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 
   // ---- the answer: at most three moves, one per family ----
-  // CALIBRATION (is the bar shared), SPEED (is anyone's queue stuck), COVERAGE (is the
+  // CALIBRATION (is the bar shared), SPEED (is anyone's backlog stuck), COVERAGE (is the
   // work spread), PICKS (do the shortlists hold up). One line per family, because three
   // versions of the same complaint fill the cap and leave the other problems unsaid.
   // `who` is the person the line is ABOUT. Two lines naming the same person is the
   // single most common way this block goes wrong: the reader gets one name three times
   // and the other problems on the team go unsaid. The family filter cannot catch it,
   // because the whole point of families is that different families say different
-  // things - and "ThuDT bypasses too much" and "ThuDT's queue has gone stale" are
+  // things - and "ThuDT bypasses too much" and "ThuDT's backlog has gone stale" are
   // genuinely different things about genuinely one person.
   type Act = { sev: number; fam: string; key: string; who?: string; do: React.ReactNode; why: React.ReactNode }
   const acts: Act[] = []
@@ -1436,7 +1442,7 @@ function Leaderboard({ d }: { d: Bundle }) {
   else if (calSpread != null && calSpread > LB_T.calSpread) acts.push({
     sev: 3, fam: 'cal', key: 'cal', who: strict.key,
     do: <>Have {loose.name} re-read 20 games {strict.name} bypassed, then agree where the bar sits</>,
-    why: <>At {loose.name}&apos;s rate, {strict.name}&apos;s {fmt.int(strict.evaluated)} games would have sent on about {fmt.int(strict.evaluated * loose.survivalRate)} instead of {fmt.int(strict.shortlisted)}. Same queue, same genre.</>,
+    why: <>At {loose.name}&apos;s rate, {strict.name}&apos;s {fmt.int(strict.evaluated)} games would have sent on about {fmt.int(strict.evaluated * loose.survivalRate)} instead of {fmt.int(strict.shortlisted)}. Same backlog, same genre.</>,
   })
   else if (outHigh.length) acts.push({
     sev: 2, fam: 'cal', key: 'outhigh', who: outHigh[0].key,
@@ -1444,17 +1450,17 @@ function Leaderboard({ d }: { d: Bundle }) {
     why: <>{outHigh[0].name} keeps {keepPair(outHigh[0].survivalRate, restKeep(outHigh[0]))[0]} where the rest of the team keeps {keepPair(outHigh[0].survivalRate, restKeep(outHigh[0]))[1]}, over {fmt.int(outHigh[0].evaluated)} games. Either they see something the others do not, or their bar is lower.</>,
   })
 
-  // SPEED: somebody's queue has stopped moving. Two tests, ONE family, because both
+  // SPEED: somebody's backlog has stopped moving. Two tests, ONE family, because both
   // end in the same move - shift work off a person - and printing them together spends
   // two of the three slots saying it twice about different names.
   //
   // The stale-pile test goes first and therefore wins the tie: it counts games that
   // are demonstrably sitting there right now and points at a button that moves them,
   // where turnaround is an average over the games that DID get judged, which a person
-  // can keep low while a third of their queue rots untouched.
+  // can keep low while a third of their backlog rots untouched.
   //
   // Anyone the calibration line above already named is dropped from the pool, so the
-  // NEXT most stale person gets said instead of the queue problem going unmentioned.
+  // NEXT most stale person gets said instead of the backlog problem going unmentioned.
   // Dropping the line outright is the wrong fix: the `who` filter at the bottom would
   // do that, and a real problem on a second person would disappear because a first
   // person happened to have two.
@@ -1462,24 +1468,24 @@ function Leaderboard({ d }: { d: Bundle }) {
   const queueStuck = queueWarn.find((r) => !spoken.has(r.key))
   const stuckFree = stuck.filter((e) => !spoken.has(e.key))
   if (queueStuck) acts.push({
-    sev: 3, fam: 'speed', key: 'queue', who: queueStuck.key,
-    do: <>Run Team Ops → Rescue on {queueStuck.name}&apos;s queue at {STALE.days} days</>,
-    why: <>{fmt.int(queueStuck.stale)} of {queueStuck.name}&apos;s {fmt.int(queueStuck.n)} waiting games have sat {STALE.days}+ days - {fmt.pct(queueStuck.stale / queueStuck.n)} of their pile, and {fmt.pct(queueStuck.stale / Math.max(1, queueStale))} of everything the team has left waiting that long. Oldest is {queueStuck.oldest} days.</>,
+    sev: 3, fam: 'speed', key: 'backlog', who: queueStuck.key,
+    do: <>Run Team Ops → Rescue on {queueStuck.name}&apos;s backlog at {STALE.days} days</>,
+    why: <>{fmt.int(queueStuck.stale)} of {queueStuck.name}&apos;s {fmt.int(queueStuck.n)} backlog games have sat {STALE.days}+ days - {fmt.pct(queueStuck.stale / queueStuck.n)} of their backlog, and {fmt.pct(queueStuck.stale / Math.max(1, queueStale))} of everything the team has left waiting that long. Oldest is {queueStuck.oldest} days.</>,
   })
   else if (stuckFree.length) acts.push({
     sev: 3, fam: 'speed', key: 'stuck', who: stuckFree[0].key,
-    do: <>Move part of {stuckFree.slice(0, 2).map((e) => e.name).join(' and ')}&apos;s queue to someone with room</>,
+    do: <>Move part of {stuckFree.slice(0, 2).map((e) => e.name).join(' and ')}&apos;s backlog to someone with room</>,
     why: <>A game waits {stuckFree.slice(0, 2).map((e) => `${e.turnaround!.toFixed(0)} days with ${e.name}`).join(' and ')} before it is judged, against {teamTa!.toFixed(0)} days for the team</>,
   })
 
   if (top && active.length >= 3 && topShare > LB_T.concentration) acts.push({
     sev: 2, fam: 'cover', key: 'conc', who: top.key,
-    do: <>Share {top.name}&apos;s queue with a second person this {winName}</>,
+    do: <>Share {top.name}&apos;s backlog with a second person this {winName}</>,
     why: <>{top.name} judged {fmt.int(top.evaluated)} of the {fmt.int(totalEval)} games this {winName}. A day of their leave costs the team {fmt.int(top.throughput)} games.</>,
   })
   else if (idle && idle.gaps / periods.length > LB_T.idleShare) acts.push({
     sev: 2, fam: 'cover', key: 'idle', who: idle.name.toLowerCase(),
-    do: <>Ask {idle.name} today whether it is leave or a stalled queue</>,
+    do: <>Ask {idle.name} today whether it is leave or a stalled backlog</>,
     why: <>Nothing evaluated in their last {idle.gaps} {idle.gaps === 1 ? unitName : unitNames}, of {periods.length} on the heatmap</>,
   })
 
@@ -1511,7 +1517,7 @@ function Leaderboard({ d }: { d: Bundle }) {
     : calSpread != null && calSpread > LB_T.calSpread
       ? 'The team is not judging by the same bar.'
       : stuck.length
-        ? 'The work is getting done, but someone’s queue has stopped moving.'
+        ? 'The work is getting done, but someone’s backlog has stopped moving.'
         : top && active.length >= 3 && topShare > LB_T.concentration
           ? `Most of the output is ${top.name}.`
           : 'The team is judging by one bar, at a comparable pace.'
@@ -1559,7 +1565,7 @@ function Leaderboard({ d }: { d: Bundle }) {
       sub: (e) => (e.evaluated > 0 ? `${fmt.int(e.shortlisted)} of ${fmt.int(e.evaluated)}` : null),
     },
     {
-      key: 'signal', label: 'Signal %', tip: TIP.signal, late: true,
+      key: 'signal', label: 'Hit %', tip: TIP.signal, late: true,
       value: (e) => (e.evaluated > 0 ? e.signalRate : null),
       cell: (e) => (e.evaluated > 0 ? fmt.pct(e.signalRate) : '·'),
       sub: (e) => (e.evaluated > 0 ? `${fmt.int(e.finalPriority)} of ${fmt.int(e.evaluated)}` : null),
@@ -1583,8 +1589,8 @@ function Leaderboard({ d }: { d: Bundle }) {
         read={[
           <span key="1">One sentence, three chips and at most three moves are the answer. The table is where they came from.</span>,
           <span key="2"><b>The table sorts</b> - click any column. Every rate carries the counts behind it in the same cell, so a high percentage on a thin sample cannot pass for the best number on the page.</span>,
-          <span key="3"><b>Games</b> and <b>Games / day</b> say how much; <b>Shortlist %</b> and <b>Signal %</b> say whether it held up. The scatter is those two read against each other.</span>,
-          <span key="4"><b>Signal %</b> lands late: a moderator stamps the final conclusion days after the evaluation, so an open {winName} reads low for everyone and judges nobody.</span>,
+          <span key="3"><b>Games</b> and <b>Games / day</b> say how much; <b>Shortlist %</b> and <b>Hit %</b> say whether it held up. The scatter is those two read against each other.</span>,
+          <span key="4"><b>Hit %</b> lands late: a moderator stamps the final conclusion days after the evaluation, so an open {winName} reads low for everyone and judges nobody.</span>,
         ]}
         act={[
           <span key="1">Nothing under &ldquo;Do this&rdquo; means nothing crossed a threshold this {winName}.</span>,
@@ -1627,7 +1633,7 @@ function Leaderboard({ d }: { d: Bundle }) {
           </div>
         )}
         <Foot
-          read={<>Across: how many games someone judged. Up: how much of it they kept. The dashed lines are the team, so the quadrant is the reading. Bubble size is pace, which makes a <b>big low bubble</b> someone fast who bypasses nearly everything, and a <b>small low bubble</b> a queue that is slow and still producing nothing. A dashed ring marks someone outside the team&apos;s range, red below it and blue above.</>}
+          read={<>Across: how many games someone judged. Up: how much of it they kept. The dashed lines are the team, so the quadrant is the reading. Bubble size is pace, which makes a <b>big low bubble</b> someone fast who bypasses nearly everything, and a <b>small low bubble</b> a backlog that is slow and still producing nothing. A dashed ring marks someone outside the team&apos;s range, red below it and blue above.</>}
           now={outLow.length || outHigh.length
             ? <>
               {outLow.map((e) => <span key={e.key}><b>{e.name}</b> keeps {keepPair(e.survivalRate, restKeep(e))[0]} where the others keep {keepPair(e.survivalRate, restKeep(e))[1]} - {fmt.dec(1 / Math.max(1e-9, ratioOf(e)))}x under, on {fmt.int(e.evaluated)} games. </span>)}
@@ -1651,12 +1657,12 @@ function Leaderboard({ d }: { d: Bundle }) {
       </Card>
 
       <Card label="Whose backlog is it" note="the backlog now, by who holds it · colour = how long they have held it"
-        tip={<><F>= unevaluated games, grouped by their assigned evaluator</F>The <b>stock</b>, not the window: every game still in the backlog, whenever it arrived. The bars therefore add up to the Backlog number on Overview, and this card is the answer to whose desks those games are on.<br />Bands are days since the game was <b>assigned to this person</b>, which is not the clock Overview&apos;s &ldquo;Backlog by age&rdquo; uses - that one counts from import. Here the question is how long this person has held it, and a handover restarts that clock on purpose, the same way &ldquo;Days waiting&rdquo; does. So the two cards agree on the total and can disagree on the split.<br />The last column is their flow across the window on screen: games taken minus games cleared. Red is a pile still filling.</>}>
+        tip={<><F>= unevaluated games, grouped by their assigned evaluator</F>The <b>stock</b>, not the window: every game still in the backlog, whenever it arrived. The bars therefore add up to the Backlog number on Overview, and this card is the answer to whose desks those games are on.<br />Bands are days since the game was <b>assigned to this person</b>, which is not the clock Overview&apos;s &ldquo;Backlog by age&rdquo; uses - that one counts from import. Here the question is how long this person has held it, and a handover restarts that clock on purpose, the same way &ldquo;Days waiting&rdquo; does. So the two cards agree on the total and can disagree on the split.<br />The last column is their flow across the window on screen: games taken minus games cleared. Red is a backlog still filling.</>}>
         <QueueBars rows={queueRows.map((r) => ({ ...r, warn: warnKeys.has(r.key) }))}
           bands={AGE_BANDS.map((b) => ({ label: b.label, color: b.color }))}
           unitName={winName} staleFrom={STALE.days} />
         <Foot
-          read={<>Bar length is that person&apos;s backlog right now; the colours are how long they have held it. The number after the bar is the pile, then the age of its oldest game, then what they took minus what they cleared this {winName} - so a <b>long bar in red</b> is a pile that is still filling, and a long bar in green is one being worked off.</>}
+          read={<>Bar length is that person&apos;s backlog right now; the colours are how long they have held it. The number after the bar is the backlog, then the age of its oldest game, then what they took minus what they cleared this {winName} - so a <b>long bar in red</b> is a backlog that is still filling, and a long bar in green is one being worked off.</>}
           now={queueTotal === 0
             ? <>The backlog is empty.</>
             /* Lead with WHO, not with the total. The card's job on this tab is to name
@@ -1668,8 +1674,8 @@ function Leaderboard({ d }: { d: Bundle }) {
               {fmt.int(queueTotal)} games in total across {queueRows.length} {queueRows.length === 1 ? 'person' : 'people'}
               {queueTop && queueRows.length > 1 ? <>, {fmt.pct(queueTop.n / queueTotal)} of it with <b>{queueTop.name}</b></> : null}.{' '}
               {queueGrowing.length > 0 && <>{queueGrowing.length === 1
-                ? <><b>{queueGrowing[0].name}</b>&apos;s pile grew by {fmt.int(queueGrowing[0].net!)} this {winName}.</>
-                : <>{queueGrowing.length} piles grew this {winName}, most of all <b>{queueGrowing[0].name}</b> at +{fmt.int(queueGrowing[0].net!)}.</>}</>}
+                ? <><b>{queueGrowing[0].name}</b>&apos;s backlog grew by {fmt.int(queueGrowing[0].net!)} this {winName}.</>
+                : <>{queueGrowing.length} backlogs grew this {winName}, most of all <b>{queueGrowing[0].name}</b> at +{fmt.int(queueGrowing[0].net!)}.</>}</>}
             </>} />
       </Card>
 
@@ -1740,7 +1746,7 @@ function pctPair(value: number, bench: number | null): [string, (n: number) => s
 /* Daily breakdown: one row per calendar DAY, plain numbers, no chart. The three
    named conclusions are the ones the team steers by; anything else the Config tab
    allows is folded into "Other" (hover it for the split). Video counts come from
-   the recording queue rows (confirmed date + slot), so this panel and the queue
+   the recording list rows (confirmed date + slot), so this panel and the recording list
    card below can never disagree. */
 const DAILY_COLS = ['Bypass', 'Playtest & Bypass', 'List_Idea'] as const
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -1872,7 +1878,7 @@ function DailyBreakdown({ person, mix, vids, win, onClose }: {
 // `T` and the Leaderboard's `LB_T`: a line prints only when a number crosses one of
 // these, and nothing prints when nothing does.
 const IND_T = {
-  // Their queue is filling faster than they clear it, as a share of what they took.
+  // Their backlog is filling faster than they clear it, as a share of what they took.
   intakeGap: 0.15,
   // Below this many games a rate is the sample talking, not the person. Same floor
   // the Leaderboard's calibration test uses, for the same reason.
@@ -1893,7 +1899,7 @@ function Individual({ d }: { d: Bundle }) {
   const e = selected
   // Same panel, two readers: a manager looking at someone else, or the evaluator
   // looking at their own row. The numbers and charts are identical - only the voice
-  // changes, because half of a manager's moves (reassign the queue, run a calibration
+  // changes, because half of a manager's moves (reassign the backlog, run a calibration
   // session) are not this person's to make.
   const self = !d.canSeeTeam
   const They = self ? 'You' : e.name
@@ -2005,9 +2011,9 @@ function Individual({ d }: { d: Bundle }) {
       : [fmt.pct(qFirst), fmt.pct(qLast)])
     : ['', '']
 
-  // ---- their slice of the waiting queue ----
+  // ---- their slice of the backlog ----
   // A STOCK: read as of now, never sliced by the window. It is their row out of the
-  // same pile Overview counts and the Leaderboard splits by person.
+  // same backlog Overview counts and the Leaderboard splits by person.
   const bq = (d.backlogBy || []).find((b) => b.key === e.key) || null
   const queueParts = bq ? [bq.a0, bq.a1, bq.a2, bq.a3] : []
   const queueStale = bq ? bq.a2 + bq.a3 : 0
@@ -2015,7 +2021,7 @@ function Individual({ d }: { d: Bundle }) {
 
   // ---- judged vs aged, per bucket: the two halves of what moved on their desk ----
   // Buckets are the UNION of both sides. A bucket where they judged nothing but their
-  // queue kept ageing is precisely the bucket this card exists to show, so dropping it
+  // backlog kept ageing is precisely the bucket this card exists to show, so dropping it
   // would hide the only bad weeks.
   const moves = d.personMoves?.[e.key] || []
   const moveRows = moves.map((m) => ({
@@ -2066,25 +2072,25 @@ function Individual({ d }: { d: Bundle }) {
   const acts: Act[] = []
 
   if (e.assigned > 0 && e.evaluated === 0) acts.push({
-    sev: 3, fam: 'queue', key: 'idle',
+    sev: 3, fam: 'backlog', key: 'idle',
     do: self
-      ? <>Say today what is blocking the queue</>
-      : <>Ask {e.name} today whether it is leave or a stalled queue</>,
+      ? <>Say today what is blocking the backlog</>
+      : <>Ask {e.name} today whether it is leave or a stalled backlog</>,
     why: <>{fmt.int(e.assigned)} games were assigned to {self ? 'you' : 'them'} this {winName} and none {self ? 'have' : 'has'} been judged.</>,
   })
   else if (bq && queueStale >= STALE.min && queueStale / bq.n > STALE.share) acts.push({
-    sev: 3, fam: 'queue', key: 'stale',
+    sev: 3, fam: 'backlog', key: 'stale',
     do: self
       ? <>Clear the {fmt.int(queueStale)} games that have waited {STALE.days}+ days before taking new ones</>
-      : <>Run Team Ops → Rescue on {e.name}&apos;s queue at {STALE.days} days</>,
-    why: <>{fmt.int(queueStale)} of {their} {fmt.int(bq.n)} waiting games have sat {STALE.days}+ days - {fmt.pct(queueStale / bq.n)} of the pile, oldest {bq.oldest} days.</>,
+      : <>Run Team Ops → Rescue on {e.name}&apos;s backlog at {STALE.days} days</>,
+    why: <>{fmt.int(queueStale)} of {their} {fmt.int(bq.n)} backlog games have sat {STALE.days}+ days - {fmt.pct(queueStale / bq.n)} of the backlog, oldest {bq.oldest} days.</>,
   })
   else if (psTotals && psTotals.assigned > 0 && (psTotals.assigned - psTotals.evaluated) / psTotals.assigned > IND_T.intakeGap) acts.push({
-    sev: 2, fam: 'queue', key: 'behind',
+    sev: 2, fam: 'backlog', key: 'behind',
     do: self
       ? <>Ask for a rebalance now, not at the end of the {winName}</>
       : <>Move {fmt.int(psTotals.assigned - psTotals.evaluated)} games off {e.name} to someone with room</>,
-    why: <>{They} took {fmt.int(psTotals.assigned)} and cleared {fmt.int(psTotals.evaluated)} this {winName}, so {fmt.int(psTotals.assigned - psTotals.evaluated)} joined the pile.</>,
+    why: <>{They} took {fmt.int(psTotals.assigned)} and cleared {fmt.int(psTotals.evaluated)} this {winName}, so {fmt.int(psTotals.assigned - psTotals.evaluated)} joined the backlog.</>,
   })
 
   // Calibration only where the sample can carry it. Under 50 games a rate is chance,
@@ -2151,7 +2157,7 @@ function Individual({ d }: { d: Bundle }) {
             ? <span key="1">One sentence, three chips and five numbers are the answer. Every card below is your own work in this {winName}.</span>
             : <span key="1">One sentence, three chips and five numbers are the answer. <b>The name chips switch person</b> - every card re-renders for them.</span>,
           <span key="2">Each KPI carries a <b>team</b> line: the team&apos;s number on the same metric and the gap in %. Green or red only past ±5%, and only where one direction is genuinely better.</span>,
-          <span key="3"><b>Backlog</b> is the only number here the {winName} filter does not reach: it is every game still sitting with {self ? 'you' : 'them'} right now, whenever it arrived. Overview and the Leaderboard call the same pile by the same name.</span>,
+          <span key="3"><b>Backlog</b> is the only number here the {winName} filter does not reach: it is every game still sitting with {self ? 'you' : 'them'} right now, whenever it arrived. Overview and the Leaderboard call the same backlog by the same name.</span>,
           <span key="4"><b>Pick quality over time</b> is the one chart that says whether {self ? 'you are' : 'they are'} improving. Everything else says how much.</span>,
         ]}
         act={[
@@ -2205,7 +2211,7 @@ function Individual({ d }: { d: Bundle }) {
           coverage (a note is mandatory in the form, so it reads ~100% for everyone and
           separates nobody), Link dead and Recorded (source quality and assigned work,
           both of which have a card that shows them in context), Assigned (it is the
-          Queue chip and the activity chart), and Signal rate (it lands days late, so a
+          Backlog chip and the activity chart), and Hit rate (it lands days late, so a
           KPI tile makes an open window look like a collapse - it is on the radar and
           in the funnel, where the lateness can be said). */}
       <div className="rp-kpi-row">
@@ -2227,11 +2233,11 @@ function Individual({ d }: { d: Bundle }) {
       <div className="rp-section-title">Shape - what {self ? 'you are' : 'they are'} strong and weak at</div>
       <div className="rp-grid-2-1">
         <Card label={self ? 'Your performance shape' : `${e.name} - performance shape`} note="5 axes, normalized to team best · raw value under each axis" tip={TIP.radar}>
-          <Radar axes={[...RADAR_AXES]} series={[{ name: e.name, values: radarValues }]} axisRaw={radarRaw} size={260} />
+          <Radar axes={RADAR_AXES.map((a) => AXIS_LABEL[a])} series={[{ name: e.name, values: radarValues }]} axisRaw={radarRaw} size={260} />
           <Foot
             read={<>A balanced polygon is well-rounded, a spiky one is lopsided. Every axis is scaled so the team&apos;s best person scores 100, and the real number sits under each caption.</>}
             now={weakAxis && strongAxis
-              ? <>{Their} shortest axis is <b>{weakAxis}</b> at {rad?.axes[weakAxis] ?? 0} of 100, {their} longest <b>{strongAxis}</b> at {rad?.axes[strongAxis] ?? 0}.{weakAxis === 'Signal' ? ' Signal is stamped by a moderator days later, so an open window reads low here for everyone.' : ''}</>
+              ? <>{Their} shortest axis is <b>{AXIS_LABEL[weakAxis]}</b> at {rad?.axes[weakAxis] ?? 0} of 100, {their} longest <b>{AXIS_LABEL[strongAxis]}</b> at {rad?.axes[strongAxis] ?? 0}.{weakAxis === 'Signal' ? ' Hit rate is stamped by a moderator days later, so an open window reads low here for everyone.' : ''}</>
               : null} />
         </Card>
         <Card label="Pick funnel" note="evaluated → shortlist → final priority"
@@ -2251,11 +2257,11 @@ function Individual({ d }: { d: Bundle }) {
           tip={<><F>assigned by assigned_date · evaluated &amp; link dead by evaluate_date</F>Buckets are the union of both axes, so a {unitName} where they were only assigned work still appears.</>}>
           <LineChart series={actSeries} area />
           <Foot
-            read={<>Red above blue is work arriving faster than it is cleared; blue above red is an older queue being worked off. Gray is dead links, which is source quality rather than filtering - it makes the volume numbers undercount the effort.</>}
+            read={<>Red above blue is work arriving faster than it is cleared; blue above red is an older backlog being worked off. Gray is dead links, which is source quality rather than filtering - it makes the volume numbers undercount the effort.</>}
             now={psTotals
               ? <>{They} took {fmt.int(psTotals.assigned)} and cleared {fmt.int(psTotals.evaluated)} across these {unitName}s{psTotals.assigned > psTotals.evaluated
-                ? <>, so {fmt.int(psTotals.assigned - psTotals.evaluated)} joined the pile</>
-                : psTotals.evaluated > psTotals.assigned ? <>, {fmt.int(psTotals.evaluated - psTotals.assigned)} of them from the older queue</> : null}.
+                ? <>, so {fmt.int(psTotals.assigned - psTotals.evaluated)} joined the backlog</>
+                : psTotals.evaluated > psTotals.assigned ? <>, {fmt.int(psTotals.evaluated - psTotals.assigned)} of them from the older backlog</> : null}.
                 {deadShare > 0.08 ? <> {fmt.pct(deadShare)} of what {self ? 'you' : 'they'} got through was dead links.</> : null}</>
               : null} />
         </Card>
@@ -2284,11 +2290,11 @@ function Individual({ d }: { d: Bundle }) {
               : <>{fmt.int(clearedTot)} judged against {fmt.int(agedTotP)} that only got older.{' '}
                 {agedIntoOldP > 0
                   /* Both sides are EVENT counts over the window, so they say which way
-                     the old work moved - not what the pile is now. The pile itself is
+                     the stale work moved - not what the backlog is now. That is
                      the backlog card beside this one, and a game can cross the line
                      here and be cleared next week, so stating a stock from these two
                      numbers would contradict a card the reader can see. */
-                  ? <>Past {STALE.days} days: {fmt.int(clearedOld)} cleared against {fmt.int(agedIntoOldP)} that crossed in, so old work arrived {clearedOld > agedIntoOldP ? 'slower than it was cleared' : clearedOld === agedIntoOldP ? 'as fast as it was cleared' : 'faster than it was cleared'}.</>
+                  ? <>Past {STALE.days} days: {fmt.int(clearedOld)} cleared against {fmt.int(agedIntoOldP)} that crossed in, so stale work arrived {clearedOld > agedIntoOldP ? 'slower than it was cleared' : clearedOld === agedIntoOldP ? 'as fast as it was cleared' : 'faster than it was cleared'}.</>
                   : <>Nothing crossed into {STALE.days}+ days.</>}</>} />
         </Card>
       )}
@@ -2327,7 +2333,7 @@ function Individual({ d }: { d: Bundle }) {
 
       <div className="rp-section-title">Direction - is the bar moving?</div>
       <Card label={self ? 'Your pick quality over time' : `${e.name} - pick quality over time`} note={`shortlist rate per ${unitName}, against the team`}
-        tip={<><F>= their shortlist ÷ their evaluated, per {unitName}</F>The one chart on this tab with a direction rather than a level. Both halves of the ratio count the same games, so the size of the queue behind them leaves the rate alone.<br />A {unitName} where they judged nothing is dropped, not drawn as 0%: a day off is not a day they bypassed everything.</>}>
+        tip={<><F>= their shortlist ÷ their evaluated, per {unitName}</F>The one chart on this tab with a direction rather than a level. Both halves of the ratio count the same games, so the size of the backlog behind them leaves the rate alone.<br />A {unitName} where they judged nothing is dropped, not drawn as 0%: a day off is not a day they bypassed everything.</>}>
         {qualitySeries.length ? <LineChart series={qualitySeries} format={(v) => `${v.toFixed(1)}%`} />
           : <Empty text={`Need two ${unitName}s with work in them`} />}
         <Foot
@@ -2347,7 +2353,7 @@ function Individual({ d }: { d: Bundle }) {
       </Card>
 
       <div className="rp-section-title">Recording - is anything lost?</div>
-      <Card label={self ? 'Your recording queue' : `${e.name} - recording queue`} note="videos assigned & recorded in this window · open rows always shown"
+      <Card label={self ? 'Your recording list' : `${e.name} - recording list`} note="videos assigned & recorded in this window · open rows always shown"
         tip={<><F>rows where they are the 5min/20min assignee</F>Same three states as the Record tab, and the video is what settles them: <b>Recorded</b> = an upload was matched to this game, <b>Recording</b> = Confirm was pressed but no upload yet, <b>Pending</b> = neither (the Record tab calls this Draft). A row confirmed over {STUCK_DAYS} days ago with still no upload is flagged.</>}>
         <VideoQueue vids={vids} />
         <Foot
@@ -2370,7 +2376,7 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
   const [roster, setRoster] = useState<Array<{ key: string; name: string }>>([])
   const [excluded, setExcluded] = useState<string[]>(d.config.excluded)
   const [weights, setWeights] = useState<Record<AxisName, number>>(d.config.weights)
-  const [credibility, setCredibility] = useState(d.config.credibility)
+  const [sampleWeightOn, setSampleWeightOn] = useState(d.config.credibility)
   const [state, setState] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('loading')
 
   useEffect(() => {
@@ -2378,14 +2384,14 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
     fetch('/api/report/config').then((r) => r.json()).then((j) => {
       if (!alive) return
       setRoster(j.roster || [])
-      if (j.config) { setExcluded(j.config.excluded); setWeights(j.config.weights); setCredibility(j.config.credibility) }
+      if (j.config) { setExcluded(j.config.excluded); setWeights(j.config.weights); setSampleWeightOn(j.config.credibility) }
       setState('idle')
     }).catch(() => alive && setState('error'))
     return () => { alive = false }
   }, [])
 
   const total = ALL_ROUNDER_AXES.reduce((s, a) => s + (weights[a] || 0), 0) || 1
-  const dirty = JSON.stringify({ excluded: [...excluded].sort(), weights, credibility })
+  const dirty = JSON.stringify({ excluded: [...excluded].sort(), weights, credibility: sampleWeightOn })
     !== JSON.stringify({ excluded: [...d.config.excluded].sort(), weights: d.config.weights, credibility: d.config.credibility })
 
   const save = async () => {
@@ -2393,7 +2399,7 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
     try {
       const res = await fetch('/api/report/config', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ excluded, weights, credibility }),
+        body: JSON.stringify({ excluded, weights, credibility: sampleWeightOn }),
       })
       if (!res.ok) throw new Error(String(res.status))
       setState('saved')
@@ -2441,7 +2447,7 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
           <div className="rp-cfg-list">
             {ALL_ROUNDER_AXES.map((a) => (
               <div key={a} className="rp-cfg-w">
-                <span className="rp-cfg-name">{a}</span>
+                <span className="rp-cfg-name">{AXIS_LABEL[a]}</span>
                 <input type="range" min={0} max={100} step={5} value={weights[a] ?? 0}
                   onChange={(e2) => setWeights((w) => ({ ...w, [a]: Number(e2.target.value) }))} />
                 <span className="rp-cfg-share">{Math.round(((weights[a] || 0) / total) * 100)}%</span>
@@ -2449,7 +2455,7 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
             ))}
           </div>
           <label className="rp-cfg-row" style={{ marginTop: 10 }}>
-            <input type="checkbox" checked={credibility} onChange={() => setCredibility((v) => !v)} />
+            <input type="checkbox" checked={sampleWeightOn} onChange={() => setSampleWeightOn((v) => !v)} />
             <span className="rp-cfg-name">Sample weight discount</span>
             <span className="rp-cfg-meta">scale non-Volume axes by sample size</span>
           </label>
@@ -2457,7 +2463,7 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
             <button className="btn btn-sm btn-primary" onClick={save} disabled={!dirty || state === 'saving'}>
               {state === 'saving' ? 'Saving…' : 'Save settings'}
             </button>
-            <button className="btn btn-sm" onClick={() => { setWeights(DEFAULT_REPORT_CONFIG.weights); setCredibility(true) }}>Reset to defaults</button>
+            <button className="btn btn-sm" onClick={() => { setWeights(DEFAULT_REPORT_CONFIG.weights); setSampleWeightOn(true) }}>Reset to defaults</button>
             <span className="rp-cfg-state">
               {state === 'error' ? <b style={{ color: 'var(--bad)' }}>Save failed</b>
                 : state === 'saved' && !dirty ? 'Saved - all tabs recomputed'
@@ -2473,7 +2479,7 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
             const evc = d.evaluators.find((x) => x.key === r.key)?.evaluated || 0
             const vols = d.evaluators.filter((x) => x.evaluated > 0 && !excluded.includes(x.key)).map((x) => x.evaluated).sort((a, b) => a - b)
             const med = vols.length ? vols[Math.floor(vols.length / 2)] : 0
-            const cred = credibility ? (med > 0 ? Math.min(1, evc / med) : 1) : 1
+            const cred = sampleWeightOn ? (med > 0 ? Math.min(1, evc / med) : 1) : 1
             return { name: r.name, value: allRounderScore(r.axes, weights, cred), sub: `${fmt.int(evc)} games` }
           }).sort((a, b) => b.value - a.value)} />
         <ReadNote>Axis values still come from the current window and are normalized to the team best, so this preview moves when the filter bar changes too.</ReadNote>
@@ -2482,13 +2488,13 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
   )
 }
 
-/* ---------------- recording queue table (5 rows tall, scrolls for more) ---------------- */
+/* ---------------- recording list table (5 rows tall, scrolls for more) ---------------- */
 // One definition of "done", shared with the Record tab (app/(manager)/youtube
 // recordStatus): the VIDEO settles it. A matched upload is Recorded whatever the
 // Confirm says; Confirm alone only means Recording. Before this the Report read
 // record_confirmed_at only, so the same game could be Recorded on one screen and
 // Pending on the other. (Record tab's fourth state, `pending` = no assignee, cannot
-// occur here - every queue row has one - so its `draft` is this table's Pending.)
+// occur here - every recording list row has one - so its `draft` is this table's Pending.)
 type VidRow = Bundle['videos'][string][number]
 type VidStatus = 'recorded' | 'recording' | 'pending'
 function vidStatus(v: VidRow): VidStatus {
@@ -2505,7 +2511,7 @@ function daysSince(day: string | null): number {
 // ISO day → d/m (module scope already has a Date-based `dm`)
 const dmISO = (day: string) => day.split('-').reverse().slice(0, 2).map(Number).join('/')
 
-// The queue can run to dozens of rows and used to push every card below it off the
+// The recording list can run to dozens of rows and used to push every card below it off the
 // screen. It now shows five and grows as you scroll: the data is already in the
 // bundle, so "loading" is just rendering the next slice - no extra requests.
 const VQ_PAGE = 5
@@ -2702,8 +2708,8 @@ function BubbleKey({ min, max, rad, caption, format }: {
 // move. Charts that are pure counts (donuts, rank boards) get no Act - there is
 // nothing to decide from a tally alone.
 // Sort a count list into a fixed display order and give each entry its colour.
-// Where the queue went over the window, as a matrix. Every other backlog chart is a
-// snapshot, so none of them can separate "the 8-14d pile shrank because we judged
+// Where the backlog went over the window, as a matrix. Every other backlog chart is a
+// snapshot, so none of them can separate "the 8-14d backlog shrank because we judged
 // those games" from "it shrank because they turned 15d+". Rows are where a game stood
 // when the window opened, columns where it stands now; each game is counted once.
 function orderedBands(data: Cnt[], order: string[]): Band[] {

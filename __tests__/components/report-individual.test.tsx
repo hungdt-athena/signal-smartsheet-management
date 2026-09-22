@@ -6,8 +6,8 @@ import { ReportView } from '@/components/report/ReportView'
 //
 //   1. Guide, then one sentence, then chips, then AT MOST THREE moves. Five KPIs, not
 //      twelve. Nothing is folded behind a toggle and no card carries its own "Act".
-//   2. "Waiting" is a STOCK. It is the only number on the tab the window filter does
-//      not reach, and it is this person's slice of the same pile Overview counts.
+//   2. "Backlog" is a STOCK. It is the only number on the tab the window filter does
+//      not reach, and it is this person's slice of the same backlog Overview counts.
 //   3. Every comparison against the team LEAVES THIS PERSON OUT. One evaluator judges
 //      a third of all games on the real roster, so a pool they are inside moves
 //      towards them - and the further out they are, the harder it hides them.
@@ -93,7 +93,7 @@ function bundleOf(people: P[], patch: Bundle = {}): Bundle {
       linkDead: 0,
     }))])),
     videos: {}, dailyMix: {},
-    // everyone is holding a fresh queue: nothing past 3 days
+    // everyone is holding a fresh backlog: nothing past 3 days
     backlogBy: people.map((p, i) => ({
       key: `k${i}`, name: p.name, n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2,
     })),
@@ -190,8 +190,8 @@ describe('Individual tab', () => {
     // guide says it too, but the guide now starts closed, so the guide cannot be the
     // only place a number's scope is stated.
     expect(txt(container)).toContain('the week filter does not reach it')
-    // One pile, one word, on all three tabs - it used to be "Waiting" here, "Queue" in
-    // the chip above it and "Backlog" on Overview, for the same games.
+    // One backlog, one word, on all three tabs - it used to be "Waiting" here, "Queue"
+    // in the chip above it and "Backlog" on Overview, for the same games.
     expect(txt(container)).not.toContain('Waiting by age')
     expect(Array.from(container.querySelectorAll('.rp-chips .rp-chip')).map(txt)
       .some((c) => c.startsWith('Backlog'))).toBe(true)
@@ -242,17 +242,17 @@ describe('Individual tab', () => {
     expect(legend).not.toContain('Team 0%')
   })
 
-  it('names the stale pile, and only past both gates', async () => {
+  it('names the stale backlog, and only past both gates', async () => {
     const fresh = await individual(bundleOf(TWO()))
     expect(actions(fresh.container).some((a) => a.do.includes('Rescue'))).toBe(false)
     fresh.unmount()
-    // 40 stale games is noise; 30% of a pile of 400 is not
+    // 40 stale games is noise; 30% of a backlog of 400 is not
     const { container } = await individual(bundleOf(TWO(), {
       backlogBy: [{ key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21 }],
     }))
     const act = actions(container).find((a) => a.do.includes('Rescue'))!
     expect(act.do).toContain('at 8 days')
-    expect(act.why).toContain('120 of their 400 waiting games')
+    expect(act.why).toContain('120 of their 400 backlog games')
     expect(act.why).toContain('oldest 21 days')
   })
 
@@ -273,9 +273,9 @@ describe('Individual tab', () => {
 
   it('draws judged against aged, and reads the two as movement rather than as a stock', async () => {
     // Both sides are EVENT counts over the window. A game can cross the 8-day line here
-    // and be cleared next week, so concluding "the old pile grew" from these two numbers
-    // can contradict the backlog card sitting right beside it - which is exactly what it
-    // did on real data for someone whose oldest game was three days old.
+    // and be cleared next week, so concluding "the stale backlog grew" from these two
+    // numbers can contradict the backlog card sitting right beside it - which is exactly
+    // what it did on real data for someone whose oldest game was three days old.
     const { container } = await individual(bundleOf(TWO(), {
       personMoves: { k0: BUCKETS.map((b, i) => ({
         key: b, label: b, cleared: [10, 0, 5, 0], aged: [0, i < 3 ? 40 : 0, 0],
@@ -284,9 +284,9 @@ describe('Individual tab', () => {
     const now = nowLines(container).find((n) => n.includes('only got older'))!
     expect(now).toContain('90 judged against 120 that only got older')
     expect(now).toContain('30 cleared against 120 that crossed in')
-    expect(now).toContain('old work arrived faster than it was cleared')
+    expect(now).toContain('stale work arrived faster than it was cleared')
     // a movement sentence, never a claim about what is on the desk right now
-    expect(now).not.toMatch(/pile (grew|shrank)/)
+    expect(now).not.toMatch(/backlog (grew|shrank)/)
   })
 
   it('shows a single-band backlog as a number, not as a 100% bar', async () => {
@@ -341,8 +341,8 @@ describe('Individual tab', () => {
     }))
     expect(txt(container.querySelector('.rp-headline'))).toBe('You have not judged anything this week.')
     const act = actions(container)[0]
-    // a manager reassigns the queue; the person holding it can only flag it
-    expect(act.do).toBe('Say today what is blocking the queue')
+    // a manager reassigns the backlog; the person holding it can only flag it
+    expect(act.do).toBe('Say today what is blocking the backlog')
     expect(act.do).not.toContain('Ask Alpha')
   })
 })

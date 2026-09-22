@@ -226,7 +226,7 @@ describe('Leaderboard tab', () => {
   })
 
   it('never spends two of the three lines on one person', async () => {
-    // Gamma is both the slowest queue and the longest silence. The speed line names
+    // Gamma is both the slowest backlog and the longest silence. The speed line names
     // them; the cadence line must then pick somebody else or say nothing.
     const people = FOUR()
     people[2] = even('Gamma', { turnaround: 12, cells: { d1: 250 } })
@@ -299,7 +299,7 @@ describe('Leaderboard tab', () => {
     expect(named[0].do).toContain('bypassed')
   })
 
-  it('moves the stale-queue line to the next person rather than dropping it', async () => {
+  it('moves the stale-backlog line to the next person rather than dropping it', async () => {
     // Dropping it outright is the wrong fix for the rule above: a real problem on a
     // second person would disappear because a first person happened to have two.
     const people = [even('Alpha', { evaluated: 700 }), even('Beta'), even('Gamma'), even('Delta')]
@@ -310,7 +310,7 @@ describe('Leaderboard tab', () => {
       ],
     }))
     const shown = actions(container)
-    // Alpha is already named by the calibration line, so the queue line names Beta
+    // Alpha is already named by the calibration line, so the backlog line names Beta
     expect(shown.find((a) => a.do.includes('Rescue'))!.do).toContain('Beta')
     expect(shown.filter((a) => a.do.includes('Alpha'))).toHaveLength(1)
   })
