@@ -92,7 +92,9 @@ describe('GET /api/report scoping', () => {
     expect(body.series).toEqual([])
     expect(body.metricSeries).toEqual([])
     expect(body.heatmap.rows).toEqual([])
-    expect(body.scoreRank.rows).toEqual([])
+    // scoreRank went with the rank-movement bump chart it existed to feed; nothing on
+    // the client reads it any more, so the payload must not carry it back
+    expect(body).not.toHaveProperty('scoreRank')
     expect(body.initialConclusions).toEqual([])
     expect(body.pipeline).toBeNull()
     expect(body.config.excluded).toEqual([])

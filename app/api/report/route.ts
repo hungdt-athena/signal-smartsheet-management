@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { loadBatchSpans } from '@/lib/report-batches'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { teamBench, weekLabel } from '@/lib/report'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
-import { allRounderScore } from '@/lib/report-config'
+// allRounderScore left the server with the rank-movement bump chart: the only score
+// the client still needs is the window-level one, and it computes that itself from
+// the radar axes so a weights change re-ranks without a refetch.
 import { loadReportConfig } from '@/lib/report-config-db'
 import { isManagerRole } from '@/lib/roles'
 import { getSession } from '@/lib/session'
@@ -29,7 +32,7 @@ const EXCLUDED = SYSTEM_EVALUATOR_KEY_LIST
 
 const VN = 'Asia/Ho_Chi_Minh'
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-type View = 'week' | 'month' | 'quarter' | 'batch' | 'custom'
+type View = 'week' | 'month' | 'quarter' | 'year' | 'batch' | 'custom'
 
 // --- tiny in-memory TTL cache (per server instance) ---
 const CACHE = new Map<string, { at: number; body: unknown }>()
@@ -58,6 +61,10 @@ function resolveWindow(view: View, key: string, from: string, to: string): {
     const to = m === 12 ? d(y + 1, 1, 1) : d(y, m + 1, 1)
     return { label: `${MONTHS[m - 1]} ${y}`, from: d(y, m, 1), to }
   }
+  if (view === 'year' && /^\d{4}$/.test(key)) {
+    const y = Number(key)
+    return { label: `${y}`, from: d(y, 1, 1), to: d(y + 1, 1, 1) }
+  }
   if (view === 'quarter' && /^\d{4}-Q[1-4]$/.test(key)) {
     const [y, q] = key.split('-Q').map(Number)
     const sm = (q - 1) * 3 + 1
@@ -65,6 +72,36 @@ function resolveWindow(view: View, key: string, from: string, to: string): {
     return { label: `Q${q} ${y}`, from: d(y, sm, 1), to }
   }
   return { label: 'All time' } // no key → all
+}
+
+// The window immediately before this one, on the SAME calendar grain the filter bar
+// is set to: the previous week for a week, the previous month for a month. A KPI
+// badge that says "vs last month" is answering the question the reader asked; a fixed
+// 90-day trailing average answers a different one, and there is no way to tell them
+// apart once the number is on screen. The trailing baseline keeps its job on the Team
+// health gauges, where it is a threshold rather than a comparison.
+//
+// Full calendar periods on both sides, deliberately: comparing a part-finished
+// September against the last 16 days of August would be "like with like" only in
+// length, and nobody reads it that way. Everything read against this is a RATE, so
+// the two sides being different lengths costs nothing - and a count never is.
+// Null where "the one before" has no meaning: all-time and batch.
+function prevWindow(view: View, win: { from?: string; to?: string; batch?: string }, prevBatch?: { from: string; to: string } | null): { from: string; to: string } | null {
+  // A batch is a week the team named, and batches tile the calendar, so "the one
+  // before" is simply the previous batch - already resolved from the same list.
+  if (win.batch) return prevBatch ?? null
+  if (!win.from) return null
+  const iso = (dt: Date) => dt.toISOString().slice(0, 10)
+  const [y, m, day] = win.from.split('-').map(Number)
+  // Date.UTC normalises the rollover, so month index -1 is December of the year before
+  if (view === 'week') return { from: iso(new Date(Date.UTC(y, m - 1, day - 7))), to: win.from }
+  if (view === 'month') return { from: iso(new Date(Date.UTC(y, m - 2, 1))), to: win.from }
+  if (view === 'quarter') return { from: iso(new Date(Date.UTC(y, m - 4, 1))), to: win.from }
+  if (view === 'year') return { from: iso(new Date(Date.UTC(y - 1, 0, 1))), to: win.from }
+  // custom has no grain to step back by, so it uses its own length
+  if (!win.to) return null
+  const span = Math.max(1, Math.round((Date.parse(win.to) - Date.parse(win.from)) / 864e5))
+  return { from: iso(new Date(Date.parse(win.from) - span * 864e5)), to: win.from }
 }
 
 export async function GET(req: NextRequest) {
@@ -85,8 +122,8 @@ export async function GET(req: NextRequest) {
     if (scoped && !selfKey) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const { searchParams } = req.nextUrl
-    const view = (['week', 'month', 'quarter', 'batch', 'custom'].includes(searchParams.get('view') || '')
-      ? searchParams.get('view') : 'month') as View
+    const view = (['week', 'month', 'quarter', 'year', 'batch', 'custom'].includes(searchParams.get('view') || '')
+      ? searchParams.get('view') : 'batch') as View
     const key = (searchParams.get('key') || '').trim()
     const from = (searchParams.get('from') || '').trim()
     const to = (searchParams.get('to') || '').trim()
@@ -107,7 +144,41 @@ export async function GET(req: NextRequest) {
     const hit = CACHE.get(cacheKey)
     if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.body)
 
-    const win = resolveWindow(view, key, from, to)
+    // Batch is the landing view, and landing on "all batches" would make the first
+    // screen anyone sees an all-time scan. Resolving the newest batch HERE rather than
+    // letting the client pick one after it has seen the options costs a single cheap
+    // lookup instead of a second round-trip for the whole (heavy) bundle - and the app
+    // is a continent away from the database, so a round-trip is the expensive unit.
+    // `key=all` is the explicit way to ask for every batch.
+    let batchKey = key
+    if (view === 'batch' && !key) {
+      const latest = await sql`
+        SELECT batch FROM game_evaluations
+        WHERE batch IS NOT NULL AND batch <> ''
+          ${category !== 'all' ? sql`AND category_group = ${category}` : sql``}
+        GROUP BY batch`
+      // The team's batch labels are manual strings ("W2 Jun, 2026"), so "newest" is the
+      // label order the rest of the app already sorts them by, never a max() on text.
+      batchKey = latest.map((r) => r.batch as string)
+        .sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a) || b.localeCompare(a))[0] || ''
+    }
+    const winBase = resolveWindow(view, view === 'batch' && key === 'all' ? '' : batchKey, from, to)
+
+    /* Resolve the batch label to the days it covers. This rides along with the roster
+       query that was already being awaited in this function, so it costs no extra
+       round-trip - and after the first request it costs no query at all, see
+       `loadBatchSpans`. Once resolved, a batch is an ordinary date window: every query
+       below, the charts, the previous period and the baseline all work on it without
+       knowing it came from a label. `win.batch` survives only as the thing to print. */
+    const rosterPromise = sql`SELECT lower(name) AS k FROM evaluator_roster WHERE list_type = 'initial'`
+    // Loaded on every view, not just batch: the dropdown has to list them whatever the
+    // reader is currently looking at. Cached, so this is a query once every 5 minutes.
+    const batchSpans = await loadBatchSpans()
+    const batchAt = batchSpans.findIndex((b) => b.batch === winBase.batch)
+    const batchSpan = batchAt >= 0 ? batchSpans[batchAt] : null
+    // the list is newest-first, so the batch before this one is the NEXT entry
+    const prevBatch = batchAt >= 0 ? batchSpans[batchAt + 1] ?? null : null
+    const win = batchSpan ? { ...winBase, from: batchSpan.from, to: batchSpan.to } : winBase
 
     // WHERE fragments shared by evaluation queries.
     const catF = category !== 'all' ? sql`AND ge.category_group = ${category}` : sql``
@@ -127,8 +198,24 @@ export async function GET(req: NextRequest) {
     const vnBound = (d: string) => sql`(${d}::timestamp AT TIME ZONE ${VN})`
 
     // Window: batch view filters by label; date views filter evaluate_date.
-    const winF = win.batch
-      ? sql`AND ge.batch = ${win.batch}`
+    /* One shape for every view: a batch reaches here already carrying the days it
+       covers, so nothing filters on the label any anymore - which is what made batch
+       view a ~5% cohort instead of a week.
+
+       The fallback matters. A batch from before `BATCH_ERA_START` has no resolvable
+       span, and without this branch its window would carry neither dates nor a label:
+       an empty predicate, which does not fail - it silently widens to ALL TIME and
+       renders a perfectly healthy-looking page of the wrong numbers. Falling back to
+       the label keeps those old batches behaving exactly as they did before. */
+    /* Every other window predicate in this file runs on a different date column
+       (assign date, recording date) but needs the same fallback: an unresolvable batch
+       must narrow to its label, never to nothing. `legacyBatch` is that one condition,
+       named once so a new query cannot quietly forget it. */
+    const legacyBatch: string | null = win.batch && !batchSpan ? win.batch : null
+    const winOn = (frag: ReturnType<typeof sql>) => legacyBatch ? sql`AND ge.batch = ${legacyBatch}` : frag
+
+    const winF = legacyBatch
+      ? sql`AND ge.batch = ${legacyBatch}`
       : sql`
         ${win.from ? sql`AND ge.evaluate_date >= ${vnBound(win.from)}` : sql``}
         ${win.to ? sql`AND ge.evaluate_date < ${vnBound(win.to)}` : sql``}`
@@ -136,7 +223,7 @@ export async function GET(req: NextRequest) {
     // Bucket unit for the time series, from the window span.
     const spanDays = win.from && win.to
       ? Math.round((Date.parse(win.to) - Date.parse(win.from)) / 864e5)
-      : win.batch ? 14 : 400
+      : 400
     const unit = spanDays <= 16 ? 'day' : spanDays <= 130 ? 'week' : 'month'
     // Activity views (heatmap + movement charts) read cadence, so they stay finer
     // than the trend buckets: a week/month/batch window breaks down by DAY, a
@@ -146,7 +233,7 @@ export async function GET(req: NextRequest) {
     // Only people currently declared on the Assign roster count in the report -
     // historical/one-off names (tiennh, quangnm…) and system accounts are noise.
     // Falls back to the system-account exclusion if the roster table is empty.
-    const rosterRows = await sql`SELECT lower(name) AS k FROM evaluator_roster WHERE list_type = 'initial'`
+    const rosterRows = await rosterPromise
     // Config tab exclusions come off the roster before anything else, so an excluded
     // person disappears from every stat, chart and denominator - not just the lists.
     let roster: string[] = rosterRows.map((r) => r.k).filter((k) => !rcfg.excluded.includes(k))
@@ -181,6 +268,12 @@ export async function GET(req: NextRequest) {
     const recAtFrom = (d: string) => sql`AND ${recAt} >= ${vnBound(d)}`
     const recAtTo   = (d: string) => sql`AND ${recAt} < ${vnBound(d)}`
 
+    // "Judged" as every other number on the report counts it. Link_dead and
+    // Stale_release are housekeeping, not decisions, and leaving them in made the
+    // judged-vs-aged card say 1,845 three tiles from an Evaluated KPI reading 1,842.
+    const judged = sql`ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> ''
+      AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')`
+
     const evalBase = sql`
       FROM game_evaluations ge
       WHERE ge.evaluate_date IS NOT NULL
@@ -188,13 +281,30 @@ export async function GET(req: NextRequest) {
         ${notSystem}
         ${catF} ${winF}`
 
+    /* The waiting stock, right now. Deliberately OUTSIDE `pipelinePromise`: it has no
+       window in it at all - no date bound, no batch - so it is the one number on this
+       tab that is true whatever the filter bar says. It used to travel inside the
+       pipeline bundle, which is null on batch view, so picking a batch (the DEFAULT
+       view) made the Backlog KPI and the age bar vanish and took the tab's three
+       summary chips with them. Cost of splitting it out: nothing - it is the same
+       single count it always was, just not conditioned on a window it never used. */
+    const stockPromise = sql`
+      SELECT count(*)::int AS backlog,
+        count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date <= 3)::int AS a0,
+        count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date BETWEEN 4 AND 7)::int AS a1,
+        count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date BETWEEN 8 AND 14)::int AS a2,
+        count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date > 14)::int AS a3
+      FROM game_evaluations ge
+      WHERE ge.evaluate_date IS NULL AND ge.initial_conclusion IS NULL ${catF}`
+
+
     // Pipeline flow (game-level, NOT person-level): games entering the pipeline
     // (imported_at) vs games evaluated (evaluate_date) vs end-of-bucket backlog
     // (pushed but not yet evaluated). System accounts are NOT excluded - their rows
     // are real games flowing through. Backlog is cumulative over ALL history (so it
     // shows true absolute stock), then sliced to the window. Batch view has no time
     // axis → pipeline is null there.
-    const pipelinePromise = win.batch ? Promise.resolve(null) : Promise.all([
+    const pipelinePromise = !win.from ? Promise.resolve(null) : Promise.all([
       sql`
         WITH r AS (
           SELECT (ge.imported_at AT TIME ZONE ${VN})::date AS in_day,
@@ -229,14 +339,7 @@ export async function GET(req: NextRequest) {
           ${win.from ? sql`AND day >= ${win.from}::date` : sql``}
           ${win.to ? sql`AND day < ${win.to}::date` : sql``}
         GROUP BY 1 ORDER BY 1`,
-      sql`
-        SELECT count(*)::int AS backlog,
-          count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date <= 3)::int AS a0,
-          count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date BETWEEN 4 AND 7)::int AS a1,
-          count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date BETWEEN 8 AND 14)::int AS a2,
-          count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date > 14)::int AS a3
-        FROM game_evaluations ge
-        WHERE ge.evaluate_date IS NULL AND ge.initial_conclusion IS NULL ${catF}`,
+      stockPromise,
       // Ageing of the stock itself: at the END of every bucket, how old were the
       // games still waiting? Answers "is the tail rotting or are we clearing it?".
       // A row is in stock on day D when it arrived on/before D and had not left yet.
@@ -265,7 +368,14 @@ export async function GET(req: NextRequest) {
           count(*) FILTER (WHERE s.snap - r.in_day <= 3)::int AS a0,
           count(*) FILTER (WHERE s.snap - r.in_day BETWEEN 4 AND 7)::int AS a1,
           count(*) FILTER (WHERE s.snap - r.in_day BETWEEN 8 AND 14)::int AS a2,
-          count(*) FILTER (WHERE s.snap - r.in_day > 14)::int AS a3
+          count(*) FILTER (WHERE s.snap - r.in_day > 14)::int AS a3,
+          -- how long the queue has actually been waiting, in days. The four bands say
+          -- how the stock is shaped; these say how long a game sits there, which is the
+          -- thing a reader wants and could not get by eyeballing band heights.
+          count(*)::int AS waiting,
+          percentile_disc(0.5) WITHIN GROUP (ORDER BY (s.snap - r.in_day))::int AS med_age,
+          percentile_disc(0.9) WITHIN GROUP (ORDER BY (s.snap - r.in_day))::int AS p90_age,
+          max(s.snap - r.in_day)::int AS max_age
         FROM snaps s
         JOIN r ON r.in_day <= s.snap AND (r.out_day IS NULL OR r.out_day > s.snap)
         GROUP BY 1 ORDER BY 1`,
@@ -297,9 +407,98 @@ export async function GET(req: NextRequest) {
           ${win.from ? sql`AND eval_day >= ${win.from}::date` : sql``}
           ${win.to ? sql`AND eval_day < ${win.to}::date` : sql``}
         GROUP BY 1 ORDER BY 1`,
+      // Where the intake came from. `game_info.type` is the scraper/importer that
+      // found the game (apkcombo-scraper, appagg-scraper, top-pub-scraper,
+      // appranking-scraper - shown as insight-track - sync, manual). Volume alone says nothing, so each source carries its own outcome
+      // counts: a source that is 30% of intake and has produced no pick is a push
+      // filter to turn off, and no other chart can show that.
+      sql`
+        SELECT date_trunc(${unit}, (ge.imported_at AT TIME ZONE ${VN}))::date::text AS b,
+          COALESCE(NULLIF(btrim(gi.type), ''), 'unknown') AS src,
+          count(*)::int AS n,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> ''
+                             AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS evaluated,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> ''
+                             AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
+                             AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
+          count(*) FILTER (WHERE ge.final_conclusion IN ('Priority IV', 'Insight'))::int AS final_priority
+        FROM game_evaluations ge
+        JOIN game_info gi ON gi.game_id = ge.game_id
+        WHERE ge.imported_at IS NOT NULL ${catF}
+          ${win.from ? sql`AND ge.imported_at >= ${vnBound(win.from)}` : sql``}
+          ${win.to ? sql`AND ge.imported_at < ${vnBound(win.to)}` : sql``}
+        GROUP BY 1, 2 ORDER BY 1, 2`,
+      // Games that crossed an age boundary during each bucket. The mirror image of
+      // `cleared` above: that one counts work finished, this one counts work that only
+      // got older, and together they say whether a bucket gained or lost ground.
+      //
+      // Counting CROSSINGS, not states, is what makes this safe per bucket. A game is
+      // judged at most once ever and passes each boundary at most once ever, so no
+      // game is counted twice no matter how long it sits - which is exactly the trap in
+      // summing per-bucket snapshots, where a game that never moves is counted once a
+      // day for a week. The crossing day is knowable from the import date alone:
+      // in_day + 4 / + 8 / + 15, and it happened only if the game was still unjudged
+      // then. No snapshot join needed, so this is a plain scan.
+      sql`
+        WITH r AS (
+          SELECT (ge.imported_at AT TIME ZONE ${VN})::date AS in_day,
+                 CASE
+                   WHEN ge.evaluate_date IS NOT NULL
+                     THEN GREATEST((ge.imported_at AT TIME ZONE ${VN})::date, (ge.evaluate_date AT TIME ZONE ${VN})::date)
+                   WHEN ge.initial_conclusion IS NOT NULL THEN (ge.imported_at AT TIME ZONE ${VN})::date
+                   ELSE NULL
+                 END AS out_day
+          FROM game_evaluations ge
+          WHERE ge.imported_at IS NOT NULL ${catF}
+        ), x AS (
+          SELECT r.in_day + v.off AS cross_day, v.band
+          FROM r, (VALUES (4, 'a1'), (8, 'a2'), (15, 'a3')) AS v(off, band)
+          WHERE (r.out_day IS NULL OR r.out_day > r.in_day + v.off)
+        )
+        SELECT date_trunc(${unit}, cross_day)::date::text AS b, band, count(*)::int AS n
+        FROM x
+        -- a boundary in the future has not been crossed yet; the current bucket would
+        -- otherwise book every game that is merely scheduled to age this week
+        WHERE cross_day <= CURRENT_DATE
+          ${win.from ? sql`AND cross_day >= ${win.from}::date` : sql``}
+          ${win.to ? sql`AND cross_day < ${win.to}::date` : sql``}
+        GROUP BY 1, 2 ORDER BY 1, 2`,
     ])
 
-    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, dailyMixRows, pipelineRaw] = await Promise.all([
+    // What the team normally does, measured on the period immediately BEFORE this
+    // window (up to 90 days of it). The health gauges are read against this instead
+    // of hardcoded targets: 8% shortlist and 100 games/day were numbers somebody
+    // picked once, and a bar can only say "good" or "bad" against a real reference.
+    // Needs a window start to have a "before" - all-time and batch views get null.
+    const baselineFrom = win.from ? new Date(new Date(`${win.from}T00:00:00Z`).getTime() - 90 * 86400_000).toISOString().slice(0, 10) : null
+    // Same shape of aggregate over an arbitrary date range, so the trailing baseline
+    // and the previous window are computed by one definition instead of two that can
+    // drift apart. Rates only on the reading side - see `baseline` / `prev` below.
+    const refQuery = (f: string, t: string) => sql`
+      SELECT
+        count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> ''
+                           AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS evaluated,
+        count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> ''
+                           AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
+                           AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
+        count(*) FILTER (WHERE ge.final_conclusion IN ('Priority IV', 'Insight'))::int AS final_priority,
+        count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> ''
+                           AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
+                           AND ge.initial_note IS NOT NULL AND btrim(ge.initial_note) <> '')::int AS noted,
+        count(DISTINCT (lower(ge.initial_evaluator), (ge.evaluate_date AT TIME ZONE ${VN})::date))::int AS person_days
+      FROM game_evaluations ge
+      WHERE ge.evaluate_date IS NOT NULL
+        AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+        ${notSystem} ${catF}
+        AND ge.evaluate_date >= ${vnBound(f)}
+        AND ge.evaluate_date < ${vnBound(t)}`
+
+    const baselinePromise = win.from ? refQuery(baselineFrom!, win.from) : Promise.resolve(null)
+    // The previous week/month/quarter, for the KPI row's comparison badges.
+    const prevWin = prevWindow(view, win, prevBatch)
+    const prevPromise = prevWin ? refQuery(prevWin.from, prevWin.to) : Promise.resolve(null)
+
+    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, dailyMixRows, pipelineRaw, baselineRaw, prevRaw, personClearedRaw, personAgedRaw, backlogByRaw, stockRaw] = await Promise.all([
       // per-evaluator core + funnel. Shortlist = initial not bypassed (List_Idea);
       // Final Priority = moderator judged 'Priority IV' or 'Insight' (user-defined -
       // Priority V intentionally NOT counted).
@@ -331,9 +530,9 @@ export async function GET(req: NextRequest) {
         WHERE ge.assigned_date IS NOT NULL
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
-          ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
+          ${winOn(sql`
             ${win.from ? sql`AND ge.assigned_date >= ${win.from}::date` : sql``}
-            ${win.to ? sql`AND ge.assigned_date < ${win.to}::date` : sql``}`}
+            ${win.to ? sql`AND ge.assigned_date < ${win.to}::date` : sql``}`)}
         GROUP BY 1`,
       // TEAM assigned per time bucket (denominator for signal/survival trend lines).
       // Axis is first_assigned_date, NOT assigned_date: a reassign/handover restamps
@@ -345,9 +544,9 @@ export async function GET(req: NextRequest) {
         WHERE ge.first_assigned_date IS NOT NULL
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
-          ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
+          ${winOn(sql`
             ${win.from ? sql`AND ge.first_assigned_date >= ${win.from}::date` : sql``}
-            ${win.to ? sql`AND ge.first_assigned_date < ${win.to}::date` : sql``}`}
+            ${win.to ? sql`AND ge.first_assigned_date < ${win.to}::date` : sql``}`)}
         GROUP BY 1`,
       // TEAM assigned total for the window - same first_assigned_date axis. Computed
       // separately instead of summing the per-evaluator numbers, which are on the
@@ -358,9 +557,9 @@ export async function GET(req: NextRequest) {
         WHERE ge.first_assigned_date IS NOT NULL
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
-          ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
+          ${winOn(sql`
             ${win.from ? sql`AND ge.first_assigned_date >= ${win.from}::date` : sql``}
-            ${win.to ? sql`AND ge.first_assigned_date < ${win.to}::date` : sql``}`}`,
+            ${win.to ? sql`AND ge.first_assigned_date < ${win.to}::date` : sql``}`)}`,
       // per-evaluator initial conclusion distribution
       sql`SELECT lower(ge.initial_evaluator) AS k, ge.initial_conclusion AS c, count(*)::int AS n
         ${evalBase} AND ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
@@ -395,9 +594,15 @@ export async function GET(req: NextRequest) {
           count(*) FILTER (WHERE ge.final_conclusion IN ('Priority IV', 'Insight'))::int AS final_priority
         ${evalBase}
         GROUP BY 1, 2`,
-      // per-evaluator time series (heatmap cells + individual activity chart)
+      // per-evaluator time series (heatmap cells + individual activity chart). The
+      // shortlist count rides along for free in a FILTER on a query that already runs:
+      // it is what lets Individual draw this person's shortlist rate BUCKET BY BUCKET
+      // against the team's, which is the one thing the tab could not say before -
+      // every chart on it showed volume over time, so nobody's pick quality had a
+      // direction, only a level.
       sql`SELECT lower(ge.initial_evaluator) AS k, date_trunc(${unit}, ge.evaluate_date AT TIME ZONE ${VN})::date::text AS b, count(*)::int AS n,
           count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS evaluated,
+          count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release') AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
           count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead
         ${evalBase}
         GROUP BY 1, 2`,
@@ -408,9 +613,9 @@ export async function GET(req: NextRequest) {
         WHERE ge.assigned_date IS NOT NULL
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
-          ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
+          ${winOn(sql`
             ${win.from ? sql`AND ge.assigned_date >= ${win.from}::date` : sql``}
-            ${win.to ? sql`AND ge.assigned_date < ${win.to}::date` : sql``}`}
+            ${win.to ? sql`AND ge.assigned_date < ${win.to}::date` : sql``}`)}
         GROUP BY 1, 2`,
       // recording per recorder (5min + 20min slots), same window on the completion
       // moment (upload, else manual Confirm) or batch
@@ -421,18 +626,18 @@ export async function GET(req: NextRequest) {
           WHERE ${recAt} IS NOT NULL AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
             ${recOk('record_5min_assignee')}
             ${catF}
-            ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
+            ${winOn(sql`
               ${win.from ? recAtFrom(win.from) : sql``}
-              ${win.to ? recAtTo(win.to) : sql``}`}
+              ${win.to ? recAtTo(win.to) : sql``}`)}
           UNION ALL
           SELECT lower(ge.record_20min_assignee), ge.record_20min_assignee, '20min'
           FROM game_evaluations ge
           WHERE ${recAt} IS NOT NULL AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
             ${recOk('record_20min_assignee')}
             ${catF}
-            ${win.batch ? sql`AND ge.batch = ${win.batch}` : sql`
+            ${winOn(sql`
               ${win.from ? recAtFrom(win.from) : sql``}
-              ${win.to ? recAtTo(win.to) : sql``}`}
+              ${win.to ? recAtTo(win.to) : sql``}`)}
         )
         SELECT k, mode() WITHIN GROUP (ORDER BY name) AS name,
           count(*)::int AS recorded,
@@ -450,6 +655,10 @@ export async function GET(req: NextRequest) {
         GROUP BY 1,2
         UNION ALL
         SELECT 'quarter', to_char(evaluate_date AT TIME ZONE ${VN}, 'YYYY') || '-Q' || EXTRACT(QUARTER FROM evaluate_date AT TIME ZONE ${VN})::int
+          FROM game_evaluations WHERE evaluate_date IS NOT NULL ${category !== 'all' ? sql`AND category_group=${category}` : sql``}
+        GROUP BY 1,2
+        UNION ALL
+        SELECT 'year', to_char(evaluate_date AT TIME ZONE ${VN}, 'YYYY')
           FROM game_evaluations WHERE evaluate_date IS NOT NULL ${category !== 'all' ? sql`AND category_group=${category}` : sql``}
         GROUP BY 1,2
         UNION ALL
@@ -477,7 +686,7 @@ export async function GET(req: NextRequest) {
           (record_confirmed_at AT TIME ZONE ${VN})::date::text AS confirmed_on,
           youtube_link
         FROM rec
-        WHERE TRUE ${win.batch ? sql`AND batch = ${win.batch}` : sql`
+        WHERE TRUE ${legacyBatch ? sql`AND batch = ${legacyBatch}` : sql`
           AND (rec_at IS NULL OR (TRUE
             ${win.from ? sql`AND rec_at >= ${vnBound(win.from)}` : sql``}
             ${win.to ? sql`AND rec_at < ${vnBound(win.to)}` : sql``}))`}
@@ -493,6 +702,94 @@ export async function GET(req: NextRequest) {
         ${evalBase} AND ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
         GROUP BY 1, 2, 3`,
       pipelinePromise,
+      baselinePromise,
+      prevPromise,
+      // ---- per-person "judged vs aged", the two halves of one bucket's movement ----
+      // The same pair of EVENT counts Overview draws for the team, grouped by the
+      // person holding the game. Events, not states: a game is judged at most once and
+      // crosses each boundary at most once, so both sides stay addable across buckets -
+      // which a snapshot never is, because a game that sits still all week appears in
+      // every one of its buckets.
+      //
+      // The clock is `assigned_date`, NOT `imported_at` the way Overview's version
+      // counts. On a per-person chart the question is how long the game sat on THIS
+      // desk, and a reassign restamps that date - so the crossings follow the game to
+      // its new owner and start again, which is the same rule the backlog card and
+      // "Days waiting" already use.
+      sql`
+        SELECT lower(ge.initial_evaluator) AS k,
+          date_trunc(${unit}, (ge.evaluate_date AT TIME ZONE ${VN}))::date::text AS b,
+          count(*) FILTER (WHERE ${judged} AND (ge.evaluate_date AT TIME ZONE ${VN})::date - ge.assigned_date <= 3)::int AS a0,
+          count(*) FILTER (WHERE ${judged} AND (ge.evaluate_date AT TIME ZONE ${VN})::date - ge.assigned_date BETWEEN 4 AND 7)::int AS a1,
+          count(*) FILTER (WHERE ${judged} AND (ge.evaluate_date AT TIME ZONE ${VN})::date - ge.assigned_date BETWEEN 8 AND 14)::int AS a2,
+          count(*) FILTER (WHERE ${judged} AND (ge.evaluate_date AT TIME ZONE ${VN})::date - ge.assigned_date > 14)::int AS a3
+        ${evalBase} AND ge.assigned_date IS NOT NULL
+        GROUP BY 1, 2 ORDER BY 1, 2`,
+      // The mirror: games that only got older on this person's desk. A crossing day is
+      // knowable from the assign date alone (+4 / +8 / +15) and happened only if the
+      // game was still unjudged then, so this needs no snapshot join.
+      sql`
+        WITH r AS (
+          SELECT lower(ge.initial_evaluator) AS k, ge.assigned_date AS in_day,
+                 -- Exactly the exit rule the team-level pipeline query uses, and for the
+                 -- same two irregular shapes in the data. Reading evaluate_date alone
+                 -- left 111 of one evaluator's games ageing forever in September while
+                 -- their backlog card correctly showed nothing older than 3 days:
+                 --   * the Jun-2026 bulk import carries initial_conclusion and NO
+                 --     evaluate_date, so it arrived already judged and exits on arrival;
+                 --   * backfilled rows can carry an evaluate_date before the assign
+                 --     date, so GREATEST keeps a game from exiting before it arrived.
+                 CASE
+                   WHEN ge.evaluate_date IS NOT NULL
+                     THEN GREATEST(ge.assigned_date, (ge.evaluate_date AT TIME ZONE ${VN})::date)
+                   WHEN ge.initial_conclusion IS NOT NULL THEN ge.assigned_date
+                   ELSE NULL
+                 END AS out_day
+          FROM game_evaluations ge
+          WHERE ge.assigned_date IS NOT NULL
+            AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+            ${notSystem} ${catF}
+        ), x AS (
+          SELECT r.k, r.in_day + v.off AS cross_day, v.band
+          FROM r, (VALUES (4, 'a1'), (8, 'a2'), (15, 'a3')) AS v(off, band)
+          WHERE (r.out_day IS NULL OR r.out_day > r.in_day + v.off)
+        )
+        SELECT k, date_trunc(${unit}, cross_day)::date::text AS b, band, count(*)::int AS n
+        FROM x
+        -- a boundary in the future has not been crossed yet, or the open bucket books
+        -- every game merely scheduled to age this week
+        WHERE cross_day <= CURRENT_DATE
+          ${win.from ? sql`AND cross_day >= ${win.from}::date` : sql``}
+          ${win.to ? sql`AND cross_day < ${win.to}::date` : sql``}
+        GROUP BY 1, 2, 3 ORDER BY 1, 2`,
+      // Who the unevaluated queue is currently sitting with. This is a STOCK, not a
+      // flow: it is read as of NOW and is never sliced by the window, exactly like
+      // Overview's Backlog KPI - and it sums to the same number, because every
+      // unevaluated row carries an evaluator and an assigned_date.
+      //
+      // Age is measured from `assigned_date`, NOT `imported_at` the way Overview's
+      // "Backlog by age" is. On a per-person card the question is how long THIS
+      // person has been sitting on the game, and a reassign or handover restamps
+      // assigned_date, which is the behaviour we want: the new owner's clock starts
+      // when they received it. It is also the same clock as the "Days waiting"
+      // metric already on this tab. The two tabs therefore agree on the total and
+      // can disagree on the band split; the card's tooltip says so.
+      sql`
+        SELECT lower(ge.initial_evaluator) AS k,
+          mode() WITHIN GROUP (ORDER BY ge.initial_evaluator) AS name,
+          count(*)::int AS n,
+          count(*) FILTER (WHERE CURRENT_DATE - ge.assigned_date <= 3)::int AS a0,
+          count(*) FILTER (WHERE CURRENT_DATE - ge.assigned_date BETWEEN 4 AND 7)::int AS a1,
+          count(*) FILTER (WHERE CURRENT_DATE - ge.assigned_date BETWEEN 8 AND 14)::int AS a2,
+          count(*) FILTER (WHERE CURRENT_DATE - ge.assigned_date > 14)::int AS a3,
+          max(CURRENT_DATE - ge.assigned_date)::int AS oldest
+        FROM game_evaluations ge
+        WHERE ge.evaluate_date IS NULL AND ge.initial_conclusion IS NULL
+          AND ge.assigned_date IS NOT NULL
+          AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+          ${notSystem} ${catF}
+        GROUP BY 1 ORDER BY 3 DESC`,
+      stockPromise,
     ])
 
     // fold conclusion maps
@@ -674,6 +971,19 @@ export async function GET(req: NextRequest) {
       const a = peopleAcc.get(b)
       return a && a.days > 0 ? Math.ceil(a.sum / a.days) : 0
     }
+    // Mirrors `date_trunc(${unit}, day)::date::text` in SQL, so a generated bucket key
+    // collides with the one a row produced instead of sitting beside it.
+    const bucketStart = (d: Date, u: string): string => {
+      const x = new Date(d.getTime())
+      if (u === 'month') x.setUTCDate(1)
+      else if (u === 'week') {
+        // Postgres weeks are ISO: Monday is day 1
+        const dow = (x.getUTCDay() + 6) % 7
+        x.setUTCDate(x.getUTCDate() - dow)
+      }
+      return x.toISOString().slice(0, 10)
+    }
+
     const seriesLabeled = series.map((s) => ({ label: bucketLabel(s.b), value: s.n, people: peopleOf(s.b) }))
 
     // multi-metric time series (one point per bucket) - powers trend lines & KPI
@@ -681,7 +991,31 @@ export async function GET(req: NextRequest) {
     // buckets are the union of both so an assign-only bucket still shows up.
     const asgSeriesBy = new Map<string, number>(assignedSeries.map((r) => [r.b, r.n]))
     const evalSeriesBy = new Map<string, (typeof series)[number]>(series.map((s) => [s.b, s]))
-    const allBuckets = Array.from(new Set(Array.from(evalSeriesBy.keys()).concat(Array.from(asgSeriesBy.keys())))).sort()
+    /* Every bucket in the window, not just the ones with rows in them. The union of
+       "buckets that have data" skipped any quiet day entirely, so a line drawn from it
+       jumped 30/8 -> 7/9 -> 8/9 with equal spacing between unequal gaps: a weekend of
+       no work read as a day of no work, and the slope of everything around it was
+       wrong. A day nobody judged anything is a real zero and has to occupy its own
+       step. Falls back to the old union when the window has no dates (all-time). */
+    const bucketsInWindow = (): string[] => {
+      if (!win.from || !win.to) return []
+      const out: string[] = []
+      const end = Date.parse(win.to)
+      const d = new Date(win.from + 'T00:00:00Z')
+      while (d.getTime() < end) {
+        out.push(bucketStart(d, unit))
+        // step a whole bucket, then snap: months are not a fixed number of days
+        if (unit === 'day') d.setUTCDate(d.getUTCDate() + 1)
+        else if (unit === 'week') d.setUTCDate(d.getUTCDate() + 7)
+        else d.setUTCMonth(d.getUTCMonth() + 1)
+      }
+      return Array.from(new Set(out))
+    }
+    const allBuckets = Array.from(new Set(
+      bucketsInWindow()
+        .concat(Array.from(evalSeriesBy.keys()))
+        .concat(Array.from(asgSeriesBy.keys())),
+    )).sort()
     const metricSeries = allBuckets.map((b) => {
       const s = evalSeriesBy.get(b)
       const assigned = asgSeriesBy.get(b) || 0
@@ -698,6 +1032,10 @@ export async function GET(req: NextRequest) {
         priorityIV: s?.priority_iv || 0,
         insight: s?.insight || 0,
         finalPriority,
+        // person-days worked in this bucket (Σ over its days of "people active that
+        // day"). Lets the client read velocity per bucket - evaluated ÷ personDays -
+        // and average it, which is what the Team health benchmarks compare against.
+        personDays: peopleAcc.get(b)?.sum || 0,
         // same-bucket cohort: numerator and denominator both come from the rows
         // evaluated in this bucket (see the note above `evaluators`). Assigned stays
         // as its own line/count - it is intake volume, not a rate denominator.
@@ -723,56 +1061,27 @@ export async function GET(req: NextRequest) {
       rows: activePeople.map((e) => ({ name: e.name, cells: heatCells.get(e.key) || {} })),
     }
 
-    // Per-period all-rounder score, powering the rank-movement chart. Uses the same
-    // configured weights as the window-level score, but only over the axes that mean
-    // something inside one bucket: Consistency (active days) is degenerate at day
-    // grain and Recording is too sparse to rank on, so both are dropped and the
-    // remaining weights re-normalize between themselves.
-    // Denominator is the bucket's own evaluated count, matching the window-level
-    // rates. Dividing by assigned-in-bucket was badly wrong at day grain: someone who
-    // evaluated 200 games on a day they happened to receive no new assignments scored
-    // 0 on both quality axes.
-    const perPeriodW = { ...rcfg.weights, Consistency: 0, Recording: 0 }
-    const scoreCells = new Map<string, Record<string, number>>()
-    for (const b of bucketKeys) {
-      const rows = actSeries.filter((r) => r.b === b)
-      if (!rows.length) continue
-      const rate = (num: number, ev: number) => (ev > 0 ? num / ev : 0)
-      const maxVol = Math.max(1e-9, ...rows.map((r) => r.n))
-      const maxSig = Math.max(1e-9, ...rows.map((r) => rate(r.final_priority, r.evaluated)))
-      const maxSur = Math.max(1e-9, ...rows.map((r) => rate(r.shortlisted, r.evaluated)))
-      const vols = rows.map((r) => r.n).sort((a, b2) => a - b2)
-      const med = vols[Math.floor(vols.length / 2)] || 0
-      for (const r of rows) {
-        const cred = rcfg.credibility ? (med > 0 ? Math.min(1, r.n / med) : 1) : 1
-        const score = allRounderScore({
-          Volume: (r.n / maxVol) * 100,
-          Signal: (rate(r.final_priority, r.evaluated) / maxSig) * 100,
-          Survival: (rate(r.shortlisted, r.evaluated) / maxSur) * 100,
-        }, perPeriodW, cred)
-        const m = scoreCells.get(r.k) || {}
-        m[b] = Math.round(score * 10) / 10
-        scoreCells.set(r.k, m)
-      }
-    }
-    const scoreRank = {
-      periods,
-      rows: activePeople.map((e) => ({ name: e.name, cells: scoreCells.get(e.key) || {} })),
-    }
+    // A per-period Overall score used to be computed here, one value per person per
+    // bucket, to drive a rank-movement bump chart. It was dropped with the chart: two
+    // of the five axes had to be zeroed because they are meaningless inside a single
+    // day, and ranking a composite score that has lost 40% of its definition, at day
+    // grain, across seven crossing lines, was noise with a shape. Biggest movers on
+    // the Leaderboard now reads first bucket against last off the heatmap the client
+    // already has.
 
     // per-person activity series: assigned / evaluated / link dead per bucket
     // (assigned is bucketed on assigned_date, the rest on evaluate_date - buckets
     // are the union so an assign-only day still shows)
-    type PersonCell = { assigned: number; evaluated: number; linkDead: number }
+    type PersonCell = { assigned: number; evaluated: number; shortlisted: number; linkDead: number }
     const psBy = new Map<string, Map<string, PersonCell>>()
     const psCell = (k: string, b: string): PersonCell => {
       let m = psBy.get(k)
       if (!m) { m = new Map(); psBy.set(k, m) }
       let c = m.get(b)
-      if (!c) { c = { assigned: 0, evaluated: 0, linkDead: 0 }; m.set(b, c) }
+      if (!c) { c = { assigned: 0, evaluated: 0, shortlisted: 0, linkDead: 0 }; m.set(b, c) }
       return c
     }
-    for (const r of evalSeries) { const c = psCell(r.k, r.b); c.evaluated = r.evaluated; c.linkDead = r.link_dead }
+    for (const r of evalSeries) { const c = psCell(r.k, r.b); c.evaluated = r.evaluated; c.shortlisted = r.shortlisted; c.linkDead = r.link_dead }
     for (const r of evalAsgSeries) { psCell(r.k, r.b).assigned = r.n }
     const personSeries: Record<string, Array<{ key: string; label: string } & PersonCell>> = {}
     for (const [k, m] of Array.from(psBy.entries())) {
@@ -780,11 +1089,12 @@ export async function GET(req: NextRequest) {
     }
 
     // options for adaptive dropdown
-    const opts: Record<string, string[]> = { week: [], month: [], quarter: [], batch: [] }
+    const opts: Record<string, string[]> = { week: [], month: [], quarter: [], year: [], batch: [] }
     for (const r of optRows) if (opts[r.kind]) opts[r.kind].push(r.v)
     opts.week.sort().reverse()
     opts.month.sort().reverse()
     opts.quarter.sort().reverse()
+    opts.year.sort().reverse()
     opts.batch.sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a))
     // pretty labels for period keys, each with its start–end date range so the
     // picker is unambiguous (e.g. "W1 Aug 2026 · 27/7 – 2/8")
@@ -805,7 +1115,21 @@ export async function GET(req: NextRequest) {
       const sm = (q - 1) * 3 + 1
       return { key: k, label: `Q${q} ${y} · 1/${sm} – ${dm(lastDay(y, sm + 2))}` }
     })
-    const batchLabels = opts.batch.map((k) => ({ key: k, label: k }))
+    /* Only batches whose label resolves to a week are offered. The pre-cutoff ones fall
+       back to the label predicate and still WORK, but they are the migration leftovers
+       whose spans overlap and run backwards - putting them in the dropdown invites a
+       reader to compare a 26-day cohort against a 7-day week and call it a trend. The
+       Week view covers those dates without the label. */
+    const batchSpanBy = new Map(batchSpans.map((b) => [b.batch, b]))
+    const batchLabels = opts.batch
+      .filter((k) => batchSpanBy.has(k))
+      .map((k) => {
+        const b = batchSpanBy.get(k)!
+        // `to` is exclusive, so the last day shown is the day before it - same as the
+        // week labels right above, which the batch names are meant to line up with.
+        const last = new Date(Date.parse(b.to) - 864e5)
+        return { key: k, label: `${k} · ${dm(new Date(b.from + 'T00:00:00Z'))} – ${dm(last)}` }
+      })
 
     // recording queue per assignee (only people already in the evaluator list)
     const videos: Record<string, Array<{ gameId: string; title: string | null; os: string | null; slot: string; batch: string | null; recordedOn: string | null; confirmedOn: string | null; youtube: string | null }>> = {}
@@ -833,11 +1157,18 @@ export async function GET(req: NextRequest) {
       series: Array<{ key: string; label: string; newGames: number; evaluated: number; backlog: number; people: number }>
       current: { backlog: number; age: { a0: number; a1: number; a2: number; a3: number } }
       window: { newGames: number; evaluated: number }
-      aging: AgeRow[]
+      // per bucket: the stock's age bands, plus how long that stock had been waiting
+      aging: Array<AgeRow & { waiting: number; medAge: number; p90Age: number; maxAge: number }>
       cleared: Array<AgeRow & { avgAge: number }>
+      // intake split by importer, per bucket, plus each source's outcome so far
+      sources: Array<{ key: string; label: string; parts: Record<string, number> }>
+      sourceYield: Array<{ src: string; n: number; evaluated: number; shortlisted: number; finalPriority: number }>
+      // games that crossed into an older band during each bucket, by the band they
+      // crossed INTO - the mirror of `cleared`, which counts what was finished
+      aged: Array<{ key: string; label: string; parts: Record<string, number> }>
     } = null
     if (pipelineRaw) {
-      const [pipeSeries, backlogNow, agingRows, peopleRows, clearedRows] = pipelineRaw
+      const [pipeSeries, backlogNow, agingRows, peopleRows, clearedRows, sourceRows, agedRows] = pipelineRaw
       const peopleBy = new Map<string, number>(peopleRows.map((r) => [r.b, r.people]))
       const seriesP = pipeSeries.map((r) => ({
         key: r.b, label: bucketLabel(r.b),
@@ -845,6 +1176,21 @@ export async function GET(req: NextRequest) {
         people: peopleBy.get(r.b) ?? 0,
       }))
       const b0 = backlogNow[0]
+      // pivot the source rows two ways: bucket → {source: count} for the stack, and
+      // source → window totals for the yield read underneath it
+      const srcByBucket = new Map<string, Record<string, number>>()
+      const srcTot = new Map<string, { src: string; n: number; evaluated: number; shortlisted: number; finalPriority: number }>()
+      for (const r of sourceRows) {
+        const parts = srcByBucket.get(r.b) || {}
+        parts[r.src] = (parts[r.src] || 0) + r.n
+        srcByBucket.set(r.b, parts)
+        const t = srcTot.get(r.src) || { src: r.src, n: 0, evaluated: 0, shortlisted: 0, finalPriority: 0 }
+        t.n += r.n; t.evaluated += r.evaluated; t.shortlisted += r.shortlisted; t.finalPriority += r.final_priority
+        srcTot.set(r.src, t)
+      }
+      const srcBuckets = Array.from(srcByBucket.keys()).sort()
+        .map((b) => ({ key: b, label: bucketLabel(b), parts: srcByBucket.get(b)! }))
+      const srcYield = Array.from(srcTot.values()).sort((a, b) => b.n - a.n)
       pipeline = {
         series: seriesP,
         current: {
@@ -857,23 +1203,117 @@ export async function GET(req: NextRequest) {
         },
         aging: agingRows.map((r) => ({
           key: r.b, label: bucketLabel(r.b), a0: r.a0, a1: r.a1, a2: r.a2, a3: r.a3,
+          waiting: r.waiting, medAge: r.med_age ?? 0, p90Age: r.p90_age ?? 0, maxAge: r.max_age ?? 0,
         })),
         cleared: clearedRows.map((r) => ({
           key: r.b, label: bucketLabel(r.b), a0: r.a0, a1: r.a1, a2: r.a2, a3: r.a3,
           avgAge: r.avg_age ?? 0,
         })),
+        sources: srcBuckets,
+        sourceYield: srcYield,
+        aged: (() => {
+          const by = new Map<string, Record<string, number>>()
+          for (const r of agedRows as unknown as Array<{ b: string; band: string; n: number }>) {
+            const parts = by.get(r.b) || {}
+            parts[r.band] = (parts[r.band] || 0) + r.n
+            by.set(r.b, parts)
+          }
+          return Array.from(by.keys()).sort().map((b) => ({ key: b, label: bucketLabel(b), parts: by.get(b)! }))
+        })(),
       }
     }
+
+    // Trailing reference for the health gauges. Rates only - a count would compare a
+    // 7-day window against 90 days and read as a collapse every time.
+    const b0r = baselineRaw?.[0]
+    const baseline = b0r && b0r.evaluated > 0 && baselineFrom
+      ? {
+        from: baselineFrom, to: win.from!, days: 90,
+        evaluated: b0r.evaluated,
+        survivalRate: b0r.shortlisted / b0r.evaluated,
+        signalRate: b0r.final_priority / b0r.evaluated,
+        noteRate: b0r.noted / b0r.evaluated,
+        personDayThroughput: b0r.person_days > 0 ? b0r.evaluated / b0r.person_days : 0,
+      }
+      : null
+
+    // The previous week/month/quarter on the same grain as the filter bar. Rates
+    // only, for the same reason as the baseline: the previous period is a different
+    // number of days whenever the current one is still running, so a count would be
+    // comparing a Tuesday against a full month.
+    const p0r = prevRaw?.[0]
+    const prev = p0r && p0r.evaluated > 0 && prevWin
+      ? {
+        from: prevWin.from, to: prevWin.to,
+        // what to call it on screen - "last week", "last month", …
+        label: view === 'week' ? 'last week' : view === 'month' ? 'last month'
+          : view === 'quarter' ? 'last quarter' : view === 'year' ? 'last year' : 'the period before',
+        evaluated: p0r.evaluated,
+        survivalRate: p0r.shortlisted / p0r.evaluated,
+        signalRate: p0r.final_priority / p0r.evaluated,
+        personDayThroughput: p0r.person_days > 0 ? p0r.evaluated / p0r.person_days : 0,
+      }
+      : null
+
+    // Per-person "judged vs aged": one row per person per bucket, carrying both halves
+    // of that bucket's movement. Buckets are the UNION of the two axes, because a
+    // bucket where somebody judged nothing but their queue aged is exactly the bucket
+    // the chart exists to show - dropping it would hide the only bad weeks.
+    type MoveCell = { cleared: [number, number, number, number]; aged: [number, number, number] }
+    const moveBy = new Map<string, Map<string, MoveCell>>()
+    const moveCell = (k: string, b: string): MoveCell => {
+      let m = moveBy.get(k)
+      if (!m) { m = new Map(); moveBy.set(k, m) }
+      let c = m.get(b)
+      if (!c) { c = { cleared: [0, 0, 0, 0], aged: [0, 0, 0] }; m.set(b, c) }
+      return c
+    }
+    for (const r of personClearedRaw || []) {
+      moveCell(r.k, r.b).cleared = [r.a0, r.a1, r.a2, r.a3]
+    }
+    const AGED_IDX: Record<string, number> = { a1: 0, a2: 1, a3: 2 }
+    for (const r of personAgedRaw || []) {
+      const i = AGED_IDX[r.band as string]
+      if (i != null) moveCell(r.k, r.b).aged[i] = r.n
+    }
+    const personMoves: Record<string, Array<{ key: string; label: string } & MoveCell>> = {}
+    for (const [k, m] of Array.from(moveBy.entries())) {
+      personMoves[k] = Array.from(m.keys()).sort().map((b) => ({ key: b, label: bucketLabel(b), ...m.get(b)! }))
+    }
+
+    // Per-person backlog stock, largest holder first. Names come from the same
+    // `mode()` trick the evaluator rows use, so casing matches the rest of the tab.
+    const backlogBy = (backlogByRaw || [])
+      .filter((r) => r.n > 0)
+      .map((r) => ({
+        key: r.k as string, name: (r.name || r.k) as string, n: r.n as number,
+        a0: r.a0 as number, a1: r.a1 as number, a2: r.a2 as number, a3: r.a3 as number,
+        oldest: (r.oldest ?? 0) as number,
+      }))
 
     // Benchmarks are computed here, over the FULL evaluator list, because an
     // evaluator's bundle is stripped of every other row below - the client could not
     // derive them from what it receives.
     const bench = teamBench(evaluators)
 
-    const options = { week: weekLabels, month: monthLabels, quarter: quarterLabels, batch: batchLabels }
+    // The waiting pile as it stands right now. Always present, on every view: it is the
+    // one figure on this tab the window does not reach.
+    const s0 = stockRaw?.[0]
+    const stock = {
+      backlog: s0?.backlog ?? 0,
+      age: { a0: s0?.a0 ?? 0, a1: s0?.a1 ?? 0, a2: s0?.a2 ?? 0, a3: s0?.a3 ?? 0 },
+    }
+
+    const yearLabels = opts.year.map((k) => ({ key: k, label: `${k} · 1/1 – 31/12` }))
+    const options = { week: weekLabels, month: monthLabels, quarter: quarterLabels, year: yearLabels, batch: batchLabels }
     const shell = {
-      view, category, title, window: win, bucketUnit: unit, options,
-      teamTotals, funnel, bench,
+      // Two grains, and the client needs both by name. `bucketUnit` is the trend
+      // charts' x axis; `activityUnit` is the heatmap's, which is deliberately finer.
+      // Until now only the first was sent, so the Leaderboard described the heatmap's
+      // cells with the trend chart's noun and printed "13 of 13 weeks with nothing
+      // evaluated" over a grid of days.
+      view, category, title, window: win, bucketUnit: unit, activityUnit: actUnit, options,
+      teamTotals, funnel, bench, baseline, prev, stock,
     }
 
     // An evaluator gets ONLY their own person-level rows. Everything keyed by person
@@ -891,13 +1331,15 @@ export async function GET(req: NextRequest) {
         initialConclusions: [], finalConclusions: [],
         series: [], metricSeries: [],
         heatmap: { periods: [], rows: [] },
-        scoreRank: { periods: [], rows: [] },
         config: { ...rcfg, excluded: [] },
         personSeries: personSeries[selfKey] ? { [selfKey]: personSeries[selfKey] } : {},
         videos: videos[selfKey] ? { [selfKey]: videos[selfKey] } : {},
         dailyMix: dailyMix[selfKey] ? { [selfKey]: dailyMix[selfKey] } : {},
         evaluators: evaluators.filter((e) => e.key === selfKey),
         radar: radar.filter((r) => r.key === selfKey),
+        // their own queue only - Individual shows it, Leaderboard is not reachable
+        backlogBy: backlogBy.filter((b) => b.key === selfKey),
+        personMoves: personMoves[selfKey] ? { [selfKey]: personMoves[selfKey] } : {},
         pipeline: null,
       }
       : {
@@ -910,12 +1352,11 @@ export async function GET(req: NextRequest) {
         series: seriesLabeled,
         metricSeries,
         heatmap,
-        scoreRank,
         config: rcfg,
         personSeries,
         videos,
         dailyMix,
-        evaluators, radar,
+        evaluators, radar, backlogBy, personMoves,
         pipeline,
       }
     CACHE.set(cacheKey, { at: Date.now(), body })
