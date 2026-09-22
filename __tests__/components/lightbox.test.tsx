@@ -38,6 +38,23 @@ describe('Lightbox', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  // Parity with EvalDetailPanel's own key handler, which skips its shortcuts when the
+  // event came from a form field: a field owns its own Escape before this does.
+  it('leaves Escape to a focused form field rather than closing over it', () => {
+    const onClose = jest.fn()
+    render(
+      <>
+        <input aria-label="a field" />
+        <Lightbox url="https://example.com/shot.png" onClose={onClose} />
+      </>,
+    )
+    fireEvent.keyDown(screen.getByLabelText('a field'), { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    // ...and still closes for an Escape from anywhere else
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('does not close when the image itself is clicked', () => {
     const onClose = jest.fn()
     render(<Lightbox url="https://example.com/shot.png" onClose={onClose} />)

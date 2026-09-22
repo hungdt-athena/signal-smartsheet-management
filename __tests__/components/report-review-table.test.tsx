@@ -351,4 +351,204 @@ describe('ReviewTable', () => {
     // server, not text a reader sees).
     expect(container.textContent).not.toMatch(/List_Idea/)
   })
+  // ---- The newest-days probe is BOUNDED ----------------------------------------
+  // Without from/to the route's rangeFilter is empty, and the probe becomes two
+  // unbounded all-time queries over the evaluator's whole history: the rows query,
+  // ordered by an expression no index serves, plus the page-1 count(*) stats
+  // aggregate (meta=0 suppresses only the facet block). The app and the database are
+  // on different continents, so that is paid in full on every Individual tab open.
+
+  it('bounds the newest-days probe to a recent window instead of asking all-time', async () => {
+    const fetchMock = mockApi({ probe: [row()], list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const probes = parseCalls(fetchMock).filter(c => c.limit === '100')
+    expect(probes).toHaveLength(1)
+    expect(probes[0].from).toBeDefined()
+    expect(probes[0].to).toBeDefined()
+    // ~90 days wide, and ending no earlier than today: a bound the route will
+    // actually turn into a range predicate.
+    const days = (Date.parse(probes[0].to) - Date.parse(probes[0].from)) / 86400000
+    expect(days).toBeGreaterThanOrEqual(90)
+    expect(days).toBeLessThanOrEqual(92)
+    expect(Date.parse(probes[0].to)).toBeGreaterThanOrEqual(Date.now())
+  })
+
+  it('falls back to one unbounded probe only when the bounded one comes back empty', async () => {
+    // The bounded probe answers empty (a person with no work in a quarter); the
+    // unbounded retry then finds their real newest days.
+    const old = row({ id: 9, evaluate_date: '2025-01-05T09:00:00Z', updated_at: '2025-01-05T09:00:00Z' })
+    const fetchMock = jest.fn(async (url: string) => {
+      const u = new URL(String(url), 'http://x')
+      if (u.pathname.endsWith('/facets')) return { ok: true, json: async () => ({ available_conclusions: [] }) } as Response
+      if (u.searchParams.get('limit') === '100') {
+        const bounded = u.searchParams.has('from')
+        return { ok: true, json: async () => ({ data: bounded ? [] : [old] }) } as Response
+      }
+      return { ok: true, json: async () => ({ data: [old] }) } as Response
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const probes = parseCalls(fetchMock).filter(c => c.limit === '100')
+    expect(probes).toHaveLength(2)
+    expect(probes[0].from).toBeDefined()
+    expect(probes[1].from).toBeUndefined()
+    // and the resolved window is the one the unbounded probe found
+    const listCall = parseCalls(fetchMock).find(c => c.limit === '20')!
+    expect(listCall.from).toBe('2025-01-05')
+  })
+
+  // ---- Filters that own the window --------------------------------------------
+
+  it('re-resolves the newest-days window when the category changes', async () => {
+    const puzzleDay = row({ id: 1, evaluate_date: '2026-09-22T09:00:00Z', updated_at: '2026-09-22T09:00:00Z' })
+    const arcadeDay = row({ id: 2, title: 'Arcade Run', evaluate_date: '2026-08-04T09:00:00Z', updated_at: '2026-08-04T09:00:00Z' })
+    const fetchMock = jest.fn(async (url: string) => {
+      const u = new URL(String(url), 'http://x')
+      if (u.pathname.endsWith('/facets')) return { ok: true, json: async () => ({ available_conclusions: [] }) } as Response
+      const arcade = u.searchParams.get('category') === 'arcade'
+      const hit = arcade ? arcadeDay : puzzleDay
+      return { ok: true, json: async () => ({ data: [hit] }) } as Response
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'arcade' } })
+    await waitFor(() => expect(screen.getByText('Arcade Run')).toBeInTheDocument())
+
+    const arcadeProbe = parseCalls(fetchMock).find(c => c.limit === '100' && c.category === 'arcade')
+    expect(arcadeProbe).toBeDefined()
+    // and the rows request for arcade uses the window that probe found, not the
+    // puzzle one -- an evaluator with no arcade work in the puzzle days would
+    // otherwise open an empty table and read it as broken.
+    const arcadeList = parseCalls(fetchMock).filter(c => c.limit === '20' && c.category === 'arcade')
+    expect(arcadeList.length).toBeGreaterThan(0)
+    arcadeList.forEach(c => expect(c.from).toBe('2026-08-04'))
+  })
+
+  it('clears both date boxes when either one is cleared, instead of going silently all-time', async () => {
+    const fetchMock = mockApi({ probe: [row()], list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const fromBox = screen.getByLabelText('From date') as HTMLInputElement
+    const toBox = screen.getByLabelText('To date') as HTMLInputElement
+    expect(fromBox.value).not.toBe('')
+    expect(toBox.value).not.toBe('')
+
+    fireEvent.change(fromBox, { target: { value: '' } })
+    await waitFor(() => expect(toBox.value).toBe(''))
+    expect(fromBox.value).toBe('')
+    // the request really is all-time now, and the toolbar says so
+    await waitFor(() => {
+      const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
+      expect(last.from).toBeUndefined()
+      expect(last.to).toBeUndefined()
+    })
+  })
+
+  it('never stores a reversed date pair, so the empty sentence cannot read backwards', async () => {
+    const fetchMock = mockApi({ probe: [row()], list: [] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(document.querySelector('.rp-review-empty')).not.toBeNull())
+
+    const fromBox = screen.getByLabelText('From date') as HTMLInputElement
+    const toBox = screen.getByLabelText('To date') as HTMLInputElement
+    fireEvent.change(toBox, { target: { value: '2026-09-18' } })
+    fireEvent.change(fromBox, { target: { value: '2026-09-22' } })
+
+    await waitFor(() => expect(toBox.value).toBe('2026-09-22'))
+    expect(Date.parse(fromBox.value)).toBeLessThanOrEqual(Date.parse(toBox.value))
+    await waitFor(() => expect(document.querySelector('.rp-review-empty')).not.toBeNull())
+    const sentence = document.querySelector('.rp-review-empty')!.textContent || ''
+    expect(sentence).not.toMatch(/between 22\/09\/26 and 18\/09\/26/)
+    // both ends collapsed onto the one day the reader last touched
+    expect(sentence).toMatch(/on 22\/09\/26/)
+  })
+
+  // ---- Switching person --------------------------------------------------------
+
+  it('drops the previous person rows the moment the name changes', async () => {
+    const alpha = row({ id: 1, title: 'Alpha Game' })
+    const beta = row({ id: 2, title: 'Beta Game' })
+    const fetchMock = jest.fn(async (url: string) => {
+      const u = new URL(String(url), 'http://x')
+      if (u.pathname.endsWith('/facets')) return { ok: true, json: async () => ({ available_conclusions: [] }) } as Response
+      const who = u.searchParams.get('evaluator')
+      const hit = who === 'Beta' ? beta : alpha
+      return { ok: true, json: async () => ({ data: [hit] }) } as Response
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { rerender } = render(<ReviewTable evaluator="Alpha" canSeeTeam />)
+    await waitFor(() => expect(screen.getByText('Alpha Game')).toBeInTheDocument())
+
+    rerender(<ReviewTable evaluator="Beta" canSeeTeam />)
+    // Synchronously, in the same commit the new name paints in: an admin clicking
+    // through the name chips must never see one person's games under another's.
+    expect(screen.queryByText('Alpha Game')).toBeNull()
+    await waitFor(() => expect(screen.getByText('Beta Game')).toBeInTheDocument())
+  })
+
+  // ---- A failed append must not retry forever ----------------------------------
+
+  it('stops and rolls the page back when appending a page fails, instead of retrying forever', async () => {
+    let listCalls = 0
+    const fetchMock = jest.fn(async (url: string) => {
+      const u = new URL(String(url), 'http://x')
+      if (u.pathname.endsWith('/facets')) return { ok: true, json: async () => ({ available_conclusions: [] }) } as Response
+      if (u.searchParams.get('limit') === '100') return { ok: true, json: async () => ({ data: [row()] }) } as Response
+      listCalls++
+      const page = u.searchParams.get('page')
+      if (page === '1') {
+        return { ok: true, json: async () => ({ data: Array.from({ length: 20 }, (_, i) => row({ id: i + 1 })) }) } as Response
+      }
+      throw new Error('network error')
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    installObserver('firing')
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(document.querySelectorAll('.rp-review-row').length).toBe(20))
+
+    // The sentinel is still intersecting. Let every pending microtask and re-render
+    // settle: with hasMore left true after the failure the observer would re-fire on
+    // each one and the list request count would keep climbing.
+    await waitFor(() => expect(listCalls).toBeGreaterThanOrEqual(2))
+    const settled = listCalls
+    await new Promise(r => setTimeout(r, 50))
+    expect(listCalls).toBe(settled)
+    // and it never skipped past the page that failed
+    const pages = parseCalls(fetchMock).filter(c => c.limit === '20').map(c => c.page)
+    expect(pages).toEqual(['1', '2'])
+    installObserver('noop')
+  })
+
+  // ---- The screenshot strip is not mouse-only ----------------------------------
+
+  it('opens the lightbox from the keyboard, not only on a mouse click', async () => {
+    const fetchMock = mockApi({ probe: [row()], list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const shot = document.querySelectorAll('.rp-review-shot')[0] as HTMLElement
+    expect(shot.getAttribute('role')).toBe('button')
+    expect(shot.tabIndex).toBe(0)
+    fireEvent.keyDown(shot, { key: 'Enter' })
+    expect(document.querySelectorAll('.lightbox-backdrop img').length).toBe(2)
+  })
 })

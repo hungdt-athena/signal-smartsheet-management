@@ -30,6 +30,11 @@ export function Lightbox({ url, onClose, images }: LightboxProps): JSX.Element |
   useEffect(() => {
     if (!url) return
     const onKey = (e: KeyboardEvent) => {
+      // Same guard EvalDetailPanel's own key handler carries: a field owns its own
+      // Escape (clearing a value, dismissing a suggestion list) before this does.
+      // Practically unreachable behind a full-screen backdrop, kept for parity so the
+      // two handlers cannot drift apart.
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return
       if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)

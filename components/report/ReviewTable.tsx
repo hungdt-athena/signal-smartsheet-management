@@ -33,17 +33,23 @@ const CONCLUSION_DEFAULTS = [
   'Need Direction', 'List_Idea', 'Playtest & Bypass',
 ]
 
-// The canonical 17 are the FLOOR: live data can only add to them or reorder them,
-// and an empty `live` (a failed fetch, or a genuinely empty answer) must leave that
-// floor intact rather than collapsing the dropdown to just the current selection.
+// The canonical 17 are the FALLBACK, not a floor: they are what the dropdown offers
+// when there is no live answer, and the live answer REPLACES them when there is one.
+//
+// An empty `live` (a failed fetch, or a genuinely empty answer) leaves the canonical
+// list intact rather than collapsing the dropdown to just the current selection --
 // app/(manager)/evaluations/page.tsx's fetchFacets guards the identical case with
 // `if (json.available_conclusions?.length) { ... }`, simply not touching state (which
-// started as the full canonical list) on an empty/failed response. This does the
-// same thing at the merge itself, so it holds regardless of who calls it.
+// started as the full canonical list) on an empty/failed response. This does the same
+// thing at the merge itself, so it holds regardless of who calls it.
 //
-// When `live` is non-empty: canonical-first, then any live values the canonical list
-// doesn't know about (sorted) -- same ordering /api/evaluations/route.ts computes for
-// available_conclusions server-side and that page's fetchFacets mirrors client-side.
+// When `live` is non-empty the canonical list NARROWS to it: the result is the
+// canonical values this evaluator/category actually has rows for, in canonical order,
+// then any live values the canonical list doesn't know about (sorted) -- the same
+// ordering /api/evaluations/route.ts computes for available_conclusions server-side
+// and that page's fetchFacets mirrors client-side. A canonical value with no rows is
+// dropped on purpose: an option that can only ever return an empty table is noise.
+// (report-review-table.test.tsx's "not.toContain('Skip')" case is exactly this.)
 // `selected` is folded in either way so the currently-chosen filter value never
 // disappears from its own dropdown mid-fetch or if the live list omits it.
 function mergeConclusionOptions(live: string[], selected: string): string[] {
@@ -106,19 +112,33 @@ function shotsFor(row: ReviewRow): string[] {
   return []
 }
 
-// "The newest 3 days that have any rows", not the last 3 calendar days: a person
-// who did not work over the weekend must not open an empty table and read it as
-// broken. /api/evaluations has no "distinct days with data" facet, so this costs
-// one extra round trip on mount (up to 100 rows, no screenshots, sorted newest
-// first) purely to read off which days are present, then the real paginated
-// fetch runs against the resolved [from, to] window.
-async function fetchNewestDays(
+// How far back the newest-days probe looks before it gives up and asks all-time.
+// 90 days is far past any window a person is plausibly reviewing and still short
+// enough to be an index-friendly range predicate.
+const PROBE_DAYS = 90
+
+// Today in Asia/Ho_Chi_Minh (UTC+7) -- the timezone /api/evaluations resolves its
+// date columns in, so the probe's window lines up with the rows it is asking about.
+function vnToday(): string {
+  return new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10)
+}
+function shiftDays(iso: string, delta: number): string {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + delta)
+  return d.toISOString().slice(0, 10)
+}
+
+// One probe request: up to 100 rows, newest first, no screenshots, read purely for
+// which calendar days are present.
+async function probeDays(
   evaluator: string, category: string, conclusion: string,
+  range: { from: string; to: string } | null,
 ): Promise<{ from: string | null; to: string | null }> {
   const params = new URLSearchParams({
     evaluator, category, conclusion, date_basis: 'evaluated',
     sort: 'desc', page: '1', limit: '100', meta: '0',
   })
+  if (range) { params.set('from', range.from); params.set('to', range.to) }
   try {
     const res = await fetch(`/api/evaluations?${params}`)
     const json = await res.json()
@@ -138,6 +158,40 @@ async function fetchNewestDays(
   } catch {
     return { from: null, to: null }
   }
+}
+
+// "The newest 3 days that have any rows", not the last 3 calendar days: a person
+// who did not work over the weekend must not open an empty table and read it as
+// broken. /api/evaluations has no "distinct days with data" facet, so this costs
+// one extra round trip on mount purely to read off which days are present, then
+// the real paginated fetch runs against the resolved [from, to] window.
+//
+// BOUNDED FIRST, and that bound is load-bearing. Without from/to the route's
+// rangeFilter is EMPTY (app/api/evaluations/route.ts, `rangeFilterFor` only fires
+// when both ends are present), which makes this one request pay for two unbounded
+// queries over that evaluator's whole history: the rows query, whose
+// `ORDER BY COALESCE(ge.evaluate_date, ge.updated_at) DESC` is an expression order
+// no plain index serves, and -- because `wantListMeta = page === 1` and `meta=0`
+// suppresses only the FACET block -- an all-time `count(*)` stats aggregate on top.
+// Passing a range bounds both of them at once, which is why this is the fix rather
+// than teaching `meta=0` to skip the stats: that would leave the unbounded scan.
+// The database is on another continent from the app, so a heavy scan here is paid
+// in full, every time the Individual tab opens.
+//
+// Only if 90 days comes back empty do we ask all-time -- one extra round trip, in
+// the rare case of a person with no work in a quarter, in exchange for never paying
+// the unbounded scan on the common path.
+async function fetchNewestDays(
+  evaluator: string, category: string, conclusion: string,
+): Promise<{ from: string | null; to: string | null }> {
+  const today = vnToday()
+  // `to` is tomorrow, not today: the route's upper bound is exclusive-of-the-next-day
+  // already, and one extra day absorbs a row whose evaluate_date was written slightly
+  // ahead of VN midnight rather than dropping it and reading as "no recent work".
+  const bounded = await probeDays(evaluator, category, conclusion,
+    { from: shiftDays(today, -PROBE_DAYS), to: shiftDays(today, 1) })
+  if (bounded.from) return bounded
+  return probeDays(evaluator, category, conclusion, null)
 }
 
 export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canSeeTeam: boolean }): JSX.Element {
@@ -170,23 +224,50 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
   const conclusionRef = useRef(conclusion)
   useEffect(() => { conclusionRef.current = conclusion }, [conclusion])
 
-  // Resolve the newest-3-days default whenever the person being viewed changes
-  // (also covers first mount). Resets the other two filters to their defaults too,
-  // so switching person always re-targets to a clean, known state.
+  // Switching person resets this table to a clean, known state. Done DURING RENDER
+  // (React's documented "adjusting state when a prop changes" pattern) rather than in
+  // an effect, for two reasons:
+  //   1. `rows` must be emptied in the same commit the new name paints in. In an
+  //      effect it is not: there is a frame where `initializing` is true, `loading` is
+  //      false and `rows` still holds the PREVIOUS person's games, so an admin clicking
+  //      through the name chips sees one person's games under another's name.
+  //   2. The probe effect below keys on [evaluator, category]. Resetting category in an
+  //      effect would let that effect fire once with the outgoing category and again
+  //      with 'puzzle' -- two probes per person switch.
+  const [lastEvaluator, setLastEvaluator] = useState(evaluator)
+  if (evaluator !== lastEvaluator) {
+    setLastEvaluator(evaluator)
+    setCategory('puzzle')
+    setConclusion('List_Idea')
+    setFrom(null)
+    setTo(null)
+    setRows([])
+    setHasMore(false)
+    setLoading(true)
+    setInitializing(true)
+  }
+
+  // Resolve the newest-3-days default. Keyed on the person AND the category: the
+  // whole reason this default exists ("a person who did not work over the weekend
+  // must not open an empty table and read it as broken") applies just as much to
+  // switching Category to Arcade, where the puzzle window would otherwise be kept
+  // and an evaluator with no arcade work in those exact three days reads as broken.
+  // Not keyed on conclusion: that dropdown is a deliberate narrowing the reader just
+  // made, and "no Puzzle games marked Priority I between these dates" is a coherent
+  // answer to it, not a broken-looking one -- and re-probing on every pick would
+  // double the request count of using that dropdown at all.
   useEffect(() => {
     let cancelled = false
     setInitializing(true)
-    setCategory('puzzle')
-    setConclusion('List_Idea')
     void (async () => {
-      const { from: f, to: t } = await fetchNewestDays(evaluator, 'puzzle', 'List_Idea')
+      const { from: f, to: t } = await fetchNewestDays(evaluator, category, conclusionRef.current)
       if (cancelled) return
       setFrom(f)
       setTo(t)
       setInitializing(false)
     })()
     return () => { cancelled = true }
-  }, [evaluator])
+  }, [evaluator, category])
 
   // Live conclusion options for the dropdown, merged with the canonical default
   // ordering. Re-fetches on evaluator or category change; a selection change alone
@@ -219,7 +300,21 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
       setRows(prev => (append ? [...prev, ...newRows] : newRows))
       setHasMore(newRows.length === PAGE_SIZE)
     } catch {
-      if (seq === fetchSeqRef.current && !append) { setRows([]); setHasMore(false) }
+      if (seq === fetchSeqRef.current) {
+        if (append) {
+          // Roll the page back and stop. Leaving hasMore true after a failed append
+          // is an infinite retry loop, not a retry: pageRef has already advanced, the
+          // sentinel is still intersecting, and the observer re-fires the moment
+          // loadingMore clears -- asking for page N+2 forever and never showing the
+          // page that failed. Rolling back keeps the next successful load asking for
+          // the right page.
+          pageRef.current = Math.max(1, pageRef.current - 1)
+          setHasMore(false)
+        } else {
+          setRows([])
+          setHasMore(false)
+        }
+      }
     }
     if (seq === fetchSeqRef.current) { setLoading(false); setLoadingMore(false) }
   }, [evaluator, category, conclusion, from, to])
@@ -251,6 +346,42 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
     setLightboxUrl(url)
   }
 
+  // Category owns the date window too, so it has to flip `initializing` here, in the
+  // event handler, not in the probe effect: an effect runs one flush too late, and the
+  // page-1 effect below (which also depends on `category`) would fire once against the
+  // outgoing category's dates before the new window is even asked for.
+  function changeCategory(next: string) {
+    setCategory(next)
+    setInitializing(true)
+    setRows([])
+    setHasMore(false)
+    setLoading(true)
+  }
+
+  // The route applies a range only when BOTH ends are present (rangeFilterFor in
+  // lib/evaluations-filters.ts), so a half-filled pair is silently all-time while one
+  // box still shows a date -- the table would then be lying about its own scope in
+  // its own toolbar. Clearing either box therefore clears both: "no dates" is a state
+  // the reader can see and the query actually has.
+  //
+  // And a reversed pair has no rows by construction, but would print "between
+  // 22/09/2026 and 18/09/2026" in the empty sentence, which reads as a bug rather
+  // than as the reader's own reversed input. Moving one end past the other carries
+  // the other end with it, the way a date picker normally behaves, so the pair is
+  // never stored reversed.
+  function changeFrom(raw: string) {
+    const next = raw || null
+    if (!next) { setFrom(null); setTo(null); return }
+    setFrom(next)
+    if (to && next > to) setTo(next)
+  }
+  function changeTo(raw: string) {
+    const next = raw || null
+    if (!next) { setFrom(null); setTo(null); return }
+    setTo(next)
+    if (from && next < from) setFrom(next)
+  }
+
   const who = canSeeTeam ? evaluator : 'You'
   const have = canSeeTeam ? 'has' : 'have'
   const catLabel = CATEGORY_OPTIONS.find(([v]) => v === category)?.[1] || category
@@ -267,7 +398,7 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
         <div className="rp-review-filters">
           <label className="rp-review-filter">
             <span>Category</span>
-            <select aria-label="Category" value={category} onChange={e => setCategory(e.target.value)}>
+            <select aria-label="Category" value={category} onChange={e => changeCategory(e.target.value)}>
               {CATEGORY_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
@@ -279,13 +410,13 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
           </label>
           <label className="rp-review-filter">
             <span>From</span>
-            <input aria-label="From date" type="date" value={from || ''}
-              onChange={e => setFrom(e.target.value || null)} />
+            <input aria-label="From date" type="date" value={from || ''} max={to || undefined}
+              onChange={e => changeFrom(e.target.value)} />
           </label>
           <label className="rp-review-filter">
             <span>To</span>
-            <input aria-label="To date" type="date" value={to || ''}
-              onChange={e => setTo(e.target.value || null)} />
+            <input aria-label="To date" type="date" value={to || ''} min={from || undefined}
+              onChange={e => changeTo(e.target.value)} />
           </label>
         </div>
         <button type="button" className="btn btn-sm" onClick={() => setExpanded(v => !v)}>
@@ -327,10 +458,20 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
                 </div>
                 {shots.length > 0 && (
                   <div className="rp-review-shots">
+                    {/* An <img> with an onClick and nothing else is a mouse-only
+                        control: no role, no tab stop, no key handler. role/tabIndex/
+                        onKeyDown make the same zoom reachable from the keyboard. */}
                     {shots.map((url, i) => (
                       <img key={i} src={url} alt={`Screenshot ${i + 1}`}
                         className="rp-review-shot"
-                        onClick={() => openShot(url, shots)} />
+                        role="button" tabIndex={0}
+                        onClick={() => openShot(url, shots)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            openShot(url, shots)
+                          }
+                        }} />
                     ))}
                   </div>
                 )}
