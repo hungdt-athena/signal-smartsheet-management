@@ -580,4 +580,52 @@ describe('Individual tab', () => {
     const sub = txt(sr.querySelector('.rp-kpi-sub'))
     expect(sub).toContain('3 final priority')
   })
+
+  // Task 6: the review table is the last block on the tab, and unlike everything above
+  // it, it does not obey the window/genre filter bar - so it must be introduced by its
+  // own separator (rule + title + a sentence saying so), or a reader assumes it is the
+  // same selection as the charts above and reads a contradiction as a bug.
+  describe('review table', () => {
+    it('places a rule, section title, scope note and the table itself - in that order - right after the recording list', async () => {
+      const { container } = await individual(bundleOf(TWO()))
+      // The fixture's `videos: {}` means the recording list itself renders as an Empty
+      // placeholder rather than a populated table, so anchor on the "Recording" section
+      // title instead of the list's own row markup.
+      const recordingTitle = Array.from(container.querySelectorAll('.rp-section-title'))
+        .find((el) => txt(el).startsWith('Recording'))
+      expect(recordingTitle).toBeTruthy()
+      const section = container.querySelector('.rp-review-section')
+      expect(section).not.toBeNull()
+      // the recording section sits before the review section, in document order
+      expect(recordingTitle!.compareDocumentPosition(section!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      const kids = Array.from(section!.children).map((c) => c.classList[0])
+      expect(kids).toEqual(['rp-review-rule', 'rp-section-title', 'rp-review-scope-note', 'rp-review-table'])
+      expect(txt(section!.querySelector('.rp-section-title'))).toMatch(/^Review/)
+    })
+
+    it('states in plain words that the table ignores the window and genre filters', async () => {
+      const { container } = await individual(bundleOf(TWO()))
+      const note = container.querySelector('.rp-review-scope-note')
+      expect(txt(note)).toBe('This table has its own filters and ignores the window and genre at the top of the page.')
+    })
+
+    it('renders it for the contractor themselves when the view is scoped to one person', async () => {
+      const { container } = await individual(bundleOf([person('Alpha', { evaluated: 0 })], {
+        canSeeTeam: false, self: 'k0',
+      }))
+      expect(container.querySelector('.rp-review-table')).not.toBeNull()
+      const calls = (global.fetch as jest.Mock).mock.calls.map((c) => String(c[0]))
+      expect(calls.some((u) => u.includes('/api/evaluations') && u.includes('evaluator=Alpha'))).toBe(true)
+    })
+
+    it('re-targets to the newly selected person when the switcher changes', async () => {
+      const { container } = await individual(bundleOf(TWO()))
+      const people = Array.from(container.querySelectorAll('.rp-people .rp-chip'))
+      fireEvent.click(people[1])
+      await waitFor(() => {
+        const calls = (global.fetch as jest.Mock).mock.calls.map((c) => String(c[0]))
+        expect(calls.some((u) => u.includes('/api/evaluations') && u.includes('evaluator=Beta'))).toBe(true)
+      })
+    })
+  })
 })

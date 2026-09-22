@@ -9,6 +9,7 @@ import {
 } from '@/components/report/charts'
 import type { BenchStats } from '@/lib/report'
 import { isBucket } from '@/lib/buckets'
+import { ReviewTable } from '@/components/report/ReviewTable'
 
 type View = 'week' | 'month' | 'quarter' | 'year' | 'batch' | 'custom'
 // The axis keys below have to stay 'Signal'/'Survival' - they index the `axes` map the
@@ -2726,6 +2727,18 @@ function Individual({ d }: { d: Bundle }) {
               ? <>{fmt.int(e.recorded)} recorded ({e.rec5} × 5min, {e.rec20} × 20min), and {stuck.length} row{stuck.length > 1 ? 's have' : ' has'} sat in <i>Recording</i> for over {STUCK_DAYS} days with no upload matched.</>
               : <>{fmt.int(e.recorded)} recorded ({e.rec5} × 5min, {e.rec20} × 20min), nothing stuck.</>} />
       </Card>
+
+      {/* Last block on the tab, and the one exception to the rule above it: every
+          other card obeys the window/genre filter bar, this one owns its own filters
+          and defaults to the newest work instead. Without the rule+title+note a reader
+          assumes it is the same selection as the charts above and reads a contradiction
+          as a bug (plan doc, "The review table", Design section C). */}
+      <div className="rp-review-section">
+        <div className="rp-review-rule" />
+        <div className="rp-section-title">Review - check the calls themselves, screenshots included</div>
+        <p className="rp-review-scope-note">This table has its own filters and ignores the window and genre at the top of the page.</p>
+        <ReviewTable evaluator={e.name} canSeeTeam={d.canSeeTeam} />
+      </div>
     </>
   )
 }
