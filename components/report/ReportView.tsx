@@ -3,7 +3,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ALL_ROUNDER_AXES, allRounderScore, DEFAULT_REPORT_CONFIG, type AxisName, type ReportConfig } from '@/lib/report-config'
 import {
-  Kpi, RankBars, Heatmap, Funnel, Radar, HealthBars, StackedBars, ColumnChart, DivergingBars, QueueBars,
+  Kpi, RankBars, Heatmap, Funnel, HealthBars, StackedBars, ColumnChart, DivergingBars, QueueBars,
   LineChart, Scatter, SortTable, Empty, fmt, CAT, InfoTip, conclusionColor,
   type Bench, type SortCol,
 } from '@/components/report/charts'
@@ -11,10 +11,10 @@ import type { BenchStats } from '@/lib/report'
 import { isBucket } from '@/lib/buckets'
 
 type View = 'week' | 'month' | 'quarter' | 'year' | 'batch' | 'custom'
-const RADAR_AXES = ['Volume', 'Consistency', 'Signal', 'Survival', 'Recording'] as const
-// The axis keys above have to stay 'Signal'/'Survival' - they index the `axes` map the
-// API sends and the all-rounder weights in lib/report-config.ts. What the reader sees
-// is the lexicon's own word for each: this is the ONLY place that translation happens.
+// The axis keys below have to stay 'Signal'/'Survival' - they index the `axes` map the
+// API sends (still read by the Leaderboard's Overall score and the Config tab's weight
+// preview) and the all-rounder weights in lib/report-config.ts. What the reader sees is
+// the lexicon's own word for each: this is the ONLY place that translation happens.
 const AXIS_LABEL: Record<string, string> = {
   Volume: 'Volume', Consistency: 'Consistency', Signal: 'Hit rate', Survival: 'Shortlist rate', Recording: 'Recording',
 }
@@ -158,7 +158,6 @@ const TIP = {
   backlog: <><F>= count(no evaluate date AND no conclusion)</F>Every game still waiting, across all history. The window filter does not reach it. Games that arrived already evaluated never enter the stock.</>,
   personBacklog: <><F>= count(backlog games assigned to this person)</F>Their slice of the same total the Backlog number on Overview counts, so every evaluator&apos;s slice adds up to it. The window filter does not reach it - this is a snapshot of right now.<br />Age is counted from the day the game was <b>assigned to them</b>, not from when it was imported the way Overview&apos;s &ldquo;Backlog by age&rdquo; counts it. The question here is how long it has been on this desk, and a reassign or handover restarts that clock on purpose - the same clock &ldquo;Days waiting&rdquo; uses. So the two agree on the total and can differ on the age split.</>,
   recorded: <><F>= count(5min) + count(20min)</F>Credited to whoever actually uploaded the video, taken from the upload sheet.</>,
-  radar: <><F>axis = value ÷ team best × 100</F>Volume = games evaluated · Consistency = active days ÷ weekdays (weekend counts as bonus) · Hit rate & Shortlist rate = rates ÷ evaluated · Recording = videos. Every axis normalized to the best person.</>,
   // Named "all-rounder score" until the redesign: one word of jargon that had to be
   // translated before the number could be read. The formula is unchanged.
   overall: <><F>= 0.4×Volume + 0.6×avg(Consistency, Hit rate, Shortlist rate, Recording)×sample weight</F>How much someone did, at 40%, and how well, at 60%. The quality half is scaled by sample weight, so 35 games on a good run cannot outrank 700 steady ones. Volume itself is never discounted. On each axis the team&apos;s best scores 100.</>,
@@ -2190,137 +2189,6 @@ function pctPair(value: number, bench: number | null): [string, (n: number) => s
     ? [fmt.pct1(value), fmt.pct1]
     : [fmt.pct(value), fmt.pct]
 }
-/* Daily breakdown: one row per calendar DAY, plain numbers, no chart. The three
-   named conclusions are the ones the team steers by; anything else the Config tab
-   allows is folded into "Other" (hover it for the split). Video counts come from
-   the recording list rows (confirmed date + slot), so this panel and the recording list
-   card below can never disagree. */
-const DAILY_COLS = ['Bypass', 'Playtest & Bypass', 'List_Idea'] as const
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-// Longest span we will enumerate day-by-day. Past this (a wide custom range) the
-// table falls back to days that actually have activity - a 400-row table of mostly
-// zeros is not a breakdown, and the caller says so on screen.
-const DAILY_MAX_DAYS = 120
-
-function dailyRows(mix: Record<string, Record<string, number>>, vids: Bundle['videos'][string], win: Bundle['window']) {
-  const rec5: Record<string, number> = {}
-  const rec20: Record<string, number> = {}
-  for (const v of vids) {
-    if (!v.recordedOn) continue
-    const t = v.slot === '20min' ? rec20 : rec5
-    t[v.recordedOn] = (t[v.recordedOn] || 0) + 1
-  }
-  // day axis: every day in the window when we know its bounds (so idle days show as
-  // zeros), otherwise only the days with something on them
-  let days: string[] = []
-  let filled = false
-  if (win.from && win.to) {
-    const start = new Date(win.from + 'T00:00:00Z')
-    const end = new Date(win.to + 'T00:00:00Z')
-    const span = Math.round((end.getTime() - start.getTime()) / 86400000)
-    if (span > 0 && span <= DAILY_MAX_DAYS) {
-      filled = true
-      for (const dt = new Date(start); dt < end; dt.setUTCDate(dt.getUTCDate() + 1)) days.push(dt.toISOString().slice(0, 10))
-    }
-  }
-  if (!filled) {
-    days = Array.from(new Set([...Object.keys(mix), ...Object.keys(rec5), ...Object.keys(rec20)])).sort()
-  }
-  const rows = days.map((day) => {
-    const m = mix[day] || {}
-    const named = DAILY_COLS.map((c) => m[c] || 0)
-    const otherEntries = Object.entries(m).filter(([c]) => !DAILY_COLS.includes(c as typeof DAILY_COLS[number]))
-    const other = otherEntries.reduce((s, [, n]) => s + n, 0)
-    const dow = new Date(day + 'T00:00:00Z').getUTCDay()
-    return {
-      day, dow, named, other,
-      otherTitle: otherEntries.map(([c, n]) => `${c}: ${n}`).join(' · '),
-      evaluated: named.reduce((a, b) => a + b, 0) + other,
-      r5: rec5[day] || 0, r20: rec20[day] || 0,
-    }
-  })
-  return { rows, filled }
-}
-
-function DailyBreakdown({ person, mix, vids, win, onClose }: {
-  person: string
-  mix: Record<string, Record<string, number>>
-  vids: Bundle['videos'][string]
-  win: Bundle['window']
-  onClose: () => void
-}) {
-  useEffect(() => {
-    const h = (ev: KeyboardEvent) => { if (ev.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose])
-  const { rows, filled } = dailyRows(mix, vids, win)
-  const hasOther = rows.some((r) => r.other > 0)
-  const tot = rows.reduce((a, r) => ({
-    named: a.named.map((n, i) => n + r.named[i]),
-    other: a.other + r.other, evaluated: a.evaluated + r.evaluated, r5: a.r5 + r.r5, r20: a.r20 + r.r20,
-  }), { named: DAILY_COLS.map(() => 0), other: 0, evaluated: 0, r5: 0, r20: 0 })
-  const workedDays = rows.filter((r) => r.evaluated > 0 || r.r5 > 0 || r.r20 > 0).length
-  // '·' instead of 0 so the eye lands on the days that actually have numbers
-  const num = (n: number, key: string, title?: string) => <td key={key} className={n ? '' : 'zero'} title={title}>{n || '·'}</td>
-  return (
-    <div className="rp-modal-backdrop" onClick={onClose}>
-      <div className="rp-modal card rp-daily-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="card-head">
-          <span className="card-label">{person} - daily breakdown</span>
-          <span className="card-head-right">
-            <span className="card-note">{win.label} · {workedDays} active {workedDays === 1 ? 'day' : 'days'} of {rows.length}</span>
-            <button className="rp-expand" onClick={onClose} aria-label="Close" title="Close (Esc)">✕</button>
-          </span>
-        </div>
-        <div className="rp-daily-wrap">
-          <table className="rp-daily">
-            <thead>
-              <tr>
-                <th className="l">Day</th>
-                <th>Bypass</th>
-                <th>P&amp;B</th>
-                <th>List_Idea</th>
-                {hasOther && <th>Other</th>}
-                <th className="sep">Evaluated</th>
-                <th>5min</th>
-                <th>20min</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.day} className={(r.dow === 0 || r.dow === 6 ? 'we' : '') + (r.evaluated || r.r5 || r.r20 ? '' : ' idle')}>
-                  <td className="l">{DAY_NAMES[r.dow]} {r.day.slice(8)}/{r.day.slice(5, 7)}</td>
-                  {r.named.map((n, i) => num(n, 'c' + i))}
-                  {hasOther && num(r.other, 'other', r.otherTitle || undefined)}
-                  <td className="sep strong">{r.evaluated || '·'}</td>
-                  {num(r.r5, 'r5')}
-                  {num(r.r20, 'r20')}
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td className="l">Total</td>
-                {tot.named.map((n, i) => <td key={i}>{n}</td>)}
-                {hasOther && <td>{tot.other}</td>}
-                <td className="sep">{tot.evaluated}</td>
-                <td>{tot.r5}</td>
-                <td>{tot.r20}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        <ReadNote>
-          Conclusions are counted on <b>evaluate date</b>, videos on the date the recording was <b>confirmed</b> in the Record tab - so a video can land on a different day than the evaluation. <b>Evaluated</b> excludes dead links, same as everywhere else in this report.
-          {!filled && <> Only days with activity are listed here (the window is too wide to enumerate every calendar day).</>}
-          {filled && <> Every day in the window is listed; dimmed rows are days with no activity, shaded rows are weekends.</>}
-        </ReadNote>
-      </div>
-    </div>
-  )
-}
-
 // The kicker on Individual's verdict chips. `net` and `wait` reuse Overview's own
 // words on purpose: this tab's "Backlog +N" chip IS growth and its "oldest Nd" chip
 // IS age - the same two numbers Overview's chips are named for, read for one person
@@ -2343,7 +2211,6 @@ const IND_T = {
 
 function Individual({ d }: { d: Bundle }) {
   const [selKey, setSel] = useState('')
-  const [daily, setDaily] = useState(false)
   const selected = useMemo(() => {
     if (!d.evaluators.length) return null
     return d.evaluators.find((e) => e.key === selKey) || d.evaluators[0]
@@ -2379,30 +2246,6 @@ function Individual({ d }: { d: Bundle }) {
     multi && ok ? vsTeam(value, bench, format, dir) : null
   const hasDays = e.activeDays > 0
   const [srVal, srFmt] = pctPair(e.survivalRate, multi ? tb.survivalRate : null)
-
-  const rad = d.radar.find((r) => r.key === e.key)
-  const radarValues = rad ? RADAR_AXES.map((a) => rad.axes[a] || 0) : RADAR_AXES.map(() => 0)
-  // raw counterpart of each normalized axis, printed under the axis caption
-  const radarRaw = [fmt.int(e.evaluated), fmt.pct(e.consistency), fmt.pct(e.signalRate), fmt.pct(e.survivalRate), fmt.int(e.recorded)]
-  const weakAxis = rad ? RADAR_AXES.reduce((w, a) => ((rad.axes[a] || 0) < (rad.axes[w] || 0) ? a : w), RADAR_AXES[0]) : null
-  const strongAxis = rad ? RADAR_AXES.reduce((w, a) => ((rad.axes[a] || 0) > (rad.axes[w] || 0) ? a : w), RADAR_AXES[0]) : null
-
-  const funnelStages = [
-    { label: 'Evaluated', value: e.evaluated },
-    { label: 'Shortlist', value: e.shortlisted },
-    { label: 'Final Priority', value: e.finalPriority, parts: [
-      { label: 'Priority IV', value: e.priorityIV, color: CAT[4] },
-      { label: 'Insight', value: e.insight, color: CAT[6] },
-    ] },
-  ]
-  // Assigned is gone from the funnel, matching Overview: it counts new intake, a
-  // different set of games from the ones judged in this window, so putting it on top
-  // made the first conversion a ratio between two populations.
-  const pSteps = [
-    { from: 'Evaluated', to: 'Shortlist', a: e.evaluated, b: e.shortlisted, team: tf.evaluated > 0 ? tf.shortlisted / tf.evaluated : 0 },
-    { from: 'Shortlist', to: 'Final Priority', a: e.shortlisted, b: e.finalPriority, team: tf.shortlisted > 0 ? tf.finalPriority / tf.shortlisted : 0 },
-  ].filter((s) => s.a > 0)
-  const pWorstStep = [...pSteps].sort((x, y) => x.b / x.a - y.b / y.a)[0]
 
   // ---- their own series ----
   const ps = d.personSeries?.[e.key] || []
@@ -2714,7 +2557,7 @@ function Individual({ d }: { d: Bundle }) {
       <div className="rp-people">
         {d.evaluators.map((x) => (
           d.canSeeTeam ? (
-            <button key={x.key} className={'rp-chip' + (x.key === e.key ? ' active' : '')} onClick={() => { setSel(x.key); setDaily(false) }}>
+            <button key={x.key} className={'rp-chip' + (x.key === e.key ? ' active' : '')} onClick={() => setSel(x.key)}>
               {x.name}{x.title && <span className="rp-chip-title">{x.title}</span>} <span className="rp-chip-n">{x.evaluated || x.recorded}</span>
             </button>
           ) : (
@@ -2724,14 +2567,7 @@ function Individual({ d }: { d: Bundle }) {
             </span>
           )
         ))}
-        <button className="rp-daily-btn" onClick={() => setDaily(true)}
-          title={`Day-by-day numbers for ${e.name}: Bypass · Playtest & Bypass · List_Idea · 5min & 20min videos`}>
-          ▦ Daily breakdown
-        </button>
       </div>
-      {daily && (
-        <DailyBreakdown person={e.name} mix={d.dailyMix?.[e.key] || {}} vids={vids} win={d.window} onClose={() => setDaily(false)} />
-      )}
 
       <VerdictHeader tone={verdictTone} headline={headline} chips={chips}
         kicker={(k) => IND_KICKER[k] ?? k.toUpperCase()} verdictRef={verdictRef} onChip={focus} />
@@ -2745,8 +2581,9 @@ function Individual({ d }: { d: Bundle }) {
           separates nobody), Link dead and Recorded (source quality and assigned work,
           both of which have a card that shows them in context), Assigned (it is the
           Backlog chip and the activity chart), and Hit rate (it lands days late, so a
-          KPI tile makes an open window look like a collapse - it is on the radar and
-          in the funnel, where the lateness can be said). */}
+          KPI tile makes an open window look like a collapse - it is folded into the
+          Shortlist rate sub-line's final-priority count instead, where it reads as
+          "N of these M" rather than as a rate an open window would understate). */}
       <div className="rp-kpi-row">
         <Kpi label="Evaluated" value={fmt.int(e.evaluated)} sub={`judged this ${winName}`} hi focusKey="share"
           spark={personSpark.length >= 2 ? personSpark : undefined} noTrend sparkNote={`games per ${unitName}`}
@@ -2757,31 +2594,14 @@ function Individual({ d }: { d: Bundle }) {
           bench={cmp(e.throughput, tb.throughput, (n) => fmt.dec(n), 'up', hasDays)} />
         <Kpi label="Days waiting" value={fmt.days(e.turnaround)} sub="assign → evaluate" tip={TIP.turnaround}
           bench={cmp(e.turnaround, tb.turnaround, (n) => fmt.days(n), 'down')} />
-        <Kpi label="Shortlist rate" value={srVal} sub={`${fmt.int(e.shortlisted)} of ${fmt.int(e.evaluated)} evaluated`}
+        {/* Sub-line carries a second number, from Task 2: the Pick funnel card is gone,
+            but its third figure - final priority, the one count of the three that was
+            not already a KPI elsewhere on this tab - must not be lost with it. */}
+        <Kpi label="Shortlist rate" value={srVal}
+          sub={`${fmt.int(e.shortlisted)} of ${fmt.int(e.evaluated)} evaluated, ${fmt.int(e.finalPriority)} final priority`}
           spark={qualityRows.length >= 2 ? qualityRows.map((p) => Math.round((p.shortlisted / p.evaluated) * 1000)) : undefined}
           noTrend sparkNote={`rate per ${unitName}`} sparkColor={CAT[3]} tip={TIP.survival}
           bench={cmp(e.survivalRate, tb.survivalRate, srFmt, 'up', e.evaluated > 0)} />
-      </div>
-
-      <div className="rp-section-title">Shape - what {self ? 'you are' : 'they are'} strong and weak at</div>
-      <div className="rp-grid-2-1">
-        <Card label={self ? 'Your performance shape' : `${e.name} - performance shape`} note="5 axes, normalized to team best · raw value under each axis" tip={TIP.radar}>
-          <Radar axes={RADAR_AXES.map((a) => AXIS_LABEL[a])} series={[{ name: e.name, values: radarValues }]} axisRaw={radarRaw} size={260} />
-          <Foot
-            read={<>A balanced polygon is well-rounded, a spiky one is lopsided. Every axis is scaled so the team&apos;s best person scores 100, and the real number sits under each caption.</>}
-            now={weakAxis && strongAxis
-              ? <>{Their} shortest axis is <b>{AXIS_LABEL[weakAxis]}</b> at {rad?.axes[weakAxis] ?? 0} of 100, {their} longest <b>{AXIS_LABEL[strongAxis]}</b> at {rad?.axes[strongAxis] ?? 0}.{weakAxis === 'Signal' ? ' Hit rate is stamped by a moderator days later, so an open window reads low here for everyone.' : ''}</>
-              : null} />
-        </Card>
-        <Card label="Pick funnel" note="evaluated → shortlist → final priority"
-          tip={<><F>shortlist = initial ≠ bypass · final = Priority IV + Insight</F>It starts at Evaluated, matching Overview. Assigned counts new intake - a different set of games from the ones judged here - so a conversion from it would be a ratio between two populations. Each band carries its conversion from the band above.</>}>
-          <Funnel stages={funnelStages} />
-          <Foot
-            read={<>Each band is a share of the one above it, so the narrow step is where the picks are lost. Final Priority is stamped by a moderator days after the evaluation, so it reads low on a {winName} that is still open.</>}
-            now={pWorstStep
-              ? <>The narrowest step is <b>{pWorstStep.from} → {pWorstStep.to}</b>, {fmt.pct(pWorstStep.b / pWorstStep.a)} through against {fmt.pct(pWorstStep.team)} for the team.</>
-              : <>Nothing has been judged this {winName} yet.</>} />
-        </Card>
       </div>
 
       <div className="rp-section-title">Tempo - what came in, what went out, and what is left</div>

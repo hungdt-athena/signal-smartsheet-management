@@ -557,4 +557,27 @@ describe('Individual tab', () => {
     expect(act.do).toBe('Ask for a rebalance now, not at the end of the week')
     expect(act.do).not.toContain('Ask Alpha')
   })
+
+  // Task 2: three blocks removed for the same reason - they describe a distribution
+  // and cannot be acted on. `d.radar` stays on the payload (Leaderboard's Overall score
+  // and the Config weight preview both read it); only the Individual-tab consumption
+  // of it goes away here.
+  it('renders no radar, no pick funnel and no daily-breakdown trigger', async () => {
+    const { container } = await individual(bundleOf(TWO()))
+    expect(txt(container).includes('performance shape')).toBe(false)
+    expect(container.querySelector('.rp-radar-wrap')).toBeNull()
+    expect(Array.from(container.querySelectorAll('.card-label')).map(txt)).not.toContain('Pick funnel')
+    expect(screen.queryByRole('button', { name: /Daily breakdown/ })).toBeNull()
+    expect(container.querySelector('.rp-daily-modal')).toBeNull()
+  })
+
+  it('names the final-priority count in the Shortlist rate KPI sub-line', async () => {
+    // finalPriority: 3 on a fixture where each of the two people evaluates 600 games,
+    // via `person()`'s default in `bundleOf`.
+    const { container } = await individual(bundleOf(TWO()))
+    const sr = Array.from(container.querySelectorAll('.rp-kpi'))
+      .find((k) => txt(k.querySelector('.rp-kpi-label')).startsWith('Shortlist rate'))!
+    const sub = txt(sr.querySelector('.rp-kpi-sub'))
+    expect(sub).toContain('3 final priority')
+  })
 })
