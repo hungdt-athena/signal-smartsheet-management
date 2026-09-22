@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Lightbox } from '@/components/Lightbox'
+import { prettyConclusion } from '@/lib/buckets'
 
 // The Individual tab's bottom block: one evaluator's judged games, one row each,
 // with the StoreKit screenshots visible so a wrong call is obvious at a glance --
@@ -10,13 +11,53 @@ import { Lightbox } from '@/components/Lightbox'
 
 const PAGE_SIZE = 20
 
-// Only the filters this table exposes -- not the full conclusion list the
-// Evaluations screen offers, and 'all' is deliberately absent: category_group is
-// a required, non-empty column and there is no 'all' value for it in the DB.
+// 'all' is deliberately absent from the category filter: category_group is a
+// required, non-empty column and there is no 'all' value for it in the DB.
 const CATEGORY_OPTIONS: Array<[string, string]> = [
   ['puzzle', 'Puzzle'], ['arcade', 'Arcade'], ['simulation', 'Sim'],
 ]
-const CONCLUSION_OPTIONS = ['Bypass', 'List_Idea', 'Playtest & Bypass']
+
+// Fallback/canonical ordering for the conclusion filter -- kept in sync with
+// CONFIG_DEFAULTS.conclusion in lib/config.ts (server-only, so not imported
+// directly into this client component), the same way the Evaluations page's own
+// local CONCLUSION_OPTIONS copy is. This is never the only source of truth: it
+// is merged with the live, admin-editable list fetched from /api/evaluations/facets
+// below, the same merge app/(manager)/evaluations/page.tsx's fetchFacets already
+// does. Without that merge this dropdown would only ever offer 3 of the 17 real
+// values, and a manager reviewing an evaluator whose games carry any of the other
+// 14 could never select a filter that would show them.
+const CONCLUSION_DEFAULTS = [
+  'Bypass', 'Conclusion', 'Good', 'Link_dead', 'M_ByPass', 'Need deeper testing', 'Skip',
+  'Wait for PlayTest', 'Priority IV: Idea', 'Priority III: Watchlist for next phase',
+  'Check Market Data', 'Watchlist for next milestone', 'Priority II', 'Priority I',
+  'Need Direction', 'List_Idea', 'Playtest & Bypass',
+]
+
+// Canonical-first, then any live values the canonical list doesn't know about
+// (sorted), same ordering /api/evaluations/route.ts computes for available_conclusions
+// server-side and app/(manager)/evaluations/page.tsx's fetchFacets mirrors client-side.
+// `selected` is folded in so the currently-chosen filter value never disappears from
+// its own dropdown mid-fetch or if the live list temporarily omits it.
+function mergeConclusionOptions(live: string[], selected: string): string[] {
+  const merged = Array.from(new Set([...live, selected]))
+  return CONCLUSION_DEFAULTS.filter(c => merged.includes(c))
+    .concat(merged.filter(c => !CONCLUSION_DEFAULTS.includes(c)).sort())
+}
+
+// The live, admin-editable conclusion list for this evaluator/category (Config tab,
+// config_options table). Scoped by category+evaluator only (no date/conclusion
+// filter) so it reflects every value that evaluator's rows have ever carried, not
+// just what falls inside whatever date window this table's filters currently show.
+async function fetchConclusionOptions(evaluator: string, category: string): Promise<string[]> {
+  try {
+    const params = new URLSearchParams({ category, evaluator })
+    const res = await fetch(`/api/evaluations/facets?${params}`)
+    const json = await res.json()
+    return Array.isArray(json.available_conclusions) ? json.available_conclusions : []
+  } catch {
+    return []
+  }
+}
 
 interface ReviewRow {
   id: number
@@ -89,6 +130,10 @@ async function fetchNewestDays(
 export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canSeeTeam: boolean }): JSX.Element {
   const [category, setCategory] = useState('puzzle')
   const [conclusion, setConclusion] = useState('List_Idea')
+  // Full canonical list until the live facets response narrows it -- same as
+  // app/(manager)/evaluations/page.tsx's own availableConclusions state, so the
+  // dropdown never flashes down to just the one selected value on first paint.
+  const [conclusionOptions, setConclusionOptions] = useState<string[]>(() => CONCLUSION_DEFAULTS.slice())
   const [from, setFrom] = useState<string | null>(null)
   const [to, setTo] = useState<string | null>(null)
   const [initializing, setInitializing] = useState(true)
@@ -106,6 +151,11 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
   const pageRef = useRef(1)
   const fetchSeqRef = useRef(0)
   const sentinelRef = useRef<HTMLDivElement>(null)
+  // Read inside the conclusion-options effect below without making `conclusion`
+  // one of its dependencies -- that fetch only needs to re-run when evaluator or
+  // category changes, not on every selection the person makes in that same dropdown.
+  const conclusionRef = useRef(conclusion)
+  useEffect(() => { conclusionRef.current = conclusion }, [conclusion])
 
   // Resolve the newest-3-days default whenever the person being viewed changes
   // (also covers first mount). Resets the other two filters to their defaults too,
@@ -124,6 +174,19 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
     })()
     return () => { cancelled = true }
   }, [evaluator])
+
+  // Live conclusion options for the dropdown, merged with the canonical default
+  // ordering. Re-fetches on evaluator or category change; a selection change alone
+  // does not need a new fetch (see conclusionRef above).
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const live = await fetchConclusionOptions(evaluator, category)
+      if (cancelled) return
+      setConclusionOptions(mergeConclusionOptions(live, conclusionRef.current))
+    })()
+    return () => { cancelled = true }
+  }, [evaluator, category])
 
   const fetchPage = useCallback(async (page: number, append: boolean) => {
     const seq = ++fetchSeqRef.current
@@ -181,7 +244,7 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
   const rangeText = from && to
     ? (from === to ? ` on ${fmtDate(from)}` : ` between ${fmtDate(from)} and ${fmtDate(to)}`)
     : ''
-  const emptySentence = `${who} ${have} no ${catLabel} games marked ${conclusion}${rangeText}.`
+  const emptySentence = `${who} ${have} no ${catLabel} games marked ${prettyConclusion(conclusion)}${rangeText}.`
 
   const showEmpty = !initializing && !loading && rows.length === 0
 
@@ -198,7 +261,7 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
           <label className="rp-review-filter">
             <span>Initial conclusion</span>
             <select aria-label="Initial conclusion" value={conclusion} onChange={e => setConclusion(e.target.value)}>
-              {CONCLUSION_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+              {conclusionOptions.map(c => <option key={c} value={c}>{prettyConclusion(c)}</option>)}
             </select>
           </label>
           <label className="rp-review-filter">
@@ -246,7 +309,7 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
                   </div>
                 </div>
                 <div className="rp-review-conclusion">
-                  <span className="pill tag">{row.initial_conclusion || '—'}</span>
+                  <span className="pill tag">{prettyConclusion(row.initial_conclusion)}</span>
                   <span className="rp-review-judged">Judged {judged}</span>
                 </div>
                 {shots.length > 0 && (

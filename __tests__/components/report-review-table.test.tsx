@@ -53,6 +53,28 @@ function parseCalls(mock: jest.Mock) {
   })
 }
 
+// Single dispatcher for every test's fetch mock: routes a request to the facets
+// response, the newest-days probe (limit=100), or a page of list rows, by URL
+// shape alone -- the same three requests the component actually makes.
+function mockApi(opts: {
+  probe?: unknown[]
+  facets?: string[]
+  pages?: Record<string, unknown[]>
+  list?: unknown[] // shorthand for pages: { '1': list } when there is only one page
+} = {}) {
+  return jest.fn(async (url: string) => {
+    const u = new URL(String(url), 'http://x')
+    if (u.pathname.endsWith('/facets')) {
+      return { ok: true, json: async () => ({ available_conclusions: opts.facets || [] }) } as Response
+    }
+    const isProbe = u.searchParams.get('limit') === '100'
+    if (isProbe) return { ok: true, json: async () => ({ data: opts.probe || [] }) } as Response
+    const page = u.searchParams.get('page') || '1'
+    const pages = opts.pages || (opts.list ? { '1': opts.list } : {})
+    return { ok: true, json: async () => ({ data: pages[page] || [] }) } as Response
+  })
+}
+
 beforeEach(() => {
   installObserver('noop')
 })
@@ -68,19 +90,12 @@ describe('ReviewTable', () => {
       row({ id: 4, evaluate_date: '2026-09-18T09:00:00Z', updated_at: '2026-09-18T09:00:00Z' }),
       row({ id: 5, evaluate_date: '2026-09-10T09:00:00Z', updated_at: '2026-09-10T09:00:00Z' }),
     ]
-    const fetchMock = jest.fn(async (url: string) => {
-      const u = new URL(url, 'http://x')
-      const isProbe = u.searchParams.get('limit') === '100'
-      return {
-        ok: true,
-        json: async () => ({ data: isProbe ? probeRows : [probeRows[0], probeRows[1], probeRows[2]] }),
-      } as Response
-    })
+    const fetchMock = mockApi({ probe: probeRows, list: [probeRows[0], probeRows[1], probeRows[2]] })
     global.fetch = fetchMock as unknown as typeof fetch
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getAllByText('Merge Puzzle').length).toBeGreaterThan(0))
     const calls = parseCalls(fetchMock)
     const probeCall = calls.find(c => c.limit === '100')!
     expect(probeCall.category).toBe('puzzle')
@@ -98,15 +113,15 @@ describe('ReviewTable', () => {
     expect(listCall.from).toBe('2026-09-18')
     expect(listCall.to).toBe('2026-09-22')
 
-    await waitFor(() => expect(screen.getAllByText('Merge Puzzle').length).toBeGreaterThan(0))
+    // The conclusion-options facets request also fired, scoped the same way.
+    const facetsCall = fetchMock.mock.calls.find(([u]) => new URL(String(u), 'http://x').pathname.endsWith('/facets'))!
+    const facetsParams = new URL(String(facetsCall[0]), 'http://x').searchParams
+    expect(facetsParams.get('category')).toBe('puzzle')
+    expect(facetsParams.get('evaluator')).toBe('NhiLV')
   })
 
   it('refetches from page 1 when a filter changes', async () => {
-    const fetchMock = jest.fn(async (url: string) => {
-      const u = new URL(url, 'http://x')
-      const isProbe = u.searchParams.get('limit') === '100'
-      return { ok: true, json: async () => ({ data: isProbe ? [] : [row()] }) } as Response
-    })
+    const fetchMock = mockApi({ list: [row()] })
     global.fetch = fetchMock as unknown as typeof fetch
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
@@ -115,23 +130,19 @@ describe('ReviewTable', () => {
 
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'arcade' } })
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    const calls = parseCalls(fetchMock)
-    expect(calls[0].category).toBe('arcade')
-    expect(calls[0].page).toBe('1')
+    // Changing category also re-fetches the conclusion facets (they're scoped by
+    // category), so wait for the list refetch specifically rather than any count.
+    await waitFor(() => {
+      const calls = parseCalls(fetchMock)
+      expect(calls.some(c => c.category === 'arcade' && c.page === '1' && c.limit === '20')).toBe(true)
+    })
   })
 
   it('appends page 2 from the sentinel rather than replacing page 1', async () => {
     installObserver('firing')
     const page1 = Array.from({ length: 20 }, (_, i) => row({ id: i + 1, title: `Game ${i + 1}` }))
     const page2 = [row({ id: 21, title: 'Game 21' })]
-    const fetchMock = jest.fn(async (url: string) => {
-      const u = new URL(url, 'http://x')
-      const isProbe = u.searchParams.get('limit') === '100'
-      if (isProbe) return { ok: true, json: async () => ({ data: [] }) } as Response
-      const page = u.searchParams.get('page')
-      return { ok: true, json: async () => ({ data: page === '2' ? page2 : page1 }) } as Response
-    })
+    const fetchMock = mockApi({ pages: { '1': page1, '2': page2 } })
     global.fetch = fetchMock as unknown as typeof fetch
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
@@ -144,14 +155,7 @@ describe('ReviewTable', () => {
   })
 
   it('renders a game with no screenshots without an empty strip', async () => {
-    const fetchMock = jest.fn(async (url: string) => {
-      const u = new URL(url, 'http://x')
-      const isProbe = u.searchParams.get('limit') === '100'
-      return {
-        ok: true,
-        json: async () => ({ data: isProbe ? [] : [row({ screenshot_urls: null, manual_screenshot_urls: null })] }),
-      } as Response
-    })
+    const fetchMock = mockApi({ list: [row({ screenshot_urls: null, manual_screenshot_urls: null })] })
     global.fetch = fetchMock as unknown as typeof fetch
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
@@ -161,15 +165,8 @@ describe('ReviewTable', () => {
   })
 
   it('falls back to manual screenshots when the StoreKit array is empty', async () => {
-    const fetchMock = jest.fn(async (url: string) => {
-      const u = new URL(url, 'http://x')
-      const isProbe = u.searchParams.get('limit') === '100'
-      return {
-        ok: true,
-        json: async () => ({
-          data: isProbe ? [] : [row({ screenshot_urls: [], manual_screenshot_urls: ['https://cdn.example/manual1.png'] })],
-        }),
-      } as Response
+    const fetchMock = mockApi({
+      list: [row({ screenshot_urls: [], manual_screenshot_urls: ['https://cdn.example/manual1.png'] })],
     })
     global.fetch = fetchMock as unknown as typeof fetch
 
@@ -180,11 +177,7 @@ describe('ReviewTable', () => {
   })
 
   it('opens the shared lightbox with the whole strip on a screenshot click', async () => {
-    const fetchMock = jest.fn(async (url: string) => {
-      const u = new URL(url, 'http://x')
-      const isProbe = u.searchParams.get('limit') === '100'
-      return { ok: true, json: async () => ({ data: isProbe ? [] : [row()] }) } as Response
-    })
+    const fetchMock = mockApi({ list: [row()] })
     global.fetch = fetchMock as unknown as typeof fetch
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
@@ -202,11 +195,7 @@ describe('ReviewTable', () => {
   })
 
   it('expands the table out of the content column and can be toggled back', async () => {
-    const fetchMock = jest.fn(async (url: string) => {
-      const u = new URL(url, 'http://x')
-      const isProbe = u.searchParams.get('limit') === '100'
-      return { ok: true, json: async () => ({ data: isProbe ? [] : [row()] }) } as Response
-    })
+    const fetchMock = mockApi({ list: [row()] })
     global.fetch = fetchMock as unknown as typeof fetch
 
     const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
@@ -223,7 +212,7 @@ describe('ReviewTable', () => {
   })
 
   it('renders a sentence naming the filters when the result is empty, instead of a blank area', async () => {
-    const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ data: [] }) } as Response))
+    const fetchMock = mockApi()
     global.fetch = fetchMock as unknown as typeof fetch
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
@@ -232,12 +221,14 @@ describe('ReviewTable', () => {
     const empty = document.querySelector('.rp-review-empty')
     expect(empty).not.toBeNull()
     expect(empty!.textContent).toMatch(/puzzle/i)
-    expect(empty!.textContent).toMatch(/List_Idea/)
+    // Pretty label, not the raw stored/transmitted value -- see prettyConclusion.
+    expect(empty!.textContent).toMatch(/List Idea/)
+    expect(empty!.textContent).not.toMatch(/List_Idea/)
     expect(empty!.textContent).toMatch(/You/)
   })
 
   it('names the evaluator (not "You") in the empty sentence when the viewer can see the team', async () => {
-    const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ data: [] }) } as Response))
+    const fetchMock = mockApi()
     global.fetch = fetchMock as unknown as typeof fetch
 
     render(<ReviewTable evaluator="QuangVN" canSeeTeam={true} />)
@@ -247,20 +238,13 @@ describe('ReviewTable', () => {
   })
 
   it('renders a row with every optional field missing without NaN, Infinity or undefined on screen', async () => {
-    const fetchMock = jest.fn(async (url: string) => {
-      const u = new URL(url, 'http://x')
-      const isProbe = u.searchParams.get('limit') === '100'
-      return {
-        ok: true,
-        json: async () => ({
-          data: isProbe ? [] : [row({
-            title: null, icon_url: null, publisher_name: null, release_date: null,
-            os: null, app_link: null, initial_conclusion: null,
-            evaluate_date: null, updated_at: null,
-            screenshot_urls: null, manual_screenshot_urls: null,
-          })],
-        }),
-      } as Response
+    const fetchMock = mockApi({
+      list: [row({
+        title: null, icon_url: null, publisher_name: null, release_date: null,
+        os: null, app_link: null, initial_conclusion: null,
+        evaluate_date: null, updated_at: null,
+        screenshot_urls: null, manual_screenshot_urls: null,
+      })],
     })
     global.fetch = fetchMock as unknown as typeof fetch
 
@@ -279,5 +263,46 @@ describe('ReviewTable', () => {
     expect(screen.getByText('Unknown developer')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3) // platform, release date, conclusion
     expect(screen.getByText(/Judged —/)).toBeInTheDocument()
+  })
+
+  it('offers the real, admin-editable conclusion list, not a hardcoded shortlist', async () => {
+    // A deliberately small, deliberately unhardcoded set: 'Good' was never one of
+    // this component's old 3 static options, so its option existing proves the
+    // dropdown is driven by the fetched facets response, not a static array --
+    // and 'Skip' being ABSENT from the live list proves it isn't just unioning in
+    // every possible value regardless of what the server actually returned.
+    const fetchMock = mockApi({ facets: ['Good', 'List_Idea'], list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
+    await waitFor(() => {
+      const values = Array.from(select.options).map(o => o.value)
+      expect(values).toEqual(expect.arrayContaining(['Good', 'List_Idea']))
+    })
+    const values = Array.from(select.options).map(o => o.value)
+    expect(values).not.toContain('Skip')
+    // Pretty label in the option text, raw value preserved on the option itself
+    // (the value is what gets sent back to the server; only the label changes).
+    const goodOption = Array.from(select.options).find(o => o.value === 'List_Idea')!
+    expect(goodOption.textContent).toBe('List Idea')
+  })
+
+  it('shows the pretty conclusion label on the row pill, never the raw stored value', async () => {
+    const fetchMock = mockApi({ list: [row({ initial_conclusion: 'List_Idea' })] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const pill = container.querySelector('.rp-review-conclusion .pill')
+    expect(pill).not.toBeNull()
+    expect(pill!.textContent).toBe('List Idea')
+    // The raw underscored value must not leak into any rendered TEXT (the <option
+    // value="List_Idea"> attribute is fine -- that's the value sent back to the
+    // server, not text a reader sees).
+    expect(container.textContent).not.toMatch(/List_Idea/)
   })
 })
