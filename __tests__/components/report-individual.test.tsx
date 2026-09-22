@@ -1,6 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ReportView } from '@/components/report/ReportView'
 
+// ReportView now reads ?rtab=/?focus= (Task 5); this file doesn't exercise that, so a
+// static stub is enough - same idiom as report-url-state.test.tsx.
+jest.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: jest.fn() }),
+  usePathname: () => '/team-ops',
+}))
+
 // The Individual tab's contract after the 2026-09-16 redesign. Same reading contract
 // as Overview and Leaderboard, plus the two things that are only true here:
 //

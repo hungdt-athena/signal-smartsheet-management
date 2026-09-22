@@ -1,6 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ReportView } from '@/components/report/ReportView'
 
+// ReportView now reads ?rtab=/?focus= (Task 5); this file doesn't exercise that, so a
+// static stub is enough - same idiom as report-url-state.test.tsx.
+jest.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: jest.fn() }),
+  usePathname: () => '/team-ops',
+}))
+
 // The Leaderboard tab's contract. It is a reading contract first, like Overview's:
 //
 //   1. Guide, then one sentence, then chips, then AT MOST THREE actions. Nothing is

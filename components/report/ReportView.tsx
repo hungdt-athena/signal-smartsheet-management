@@ -1,5 +1,6 @@
 'use client'
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ALL_ROUNDER_AXES, allRounderScore, DEFAULT_REPORT_CONFIG, type AxisName, type ReportConfig } from '@/lib/report-config'
 import {
   Kpi, RankBars, Heatmap, Funnel, Radar, HealthBars, StackedBars, ColumnChart, DivergingBars, QueueBars,
@@ -287,9 +288,25 @@ export function ReportView() {
 }
 
 function ReportInner() {
+  const sp = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
   // '' = not chosen yet; the landing tab depends on the role, which only the payload
-  // knows (Team Overview for an admin, Individual for an evaluator).
-  const [tab, setTab] = useState('')
+  // knows (Team Overview for an admin, Individual for an evaluator). `?rtab=` lets an
+  // action elsewhere on the page link straight into a tab - it is our own param, never
+  // `?tab=`, which Team Ops already owns for picking this whole sub-page.
+  const [tab, setTabState] = useState(sp.get('rtab') || '')
+  // A one-shot focus key for a card an action links to. Read once on mount and then
+  // cleared from STATE, not the URL: clearing the URL would fight the browser's back
+  // button, and leaving it live in state would re-flash the card on every re-render.
+  const [focusOnce, setFocusOnce] = useState(sp.get('focus') || '')
+
+  const setTab = (id: string) => {
+    setTabState(id)
+    const next = new URLSearchParams(sp.toString())
+    next.set('rtab', id)
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false })
+  }
   // Batch is the landing view: it is the unit the team actually plans in, and the
   // server resolves an empty key to the newest batch, so the first paint is the current
   // batch rather than an all-time scan.

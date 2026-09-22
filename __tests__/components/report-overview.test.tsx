@@ -23,6 +23,14 @@ jest.mock('next-auth/react', () => ({
   useSession: () => ({ data: { user: { id: 1, role: 'admin', name: 'Admin' } }, status: 'authenticated' }),
 }))
 
+// ReportView now reads ?rtab=/?focus= (Task 5); this file doesn't exercise that, so a
+// static stub is enough - same idiom as report-url-state.test.tsx.
+jest.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: jest.fn() }),
+  usePathname: () => '/team-ops',
+}))
+
 type Bundle = Record<string, unknown>
 
 // A window that is entirely healthy: everything at or above its baseline, intake and
