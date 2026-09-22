@@ -11,6 +11,9 @@ import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 import { loadReportConfig } from '@/lib/report-config-db'
 import { isManagerRole } from '@/lib/roles'
 import { getSession } from '@/lib/session'
+import { loadRescueConfig } from '@/lib/rescue-config-db'
+import { scanRoster } from '@/lib/rescue-core'
+import { classifyRoster } from '@/lib/rescue-rules'
 
 export const dynamic = 'force-dynamic'
 
@@ -233,7 +236,13 @@ export async function GET(req: NextRequest) {
     // Only people currently declared on the Assign roster count in the report -
     // historical/one-off names (tiennh, quangnm…) and system accounts are noise.
     // Falls back to the system-account exclusion if the roster table is empty.
-    const rosterRows = await rosterPromise
+    // Rescue's threshold, fetched alongside the roster because that await already
+    // exists. Everything on the Report that says "stale" reads this number, so the
+    // tab and the Rescue panel can never point at different games.
+    const [rosterRows, rescueCfg] = await Promise.all([
+      rosterPromise,
+      loadRescueConfig(),
+    ])
     // Config tab exclusions come off the roster before anything else, so an excluded
     // person disappears from every stat, chart and denominator - not just the lists.
     let roster: string[] = rosterRows.map((r) => r.k).filter((k) => !rcfg.excluded.includes(k))
@@ -498,7 +507,7 @@ export async function GET(req: NextRequest) {
     const prevWin = prevWindow(view, win, prevBatch)
     const prevPromise = prevWin ? refQuery(prevWin.from, prevWin.to) : Promise.resolve(null)
 
-    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, dailyMixRows, pipelineRaw, baselineRaw, prevRaw, personClearedRaw, personAgedRaw, backlogByRaw, stockRaw] = await Promise.all([
+    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, dailyMixRows, pipelineRaw, baselineRaw, prevRaw, personClearedRaw, personAgedRaw, backlogByRaw, stockRaw, rescueStats] = await Promise.all([
       // per-evaluator core + funnel. Shortlist = initial not bypassed (List_Idea);
       // Final Priority = moderator judged 'Priority IV' or 'Insight' (user-defined -
       // Priority V intentionally NOT counted).
@@ -782,7 +791,10 @@ export async function GET(req: NextRequest) {
           count(*) FILTER (WHERE CURRENT_DATE - ge.assigned_date BETWEEN 4 AND 7)::int AS a1,
           count(*) FILTER (WHERE CURRENT_DATE - ge.assigned_date BETWEEN 8 AND 14)::int AS a2,
           count(*) FILTER (WHERE CURRENT_DATE - ge.assigned_date > 14)::int AS a3,
-          max(CURRENT_DATE - ge.assigned_date)::int AS oldest
+          max(CURRENT_DATE - ge.assigned_date)::int AS oldest,
+          -- Rescue's own threshold, not the fixed 14-day band above: this is what
+          -- selfStale reads, so a contractor's own count matches the Rescue panel.
+          count(*) FILTER (WHERE CURRENT_DATE - ge.assigned_date > ${rescueCfg.staleDays})::int AS stale
         FROM game_evaluations ge
         WHERE ge.evaluate_date IS NULL AND ge.initial_conclusion IS NULL
           AND ge.assigned_date IS NOT NULL
@@ -790,6 +802,9 @@ export async function GET(req: NextRequest) {
           ${notSystem} ${catF}
         GROUP BY 1 ORDER BY 3 DESC`,
       stockPromise,
+      // The Rescue scan itself. Guarded so an evaluator never pays for a query whose
+      // result is thrown away below (rescue is manager-only).
+      !scoped ? scanRoster({ category, config: rescueCfg }) : Promise.resolve([]),
     ])
 
     // fold conclusion maps
@@ -1289,6 +1304,7 @@ export async function GET(req: NextRequest) {
         key: r.k as string, name: (r.name || r.k) as string, n: r.n as number,
         a0: r.a0 as number, a1: r.a1 as number, a2: r.a2 as number, a3: r.a3 as number,
         oldest: (r.oldest ?? 0) as number,
+        stale: (r.stale ?? 0) as number,
       }))
 
     // Benchmarks are computed here, over the FULL evaluator list, because an
@@ -1304,6 +1320,23 @@ export async function GET(req: NextRequest) {
       age: { a0: s0?.a0 ?? 0, a1: s0?.a1 ?? 0, a2: s0?.a2 ?? 0, a3: s0?.a3 ?? 0 },
     }
 
+    // Top level, NOT inside `pipeline`: the scan reads "right now" and has no window
+    // in it at all. `stock` was hoisted out of `pipeline` for exactly this reason on
+    // 2026-09-21, and the batch view lost three chips the day it was not.
+    const rescueRows = !scoped ? classifyRoster(rescueStats, rescueCfg) : []
+    const rescue = !scoped ? {
+      staleDays: rescueCfg.staleDays,
+      sources: rescueRows.filter((r) => r.role === 'source')
+        .map((r) => ({ name: r.name, stale: r.stale, movable: r.movable }))
+        .sort((a, b) => b.movable - a.movable),
+      receivers: rescueRows.filter((r) => r.role === 'receiver')
+        .map((r) => ({ name: r.name, pending: r.pending, evaluatedRecent: r.evaluatedRecent })),
+      movableTotal: rescueRows.reduce((s, r) => s + (r.role === 'source' ? r.movable : 0), 0),
+    } : null
+    // The same number Rescue would show for this person, so a contractor never sees
+    // "Backlog" and "Stale" disagree between the Report and the Rescue panel.
+    const selfStale = scoped ? (backlogBy.find((b) => b.key === selfKey)?.stale ?? 0) : null
+
     const yearLabels = opts.year.map((k) => ({ key: k, label: `${k} · 1/1 – 31/12` }))
     const options = { week: weekLabels, month: monthLabels, quarter: quarterLabels, year: yearLabels, batch: batchLabels }
     const shell = {
@@ -1314,6 +1347,7 @@ export async function GET(req: NextRequest) {
       // evaluated" over a grid of days.
       view, category, title, window: win, bucketUnit: unit, activityUnit: actUnit, options,
       teamTotals, funnel, bench, baseline, prev, stock,
+      staleDays: rescueCfg.staleDays,
     }
 
     // An evaluator gets ONLY their own person-level rows. Everything keyed by person
@@ -1341,12 +1375,16 @@ export async function GET(req: NextRequest) {
         backlogBy: backlogBy.filter((b) => b.key === selfKey),
         personMoves: personMoves[selfKey] ? { [selfKey]: personMoves[selfKey] } : {},
         pipeline: null,
+        rescue: null,
+        selfStale,
       }
       : {
         ...shell,
         empty: evaluators.length === 0,
         canSeeTeam: true,
         self: null,
+        rescue,
+        selfStale: null,
         initialConclusions: mergeMap((e) => e.initialConclusions),
         finalConclusions: mergeMap((e) => e.finalConclusions),
         series: seriesLabeled,
