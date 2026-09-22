@@ -2102,19 +2102,30 @@ input:checked + .slider:before {
 /* The tab's whole action list: at most three, absent when nothing is wrong. Two tiers
    inside each one - the move, then the numbers behind it, so the instruction can be
    read on its own and the evidence is there when it is questioned. */
-.rp-do-block { margin: 12px 0 4px; display: flex; flex-direction: column; gap: 6px; }
+.rp-do-block { margin: 12px 0 4px; }
+.rp-do-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; align-items: stretch; }
 .rp-do { border-left: 3px solid var(--warn); background: var(--warn-weak); border-radius: 0 8px 8px 0;
-  padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; }
+  padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
 .rp-do.urgent { border-left-color: var(--bad); background: var(--bad-weak); }
-/* Which of the four problems the line answers, and the way back to the evidence for
-   it. Set above the move, not beside it, so the verb still starts the line the eye
-   lands on - the two-tier rule the action list was built on. */
 .rp-do-topic { align-self: flex-start; font-family: var(--font); font-size: 9.5px; font-weight: 800;
   letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: none;
   border: none; padding: 0; margin-bottom: 2px; cursor: pointer; }
-.rp-do-topic:hover { color: var(--text); text-decoration: underline; }
+.rp-do-topic.as-text { cursor: default; }
+.rp-do-topic:hover:not(.as-text) { color: var(--text); text-decoration: underline; }
 .rp-do-line { font-size: 13.5px; font-weight: 650; color: var(--text); line-height: 1.35; }
 .rp-do-why { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Pushed to the bottom so the three buttons line up however tall the cards are: a
+   card in a grid row is as tall as its tallest sibling, and a ragged row of buttons
+   reads as three unrelated widgets rather than three prices for one problem. */
+.rp-do-foot { margin-top: auto; padding-top: 8px; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 6px; border-top: 1px solid var(--border); }
+.rp-do-payoff { font-size: 11.5px; font-weight: 600; color: var(--good); line-height: 1.35; }
+.rp-do-payoff::before { content: '\2192\00a0'; }
+.rp-do-cta { font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 4px;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+  text-decoration: none; cursor: pointer; }
+.rp-do-cta:hover { border-color: var(--text); }
+@media (max-width: 900px) { .rp-do-grid { grid-template-columns: 1fr; } }
 /* Two stacked bars per bucket out of a shared centre: work done to the right, work
    that only got older to the left, on one scale. Which side is longer IS the reading,
    so the two tracks are the same width and the centre column is fixed. */

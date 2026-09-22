@@ -470,6 +470,61 @@ type Topic = keyof typeof TOPIC
 const SRC_LABEL: Record<string, string> = { 'appranking-scraper': 'insight-track' }
 const srcName = (s: string) => SRC_LABEL[s] ?? s.replace(/-scraper$/, '')
 
+export type DoAct = {
+  sev: number
+  key: string
+  kicker: string                       // TOPIC[topic] on Overview, the family on the others
+  do: React.ReactNode
+  why: React.ReactNode
+  payoff?: React.ReactNode             // what the reader gets, in days or a date
+  cta?: { label: string; href?: string; onClick?: () => void }
+  onKicker?: () => void
+}
+
+// Sorts worst-first and caps at three. Pulled out of `DoBlock` so a caller can rank
+// its own actions - to decide, for example, which lines get an "Or" prefix - and then
+// hand DoBlock the already-ranked list. Idempotent: ranking a ranked list is a no-op,
+// and the sort is stable so equal-severity actions keep the order their tab pushed
+// them in.
+export function rankActs<T extends { sev: number }>(acts: T[]): T[] {
+  return [...acts].sort((a, b) => b.sev - a.sev).slice(0, 3)
+}
+
+/* One block, three cards, used by every tab. It replaces three near-identical copies
+   of the same JSX, which is how the three tabs drifted apart in the first place.
+   Sorting and the cap of three live HERE (via `rankActs`) so no tab can quietly raise
+   its own limit. `payoff` and `cta` are optional because a contractor's card has no
+   operation to offer - see law 4: a button must be something the reader is allowed to
+   run. */
+export function DoBlock({ acts }: { acts: DoAct[] }) {
+  const shown = rankActs(acts)
+  if (!shown.length) return null
+  return (
+    <div className="rp-do-block">
+      <span className="rp-mix-label">Do this</span>
+      <div className="rp-do-grid">
+        {shown.map((a) => (
+          <div className={'rp-do' + (a.sev >= 3 ? ' urgent' : '')} key={a.key}>
+            {a.onKicker
+              ? <button type="button" className="rp-do-topic" onClick={a.onKicker}>{a.kicker}</button>
+              : <span className="rp-do-topic as-text">{a.kicker}</span>}
+            <span className="rp-do-line">{a.do}</span>
+            <span className="rp-do-why">{a.why}</span>
+            {(a.payoff || a.cta) && (
+              <div className="rp-do-foot">
+                {a.payoff && <span className="rp-do-payoff">{a.payoff}</span>}
+                {a.cta && (a.cta.href
+                  ? <a className="rp-do-cta" href={a.cta.href}>{a.cta.label}</a>
+                  : <button type="button" className="rp-do-cta" onClick={a.cta.onClick}>{a.cta.label}</button>)}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function Overview({ d }: { d: Bundle }) {
   const bannerRef = useRef<HTMLDivElement>(null)
   const sd = staleDays(d)
@@ -887,7 +942,7 @@ function Overview({ d }: { d: Bundle }) {
     do: <>Put the {fmt.int(p!.current.age.a3)} games past 15 days into the next assign run by name</>,
     why: <>{fmt.pct(agedShare)} of the backlog is 8d+, but only {fmt.pct(clearedOldShare)} of what cleared was</>,
   })
-  const shown = acts.sort((a, b) => b.sev - a.sev).slice(0, 3)
+  const shown = rankActs(acts)
 
   // One clause, and it answers "can the team get through this?" rather than reciting
   // the two numbers the KPI row already carries. The chips under it are the arithmetic
@@ -1042,21 +1097,10 @@ function Overview({ d }: { d: Bundle }) {
           bands={AGE_BANDS.map((b) => ({ name: b.label, value: stockAge[b.k], color: b.color }))} />
       </div>
 
-      {shown.length > 0 && (
-        <div className="rp-do-block">
-          <span className="rp-mix-label">Do this</span>
-          {shown.map((a) => (
-            <div className={'rp-do' + (a.sev >= 3 ? ' urgent' : '')} key={a.key}>
-              {/* Which of the four problems this line answers, and a way back to the
-                  evidence for it: the same key the chip and the KPI carry. */}
-              <button type="button" className="rp-do-topic" onClick={() => focus(a.topic)}
-                title={`Go to the ${TOPIC[a.topic].toLowerCase()} number behind this`}>{TOPIC[a.topic]}</button>
-              <span className="rp-do-line">{a.do}</span>
-              <span className="rp-do-why">{a.why}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <DoBlock acts={shown.map((a) => ({
+        sev: a.sev, key: a.key, kicker: TOPIC[a.topic], do: a.do, why: a.why,
+        onKicker: () => focus(a.topic),
+      }))} />
 
       <div className="rp-section-title">Flow - what came in, what went out</div>
       <div className="rp-grid-70-30">
@@ -1530,13 +1574,13 @@ function Leaderboard({ d }: { d: Bundle }) {
   // the team has a problem.
   const fams = new Set<string>()
   const named = new Set<string>()
-  const shown = acts.sort((a, b) => b.sev - a.sev).filter((a) => {
+  const shown = rankActs([...acts].sort((a, b) => b.sev - a.sev).filter((a) => {
     if (fams.has(a.fam)) return false
     if (a.who && named.has(a.who)) return false
     fams.add(a.fam)
     if (a.who) named.add(a.who)
     return true
-  }).slice(0, 3)
+  }))
 
   // One clause, answering the tab's question rather than reciting the table under it.
   const headline = active.length === 0
@@ -1631,17 +1675,9 @@ function Leaderboard({ d }: { d: Bundle }) {
           {chips.map((c) => <span className={`rp-chip ${c.tone}`} key={c.key}>{c.text}</span>)}
         </div>
       )}
-      {shown.length > 0 && (
-        <div className="rp-do-block">
-          <span className="rp-mix-label">Do this</span>
-          {shown.map((a) => (
-            <div className={'rp-do' + (a.sev >= 3 ? ' urgent' : '')} key={a.key}>
-              <span className="rp-do-line">{a.do}</span>
-              <span className="rp-do-why">{a.why}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <DoBlock acts={shown.map((a) => ({
+        sev: a.sev, key: a.key, kicker: a.fam.toUpperCase(), do: a.do, why: a.why,
+      }))} />
 
       <div className="rp-section-title">Everyone - who produces, and does it hold up?</div>
       <Card label="Volume vs shortlist rate" note="x = games evaluated · y = shortlist % · bubble = games per day"
@@ -2145,11 +2181,11 @@ function Individual({ d }: { d: Bundle }) {
   })
 
   const fams = new Set<string>()
-  const shown = acts.sort((a, b) => b.sev - a.sev).filter((a) => {
+  const shown = rankActs([...acts].sort((a, b) => b.sev - a.sev).filter((a) => {
     if (fams.has(a.fam)) return false
     fams.add(a.fam)
     return true
-  }).slice(0, 3)
+  }))
 
   // One clause, answering the tab's question rather than reciting the KPI row.
   const headline = e.evaluated === 0 && e.assigned === 0
@@ -2222,17 +2258,9 @@ function Individual({ d }: { d: Bundle }) {
           {chips.map((c) => <span className={`rp-chip ${c.tone}`} key={c.key}>{c.text}</span>)}
         </div>
       )}
-      {shown.length > 0 && (
-        <div className="rp-do-block">
-          <span className="rp-mix-label">Do this</span>
-          {shown.map((a) => (
-            <div className={'rp-do' + (a.sev >= 3 ? ' urgent' : '')} key={a.key}>
-              <span className="rp-do-line">{a.do}</span>
-              <span className="rp-do-why">{a.why}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <DoBlock acts={shown.map((a) => ({
+        sev: a.sev, key: a.key, kicker: a.fam.toUpperCase(), do: a.do, why: a.why,
+      }))} />
 
       {/* Five, down from twelve. What went: the three per-day mix tiles (one
           distribution read three times - it is the conclusion-flow bar now), Note
