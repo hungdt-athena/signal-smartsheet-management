@@ -288,6 +288,71 @@ describe('Leaderboard tab', () => {
     expect(cal.length).toBeLessThanOrEqual(150)
   })
 
+  // Code review Important 1: `strict`/`loose` are picked by BYPASS SHARE order, not
+  // by survival rate order, so the person with the lowest bypass share (loose) can
+  // still have shortlisted zero games. `keepPair` only special-cases a non-positive
+  // rate in the FIRST slot ('nothing'); the second falls through to `oneIn`, which
+  // returns the infinity glyph for a non-positive rate - "1 in every ∞" printed
+  // inside an English sentence, and a direct violation of "no Infinity on screen."
+  // Loose here has Bypass=0 and List_Idea=0, so their bypassShare denominator is 0
+  // and they still sort to the bottom (loosest) even though they kept nothing.
+  it('never prints the infinity glyph when the loose side of the cal chip kept nothing', async () => {
+    const people = [
+      // thin, non-zero rate: keepOne(0.1) would print "1 game in 10"
+      even('Strict', { evaluated: 250, bypass: 225, listIdea: 25, cells: { d1: 250 } }),
+      even('Loose', { evaluated: 250, bypass: 0, listIdea: 0, cells: { d1: 250 } }),
+      even('Gamma', { evaluated: 10, bypass: 5, listIdea: 5, cells: { d1: 10 } }),
+      even('Delta', { evaluated: 10, bypass: 5, listIdea: 5, cells: { d1: 10 } }),
+    ]
+    const { container } = await leaderboard(bundleOf(people))
+    const cal = chipText(container, 'CALIBRATION')
+    expect(cal).not.toContain('∞')
+    expect(cal).not.toMatch(/Infinity|NaN|undefined/)
+    expect(cal).toBe('Strict shortlists 1 in every 10 of the games they judge; Loose keeps none')
+  })
+
+  // Code review Important 1, both sides at once: strict keeps nothing at the top of
+  // the bypass-share order (Bypass=all, List_Idea=0), loose keeps nothing at the
+  // bottom of it (forced there via a non-Bypass/List_Idea conclusion, so their
+  // bypassShare denominator excludes both and sorts to 0 independent of survival).
+  it('never prints the infinity glyph when both sides of the cal chip kept nothing', async () => {
+    const people = [
+      even('Strict', { evaluated: 250, bypass: 250, listIdea: 0, cells: { d1: 250 } }),
+      even('Loose', { evaluated: 250, bypass: 0, listIdea: 0, cells: { d1: 250 } }),
+      even('Gamma', { evaluated: 10, bypass: 5, listIdea: 5, cells: { d1: 10 } }),
+      even('Delta', { evaluated: 10, bypass: 5, listIdea: 5, cells: { d1: 10 } }),
+    ]
+    const bundle = bundleOf(people) as Record<string, unknown>
+    // force Loose's bypassShare to 0 via a denominator Bypass/List_Idea do not touch,
+    // independent of the fixture's Bypass/List_Idea = 0/0 (which would ALSO read 0
+    // through the "tot > 0 ? ... : 0" fallback, but this is the unambiguous case).
+    ;(bundle.evaluators as Array<Record<string, unknown>>)[1].initialConclusions = { Something: 1 }
+    const { container } = await leaderboard(bundle)
+    const cal = chipText(container, 'CALIBRATION')
+    expect(cal).not.toContain('∞')
+    expect(cal).not.toMatch(/Infinity|NaN|undefined/)
+    expect(cal).toBe('Strict shortlists none of the games they judge; Loose keeps none')
+  })
+
+  // Code review Important 2: the two clauses used to use different phrasing for the
+  // same "1 in N" construction - clause 1 stripped "game" but never added "every",
+  // clause 2 added "every" but never stripped "game". A thin/thin pair (arguably the
+  // most common real calibration gap) exposed the mismatch in one sentence.
+  it('phrases both sides of a thin/thin cal pair the same way', async () => {
+    // a2 = 0.1 (1 in 10), b2 = 0.15 (1 in 7) - the reviewer's own example of the most
+    // common real calibration gap: neither side clears 0.25, and neither is zero.
+    const people = [
+      even('Strict', { evaluated: 250, bypass: 225, listIdea: 25, cells: { d1: 250 } }), // survivalRate 0.1, bypassShare 0.9
+      even('Loose', { evaluated: 200, bypass: 170, listIdea: 30, cells: { d1: 200 } }), // survivalRate 0.15, bypassShare 0.85
+      even('Gamma', { evaluated: 10, bypass: 5, listIdea: 5, cells: { d1: 10 } }),
+      even('Delta', { evaluated: 10, bypass: 5, listIdea: 5, cells: { d1: 10 } }),
+    ]
+    const { container } = await leaderboard(bundleOf(people))
+    const cal = chipText(container, 'CALIBRATION')
+    // both clauses spelled out as "1 in every N", never "1 in N" or "1 game in N"
+    expect(cal).toBe('Strict shortlists 1 in every 10 of the games they judge; Loose keeps 1 in every 7')
+  })
+
   it('puts every rate next to the count it was computed from', async () => {
     // Delta's 50% shortlist rate is the best number in the column and rests on 8 games.
     const people = FOUR()

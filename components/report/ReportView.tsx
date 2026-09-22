@@ -1958,16 +1958,25 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
 
   // Two clauses built from `keepPair`'s own strings rather than a fresh calculation,
   // so this stays true for the whole range keepPair can return - 'nothing', a percent,
-  // or the "1 game in N" thin-rate form - not just the zero/thin example that prompted
-  // the rewrite. The first clause always names what is kept ("shortlists ... of the
-  // games they judge"); the second stays terse ("keeps ...") the way the design table
-  // has it, with "1 in N" spelled out as "1 in every N" so it reads as English rather
-  // than a fraction with the denominator left for the reader to supply.
+  // or the "1 game in N" / "1 in N" thin-rate forms - not just the zero/thin example
+  // that prompted the rewrite.
+  //
+  // `keepPair` only ever special-cases the FIRST slot for a non-positive rate
+  // (`a2 <= 0 -> 'nothing'`); the second falls through to `keepOne` -> `oneIn`, which
+  // returns the infinity glyph when `b2 <= 0`. That would print "1 in every ∞" inside
+  // an English sentence and break the plan's own "no Infinity on screen" rule.
+  // `normalize` decides "none" off the ACTUAL rate for whichever side it is given,
+  // not off which slot `keepPair` put it in, so both sides are covered alike.
+  //
+  // It also applies the SAME "1 in every N" rewrite to both clauses (`keepPair`'s raw
+  // strings differ only in whether "game" is said, "1 game in N" vs "1 in N" - both
+  // match this one pattern), so a thin/thin pair reads as one construction instead of
+  // two different phrasings glued into one sentence.
   const calWords = calSpread != null ? (() => {
     const [a, b] = keepPair(strict.survivalRate, loose.survivalRate)
-    const clause1 = a === 'nothing' ? 'none' : a.replace('1 game in', '1 in')
-    const clause2 = b.replace(/^1 in /, '1 in every ')
-    return { clause1, clause2 }
+    const normalize = (raw: string, rate: number) =>
+      rate <= 0 ? 'none' : raw.replace(/^1 (?:game )?in /, '1 in every ')
+    return { clause1: normalize(a, strict.survivalRate), clause2: normalize(b, loose.survivalRate) }
   })() : null
 
   const chips: Array<{ key: string; text: React.ReactNode; tone: 'good' | 'warn' | 'bad' }> = active.length ? [
