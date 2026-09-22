@@ -55,7 +55,7 @@ function scanBody() {
 
 beforeEach(() => {
   params = new URLSearchParams('')
-  global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+  global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input)
     if (url.startsWith('/api/operations/rescue')) {
       return Promise.resolve({ ok: true, json: async () => ({ rows: RESCUE_ROWS, config: RESCUE_CONFIG }) } as Response)
