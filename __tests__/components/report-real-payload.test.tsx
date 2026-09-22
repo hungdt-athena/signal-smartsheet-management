@@ -108,10 +108,22 @@ function dump(label: string) {
 // of the team keeps 1 in 17, over 10,772 games. At the others' rate that is about 633
 // games sent on instead of 258." No synthetic-fixture test ever caught this because
 // none used a four/five-digit evaluated count. This is NOT sanctioned the way `rec`
-// is - it is excluded here (by its distinctive "At the others' rate" clause) only so
-// the rest of this file's real assertions still run; task-11-report.md flags it as a
-// real, unfixed budget violation for the Leaderboard/Task-8 owner.
-const KNOWN_OVER_BUDGET_WHY = /no video has ever matched|At the others&?'? ?rate|At the others. rate/i
+// is - it is excluded here only so the rest of this file's real assertions still run;
+// task-11-report.md flags it as a real, unfixed budget violation for the
+// Leaderboard/Task-8 owner.
+//
+// Neither exception can be anchored to a stable DOM attribute (`.rp-do` carries only
+// a React `key`, never rendered to an attribute - see the `.map((a) => ...)` in
+// ReportView.tsx's DoBlock), so both patterns match the FULL distinctive clause each
+// act's copy is built from, not a loose keyword, and are verified (by grep against
+// ReportView.tsx, 2026-09-22) to appear nowhere else in the component: `rec`'s is the
+// exact fixed sentence "no video has ever matched"; `outlow`'s is the exact fixed
+// clause "At the others' rate that is about" (line 1745 only - the `cal` act's why
+// two lines below it says "At {loose.name}'s rate", a different string, and does not
+// match). If either act's copy changes, this regex must be revisited - it is
+// deliberately narrow rather than a loose keyword so a future, unrelated `why` cannot
+// coincidentally slip through it and mask a real new overage.
+const KNOWN_OVER_BUDGET_WHY = /no video has ever matched|At the others&?'? ?rate that is about/i
 
 function assertClean(lines: string[]) {
   lines.forEach((t) => {
@@ -141,9 +153,18 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       // "Age" chip - see report-11-report.md's hand-read notes - names the fixed
       // 8-14d/15d+ backlog age bands instead, a different, unconfigurable metric; that
       // is not this assertion's concern and is flagged separately, not asserted here.)
-      const ageWhy = Array.from(document.querySelectorAll('.rp-do-why'))
-        .map((n) => n.textContent || '').find((t) => /past \d+ days/.test(t))
-      if (ageWhy) expect(ageWhy).toMatch(/past 7 days/)
+      // Asserted only on Overview and Leaderboard, where a "past N days" why reliably
+      // fires on THIS fixture (see the dump in task-11-report.md: Overview's `age`
+      // rebalance act and Leaderboard's `queue` reassign act both name it; Individual
+      // shows a different person - HuyDD - whose only act this window is `rec`, with
+      // no stale-days sentence at all). Asserting `ageWhy` is found, not just `if
+      // (ageWhy)`, keeps this from silently no-opping if either act stops rendering.
+      if (tab === 'Overview' || tab === 'Leaderboard') {
+        const ageWhy = Array.from(document.querySelectorAll('.rp-do-why'))
+          .map((n) => n.textContent || '').find((t) => /past \d+ days/.test(t))
+        expect(ageWhy).toBeDefined()
+        expect(ageWhy).toMatch(/past 7 days/)
+      }
       unmount()
     }
   })
@@ -174,10 +195,19 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
     const { unmount } = await renderTab(bundle, 'Overview')
     const { lines } = dump('report-prod-no-receivers.json / Overview')
     assertClean(lines)
-    const text = lines.join(' | ')
-    // The rebalance act names receivers by name in its flash= URL; with none, it must
-    // not appear at all, and whatever DOES print must not silently claim a receiver.
-    expect(text).not.toMatch(/tab=rescue&flash=/)
+    // The rebalance act's button is an <a className="rp-do-cta" href={...}>; its
+    // textContent is only the visible label ("Open Rescue"), never the href, so a
+    // URL substring can never appear in `lines` (those come from .textContent) - it
+    // has to be read off the actual DOM attribute. See the CTA render at
+    // ReportView.tsx ~line 570 and the contractor test above, which reads hrefs the
+    // same way.
+    const ctaHrefs = Array.from(document.querySelectorAll('a.rp-do-cta'))
+      .map((a) => a.getAttribute('href') || '')
+    expect(ctaHrefs.some((h) => /tab=rescue&flash=/.test(h))).toBe(false)
+    // And the fallback (`holders`) act - which fires exactly where `rebalance`
+    // cannot, per the `canRebalance` gate at ReportView.tsx ~line 936 - must
+    // positively be there instead of the block just going silent.
+    expect(lines.some((t) => /^Put the/.test(t))).toBe(true)
     unmount()
   })
 
