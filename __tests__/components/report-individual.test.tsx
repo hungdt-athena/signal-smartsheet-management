@@ -583,8 +583,10 @@ describe('Individual tab', () => {
     expect(txt(container).includes('performance shape')).toBe(false)
     expect(container.querySelector('.rp-radar-wrap')).toBeNull()
     expect(Array.from(container.querySelectorAll('.card-label')).map(txt)).not.toContain('Pick funnel')
+    // The trigger button is the real guard. A `.rp-daily-modal` assertion used to sit
+    // here too and could never have gone red: the modal only ever rendered after a
+    // click on that button, so it was null before the removal as well.
     expect(screen.queryByRole('button', { name: /Daily breakdown/ })).toBeNull()
-    expect(container.querySelector('.rp-daily-modal')).toBeNull()
   })
 
   it('names the final-priority count in the Shortlist rate KPI sub-line', async () => {

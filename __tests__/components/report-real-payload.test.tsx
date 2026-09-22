@@ -117,7 +117,11 @@ function dump(label: string) {
 // this file exists for. Printed alongside `dump()`'s output, not instead of it: the
 // brief's deliverable is the full text, and a human reads all of it, not just the
 // bit a regex happens to check.
-function dumpChipsAndKpis(label: string) {
+// `expectKpis` is explicit rather than sniffed off the DOM, because sniffing for the
+// KPI row with the very selector under test is how a renamed selector goes quiet: only
+// Individual carries a KPI row (the Leaderboard deliberately has none - its table IS
+// the numbers), so the caller states which tab it is dumping.
+function dumpChipsAndKpis(label: string, { expectKpis }: { expectKpis: boolean }) {
   const chips = Array.from(document.querySelectorAll('.rp-chip-text')).map((n) => n.textContent!.trim())
   const sectionTitles = Array.from(document.querySelectorAll('.rp-section-title')).map((n) => n.textContent!.trim())
   const kpis = Array.from(document.querySelectorAll('.rp-kpi')).map((k) => {
@@ -129,6 +133,13 @@ function dumpChipsAndKpis(label: string) {
   const reviewNote = document.querySelector('.rp-review-scope-note')?.textContent?.trim() ?? null
   // eslint-disable-next-line no-console
   console.log(`\n----- ${label} / chips+kpis -----\nchips:\n${chips.length ? chips.join('\n') : '(none)'}\nsection titles:\n${sectionTitles.length ? sectionTitles.join('\n') : '(none)'}\nkpis:\n${kpis.length ? kpis.join('\n') : '(none)'}\nreview scope note: ${reviewNote ?? '(absent)'}\n`)
+  // The non-empty guarantee assertReviewSeparatorIsLast already carries, and the
+  // reason it matters: assertClean() iterates with forEach, so `assertClean([])`
+  // passes every check it makes. Without this, renaming `.rp-chip-text` or `.rp-kpi`
+  // would turn all five call sites below green while reading nothing at all.
+  expect(chips.length).toBeGreaterThan(0)
+  expect(sectionTitles.length).toBeGreaterThan(0)
+  if (expectKpis) expect(kpis.length).toBeGreaterThan(0)
   return { chips, sectionTitles, kpis, reviewNote }
 }
 
@@ -154,7 +165,6 @@ function assertRemovedBlocksAbsent() {
   const cardLabels = Array.from(document.querySelectorAll('.card-label')).map((n) => n.textContent!.trim())
   expect(cardLabels).not.toContain('Pick funnel')
   expect(screen.queryByRole('button', { name: /Daily breakdown/i })).toBeNull()
-  expect(document.querySelector('.rp-daily-modal')).toBeNull()
 }
 
 // The separator + its scope note must exist, and must sit AFTER every other section
@@ -281,12 +291,12 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       }
       // Task 7: the rewritten chips + KPI sub-lines, read back on this real payload.
       if (tab === 'Leaderboard' || tab === 'Individual') {
-        const { chips, kpis } = dumpChipsAndKpis(`report-prod.json / ${tab}`)
+        const { chips, kpis } = dumpChipsAndKpis(`report-prod.json / ${tab}`, { expectKpis: tab === 'Individual' })
         assertClean([...chips, ...kpis])
       }
       if (tab === 'Individual') {
         await waitForReviewTableSettled()
-        dumpChipsAndKpis(`report-prod.json / ${tab} (after ReviewTable settled)`)
+        dumpChipsAndKpis(`report-prod.json / ${tab} (after ReviewTable settled)`, { expectKpis: true })
         dumpReviewTableState(`report-prod.json / ${tab}`)
         assertRemovedBlocksAbsent()
         assertReviewSeparatorIsLast()
@@ -302,7 +312,7 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       const { lines } = dump(`report-prod-batch-latest.json / ${tab}`)
       assertClean(lines)
       if (tab === 'Leaderboard' || tab === 'Individual') {
-        const { chips, kpis } = dumpChipsAndKpis(`report-prod-batch-latest.json / ${tab}`)
+        const { chips, kpis } = dumpChipsAndKpis(`report-prod-batch-latest.json / ${tab}`, { expectKpis: tab === 'Individual' })
         assertClean([...chips, ...kpis])
       }
       if (tab === 'Individual') {
@@ -323,7 +333,7 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       const { lines } = dump(`report-prod-batch-all.json / ${tab}`)
       assertClean(lines)
       if (tab === 'Leaderboard' || tab === 'Individual') {
-        const { chips, kpis } = dumpChipsAndKpis(`report-prod-batch-all.json / ${tab}`)
+        const { chips, kpis } = dumpChipsAndKpis(`report-prod-batch-all.json / ${tab}`, { expectKpis: tab === 'Individual' })
         assertClean([...chips, ...kpis])
       }
       if (tab === 'Individual') {
@@ -379,7 +389,7 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
     // person) voice - `self` is true throughout ReportView's Individual render, so
     // this is the one fixture that actually exercises the "you" wording (net/wait)
     // rather than the admin ("their name") wording every other fixture above reads.
-    const { chips, kpis } = dumpChipsAndKpis('report-prod-contractor.json / self view')
+    const { chips, kpis } = dumpChipsAndKpis('report-prod-contractor.json / self view', { expectKpis: true })
     assertClean([...chips, ...kpis])
     await waitForReviewTableSettled()
     dumpReviewTableState('report-prod-contractor.json / self view')
@@ -395,7 +405,7 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       const { lines } = dump(`report-prod-healthy.json / ${tab}`)
       expect(lines).toHaveLength(0)
       if (tab === 'Leaderboard' || tab === 'Individual') {
-        const { chips, kpis } = dumpChipsAndKpis(`report-prod-healthy.json / ${tab}`)
+        const { chips, kpis } = dumpChipsAndKpis(`report-prod-healthy.json / ${tab}`, { expectKpis: tab === 'Individual' })
         assertClean([...chips, ...kpis])
       }
       if (tab === 'Individual') {
