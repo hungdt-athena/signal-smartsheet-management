@@ -252,8 +252,6 @@ interface Bundle {
   config: ReportConfig
   personSeries: Record<string, Array<{ key: string; label: string; assigned: number; evaluated: number; shortlisted: number; linkDead: number }>>
   videos: Record<string, Array<{ gameId: string; title: string | null; os: string | null; slot: string; batch: string | null; recordedOn: string | null; confirmedOn: string | null; youtube: string | null }>>
-  // person → 'YYYY-MM-DD' → initial conclusion → count (Link_dead excluded)
-  dailyMix: Record<string, Record<string, Record<string, number>>>
   evaluators: Ev[]
   radar: Array<{ key: string; name: string; axes: Record<string, number> }>
   pipeline: null | {

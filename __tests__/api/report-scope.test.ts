@@ -44,11 +44,13 @@ function setupSql() {
     if (q.includes('AS assigned')) {
       return Promise.resolve([{ k: 'mitt', name: 'MitT', assigned: 220 }, { k: 'huydd', name: 'HuyDD', assigned: 110 }])
     }
-    // per-person per-day mix (Daily breakdown) - same columns plus the day
-    if (q.includes('::date::text AS d,')) {
+    // per-person per-BUCKET series (Individual's activity + pick-quality charts).
+    // Person-keyed, so this is what the self-scoped payload has to filter down to
+    // one key -- the role the removed `dailyMix` map used to play in these tests.
+    if (q.includes('AS link_dead') && q.includes('AS b,')) {
       return Promise.resolve([
-        { k: 'mitt', d: '2026-08-03', c: 'Bypass', n: 10 },
-        { k: 'huydd', d: '2026-08-03', c: 'Bypass', n: 7 },
+        { k: 'mitt', b: '2026-08-01', n: 200, evaluated: 200, shortlisted: 20, link_dead: 5 },
+        { k: 'huydd', b: '2026-08-01', n: 100, evaluated: 100, shortlisted: 5, link_dead: 1 },
       ])
     }
     if (q.includes('ge.initial_conclusion AS c')) {
@@ -81,7 +83,11 @@ describe('GET /api/report scoping', () => {
     expect(body.self).toBe('mitt')
     expect(body.evaluators).toHaveLength(1)
     expect(body.evaluators[0].key).toBe('mitt')
-    expect(Object.keys(body.dailyMix)).toEqual(['mitt'])
+    expect(Object.keys(body.personSeries)).toEqual(['mitt'])
+    // `dailyMix` used to be scoped here too. The Daily breakdown modal was its only
+    // reader and went with it, so the field is not shipped at all any more - assert
+    // that, rather than dropping the line and letting a dead payload creep back.
+    expect(body).not.toHaveProperty('dailyMix')
     // no other person anywhere in the serialized payload
     expect(JSON.stringify(body).toLowerCase()).not.toContain('huydd')
   })

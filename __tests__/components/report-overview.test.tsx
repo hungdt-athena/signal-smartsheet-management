@@ -81,7 +81,7 @@ function healthy(): Bundle {
     series: [], metricSeries,
     heatmap: { periods: [], rows: [] }, scoreRank: { periods: [], rows: [] },
     config: { excluded: [], included: [], weights: {} },
-    personSeries: {}, videos: {}, dailyMix: {},
+    personSeries: {}, videos: {},
     evaluators: [
       { key: 'a', name: 'Alpha', title: null, assigned: 500, evaluated: 500, activeDays: 5, throughput: 100, turnaround: 2, signalRate: 0.015, consistency: 1, shortlisted: 40, priorityIV: 5, insight: 3, finalPriority: 8, survivalRate: 0.08, linkDead: 0, noted: 475, noteRate: 0.95, recorded: 5, rec5: 3, rec20: 2, initialConclusions: { Bypass: 460, List_Idea: 40 }, finalConclusions: { 'Theme/Art': 5 } },
       { key: 'b', name: 'Beta', title: null, assigned: 500, evaluated: 500, activeDays: 5, throughput: 100, turnaround: 2, signalRate: 0.015, consistency: 1, shortlisted: 40, priorityIV: 5, insight: 2, finalPriority: 7, survivalRate: 0.08, linkDead: 0, noted: 475, noteRate: 0.95, recorded: 5, rec5: 3, rec20: 2, initialConclusions: { Bypass: 460, List_Idea: 40 }, finalConclusions: { 'Theme/Art': 4 } },

@@ -121,7 +121,6 @@ function selfBundle(over: Partial<{
       gameId: `g${i}`, title: `Game ${i}`, os: 'android', slot: '5min', batch: null,
       recordedOn: '2026-08-01', confirmedOn: '2026-08-01', youtube: null,
     })) },
-    dailyMix: { k0: {} },
     backlogBy: [{ key: 'k0', name: 'Alpha', n: 200, a0: 150, a1: 30, a2: 15, a3: 5, oldest: 40, stale: selfStale }],
     personMoves: { k0: [] },
     evaluators: [evaluator],

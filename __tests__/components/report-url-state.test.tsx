@@ -92,7 +92,7 @@ function teamBundle(people: P[] = [person('Alpha'), person('Beta')], patch: Bund
       shortlisted: Math.round(p.shortlisted / BUCKETS.length),
       linkDead: 0,
     }))])),
-    videos: {}, dailyMix: {},
+    videos: {},
     backlogBy: people.map((p, i) => ({
       key: `k${i}`, name: p.name, n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0,
     })),

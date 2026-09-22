@@ -97,7 +97,7 @@ function bundleOf(people: Person[], patch: Bundle = {}): Bundle {
       weights: { Volume: 40, Consistency: 15, Signal: 15, Survival: 15, Recording: 15 },
       credibility: true,
     },
-    personSeries: {}, videos: {}, dailyMix: {},
+    personSeries: {}, videos: {},
     evaluators,
     radar: people.map((p, i) => ({
       key: `k${i}`, name: p.name,

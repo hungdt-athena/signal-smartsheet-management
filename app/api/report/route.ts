@@ -584,7 +584,7 @@ export async function GET(req: NextRequest) {
     const prevWin = prevWindow(view, win, prevBatch)
     const prevPromise = prevWin ? refQuery(prevWin.from, prevWin.to) : Promise.resolve(null)
 
-    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, dailyMixRows, pipelineRaw, baselineRaw, prevRaw, personClearedRaw, personAgedRaw, backlogByRaw, stockRaw, rescueStats] = await Promise.all([
+    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, pipelineRaw, baselineRaw, prevRaw, personClearedRaw, personAgedRaw, backlogByRaw, stockRaw, rescueStats] = await Promise.all([
       // per-evaluator core + funnel. Shortlist = initial not bypassed (List_Idea);
       // Final Priority = moderator judged 'Priority IV' or 'Insight' (user-defined -
       // Priority V intentionally NOT counted).
@@ -777,16 +777,6 @@ export async function GET(req: NextRequest) {
             ${win.from ? sql`AND rec_at >= ${vnBound(win.from)}` : sql``}
             ${win.to ? sql`AND rec_at < ${vnBound(win.to)}` : sql``}))`}
         ORDER BY rec_at DESC NULLS FIRST, slot`,
-      // per-evaluator per-DAY initial conclusion counts (Individual → Daily breakdown).
-      // Always day grain, whatever the view's bucket unit is: the point of the
-      // breakdown is "what did they do on each calendar day". Link_dead and
-      // Stale_release excluded to
-      // match every other conclusion-mix number in this file.
-      sql`SELECT lower(ge.initial_evaluator) AS k,
-          (ge.evaluate_date AT TIME ZONE ${VN})::date::text AS d,
-          ge.initial_conclusion AS c, count(*)::int AS n
-        ${evalBase} AND ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> '' AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
-        GROUP BY 1, 2, 3`,
       pipelinePromise,
       baselinePromise,
       prevPromise,
@@ -1232,17 +1222,6 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // per-person daily conclusion counts, keyed person → day → conclusion → n.
-    // Video counts per day are NOT duplicated here - the client derives them from
-    // `videos` (recordedOn + slot), which is already the source of truth for the
-    // recording queue, so the two panels can never disagree.
-    const dailyMix: Record<string, Record<string, Record<string, number>>> = {}
-    for (const r of dailyMixRows) {
-      const byDay = (dailyMix[r.k] ||= {})
-      const day = (byDay[r.d] ||= {})
-      day[r.c] = (day[r.c] || 0) + r.n
-    }
-
     // pipeline payload (null on batch view)
     type AgeRow = { key: string; label: string; a0: number; a1: number; a2: number; a3: number }
     let pipeline: null | {
@@ -1450,7 +1429,6 @@ export async function GET(req: NextRequest) {
         config: { ...rcfg, excluded: [] },
         personSeries: personSeries[selfKey] ? { [selfKey]: personSeries[selfKey] } : {},
         videos: videos[selfKey] ? { [selfKey]: videos[selfKey] } : {},
-        dailyMix: dailyMix[selfKey] ? { [selfKey]: dailyMix[selfKey] } : {},
         evaluators: evaluators.filter((e) => e.key === selfKey),
         radar: radar.filter((r) => r.key === selfKey),
         // their own queue only - Individual shows it, Leaderboard is not reachable
@@ -1475,7 +1453,6 @@ export async function GET(req: NextRequest) {
         config: rcfg,
         personSeries,
         videos,
-        dailyMix,
         evaluators, radar, backlogBy, personMoves,
         pipeline,
       }
