@@ -505,13 +505,33 @@ export type DoAct = {
   onKicker?: () => void
 }
 
-// Sorts worst-first and caps at three. Pulled out of `DoBlock` so a caller can rank
-// its own actions - to decide, for example, which lines get an "Or" prefix - and then
-// hand DoBlock the already-ranked list. Idempotent: ranking a ranked list is a no-op,
-// and the sort is stable so equal-severity actions keep the order their tab pushed
-// them in.
-export function rankActs<T extends { sev: number }>(acts: T[]): T[] {
-  return [...acts].sort((a, b) => b.sev - a.sev).slice(0, 3)
+/* Sorts worst-first, keeps at most one line per topic, and caps at three. Pulled out
+   of `DoBlock` so a caller can rank its own actions - to decide, for example, which
+   lines get an "Or" prefix - and then hand DoBlock the already-ranked list. Idempotent:
+   ranking a ranked list is a no-op, and the sort is stable so equal-severity actions
+   keep the order their tab pushed them in.
+
+   The per-topic cap lives HERE rather than in the conditions that build the list. It
+   used to be an `if / else if` between the two `age` actions, which held right up until
+   one of them was made independent - and then "Move 926 stale games off three desks"
+   and "Drop the 4,200 games past 15 days" could print side by side, two lines largely
+   about the same games, eating two of the three slots.
+
+   `topic` is optional on purpose: the Leaderboard and Individual tabs group their
+   actions by `fam`, not by topic, so their lists come through untouched. Dedupe runs
+   BEFORE the slice, or a second line on one topic could starve a third topic of the
+   last slot. */
+export function rankActs<T extends { sev: number; topic?: string }>(acts: T[]): T[] {
+  const seen = new Set<string>()
+  return [...acts]
+    .sort((a, b) => b.sev - a.sev)
+    .filter((a) => {
+      if (!a.topic) return true
+      if (seen.has(a.topic)) return false
+      seen.add(a.topic)
+      return true
+    })
+    .slice(0, 3)
 }
 
 /* One block, three cards, used by every tab. It replaces three near-identical copies
@@ -632,14 +652,10 @@ function Overview({ d }: { d: Bundle }) {
   // reader distrust both. `t.evaluators` is who actually judged something this window,
   // which is the only headcount the pace was measured over.
   const heads = Math.max(1, t.evaluators || 1)
-  // How long the extra people are being asked for. Kept out here because the payoff
-  // line has to name the date this ask lands on, and computing that date from anything
-  // else - the CURRENT pace, say - puts a sentence under "add 8 people for 3 weeks"
-  // that quietly describes what happens if nobody is added at all.
-  const askWeeks = Math.max(1, Math.round(catchUpPersonDays / (heads * 5)))
   const peopleAsk = (() => {
-    const extra = Math.max(1, Math.round(catchUpPersonDays / (askWeeks * 5)))
-    const forLong = askWeeks === 1 ? 'a week' : askWeeks === 4 ? 'a month' : `${askWeeks} weeks`
+    const weeks = Math.max(1, Math.round(catchUpPersonDays / (heads * 5)))
+    const extra = Math.max(1, Math.round(catchUpPersonDays / (weeks * 5)))
+    const forLong = weeks === 1 ? 'a week' : weeks === 4 ? 'a month' : `${weeks} weeks`
     return <><b>{extra === 1 ? 'one more person' : `${fmt.int(extra)} more people`}</b> for {forLong}</>
   })()
 
@@ -914,20 +930,28 @@ function Overview({ d }: { d: Bundle }) {
     const names = top.length === 1 ? top[0].name
       : `${top.slice(0, -1).map((s2) => s2.name).join(', ')} and ${top[top.length - 1].name}`
     const moving = top.reduce((s2, x) => s2 + x.movable, 0)
+    // `stale`, not `movableTotal`. They are different populations: `movable` excludes
+    // the games inside the Rescue panel's cool-down window, so a sentence saying "N
+    // games past 8 days" built from `movableTotal` prints a smaller number than the
+    // stale column of the very panel the button opens.
+    const staleHeld = rbSources.reduce((s2, x) => s2 + x.stale, 0)
     const recvShare = Math.min(rbRecv.length, heads) / heads
     const movedDays = perDay > 0 && recvShare > 0 ? moving / (perDay * recvShare) : null
     acts.push({
       sev: 3, key: 'rebalance', topic: 'age', family: 'backlog',
       lead: 'Move',
       rest: <>{fmt.int(moving)} stale games from {names} to the {rbRecv.length === 1 ? 'one person' : `${rbRecv.length} people`} with a clear desk</>,
-      why: <>{rbSources.length === 1 ? 'One person holds' : `${rbSources.length} people hold`} {fmt.int(rb.movableTotal)} games past {rb.staleDays} days. {rbRecv.length === 1 ? 'One other has nothing stale and is still judging.' : `${rbRecv.length} others have nothing stale and are still judging.`}</>,
+      why: <>{rbSources.length === 1 ? 'One person holds' : `${rbSources.length} people hold`} {fmt.int(staleHeld)} games past {rb.staleDays} days. {rbRecv.length === 1 ? 'One other has nothing stale and is still judging.' : `${rbRecv.length} others have nothing stale and are still judging.`}</>,
       // The moved games measured against the people who will actually eat them: the
       // receivers' share of the team's pace. The WHOLE team's pace would say the stale
       // work is gone in a fraction of the time, on the assumption that everybody drops
       // what they are holding - and `evaluatedRecent` arrives with no window attached,
       // so a real per-receiver rate cannot be computed from it either.
+      // Scoped to the games this line actually moves. With more than three holders the
+      // rest stay where they are, so "stale games gone" would be false; the number the
+      // reader is being shown is the one in the instruction directly above.
       payoff: movedDays != null
-        ? <>Stale games gone in {fmt.dec(movedDays)} days, with nobody added</>
+        ? <>Those {fmt.int(moving)} are gone in {fmt.dec(movedDays)} days, with nobody added</>
         : <>Nobody added</>,
       // Only which rows it meant, never what the threshold should be: a Rescue scan
       // persists whatever config it is handed, so a link carrying `staleDays` would
@@ -1030,14 +1054,14 @@ function Overview({ d }: { d: Bundle }) {
   })
 
   // -- speed: the remedy that costs money --
-  // The date the ASK lands on - today plus the weeks the sentence above asks for - not
-  // the date the backlog would clear if nothing changed. Those are two different days
-  // and the second one printed under "add 8 more people" reads as a promise the extra
-  // people had nothing to do with.
-  const askBy = (() => {
-    const dt = new Date(`${addDays(vnTodayIso(), askWeeks * 7)}T00:00:00Z`)
-    return Number.isNaN(dt.getTime()) ? '' : `${dt.getUTCDate()} ${MON[dt.getUTCMonth()]}`
-  })()
+  // No date on this rung, and two wrong ones were tried before that was settled. The
+  // day the backlog would CLEAR is what happens if nobody is added, printed under a
+  // sentence asking for people. The day the ASK lands is `catchUpPersonDays`, which is
+  // a snapshot of the stock and ignores intake entirely - and law 7 puts the intake gap
+  // two rows above it, so the reader can see for themselves that three more weeks of
+  // that gap is another 2,500 games. Any date here is a promise this arithmetic does
+  // not buy. The payoff says the one thing the instruction does not: the size of the
+  // move, from what it is now to what it is being bought down to.
   if (!paceIsShort && daysToClear != null && daysToClear > T.clearDays && catchUpPersonDays >= 1) acts.push({
     sev: 2, key: 'capacity', topic: 'speed', family: 'backlog', priciest: true,
     // "Add 1,153 person-days" is a true number in a unit nobody hires in, and it is the
@@ -1047,7 +1071,7 @@ function Overview({ d }: { d: Bundle }) {
     lead: 'Add',
     rest: <>{peopleAsk} to get the backlog under {T.clearDays} days of work</>,
     why: <>{fmt.int(stock)} games in the backlog · the team clears {perDayFmt(perDay)} a day · that is {fmt.dec(daysToClear)} days of work</>,
-    payoff: askBy ? <>Backlog under {T.clearDays} days of work by {askBy}</> : undefined,
+    payoff: <>{fmt.dec(daysToClear)} days of work down to {T.clearDays}</>,
     cta: { label: 'Open Assign preview', href: '/team-ops?tab=assign' },
   })
 
@@ -1055,13 +1079,20 @@ function Overview({ d }: { d: Bundle }) {
   // The oldest band measured against the pace that would have to reach it. Four times
   // the whole backlog's own target is the line: past that, "we will get to them" is not
   // a plan, it is a sentence, and saying so is the only honest thing left to print.
+  //
+  // ONE instruction, and no "or" inside it. This used to read "put them at the front,
+  // or drop them", and its payoff - days to clear falling - is true of the drop and not
+  // of the reordering, which moves no work at all. Reordering is what the two `age`
+  // remedies above already ask for; law 7's last rung is the one they are an
+  // alternative TO. So this line is the drop and nothing else, its payoff answers
+  // exactly it, and the only "or" on the line is the one law 7 puts at the front.
   const oldest = stockAge.a3
   if (oldest > 0 && perDay > 0 && daysToClear != null && oldest / perDay > T.clearDays * 4) acts.push({
     sev: 2, key: 'tail', topic: 'age', family: 'backlog',
-    lead: 'Put',
-    rest: <>the {fmt.int(oldest)} games past 15 days at the front, or drop them</>,
+    lead: 'Drop',
+    rest: <>the {fmt.int(oldest)} games past 15 days</>,
     why: <>Games past 15 days alone are {fmt.dec(oldest / perDay)} days of work at {perDayFmt(perDay)} a day.</>,
-    payoff: <>Days to clear falls from {fmt.dec(daysToClear)} to {fmt.dec(Math.max(0, stock - oldest) / perDay)} if they go</>,
+    payoff: <>Days to clear falls from {fmt.dec(daysToClear)} to {fmt.dec(Math.max(0, stock - oldest) / perDay)}</>,
   })
 
   // -- quality --
@@ -1083,8 +1114,12 @@ function Overview({ d }: { d: Bundle }) {
     ? (outTotal >= inTotal ? 'The team is clearing more than it takes in.' : 'The team is taking in more than it clears.')
     : daysToClear <= T.clearDays ? 'The team is on top of the backlog.'
       : net <= 0 ? 'The backlog is large, but the team is pulling it down.'
-        // same test the tail action uses, so the sentence never claims the old games
-        // are sitting on a window where the team is demonstrably working through them
+        // Its own test, and deliberately a different one from the `tail` action's:
+        // this asks whether the stale share is growing FASTER than it is being cleared
+        // (a fact about the window), where `tail` asks whether the 15d+ band is now
+        // beyond reach at the current pace (a fact about the stock). The sentence must
+        // not claim the old games are sitting on a window where the team is
+        // demonstrably working through them, which is what `tailGrowing` rules out.
         : tailGrowing && agedShare > T.agedShare ? 'The backlog is outgrowing the team, and the oldest games are sitting.'
           : 'The backlog is outgrowing the team.'
   /* Each chip is the arithmetic behind one clause of the sentence, and each one has to
@@ -1138,30 +1173,40 @@ function Overview({ d }: { d: Bundle }) {
   /* Law 7, applied to the list that actually printed. Two things are decided here and
      nowhere else, because both depend on which lines SURVIVED the cap of three:
 
-     - "Or". A remedy that is not the first of its family is an alternative to the one
-       above it, so it opens with "Or" and its verb drops its capital. This lives in
-       Overview rather than in `DoBlock`, which is shared with two tabs that have no
-       cost ladder to order.
+     - "Or". A remedy printed directly under another remedy for the same problem is an
+       alternative to it, so it opens with "Or" and its verb drops its capital. The test
+       is ADJACENCY, not "is it the first of its family anywhere in the list". `pace` is
+       a diagnosis and carries no family, and it can rank between two remedies - which
+       put "Find what changed in the working day before adding people" directly above
+       "Or each person adds 100 games a day", where the "Or" reads as an alternative to
+       investigating: the exact misreading the pace/capacity interlock exists to stop.
+       An "Or" whose antecedent is two lines up, with something unrelated in between, is
+       not an "Or". This lives in Overview rather than in `DoBlock`, which is shared
+       with two tabs that have no cost ladder to order.
      - How expensive the capacity ask is, said out loud. ", the most expensive of the
        three" is a claim about the other lines on the screen, so it prints only when
-       buying people really is the last rung shown: with something above it and nothing
-       below, and counting the remedies that actually survived the cap. Alone, or with
-       "drop the oldest games" printed under it, it says nothing. */
+       buying people really is the last rung shown: presented as an alternative, and
+       with nothing costlier under it. Alone, or with "drop the oldest games" printed
+       below, it says nothing. */
   const famTotal = new Map<string, number>()
   for (const a of shown) if (a.family) famTotal.set(a.family, (famTotal.get(a.family) ?? 0) + 1)
   const famCount = new Map<string, number>()
+  let prevFamily = ''
   const doActs: DoAct[] = shown.map((a) => {
-    const cheaper = a.family ? famCount.get(a.family) ?? 0 : 0
-    if (a.family) famCount.set(a.family, cheaper + 1)
-    const total = a.family ? famTotal.get(a.family) ?? 1 : 1
+    const fam = a.family ?? ''
+    const alt = !!fam && prevFamily === fam
+    const cheaper = fam ? famCount.get(fam) ?? 0 : 0
+    if (fam) famCount.set(fam, cheaper + 1)
+    prevFamily = fam
+    const total = fam ? famTotal.get(fam) ?? 1 : 1
     const isLast = cheaper === total - 1
     return {
       sev: a.sev, key: a.key,
       kicker: TOPIC[a.topic],
       kickerTitle: `Go to the ${TOPIC[a.topic].toLowerCase()} number behind this`,
-      do: <>{cheaper > 0 ? `Or ${a.lead.toLowerCase()}` : a.lead} {a.rest}</>,
+      do: <>{alt ? `Or ${a.lead.toLowerCase()}` : a.lead} {a.rest}</>,
       why: a.why,
-      payoff: a.payoff != null && a.priciest && cheaper > 0 && isLast
+      payoff: a.payoff != null && a.priciest && alt && isLast
         ? <>{a.payoff}, the {total >= 3 ? 'most expensive of the three' : 'more expensive of the two'}</>
         : a.payoff,
       cta: a.cta,

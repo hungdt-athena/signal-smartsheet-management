@@ -325,12 +325,13 @@ describe('Overview tab', () => {
     expect(cap.do).not.toMatch(/person-day/)
     // and the evidence reads as a sentence, not three numbers separated by dots
     expect(cap.why).toBe('3,747 games in the backlog · the team clears 200 a day · that is 18.7 days of work')
-    // It also says when the ask lands, which is the thing the money buys - and the date
-    // is today plus the WEEKS the line above asks for, never the day the backlog would
-    // clear on the current pace. Those are different days, and the second one printed
-    // under "add 6 more people" reads as a promise the extra people had nothing to do
-    // with. The date moves with today, so the shape is asserted, not the day.
-    expect(cap.payoff).toMatch(/^Backlog under 5 days of work by \d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/)
+    // The payoff is the size of the move, not a date. Two dates were tried and both
+    // were promises the arithmetic does not buy: the day the backlog would CLEAR is
+    // what happens if nobody is added, and the day the ASK lands is computed from a
+    // stock snapshot that ignores intake - while the intake gap is printed two rows
+    // above it on the same card.
+    expect(cap.payoff).toBe('18.7 days of work down to 5')
+    expect(cap.payoff).not.toMatch(/Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/)
     // alone on the tab, it makes no claim about how it compares with lines that are
     // not on the screen
     expect(cap.payoff).not.toMatch(/expensive/)
@@ -380,13 +381,19 @@ describe('Overview tab', () => {
     // directly under it: dropping the work costs the work.
     expect(shown[1].payoff).not.toMatch(/expensive/)
     // Last rung: 4,200 games past 15 days is 21 days of work on its own, four times the
-    // 5-day target for the WHOLE backlog. "We will get to them" is not a plan.
-    expect(shown[2].do).toBe('Or put the 4,200 games past 15 days at the front, or drop them')
+    // 5-day target for the WHOLE backlog. "We will get to them" is not a plan. ONE
+    // instruction, because the payoff has to answer it: this line used to read "at the
+    // front, or drop them" over a days-to-clear figure that is true of the drop and
+    // false of the reordering, which moves no work at all. No "or" inside the sentence
+    // either - law 7 already puts one at the front, and "Or drop them, or accept X"
+    // makes the reader work out which of the two the number underneath belongs to.
+    expect(shown[2].do).toBe('Or drop the 4,200 games past 15 days')
+    expect(shown[2].do.slice(3)).not.toMatch(/\bor\b/)
     expect(shown[2].why).toBe('Games past 15 days alone are 21.0 days of work at 200 a day.')
-    expect(shown[2].payoff).toBe('Days to clear falls from 30.0 to 9.0 if they go')
+    expect(shown[2].payoff).toBe('Days to clear falls from 30.0 to 9.0')
     // every action leads with the move, and no action reaches for the push filter
     for (const a of shown) {
-      expect(a.do).toMatch(/^(Clear|Add|Find|Ask|Put|Move|Each|Or)\b/)
+      expect(a.do).toMatch(/^(Clear|Add|Find|Ask|Put|Move|Drop|Each|Or)\b/)
       expect(`${a.do} ${a.why}`.toLowerCase()).not.toMatch(/push|cut |hold /)
     }
     // the one place a drop is allowed to be named is the last rung, and it is named
@@ -765,6 +772,50 @@ describe('Overview tab', () => {
   it('prints nothing at all on a healthy window', async () => {
     await renderTab(healthy())
     expect(screen.queryByText('Do this')).toBeNull()
+  })
+
+  /* Two `age` lines can be eligible at once - a Rescue scan with somewhere to move
+     games to, AND a 15d+ band past reach at the current pace - and they are largely
+     about the same games. The per-topic cap used to be an `if / else if` between them,
+     which held until one was made independent; it lives in `rankActs` now so no future
+     action can quietly reintroduce the pair. */
+  it('prints at most one line per topic, however many are eligible', async () => {
+    const { container } = await renderTab(withPatch({
+      ...rebalanceable(),
+      // 4,200 past 15 days at 200 a day is 21 days of work, over the 4x-target line, so
+      // `tail` is eligible at the same time as the rebalance.
+      stock: { backlog: 6000, age: { a0: 400, a1: 400, a2: 1000, a3: 4200 } },
+    }))
+    const shown = actions(container)
+    expect(shown.length).toBeGreaterThan(1)
+    // the free age remedy wins its topic; the drop is held back
+    expect(shown.some((a) => /^Move \d/.test(a.do))).toBe(true)
+    expect(shown.some((a) => /past 15 days/.test(a.do))).toBe(false)
+    const topics = shown.map((a) => a.topic)
+    expect(new Set(topics).size).toBe(topics.length)
+  })
+
+  /* `pace` is a diagnosis, and it can rank BETWEEN two remedies. An "Or" whose
+     antecedent is two lines up, with an unrelated line in between, reads as an
+     alternative to that line - here, as an alternative to investigating, which is the
+     exact misreading the pace/capacity interlock exists to prevent. */
+  it('never hangs an "Or" off the diagnosis line', async () => {
+    const { container } = await renderTab(withPatch({
+      ...rebalanceable(),
+      // 54,000 over 90 days is a 600-a-day standing pace against 200 this week, so the
+      // pace diagnosis fires; 2,000 in against 1,000 out fires the catch-up remedy.
+      baseline: { ...healthy().baseline as object, evaluated: 54000 },
+      pipeline: { ...healthy().pipeline as object, window: { newGames: 2000, evaluated: 1000 } },
+    }))
+    const shown = actions(container)
+    const pace = shown.findIndex((a) => a.do.startsWith('Find what changed'))
+    expect(pace).toBeGreaterThanOrEqual(0)
+    // whatever printed under the diagnosis, it is not offered as an alternative to it
+    if (shown[pace + 1]) expect(shown[pace + 1].do.startsWith('Or ')).toBe(false)
+    // and an "Or" anywhere on the card still has a remedy directly above it
+    shown.forEach((a, i) => {
+      if (a.do.startsWith('Or ')) expect(shown[i - 1].do.startsWith('Find what changed')).toBe(false)
+    })
   })
 
   // Every line ends somewhere the reader can go. The rescue link says which rows it
