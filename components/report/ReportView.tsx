@@ -299,9 +299,8 @@ function ReportInner() {
   // A one-shot focus key for a card an action links to. Read once on mount and then
   // cleared from STATE, not the URL: clearing the URL would fight the browser's back
   // button, and leaving it live in state would re-flash the card on every re-render.
-  // Not consumed yet - no action produces a `focus=` link until a later task wires one
-  // up (e.g. Leaderboard's per-day column, Task 8) and clears it via setFocusOnce('').
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // Leaderboard's Games-per-day column is the first consumer (Task 8); it clears this
+  // via `onConsumeFocus` once it has taken its own one-shot copy into local state.
   const [focusOnce, setFocusOnce] = useState(sp.get('focus') || '')
 
   const setTab = (id: string) => {
@@ -439,7 +438,8 @@ function ReportInner() {
       {!loading && data && !data.empty && (
         <>
           {activeTab === 'overview' && <Overview d={data} />}
-          {activeTab === 'leaderboard' && <Leaderboard d={data} />}
+          {activeTab === 'leaderboard' && <Leaderboard d={data} focusOnce={focusOnce}
+            onConsumeFocus={() => setFocusOnce('')} />}
           {activeTab === 'individual' && <Individual d={data} />}
           {activeTab === 'config' && <ConfigTab d={data} onSaved={fetchData} />}
         </>
@@ -1460,9 +1460,23 @@ const LB_T = {
   outlierZ: 2,
 }
 
-function Leaderboard({ d }: { d: Bundle }) {
+function Leaderboard({ d, focusOnce, onConsumeFocus }: {
+  d: Bundle
+  // A one-shot key from Overview's "See who is under the pace" link. Read once, held
+  // in local state (NOT re-derived from `focusOnce` on every render) so the ring plays
+  // once and then stops - a re-render half a second later must not restart it, and the
+  // parent clearing its own copy must not erase the flash mid-animation.
+  focusOnce?: string
+  onConsumeFocus?: () => void
+}) {
   const ev = d.evaluators
   const sd = staleDays(d)
+  const [flashPerDay] = useState(focusOnce === 'perday')
+  useEffect(() => {
+    if (focusOnce !== 'perday') return
+    onConsumeFocus?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const W = d.config.weights
   const winName = windowNoun(d)
   // The heatmap's grain, NOT the trend charts'. They differ on every view except a
@@ -1705,7 +1719,10 @@ function Leaderboard({ d }: { d: Bundle }) {
   // because the whole point of families is that different families say different
   // things - and "ThuDT bypasses too much" and "ThuDT's backlog has gone stale" are
   // genuinely different things about genuinely one person.
-  type Act = { sev: number; fam: string; key: string; who?: string; do: React.ReactNode; why: React.ReactNode }
+  type Act = {
+    sev: number; fam: string; key: string; who?: string; do: React.ReactNode; why: React.ReactNode
+    cta?: DoAct['cta']
+  }
   const acts: Act[] = []
 
   // Shortlist rate and bypass share are the same quantity read from opposite ends, so
@@ -1748,8 +1765,12 @@ function Leaderboard({ d }: { d: Bundle }) {
   const stuckFree = stuck.filter((e) => !spoken.has(e.key))
   if (queueStuck) acts.push({
     sev: 3, fam: 'speed', key: 'backlog', who: queueStuck.key,
-    do: <>Run Team Ops → Rescue on {queueStuck.name}&apos;s backlog at {sd} days</>,
-    why: <>{fmt.int(queueStuck.stale)} of {queueStuck.name}&apos;s {fmt.int(queueStuck.n)} backlog games have sat {sd}+ days - {fmt.pct(queueStuck.stale / queueStuck.n)} of their backlog, and {fmt.pct(queueStuck.stale / Math.max(1, queueStale))} of everything the team has left waiting that long. Oldest is {queueStuck.oldest} days.</>,
+    // This is a name's problem, not the bucket's: Reassign moves what is named here,
+    // where Overview's Rescue button scans and picks both sides itself. Two different
+    // operations for two different altitudes - see law 2.
+    do: <>Reassign {queueStuck.name}&apos;s backlog</>,
+    why: <>{fmt.int(queueStuck.stale)} of {queueStuck.name}&apos;s {fmt.int(queueStuck.n)} games sat past {sd} days ({fmt.pct(queueStuck.stale / queueStuck.n)} of their backlog, {fmt.pct(queueStuck.stale / Math.max(1, queueStale))} of the team&apos;s). Oldest is {queueStuck.oldest} days.</>,
+    cta: { label: `Reassign ${queueStuck.name}`, href: `/team-ops?tab=reassign&from=${encodeURIComponent(queueStuck.name)}` },
   })
   else if (stuckFree.length) acts.push({
     sev: 3, fam: 'speed', key: 'stuck', who: stuckFree[0].key,
@@ -1829,7 +1850,7 @@ function Leaderboard({ d }: { d: Bundle }) {
       sub: (e) => (e.evaluated > 0 && e.activeDays > 0 ? `${e.activeDays} active ${e.activeDays === 1 ? 'day' : 'days'}` : null),
     },
     {
-      key: 'perday', label: 'Games per day', tip: TIP.perDay('games evaluated'),
+      key: 'perday', label: 'Games per day', tip: TIP.perDay('games evaluated'), focusKey: 'perday',
       value: (e) => (e.evaluated > 0 ? e.throughput : null),
       cell: (e) => (e.evaluated > 0 ? fmt.dec(e.throughput) : '·'),
     },
@@ -1884,7 +1905,7 @@ function Leaderboard({ d }: { d: Bundle }) {
         </div>
       )}
       <DoBlock acts={shown.map((a) => ({
-        sev: a.sev, key: a.key, kicker: a.fam.toUpperCase(), do: a.do, why: a.why,
+        sev: a.sev, key: a.key, kicker: a.fam.toUpperCase(), do: a.do, why: a.why, cta: a.cta,
       }))} />
 
       <div className="rp-section-title">Everyone - who produces, and does it hold up?</div>
@@ -1921,7 +1942,8 @@ function Leaderboard({ d }: { d: Bundle }) {
           rowKey={(e) => e.key} rowName={(e) => e.name}
           rowSub={(e) => e.title || null}
           inactive={(e) => e.evaluated === 0}
-          inactiveNote={`No evaluations this ${winName} - listed, not ranked`} />
+          inactiveNote={`No evaluations this ${winName} - listed, not ranked`}
+          rowFlash={(e) => flashPerDay && e.evaluated > 0 && e.throughput < d.teamTotals.avgThroughput} />
         <Foot
           read={<>Click any column to sort, click again to flip it, once more to clear. Every rate carries the counts it came from, so a percentage and its sample are read together.</>}
           now={bestRate && <><b>{bestRate.name}</b> has the highest shortlist rate at {fmt.pct(bestRate.survivalRate)}, on {fmt.int(bestRate.evaluated)} games against a team median of {fmt.int(medianVol)}. Sample weight is what keeps that from topping the score.</>} />

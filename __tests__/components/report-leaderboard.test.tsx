@@ -1,13 +1,19 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ReportView } from '@/components/report/ReportView'
 
-// ReportView now reads ?rtab=/?focus= (Task 5); this file doesn't exercise that, so a
-// static stub is enough - same idiom as report-url-state.test.tsx.
+// ReportView reads ?rtab=/?focus= (Task 5). Task 8 is the first consumer of `focus`,
+// so `params` is now mutable per test - same idiom as report-url-state.test.tsx -
+// rather than the static stub this file used while nothing read it.
+let params = new URLSearchParams()
 jest.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => params,
   useRouter: () => ({ replace: jest.fn() }),
   usePathname: () => '/team-ops',
 }))
+
+// jsdom has no scrollIntoView; the focus=perday flash scrolls the flagged column into
+// view the same way Overview's chip-to-card focus does.
+Element.prototype.scrollIntoView = jest.fn()
 
 // The Leaderboard tab's contract. It is a reading contract first, like Overview's:
 //
@@ -125,7 +131,7 @@ const readNotes = (c: HTMLElement) => Array.from(c.querySelectorAll('.rp-readnot
 const nowLines = (c: HTMLElement) => Array.from(c.querySelectorAll('.rp-foot-now')).map((r) => r.textContent || '')
 
 describe('Leaderboard tab', () => {
-  afterEach(() => jest.restoreAllMocks())
+  afterEach(() => { jest.restoreAllMocks(); params = new URLSearchParams() })
 
   it('reads guide, sentence, chips, actions - with no KPI row and nothing folded away', async () => {
     const { container } = await leaderboard(bundleOf(FOUR()))
@@ -290,7 +296,7 @@ describe('Leaderboard tab', () => {
     const now = nowLines(container).find((n) => n.includes('flagged'))!
     expect(now).toContain('Alpha')
     expect(now).not.toContain('Beta')
-    expect(actions(container).find((a) => a.do.includes('Rescue'))!.do).toContain('Alpha')
+    expect(actions(container).find((a) => a.do.includes('Reassign'))!.do).toContain('Alpha')
   })
 
   it('never prints two moves about the same person', async () => {
@@ -320,8 +326,38 @@ describe('Leaderboard tab', () => {
     }))
     const shown = actions(container)
     // Alpha is already named by the calibration line, so the backlog line names Beta
-    expect(shown.find((a) => a.do.includes('Rescue'))!.do).toContain('Beta')
+    expect(shown.find((a) => a.do.includes('Reassign'))!.do).toContain('Beta')
     expect(shown.filter((a) => a.do.includes('Alpha'))).toHaveLength(1)
+  })
+
+  it('sends a stuck backlog to Reassign, not to Rescue', async () => {
+    const people = [even('Alpha', { evaluated: 700 }), even('Beta'), even('Gamma'), even('Delta')]
+    const { container } = await leaderboard(bundleOf(people, {
+      backlogBy: [
+        { key: 'k1', name: 'Beta', n: 300, a0: 100, a1: 40, a2: 120, a3: 40, oldest: 22, stale: 160 },
+      ],
+    }))
+    const block = screen.getByText('Do this').closest('.rp-do-block')!
+    expect(block.textContent).not.toMatch(/Rescue/)
+    const link = screen.getByRole('link', { name: /Reassign/ })
+    expect(link).toHaveAttribute('href', expect.stringContaining('tab=reassign&from=Beta'))
+    // and Rescue's own admin-editable threshold never rides along on this link
+    expect(link.getAttribute('href')).not.toMatch(/staleDays/)
+  })
+
+  it('flashes the under-pace rows when arrived at with focus=perday', async () => {
+    params = new URLSearchParams('rtab=leaderboard&focus=perday')
+    const people = FOUR()
+    // Alpha runs well under the team's pace; the other three sit at it.
+    people[0] = even('Alpha', { evaluated: 10, cells: { d1: 10 } })
+    const { container } = await leaderboard(bundleOf(people))
+    expect(document.querySelectorAll('.rp-flash').length).toBeGreaterThan(0)
+    const header = container.querySelector('[data-rp-focus="perday"]')
+    expect(header).not.toBeNull()
+    expect(header?.textContent).toContain('Games per day')
+    // only the under-pace row is flashed, not everyone
+    expect(rowNamed(container, 'Alpha').classList.contains('rp-flash')).toBe(true)
+    expect(rowNamed(container, 'Beta').classList.contains('rp-flash')).toBe(false)
   })
 
   it('does not call an all-time window "this week"', async () => {

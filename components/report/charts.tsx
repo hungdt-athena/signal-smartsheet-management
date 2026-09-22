@@ -902,6 +902,9 @@ export type SortCol<R> = {
   tip?: React.ReactNode
   // a column the moderator stamps days later - unreliable while the window is open
   late?: boolean
+  // Marks this header cell `data-rp-focus="<focusKey>"` so an action elsewhere on the
+  // page can link a reader straight to it (see the shared `focus()` helper).
+  focusKey?: string
 }
 
 // Two chevrons, drawn rather than typed: ▲▼↕ are font glyphs, so they arrive at a
@@ -917,7 +920,7 @@ function SortMark({ dir }: { dir: 'asc' | 'desc' | 'off' }) {
   )
 }
 
-export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort, inactive, inactiveNote }: {
+export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort, inactive, inactiveNote, rowFlash }: {
   rows: R[]
   cols: Array<SortCol<R>>
   rowKey: (r: R) => string
@@ -929,6 +932,10 @@ export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort,
   // a rank of last implies they competed.
   inactive?: (r: R) => boolean
   inactiveNote?: string
+  // A one-shot ring on the rows an incoming `focus=` link is about, same idiom as
+  // `rp-flash` elsewhere on the page. The caller decides which rows qualify and for
+  // how long; this table only paints the class it is handed.
+  rowFlash?: (r: R) => boolean
 }) {
   // null = the table's own default. A column cycles largest-first, smallest-first, off,
   // so the third click undoes the sort instead of leaving the reader hunting for which
@@ -955,7 +962,8 @@ export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort,
   const dirOf = (key: string): 'desc' | 'asc' | 'off' =>
     sort && sort.key === key ? sort.dir : 'off'
   const body = (r: R, rank: number | null) => (
-    <tr key={rowKey(r)} className={rank == null ? 'rp-lbt-idle' : undefined}>
+    <tr key={rowKey(r)} className={[rank == null ? 'rp-lbt-idle' : null, rowFlash?.(r) ? 'rp-flash' : null]
+      .filter(Boolean).join(' ') || undefined}>
       <td className="rp-lbt-i">{rank ?? ''}</td>
       <td className="rp-lbt-name">
         {rowName(r)}
@@ -983,7 +991,8 @@ export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort,
             <th className="rp-lbt-i" />
             <th className="rp-lbt-name">Evaluator</th>
             {cols.map((c) => (
-              <th key={c.key} className={'rp-lbt-num' + (c.key === eff.key ? ' on' : '')}>
+              <th key={c.key} className={'rp-lbt-num' + (c.key === eff.key ? ' on' : '')}
+                {...(c.focusKey ? { 'data-rp-focus': c.focusKey } : {})}>
                 <button className="rp-lbt-sortbtn" onClick={() => click(c.key)}
                   title={`Sort by ${c.label}`} aria-label={`Sort by ${c.label}`}>
                   {c.label}

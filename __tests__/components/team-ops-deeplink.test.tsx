@@ -81,6 +81,23 @@ describe('team-ops deep links', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'PhuongNT1' })).toBeInTheDocument())
   })
 
+  it('resolves a casing-drifted ?from= to the roster’s own spelling', async () => {
+    // The Report builds this link from game_evaluations.initial_evaluator; the roster
+    // it has to match against is evaluator_roster.name — a table with a known history
+    // of casing drift against that one. A case-sensitive match would land on an empty
+    // select and say nothing about why.
+    params = new URLSearchParams('tab=reassign&from=phuongnt1')
+    render(<TeamOpsPage />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'PhuongNT1' })).toBeInTheDocument())
+  })
+
+  it('drops the preselection when the named evaluator is not on this roster', async () => {
+    params = new URLSearchParams('tab=reassign&from=NobodyHere')
+    render(<TeamOpsPage />)
+    await waitFor(() => expect(screen.getByText(/select evaluator/i)).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'NobodyHere' })).not.toBeInTheDocument()
+  })
+
   it('rings the rows named in the URL on Rescue', async () => {
     params = new URLSearchParams('tab=rescue&flash=PhuongNT1,ThuDT')
     render(<TeamOpsPage />)

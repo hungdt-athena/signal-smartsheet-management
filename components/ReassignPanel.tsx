@@ -57,12 +57,17 @@ export function ReassignPanel({ initialFrom }: { initialFrom?: string } = {}) {
   }, [loadRoster])
 
   // A link can only say a name; it cannot guarantee that name is still on this
-  // bucket's roster by the time it loads. Once the roster is in, drop a preselection
-  // that does not resolve to a real row rather than leaving the select on a value it
-  // cannot show.
+  // bucket's roster by the time it loads, or that it spells it the same way. The
+  // Report's names come from game_evaluations.initial_evaluator, the roster from
+  // evaluator_roster.name - two tables with a known history of casing drift - so the
+  // match is case-insensitive, and the select is seeded with the ROSTER's own spelling
+  // (never the URL's) so it shows what the roster shows. A name that resolves to
+  // nothing real drops the preselection rather than leaving the select on a value it
+  // cannot display.
   useEffect(() => {
     if (!initialFrom || roster.length === 0) return
-    if (!roster.some(r => r.name === initialFrom)) setFrom('')
+    const match = roster.find(r => r.name.toLowerCase() === initialFrom.toLowerCase())
+    setFrom(match ? match.name : '')
   }, [roster, initialFrom])
 
   const targets = useMemo(() => roster.filter(r => r.name !== from), [roster, from])
