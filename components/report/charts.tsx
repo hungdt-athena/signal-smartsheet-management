@@ -920,13 +920,20 @@ function SortMark({ dir }: { dir: 'asc' | 'desc' | 'off' }) {
   )
 }
 
-export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort, inactive, inactiveNote, rowFlash }: {
+export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort, focusSort, inactive, inactiveNote, rowFlash }: {
   rows: R[]
   cols: Array<SortCol<R>>
   rowKey: (r: R) => string
   rowName: (r: R) => React.ReactNode
   rowSub?: (r: R) => React.ReactNode
   initialSort: string
+  // An incoming `focus=` link is about THIS table, and says how it should be read.
+  // Three things follow from it, and the shipped version did none of them: the table
+  // opens on that column and direction, it is scrolled into view, and the sort bar
+  // above it says so with a Reset - so the reader knows the order was chosen for them
+  // and can undo it. Without the sort the button's promise ("see who is under the
+  // pace") was left to a ring on rows that could be anywhere in the list.
+  focusSort?: { key: string; dir: 'asc' | 'desc' }
   // Did no work in this window. Still listed - "who is missing" is a reading of this
   // table - but pinned below the ranked block and never given a rank number, because
   // a rank of last implies they competed.
@@ -939,8 +946,19 @@ export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort,
 }) {
   // null = the table's own default. A column cycles largest-first, smallest-first, off,
   // so the third click undoes the sort instead of leaving the reader hunting for which
-  // column they touched.
-  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
+  // column they touched. `focusSort` seeds it rather than bypassing it, so the state
+  // bar and its Reset button appear exactly as they would after a click.
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(focusSort ?? null)
+  // The table is below the fold on every screen this report is read on, and the row
+  // ring is a one-shot animation - so without this it is over before the reader has
+  // scrolled down to it. Optional-called: jsdom has no scrollIntoView.
+  const wrapRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!focusSort) return
+    wrapRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    // one-shot on arrival; a later re-render must not yank the page back
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   if (rows.length === 0) return <Empty />
   const eff = sort || { key: initialSort, dir: 'desc' as const }
   const col = cols.find((c) => c.key === eff.key) || cols[0]
@@ -962,7 +980,11 @@ export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort,
   const dirOf = (key: string): 'desc' | 'asc' | 'off' =>
     sort && sort.key === key ? sort.dir : 'off'
   const body = (r: R, rank: number | null) => (
-    <tr key={rowKey(r)} className={[rank == null ? 'rp-lbt-idle' : null, rowFlash?.(r) ? 'rp-flash' : null]
+    // `rp-flash` is a box-shadow ring, and this table is `border-collapse: collapse` -
+    // a box-shadow on a <tr> in a collapsed table is not painted by Chrome at all, so
+    // the shipped ring existed only in the class name jsdom asserted. `rp-lbt-flash`
+    // tints the row's CELLS instead, which a collapsed table does paint.
+    <tr key={rowKey(r)} className={[rank == null ? 'rp-lbt-idle' : null, rowFlash?.(r) ? 'rp-lbt-flash' : null]
       .filter(Boolean).join(' ') || undefined}>
       <td className="rp-lbt-i">{rank ?? ''}</td>
       <td className="rp-lbt-name">
@@ -978,7 +1000,7 @@ export function SortTable<R>({ rows, cols, rowKey, rowName, rowSub, initialSort,
     </tr>
   )
   return (
-    <div className="rp-lbt-wrap">
+    <div className="rp-lbt-wrap" ref={wrapRef}>
       {sort && (
         <div className="rp-lbt-bar">
           <span className="rp-lbt-state">Sorted by {col.label}, {sort.dir === 'desc' ? 'largest first' : 'smallest first'}</span>

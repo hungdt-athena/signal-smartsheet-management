@@ -220,6 +220,29 @@ describe('Individual tab', () => {
     const why = actions(container).find((a) => a.do.includes('bypassed'))!.why
     expect(why).toContain('the rest of the team keeps 50%')
     expect(why).not.toContain('5.5%')
+    // and the projection says whose rate it applies. "At their rate their 1,000
+    // games..." over a sentence whose subject is this person reads as their OWN rate,
+    // which would make the clause say nothing at all.
+    expect(why).toContain("At the team's rate their 1,000 games")
+    expect(why).not.toContain('At their rate')
+  })
+
+  /* Two of the three tabs printed `fam.toUpperCase()` as the card's kicker, so the
+     reader met CAL, REC and COVER - which are not words - on the one branch whose
+     point is a single vocabulary across three tabs. Overview always mapped its topic
+     through a label table; this is the same table for the other two. The lexicon gate
+     greps this component's SOURCE, so it cannot see an identifier upper-cased at
+     render time, and only an assertion on the rendered text can. */
+  it('names the card topic in words, never as an internal code', async () => {
+    const { container } = await individual(bundleOf(TWO(), {
+      backlogBy: [{ key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21, stale: 120 }],
+    }))
+    const kickers = Array.from(container.querySelectorAll('.rp-do-topic')).map((n) => n.textContent || '')
+    expect(kickers.length).toBeGreaterThan(0)
+    expect(kickers).toContain('Backlog')
+    for (const k of kickers) {
+      expect(['Backlog', 'Calibration', 'Coverage', 'Output', 'Picks', 'Recording', 'Rhythm', 'Speed']).toContain(k)
+    }
   })
 
   it('never prints a rate and its benchmark as the same number', async () => {
@@ -262,27 +285,38 @@ describe('Individual tab', () => {
     const act = actions(container).find((a) => a.do.includes('5 oldest games'))!
     expect(act.do).toContain('Ask Alpha')
     expect(act.why).toContain('120 of their 400 games')
-    expect(act.why).toContain('oldest 21')
+    // with its unit. The self voice says "oldest 41d"; this one used to stop at the
+    // bare number, so the same field read as two different quantities across voices.
+    expect(act.why).toContain('oldest 21d.')
     // this tab coaches the person, it does not move their games - Leaderboard already did
     expect(act.do).not.toMatch(/Rescue|Reassign/)
   })
 
-  it('guards the stale payoff against a zero throughput', async () => {
+  /* The payoff answers the instruction on the card, which asks for FIVE games a day -
+     not the person's full measured pace. Reading `e.throughput` instead answered a
+     question nobody asked and made the two voices disagree by 25x on the same person:
+     2.6 "working days" for a manager against 64 days for the contractor, off the same
+     316 games and the same threshold. It also divided by zero on a quiet window. */
+  const staleRow = { key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21, stale: 120 }
+  const cleanRow = { key: 'k1', name: 'Beta', n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 }
+
+  it('prices the stale backlog at the five a day it just asked for', async () => {
+    const { container } = await individual(bundleOf(TWO(), { backlogBy: [staleRow, cleanRow] }))
+    // 120 stale games, five a day: 24 days.
+    expect(txt(container.querySelector('.rp-do-payoff'))).toBe('Their stale games gone in about 24 days')
+  })
+
+  it('gives the same answer whatever pace the person happens to be running at', async () => {
     // Alpha has judged nothing this window (throughput = evaluated / activeDays = 0)
-    // but is still sitting on a real stale backlog - the one case the payoff's
-    // division is guarded for. Dividing by the raw throughput here would print
-    // "Infinity working days" on screen.
+    // but is still sitting on the same stale backlog. The instruction has not changed,
+    // so neither has the answer - and a zero throughput can no longer reach the
+    // arithmetic to print "Infinity working days".
     const { container } = await individual(bundleOf([
       person('Alpha', { evaluated: 0, assigned: 600 }),
       person('Beta'),
-    ], {
-      backlogBy: [
-        { key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21, stale: 120 },
-        { key: 'k1', name: 'Beta', n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 },
-      ],
-    }))
+    ], { backlogBy: [staleRow, cleanRow] }))
     const payoff = txt(container.querySelector('.rp-do-payoff'))
-    expect(payoff).toBe('Their stale games clear in about 120.0 working days')
+    expect(payoff).toBe('Their stale games gone in about 24 days')
     expect(payoff).not.toMatch(/Infinity|NaN/)
   })
 

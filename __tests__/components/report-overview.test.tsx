@@ -188,7 +188,10 @@ describe('Overview tab', () => {
     // and the banner still carries its three chips
     const chips = Array.from(container.querySelectorAll('.rp-chip .rp-chip-text')).map((c) => c.textContent)
     expect(chips).toHaveLength(3)
-    expect(chips[2]).toBe('40 games have waited 8+ days - 10% of the backlog')
+    // "since import" is load-bearing: the `holders` action on this same screen counts
+    // stale games from the ASSIGN date at the admin's threshold, so the two numbers
+    // can legitimately disagree and only the labels say why.
+    expect(chips[2]).toBe('40 games have waited 8+ days since import - 10% of the backlog')
     // days-to-clear works because the batch brought dates: 1,000 over 5 days = 200/day
     expect(chips[1]).toBe('2.0 days to clear the whole backlog at the current 200 games/day')
   })
@@ -231,7 +234,7 @@ describe('Overview tab', () => {
     // and mixing the two nouns is what printed "Queue +1,413 this day".
     expect(body(chips[0])).toBe('As many games were cleared as arrived this week')
     expect(body(chips[1])).toBe('2.0 days to clear the whole backlog at the current 200 games/day')
-    expect(body(chips[2])).toBe('40 games have waited 8+ days - 10% of the backlog')
+    expect(body(chips[2])).toBe('40 games have waited 8+ days since import - 10% of the backlog')
     // a healthy backlog reads green, not "no colour"
     expect(chips.every((c) => c.classList.contains('good'))).toBe(true)
   })
@@ -472,7 +475,8 @@ describe('Overview tab', () => {
       ],
     }))
     const block = screen.getByText('Do this').closest('.rp-do-block')!
-    expect(block.textContent).toContain('11')
+    // The whole phrase, not the bare digits: '11' alone also matches "1,100 games".
+    expect(block.textContent).toContain('11+ days')
     expect(block.textContent).not.toMatch(/\b8\+ days\b/)
   })
 
@@ -491,9 +495,31 @@ describe('Overview tab', () => {
     expect(act.do).toContain('250 games sitting 8+ days with Alpha')
     expect(act.why).toContain('One person holds 250 of the 250 games')
     expect(act.do).not.toContain('Beta')
+    // one holder, so there is no "of N" to add
+    expect(act.do).not.toMatch(/the top \d+ of/)
     // the denominator comes from the same rows as the holders, never from a stock that
     // is null on a batch window and measured from a different date when it is not
     expect(act.why).not.toContain('of the 0 games')
+  })
+
+  /* Three names over a `why` counting four people and a different total is three
+     numbers that do not reconcile on one card - and reconciling them is the first
+     thing a manager does. The instruction says so when the names are not all of them. */
+  it('says when the names it prints are not all of the holders', async () => {
+    const { container } = await renderTab(withPatch({
+      backlogBy: [
+        { key: 'k0', name: 'Alpha', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 30, stale: 250 },
+        { key: 'k1', name: 'Beta', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 28, stale: 240 },
+        { key: 'k2', name: 'Gamma', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 26, stale: 230 },
+        { key: 'k3', name: 'Delta', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 24, stale: 220 },
+      ],
+    }))
+    const act = actions(container).find((a) => a.do.includes('Alpha'))!
+    expect(act.do).toContain('Alpha, Beta and Gamma, the top 3 of 4,')
+    expect(act.do).not.toContain('Delta')
+    // the evidence still counts all four, which is exactly why the instruction has to
+    // say that it does not
+    expect(act.why).toContain('4 people hold 940 of the 940 games')
   })
 
   it('never shows a +/- badge without saying what it is a change from', async () => {
@@ -810,12 +836,16 @@ describe('Overview tab', () => {
     const shown = actions(container)
     const pace = shown.findIndex((a) => a.do.startsWith('Find what changed'))
     expect(pace).toBeGreaterThanOrEqual(0)
+    // There has to BE a line under the diagnosis for this test to mean anything: the
+    // assertion below no-ops the moment `pace` ranks last, so the precondition is
+    // asserted rather than assumed.
+    expect(shown.length).toBeGreaterThan(pace + 1)
     // whatever printed under the diagnosis, it is not offered as an alternative to it
-    if (shown[pace + 1]) expect(shown[pace + 1].do.startsWith('Or ')).toBe(false)
-    // and an "Or" anywhere on the card still has a remedy directly above it
-    shown.forEach((a, i) => {
-      if (a.do.startsWith('Or ')) expect(shown[i - 1].do.startsWith('Find what changed')).toBe(false)
-    })
+    expect(shown[pace + 1].do.startsWith('Or ')).toBe(false)
+    // (The companion check - that no "Or" anywhere sits directly under the diagnosis -
+    // used to loop over every line here, but nothing on this fixture opens with "Or"
+    // once `pace` has taken the Speed slot, so its body never ran. The line above is
+    // the whole of the case on this fixture.)
   })
 
   // Every line ends somewhere the reader can go. The rescue link says which rows it
@@ -825,7 +855,11 @@ describe('Overview tab', () => {
   it('sends each line somewhere, and never puts a threshold in a link', async () => {
     await renderTab(rebalanceable())
     const rescue = screen.getByText('Open Rescue') as HTMLAnchorElement
-    expect(rescue.getAttribute('href')).toBe('/team-ops?tab=rescue&flash=PhuongNT1%2CThuDT%2CHaiNM%2CLinhPT')
+    // `cat` is the genre the sentence was read on. Without it the reader landed on
+    // Rescue's own default bucket, where none of the flashed names appear and none of
+    // the numbers in the sentence exist. A category selects a VIEW; a threshold is a
+    // SETTING a scan persists, so it still may not travel here.
+    expect(rescue.getAttribute('href')).toBe('/team-ops?tab=rescue&cat=puzzle&flash=PhuongNT1%2CThuDT%2CHaiNM%2CLinhPT')
     expect(rescue.getAttribute('href')).not.toMatch(/staleDays|days=/)
   })
 
@@ -853,6 +887,61 @@ describe('Overview tab', () => {
       expect(k.tagName).toBe('BUTTON')
       expect(k.getAttribute('title')).toMatch(/^Go to the (growth|speed|age|quality) number behind this$/)
     }
+  })
+
+  /* `classifyRoster` qualifies a receiver on STALE work, never on pending work, so on
+     the real roster the "clear desks" this line offered were holding 404 and 332
+     games each - a claim the table one click away disproves, which is the first thing
+     a manager checks. "Nothing stale" would not have been safe either: it is true only
+     while `receiverMaxStale` is 0, and that knob is admin-editable up to 100. Both
+     sentences now say what stays true, in the destination screen's own word. */
+  it('does not promise a clear desk the Rescue table disproves', async () => {
+    const { container } = await renderTab(rebalanceable())
+    const move = actions(container).find((a) => a.do.startsWith('Move '))!
+    expect(move.do).toContain('to the 2 people Rescue would hand them to')
+    expect(move.do).not.toMatch(/clear desk/i)
+    expect(move.why).toContain("2 others pass Rescue's receiver check and are still judging.")
+    expect(move.why).not.toMatch(/nothing stale/i)
+  })
+
+  /* A window with no dates - all-time, and "All batches" - has no elapsed span to
+     divide by, so `perDay` and the reference velocity are both 0, the pace gauge reads
+     0 against nothing, and the shortfall sat at a flat 66 points. A missing
+     denominator was crossing the threshold, which is not what Law 6 means by a reading
+     crossing a line: the branch's own real-payload dump printed "The team cleared 0.0
+     games a day against 0.0" on two of six fixtures, and the Speed slot it took then
+     suppressed the capacity ask through the !paceIsShort interlock. */
+  it('does not diagnose a pace it never measured', async () => {
+    const bundle = rebalanceable()
+    bundle.window = { label: 'All time' }
+    const { container } = await renderTab(bundle)
+    const shown = actions(container)
+    expect(shown.length).toBeGreaterThan(0)
+    expect(shown.some((a) => a.do.startsWith('Find what changed'))).toBe(false)
+    expect(container.querySelector('.rp-do-block')!.textContent).not.toMatch(/0\.0 games a day/)
+  })
+
+  // The payoff on the rebalance line is priced off that same missing pace. It used to
+  // fall back to the bare fragment "Nobody added", which under a green arrow reads as
+  // a sentence that lost its beginning rather than as what the reader gets.
+  it('prints no payoff where there is no pace to price one with', async () => {
+    const bundle = rebalanceable()
+    bundle.window = { label: 'All time' }
+    const { container } = await renderTab(bundle)
+    expect(actions(container).some((a) => a.do.startsWith('Move '))).toBe(true)
+    expect(container.querySelectorAll('.rp-do-payoff')).toHaveLength(0)
+    expect(container.querySelector('.rp-do-block')!.textContent).not.toContain('Nobody added')
+  })
+
+  // A fixed three-column grid left a single action as a third-width card with two
+  // thirds of the row blank - the common case on Individual, and the only shape the
+  // good-news line ever prints in.
+  it('gives the grid as many columns as there are cards', async () => {
+    const { container } = await renderTab(rebalanceable())
+    const grid = container.querySelector('.rp-do-grid')!
+    const cards = container.querySelectorAll('.rp-do').length
+    expect(cards).toBeGreaterThan(0)
+    expect(grid.classList.contains(`n${Math.min(3, cards)}`)).toBe(true)
   })
 
   // The cards are narrow. Evidence longer than this wraps to four lines and the

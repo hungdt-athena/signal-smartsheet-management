@@ -2103,10 +2103,22 @@ input:checked + .slider:before {
    inside each one - the move, then the numbers behind it, so the instruction can be
    read on its own and the evidence is there when it is questioned. */
 .rp-do-block { margin: 12px 0 4px; }
-.rp-do-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; align-items: stretch; }
+/* Column count follows the card count. A flat repeat(3, 1fr) rendered a single action
+   - the common case on Individual, and the only shape the good-news line ever prints
+   in - as a third-width card with two thirds of the row blank. A lone card is capped
+   rather than stretched full-bleed, so one sentence does not run the width of a
+   desktop. */
+.rp-do-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+.rp-do-grid.n1 { grid-template-columns: minmax(0, 560px); }
+.rp-do-grid.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .rp-do { border-left: 3px solid var(--warn); background: var(--warn-weak); border-radius: 0 8px 8px 0;
   padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
 .rp-do.urgent { border-left-color: var(--bad); background: var(--bad-weak); }
+/* The one good-news card (Individual's `up`, sev 0). Everything that was not urgent
+   used to fall through to the amber warning above, which printed "Keep the change you
+   made this week" as a caution - the exact opposite of the reason that line exists,
+   on the one tab a contractor ever sees. */
+.rp-do.good { border-left-color: var(--good); background: var(--good-weak); }
 .rp-do-topic { align-self: flex-start; font-family: var(--font); font-size: 9.5px; font-weight: 800;
   letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: none;
   border: none; padding: 0; margin-bottom: 2px; cursor: pointer; }
@@ -2125,7 +2137,7 @@ input:checked + .slider:before {
   border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
   text-decoration: none; cursor: pointer; }
 .rp-do-cta:hover { border-color: var(--text); }
-@media (max-width: 900px) { .rp-do-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .rp-do-grid, .rp-do-grid.n1, .rp-do-grid.n2 { grid-template-columns: 1fr; } }
 /* Two stacked bars per bucket out of a shared centre: work done to the right, work
    that only got older to the left, on one scale. Which side is longer IS the reading,
    so the two tracks are the same width and the centre column is fixed. */
@@ -2493,6 +2505,21 @@ input:checked + .slider:before {
 .rp-lbt td { padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); white-space: nowrap; }
 .rp-lbt tbody tr:last-child td { border-bottom: none; }
 .rp-lbt tbody tr:hover td { background: var(--surface-2); }
+/* The rows an incoming `focus=` link is about. NOT `.rp-flash`: that is a box-shadow
+   ring, and this table is `border-collapse: collapse`, where Chrome does not paint a
+   box-shadow on a <tr> at all - so the shipped ring was invisible in a browser while
+   jsdom happily asserted the class name. A background on the row's own CELLS is
+   painted, and an animation beats the :hover rule above on the cascade. Longer than
+   `.rp-flash`'s 1.2s because the page has to scroll to the table first, and a flash
+   that finishes mid-scroll never happened. */
+@keyframes rp-row-flash {
+  0%, 65% { background: var(--accent-weak); }
+  100% { background: transparent; }
+}
+.rp-lbt tbody tr.rp-lbt-flash > td { animation: rp-row-flash 2.4s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .rp-lbt tbody tr.rp-lbt-flash > td { animation: none; background: var(--accent-weak); }
+}
 .rp-lbt-i { width: 24px; padding-left: 2px !important; padding-right: 0 !important; text-align: right;
   font-size: 11px; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
 .rp-lbt-name { text-align: left; font-size: 12.5px; font-weight: 600; color: var(--text); min-width: 118px; }

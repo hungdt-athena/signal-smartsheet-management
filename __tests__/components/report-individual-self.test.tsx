@@ -143,14 +143,17 @@ describe('Individual tab, read by a contractor', () => {
     const block = screen.getByText('Do this').closest('.rp-do-block')!
     expect(block.querySelectorAll('a[href*="tab=rescue"], a[href*="tab=reassign"], a[href*="tab=assign"]'))
       .toHaveLength(0)
-    // Law 4: a `cta` may only be an `onClick` (e.g. scroll-to-evidence), never an
-    // `href` - a contractor's card has no operation to link to at all. Individual's
-    // own mapping into `DoBlock` (ReportView.tsx, the `<DoBlock acts={shown.map(...)}`
-    // just under this tab's acts) does not forward `cta` AT ALL today, which is a
-    // stronger guarantee than "no act sets one": even a future act that pushed a
-    // `cta` here could not render a link unless that mapping is deliberately changed
-    // to add cta support - this assertion also stands as a canary for that.
-    expect(block.querySelectorAll('.rp-do-cta[href]')).toHaveLength(0)
+    // Law 4: a contractor's card carries no operation at all - not a link, not a
+    // button. Individual's mapping into `DoBlock` does not forward `cta` today, so
+    // this goes red the day that mapping starts forwarding one and a self-voice act
+    // carries it.
+    //
+    // The card count is asserted FIRST and on purpose. "No buttons" over an empty
+    // block passes for the wrong reason, and both of the assertions this replaces
+    // were counting collections that are empty whatever the code does - one of them
+    // a strictly narrower duplicate of the other.
+    const cards = block.querySelectorAll('.rp-do')
+    expect(cards.length).toBeGreaterThan(0)
     expect(block.querySelectorAll('.rp-do-cta')).toHaveLength(0)
   })
 
@@ -192,6 +195,26 @@ describe('Individual tab, read by a contractor', () => {
     expect(screen.getByText(/up from/i)).toBeInTheDocument()
   })
 
+  /* And says it in green. `DoBlock` only separated sev >= 3, so everything else took
+     the base amber warning border and tint - printing "Keep the change you made this
+     week" as a caution, which is the opposite of the reason that line exists, on the
+     one tab a contractor ever sees. */
+  it('prints the good-news line as good news, not as a warning', async () => {
+    await renderTab(selfBundle({ throughput: 96, prevThroughput: 70 }))
+    const card = screen.getByText(/keep the change you made/i).closest('.rp-do')!
+    expect(card.classList.contains('good')).toBe(true)
+    expect(card.classList.contains('urgent')).toBe(false)
+  })
+
+  // A warning still looks like one. Reading the `good` class off the severity has to
+  // leave the other two tiers alone.
+  it('still prints a real problem as a warning', async () => {
+    await renderTab(selfBundle({ selfStale: 120 }))
+    const card = screen.getByText(/start each day with your 5 oldest games/i).closest('.rp-do')!
+    expect(card.classList.contains('good')).toBe(false)
+    expect(card.classList.contains('urgent')).toBe(true)
+  })
+
   it('prints nothing when nothing crossed a threshold', async () => {
     await renderTab(selfBundle({}))
     expect(screen.queryByText('Do this')).toBeNull()
@@ -206,6 +229,18 @@ describe('Individual tab, read by a contractor', () => {
     // admin `queueStale`/band-share test.
     await renderTab(selfBundle({ selfStale: 5 }))
     expect(screen.getByText(/start each day with your 5 oldest games/i)).toBeInTheDocument()
+  })
+
+  /* Both voices of the `stale` act price the same backlog the same way, because the
+     instruction on the card is the same in both: five oldest a day. The admin side is
+     pinned at 24 days for these same 120 games in report-individual.test.tsx ("prices
+     the stale backlog at the five a day it just asked for"). They used to disagree by
+     25x - the admin side divided by the person's whole measured pace instead. */
+  it('prices the stale backlog at five a day, the same as a manager sees it', async () => {
+    await renderTab(selfBundle({ selfStale: 120 }))
+    const block = screen.getByText('Do this').closest('.rp-do-block')!
+    expect(block.textContent).toContain('Start each day with your 5 oldest games')
+    expect(block.textContent).toContain('Your stale games gone in about 24 days')
   })
 
   it('never fires rhythm without a real reference for their own last window', async () => {

@@ -8,6 +8,7 @@ import {
   type Bench, type SortCol,
 } from '@/components/report/charts'
 import type { BenchStats } from '@/lib/report'
+import { isBucket } from '@/lib/buckets'
 
 type View = 'week' | 'month' | 'quarter' | 'year' | 'batch' | 'custom'
 const RADAR_AXES = ['Volume', 'Consistency', 'Signal', 'Survival', 'Recording'] as const
@@ -69,10 +70,28 @@ const STALE = { min: 60, share: 0.25 }
 
 // The one place `d.staleDays` is read. Everything downstream calls this rather than
 // touching the field directly, so a payload that omits it (an old fixture, a route
-// that has not caught up) degrades to the age band boundary instead of `undefined`
-// silently propagating into every sentence that names it.
+// that has not caught up) degrades to a number instead of `undefined` silently
+// propagating into every sentence that names it.
+//
+// The fallback is 14 because that is `DEFAULT_RESCUE_CONFIG.staleDays` - the value the
+// Rescue panel itself runs on when app_config has nothing saved, so the two screens
+// still agree. It is deliberately NOT a chart age band (0-3 / 4-7 / 8-14 / 15+): a band
+// is a ruler and `staleDays` is a threshold, and neither is ever derived from the other.
 function staleDays(d: Bundle): number {
   return d.staleDays ?? 14
+}
+
+/* The Category segment this report is being read on, as a query parameter for a Team
+   Ops link. Only when it names one bucket: on "All" there is no single scan to point
+   the panel at, so nothing is passed and the panel keeps its own default rather than
+   opening on a genre the sentence never mentioned.
+
+   A category selects a VIEW, which is why it may travel in a URL at all. No Rescue
+   SETTING ever may: POST /api/operations/rescue persists whatever config it is handed,
+   so a link carrying `staleDays` would rewrite the admin's saved thresholds by being
+   clicked. */
+function catParam(d: Bundle): string {
+  return isBucket(d.category) ? `&cat=${d.category}` : ''
 }
 
 function windowNoun(d: Bundle): string {
@@ -492,6 +511,31 @@ const TOPIC = {
 } as const
 type Topic = keyof typeof TOPIC
 
+/* The kicker on a Leaderboard or Individual card. Those two tabs group their actions
+   by `fam`, an internal identifier, and both used to print `a.fam.toUpperCase()` - so
+   the reader met CAL, REC and COVER, which are not words, on the branch whose whole
+   point is one vocabulary across three tabs. Overview never did: it has always mapped
+   its `topic` through TOPIC, and this is the same translation for the other two.
+   `speed` reads "Speed" rather than a fourth word for the same idea, because that is
+   what the Overview chip and KPI above it already call the pace.
+
+   The lexicon gate (__tests__/components/report-lexicon.test.tsx) greps this file's
+   SOURCE, so it cannot see an identifier being upper-cased at render time. Every fam
+   in use must therefore have a row here - the map is exhaustive over the `fam:` values
+   in this file, and `fam` is typed `string`, so a new family that forgets one falls
+   back to the identifier and reads exactly as wrong as CAL did. */
+const FAM_LABEL: Record<string, string> = {
+  backlog: 'Backlog',
+  cal: 'Calibration',
+  cover: 'Coverage',
+  output: 'Output',
+  picks: 'Picks',
+  rec: 'Recording',
+  rhythm: 'Rhythm',
+  speed: 'Speed',
+}
+const famLabel = (f: string) => FAM_LABEL[f] ?? f.toUpperCase()
+
 // Sources are `game_info.type` - the importer that found the game. The suffix is
 // noise on a chart legend. A couple of importers go by a different name to the team
 // than the one the scraper writes, and the chart is read by the team.
@@ -555,9 +599,17 @@ export function DoBlock({ acts }: { acts: DoAct[] }) {
   return (
     <div className="rp-do-block">
       <span className="rp-mix-label">Do this</span>
-      <div className="rp-do-grid">
+      {/* The column count follows the number of cards. A fixed `repeat(3, 1fr)` left a
+          lone action - the common case on Individual - as a third-width card with two
+          thirds of the row blank.
+
+          Severity picks each card's colour, in three tiers. It used to be two: `sev: 0`
+          is the one good-news line on the whole report (Individual's `up`), and it fell
+          through to the amber warning tint, which printed "Keep the change you made
+          this week" as a caution, on the one tab a contractor ever sees. */}
+      <div className={`rp-do-grid n${Math.min(3, shown.length)}`}>
         {shown.map((a) => (
-          <div className={'rp-do' + (a.sev >= 3 ? ' urgent' : '')} key={a.key}>
+          <div className={'rp-do' + (a.sev >= 3 ? ' urgent' : a.sev === 0 ? ' good' : '')} key={a.key}>
             {a.onKicker
               ? <button type="button" className="rp-do-topic" onClick={a.onKicker} title={a.kickerTitle}>{a.kicker}</button>
               : <span className="rp-do-topic as-text">{a.kicker}</span>}
@@ -949,8 +1001,18 @@ function Overview({ d }: { d: Bundle }) {
     acts.push({
       sev: 3, key: 'rebalance', topic: 'age', family: 'backlog',
       lead: 'Move',
-      rest: <>{fmt.int(moving)} stale games from {names} to the {rbRecv.length === 1 ? 'one person' : `${rbRecv.length} people`} with a clear desk</>,
-      why: <>{rbSources.length === 1 ? 'One person holds' : `${rbSources.length} people hold`} {fmt.int(staleHeld)} games past {rb.staleDays} days. {rbRecv.length === 1 ? 'One other has nothing stale and is still judging.' : `${rbRecv.length} others have nothing stale and are still judging.`}</>,
+      // NOT "with a clear desk". `classifyRoster` gates a receiver on STALE work, not
+      // on pending work, so on a real roster those people were holding 404 and 332
+      // games each - and a claim the table underneath disproves is the first thing a
+      // manager checks. "Rescue would hand them to" is also the only phrasing that
+      // stays true when `receiverMaxStale` is raised off its default of 0 (it is
+      // admin-editable up to 100), where "nothing stale" quietly becomes false.
+      //
+      // "the top 3 of 5" for the same reason `holders` below carries it: three names
+      // over a `why` counting five people and a bigger total is three numbers that do
+      // not reconcile, and reconciling them is the first thing a manager does.
+      rest: <>{fmt.int(moving)} stale games from {names}{rbSources.length > top.length ? <>, the top {top.length} of {rbSources.length},</> : null} to the {rbRecv.length === 1 ? 'one person' : `${rbRecv.length} people`} Rescue would hand them to</>,
+      why: <>{rbSources.length === 1 ? 'One person holds' : `${rbSources.length} people hold`} {fmt.int(staleHeld)} games past {rb.staleDays} days. {rbRecv.length === 1 ? `One other passes Rescue's receiver check and is still judging.` : `${rbRecv.length} others pass Rescue's receiver check and are still judging.`}</>,
       // The moved games measured against the people who will actually eat them: the
       // receivers' share of the team's pace. The WHOLE team's pace would say the stale
       // work is gone in a fraction of the time, on the assumption that everybody drops
@@ -959,15 +1021,19 @@ function Overview({ d }: { d: Bundle }) {
       // Scoped to the games this line actually moves. With more than three holders the
       // rest stay where they are, so "stale games gone" would be false; the number the
       // reader is being shown is the one in the instruction directly above.
+      // No payoff at all when there is no pace to divide by (all-time and All batches
+      // have no window to measure one over). The fallback was the bare fragment
+      // "Nobody added", which under a green arrow reads as a sentence that lost its
+      // beginning rather than as what the reader gets.
       payoff: movedDays != null
         ? <>Those {fmt.int(moving)} are gone in {fmt.dec(movedDays)} days, with nobody added</>
-        : <>Nobody added</>,
+        : undefined,
       // Only which rows it meant, never what the threshold should be: a Rescue scan
       // persists whatever config it is handed, so a link carrying `staleDays` would
       // rewrite the admin's saved settings just by being clicked.
       cta: {
         label: 'Open Rescue',
-        href: `/team-ops?tab=rescue&flash=${encodeURIComponent([...top.map((s2) => s2.name), ...rbRecv.slice(0, 4).map((r) => r.name)].join(','))}`,
+        href: `/team-ops?tab=rescue${catParam(d)}&flash=${encodeURIComponent([...top.map((s2) => s2.name), ...rbRecv.slice(0, 4).map((r) => r.name)].join(','))}`,
       },
     })
   }
@@ -1008,7 +1074,11 @@ function Overview({ d }: { d: Bundle }) {
   if (oldHolders.length > 0 && !canRebalance) acts.push({
     sev: 3, key: 'holders', topic: 'age', family: 'backlog',
     lead: 'Put',
-    rest: <>the {fmt.int(top3Stale)} games sitting {sd}+ days with {holderNames} at the front of the next assign run</>,
+    // Says so when the three names are not all of them. On the real payload it read
+    // "the 796 games with A, B and C" directly over a `why` counting FOUR people and a
+    // different total - three numbers that do not reconcile on one card, and
+    // reconciling them is the first thing a manager does.
+    rest: <>the {fmt.int(top3Stale)} games sitting {sd}+ days with {holderNames}{oldHolders.length > top3.length ? <>, the top {top3.length} of {oldHolders.length},</> : null} at the front of the next assign run</>,
     why: <>{oldHolders.length === 1 ? 'One person holds' : `${oldHolders.length} people hold`} {fmt.int(holderStale)} of the {fmt.int(staleTotal)} games that have sat {sd}+ days with the same person{staleTotal > 0 ? <> ({fmt.pct(holderStale / staleTotal)})</> : null}, each over {fmt.pct(STALE.share)} of their own backlog.</>,
     payoff: <>The oldest games get judged first, with nobody added</>,
   })
@@ -1022,7 +1092,14 @@ function Overview({ d }: { d: Bundle }) {
   //
   // No `family`: this is a diagnosis, not a remedy. Nothing below it is an alternative
   // to finding out what happened, so it never carries or triggers an "Or".
-  const paceIsShort = paceShort > T.healthShortPts
+  // Both sides of the comparison have to exist. All-time and "All batches" have no
+  // `window.from`, so `elapsedDays` is 0, `perDay` and `ref.velocity` are both 0, the
+  // gauge reads 0 and `paceShort` is a flat 66 - a missing denominator crossing the
+  // threshold for a problem nobody has. It printed "0.0 games a day against 0.0" on
+  // two of the six real-payload fixtures, ate the Speed slot, and suppressed the
+  // `capacity` ask through the `!paceIsShort` interlock below. Law 6 is about a
+  // reading crossing a line, not about a division that never happened.
+  const paceIsShort = perDay > 0 && ref.velocity > 0 && paceShort > T.healthShortPts
   if (paceIsShort) acts.push({
     sev: 3, key: 'pace', topic: 'speed',
     lead: 'Find',
@@ -1157,7 +1234,13 @@ function Overview({ d }: { d: Bundle }) {
     }] : []),
     {
       key: 'age', tone: agedShare > T.agedShare ? 'bad' : agedShare > T.agedShare / 2 ? 'warn' : 'good',
-      text: <><b>{fmt.int(oldStock)} games</b> have waited 8+ days - {fmt.pct(agedShare)} of the backlog</>,
+      // "since import" is not decoration. The `holders` action a few lines above this
+      // chip counts stale games from the ASSIGN date at the admin's configured
+      // threshold, so a shorter threshold legitimately produces a larger count than
+      // this band does - and a manager reading 1,141 over 1,096 with nothing on screen
+      // saying the clocks differ concludes one of them is broken. The band stays a
+      // fixed ruler and `staleDays` stays a threshold; only the label is added.
+      text: <><b>{fmt.int(oldStock)} games</b> have waited 8+ days since import - {fmt.pct(agedShare)} of the backlog</>,
     },
   ] : []
   // The banner takes the colour of its worst chip. The sentence is a summary of them,
@@ -1742,7 +1825,10 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
   if (outLow.length) acts.push({
     sev: 3, fam: 'cal', key: 'outlow', who: outLow[0].key,
     do: <>Re-read 20 games {outLow[0].name} bypassed, with a moderator</>,
-    why: <>{outLow[0].name} keeps {keepPair(outLow[0].survivalRate, restKeep(outLow[0]))[0]} where the rest of the team keeps {keepPair(outLow[0].survivalRate, restKeep(outLow[0]))[1]}, over {fmt.int(outLow[0].evaluated)} games. At the others&apos; rate that is about {fmt.int(outLow[0].evaluated * restKeep(outLow[0]))} games sent on instead of {fmt.int(outLow[0].shortlisted)}.</>,
+    // "games" is said once, over the evaluated count. Repeating it in the projection
+    // took this sentence to 153 characters on a real five-digit volume - over the
+    // 150-character evidence budget the whole block is written to.
+    why: <>{outLow[0].name} keeps {keepPair(outLow[0].survivalRate, restKeep(outLow[0]))[0]} where the rest of the team keeps {keepPair(outLow[0].survivalRate, restKeep(outLow[0]))[1]}, over {fmt.int(outLow[0].evaluated)} games. At the others&apos; rate that is about {fmt.int(outLow[0].evaluated * restKeep(outLow[0]))} sent on instead of {fmt.int(outLow[0].shortlisted)}.</>,
   })
   else if (calSpread != null && calSpread > LB_T.calSpread) acts.push({
     sev: 3, fam: 'cal', key: 'cal', who: strict.key,
@@ -1779,7 +1865,7 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
     // operations for two different altitudes - see law 2.
     do: <>Reassign {queueStuck.name}&apos;s backlog</>,
     why: <>{fmt.int(queueStuck.stale)} of {queueStuck.name}&apos;s {fmt.int(queueStuck.n)} games sat past {sd} days ({fmt.pct(queueStuck.stale / queueStuck.n)} of their backlog, {fmt.pct(queueStuck.stale / Math.max(1, queueStale))} of the team&apos;s stale total). Oldest is {queueStuck.oldest} days.</>,
-    cta: { label: `Reassign ${queueStuck.name}`, href: `/team-ops?tab=reassign&from=${encodeURIComponent(queueStuck.name)}` },
+    cta: { label: `Reassign ${queueStuck.name}`, href: `/team-ops?tab=reassign${catParam(d)}&from=${encodeURIComponent(queueStuck.name)}` },
   })
   else if (stuckFree.length) acts.push({
     sev: 3, fam: 'speed', key: 'stuck', who: stuckFree[0].key,
@@ -1914,7 +2000,7 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
         </div>
       )}
       <DoBlock acts={shown.map((a) => ({
-        sev: a.sev, key: a.key, kicker: a.fam.toUpperCase(), do: a.do, why: a.why, cta: a.cta,
+        sev: a.sev, key: a.key, kicker: famLabel(a.fam), do: a.do, why: a.why, cta: a.cta,
       }))} />
 
       <div className="rp-section-title">Everyone - who produces, and does it hold up?</div>
@@ -1947,7 +2033,12 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
       </Card>
       <Card label="Everyone, side by side" note="click a column to sort · rates carry their counts"
         tip={<><F>one row per evaluator · every column sorts</F>This replaced eight separate rank boards. Reading one person across all eight was the thing those boards could never do.</>}>
+        {/* Overview's "See who is under the pace" promised a table sorted by Games
+            per day ascending with the under-pace rows flashed. `focusSort` is what
+            delivers the first half: without it the reader arrived at a table still
+            sorted by Overall score, with a ring somewhere below the fold. */}
         <SortTable<Ev> rows={ev} cols={cols} initialSort="score"
+          focusSort={flashPerDay ? { key: 'perday', dir: 'asc' } : undefined}
           rowKey={(e) => e.key} rowName={(e) => e.name}
           rowSub={(e) => e.title || null}
           inactive={(e) => e.evaluated === 0}
@@ -2397,12 +2488,21 @@ function Individual({ d }: { d: Bundle }) {
       : <>Ask {e.name} to start each day with their 5 oldest games</>,
     why: self
       ? <>{fmt.int(d.selfStale!)} of your {fmt.int(bq.n)} games have gone past {sd} days, oldest {bq.oldest}d.</>
-      : <>{fmt.int(queueStale)} of {their} {fmt.int(bq.n)} games have gone past {sd} days, oldest {bq.oldest}.</>,
-    // Guarded: `throughput` can be 0 for a quiet window, and dividing by it would print
-    // Infinity on screen.
-    payoff: self
-      ? <>Your stale games gone in about {Math.ceil(Math.max(1, d.selfStale ?? 0) / 5)} days</>
-      : <>{Their} stale games clear in about {fmt.dec(queueStale / Math.max(1, e.throughput))} working days</>,
+      : <>{fmt.int(queueStale)} of {their} {fmt.int(bq.n)} games have gone past {sd} days, oldest {bq.oldest}d.</>,
+    /* ONE answer, in both voices. The admin payoff used to divide by `e.throughput` -
+       the person's full measured pace - and so answered a question the card does not
+       ask: the instruction directly above it asks for five games a day, not for
+       everything they have. On the same person, the same 316 games and the same
+       threshold, the two voices printed 2.6 days and 64 days, twenty-five times apart,
+       and a manager and the contractor they are talking to could not both be right.
+       Five a day is the instruction, so five a day is the arithmetic. */
+    payoff: (() => {
+      const n = self ? (d.selfStale ?? 0) : queueStale
+      const days = Math.ceil(Math.max(1, n) / 5)
+      return self
+        ? <>Your stale games gone in about {days} days</>
+        : <>{Their} stale games gone in about {days} days</>
+    })(),
   })
   else if (psTotals && psTotals.assigned > 0 && (psTotals.assigned - psTotals.evaluated) / psTotals.assigned > IND_T.intakeGap) acts.push({
     sev: 2, fam: 'backlog', key: 'behind',
@@ -2427,7 +2527,10 @@ function Individual({ d }: { d: Bundle }) {
     do: self
       ? <>Send your last 5 bypasses to a moderator to check the bar together</>
       : <>Re-read 20 games {e.name} bypassed, with a moderator</>,
-    why: <>{They} keep{self ? '' : 's'} {fmt.pct(e.survivalRate)} where the rest of the team keeps {fmt.pct(restKeep!)}. At their rate {their} {fmt.int(e.evaluated)} games would have sent on about {fmt.int(e.evaluated * restKeep!)} instead of {fmt.int(e.shortlisted)}.</>,
+    // "At their rate" over a sentence whose subject is this person reads as their own
+    // rate, which would make the clause say nothing. The rate being applied is the
+    // rest of the team's, in both voices.
+    why: <>{They} keep{self ? '' : 's'} {fmt.pct(e.survivalRate)} where the rest of the team keeps {fmt.pct(restKeep!)}. At the team&apos;s rate {their} {fmt.int(e.evaluated)} games would have sent on about {fmt.int(e.evaluated * restKeep!)} instead of {fmt.int(e.shortlisted)}.</>,
   })
   else if (enoughToJudge && keepRatio != null && keepRatio > 2.5) acts.push({
     sev: 1, fam: 'cal', key: 'calhigh',
@@ -2561,7 +2664,7 @@ function Individual({ d }: { d: Bundle }) {
         </div>
       )}
       <DoBlock acts={shown.map((a) => ({
-        sev: a.sev, key: a.key, kicker: a.fam.toUpperCase(), do: a.do, why: a.why, payoff: a.payoff,
+        sev: a.sev, key: a.key, kicker: famLabel(a.fam), do: a.do, why: a.why, payoff: a.payoff,
       }))} />
 
       {/* Five, down from twelve. What went: the three per-day mix tiles (one

@@ -11,9 +11,13 @@ jest.mock('next/navigation', () => ({
   usePathname: () => '/team-ops',
 }))
 
-// jsdom has no scrollIntoView; the focus=perday flash scrolls the flagged column into
-// view the same way Overview's chip-to-card focus does.
-Element.prototype.scrollIntoView = jest.fn()
+// jsdom has no scrollIntoView; the focus=perday link scrolls the table into view the
+// same way Overview's chip-to-card focus does. RECORDED rather than swallowed: the
+// table sits below the fold on every screen this report is read on, and a row tint
+// that plays while the reader is still looking at the headline never happened. Not a
+// jest.fn(), because this file's afterEach calls jest.restoreAllMocks().
+let scrolled = false
+Element.prototype.scrollIntoView = function scrollIntoViewStub() { scrolled = true } as Element['scrollIntoView']
 
 // The Leaderboard tab's contract. It is a reading contract first, like Overview's:
 //
@@ -131,7 +135,7 @@ const readNotes = (c: HTMLElement) => Array.from(c.querySelectorAll('.rp-readnot
 const nowLines = (c: HTMLElement) => Array.from(c.querySelectorAll('.rp-foot-now')).map((r) => r.textContent || '')
 
 describe('Leaderboard tab', () => {
-  afterEach(() => { jest.restoreAllMocks(); params = new URLSearchParams() })
+  afterEach(() => { jest.restoreAllMocks(); params = new URLSearchParams(); scrolled = false })
 
   it('reads guide, sentence, chips, actions - with no KPI row and nothing folded away', async () => {
     const { container } = await leaderboard(bundleOf(FOUR()))
@@ -339,6 +343,25 @@ describe('Leaderboard tab', () => {
     expect(beta.why.length).toBeLessThanOrEqual(150)
   })
 
+  /* The kicker on this tab printed `fam.toUpperCase()`, so the reader met CAL, SPEED
+     and COVER rather than words. Overview has always mapped its topic through a label
+     table; this is that table for the other two tabs. The lexicon gate greps the
+     component's SOURCE, so an identifier upper-cased at render time is invisible to
+     it - only a rendered-text assertion can see this. */
+  it('names the card topic in words, never as an internal code', async () => {
+    const { container } = await leaderboard(bundleOf(FOUR(), {
+      backlogBy: [
+        { key: 'k1', name: 'Beta', n: 300, a0: 100, a1: 40, a2: 120, a3: 40, oldest: 22, stale: 160 },
+      ],
+    }))
+    const kickers = Array.from(container.querySelectorAll('.rp-do-topic')).map((n) => n.textContent || '')
+    expect(kickers.length).toBeGreaterThan(0)
+    expect(kickers).toContain('Speed')
+    for (const k of kickers) {
+      expect(['Backlog', 'Calibration', 'Coverage', 'Output', 'Picks', 'Recording', 'Rhythm', 'Speed']).toContain(k)
+    }
+  })
+
   it('sends a stuck backlog to Reassign, not to Rescue', async () => {
     const people = [even('Alpha', { evaluated: 700 }), even('Beta'), even('Gamma'), even('Delta')]
     const { container } = await leaderboard(bundleOf(people, {
@@ -349,9 +372,30 @@ describe('Leaderboard tab', () => {
     const block = screen.getByText('Do this').closest('.rp-do-block')!
     expect(block.textContent).not.toMatch(/Rescue/)
     const link = screen.getByRole('link', { name: /Reassign/ })
-    expect(link).toHaveAttribute('href', expect.stringContaining('tab=reassign&from=Beta'))
+    // The genre rides along, or the panel opens on its own default bucket - where
+    // Beta may not be on the roster at all. It is a view selector, not a setting.
+    expect(link).toHaveAttribute('href', expect.stringContaining('tab=reassign&cat=puzzle&from=Beta'))
     // and Rescue's own admin-editable threshold never rides along on this link
     expect(link.getAttribute('href')).not.toMatch(/staleDays/)
+  })
+
+  /* The navigation contract for "See who is under the pace" is: the table sorted by
+     Games per day ASCENDING, scrolled to, with the under-pace rows flashed. The first
+     two were missing - the table still opened on Overall score and nothing scrolled -
+     so the only thing delivered was a ring on rows below the fold. */
+  it('opens the table on Games per day ascending when arrived at with focus=perday', async () => {
+    params = new URLSearchParams('rtab=leaderboard&focus=perday')
+    const people = FOUR()
+    people[0] = even('Alpha', { evaluated: 10, cells: { d1: 10 } })
+    const { container } = await leaderboard(bundleOf(people))
+    // the sort bar says so out loud, and offers the reader a way back
+    expect(container.querySelector('.rp-lbt-state')).toHaveTextContent('Games per day, smallest first')
+    expect(container.querySelector('.rp-lbt-reset')).not.toBeNull()
+    // slowest first: Alpha, who is the one under the pace, is the top row
+    const firstRow = container.querySelector('.rp-lbt tbody tr')!
+    expect(firstRow.querySelector('.rp-lbt-name')?.textContent).toContain('Alpha')
+    // and the table was brought into view rather than left below the fold
+    expect(scrolled).toBe(true)
   })
 
   it('flashes the under-pace rows when arrived at with focus=perday', async () => {
@@ -360,13 +404,24 @@ describe('Leaderboard tab', () => {
     // Alpha runs well under the team's pace; the other three sit at it.
     people[0] = even('Alpha', { evaluated: 10, cells: { d1: 10 } })
     const { container } = await leaderboard(bundleOf(people))
-    expect(document.querySelectorAll('.rp-flash').length).toBeGreaterThan(0)
+    // NOT `rp-flash`: that is a box-shadow ring, and this table is border-collapse,
+    // where Chrome paints no shadow on a <tr> at all. `rp-lbt-flash` tints the row's
+    // own cells, which is painted.
+    expect(document.querySelectorAll('.rp-lbt-flash').length).toBeGreaterThan(0)
+    expect(document.querySelectorAll('.rp-lbt .rp-flash').length).toBe(0)
     const header = container.querySelector('[data-rp-focus="perday"]')
     expect(header).not.toBeNull()
     expect(header?.textContent).toContain('Games per day')
     // only the under-pace row is flashed, not everyone
-    expect(rowNamed(container, 'Alpha').classList.contains('rp-flash')).toBe(true)
-    expect(rowNamed(container, 'Beta').classList.contains('rp-flash')).toBe(false)
+    expect(rowNamed(container, 'Alpha').classList.contains('rp-lbt-flash')).toBe(true)
+    expect(rowNamed(container, 'Beta').classList.contains('rp-lbt-flash')).toBe(false)
+  })
+
+  it('leaves the table on its own default sort when no focus link sent the reader', async () => {
+    params = new URLSearchParams('rtab=leaderboard')
+    const { container } = await leaderboard(bundleOf(FOUR()))
+    expect(container.querySelector('.rp-lbt-state')).toBeNull()
+    expect(scrolled).toBe(false)
   })
 
   it('does not call an all-time window "this week"', async () => {
