@@ -138,6 +138,15 @@ function assertClean(lines: string[]) {
   })
 }
 
+// File-level, not per-test: rendering six real prod payloads through three tabs each
+// and reading every sentence back is genuinely slow, not a hang - a future case added
+// to this file inherits the same budget without needing to remember to raise it.
+// Measured under `npx jest` (87 suites, parallel, this machine): the heaviest case
+// (report-prod.json, three tabs) ranged 5-8.7s across five full-suite runs, and the
+// task brief that found this defect measured ~33s on its own hardware under load.
+// 45s covers both with real headroom rather than trimming coverage to fit 5s.
+jest.setTimeout(45000)
+
 describe('Report tabs read back as English on real (or real-derived) prod payloads', () => {
   afterEach(() => jest.restoreAllMocks())
 
