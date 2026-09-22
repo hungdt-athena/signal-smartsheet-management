@@ -1,8 +1,8 @@
 'use client'
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { StyledSelect } from '@/components/StyledSelect'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
+import { Lightbox } from '@/components/Lightbox'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { useConfig } from '@/hooks/useConfig'
@@ -484,13 +484,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
 
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [expandedImg, setExpandedImg] = useState<string | null>(null)
-  const [mounted, setMounted] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const [autoSave, setAutoSave] = useState(false)
   const [confirmClearAll, setConfirmClearAll] = useState(false)
 
   useEffect(() => {
-    setMounted(true)
     // Auto-save preference is remembered per browser/user.
     try { setAutoSave(localStorage.getItem('eval:autoSave') === '1') } catch { /* ignore */ }
   }, [])
@@ -1604,39 +1602,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
       </div>
 
       {/* Screenshot overlay */}
-      {mounted && expandedImg && createPortal(
-        <div onClick={() => setExpandedImg(null)} className="lightbox-backdrop">
-          <div onClick={e => e.stopPropagation()}
-            style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', display: 'flex', gap: 8, overflowX: 'auto', padding: 16, cursor: 'default' }}>
-            {expandedImg.startsWith('data:image/') ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'var(--surface)', padding: 24, borderRadius: 16, border: '1px solid var(--border)' }}>
-                <img src={expandedImg} alt="QR Code Expanded"
-                  style={{ width: 280, height: 280, borderRadius: 12, border: '1px solid var(--border)' }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginTop: 14 }}>
-                  Scan to download/test game
-                </span>
-              </div>
-            ) : (
-              (screenshots.length > 0 ? screenshots : manualShots).map((url, i) => (
-                <img key={i} src={url} alt={`Screenshot ${i + 1}`}
-                  style={{
-                    maxHeight: '85vh', borderRadius: 12, flexShrink: 0,
-                    border: url === expandedImg ? '3px solid var(--accent)' : '1px solid rgba(255,255,255,.2)',
-                    scrollMarginInline: 16,
-                  }}
-                  ref={el => { if (el && url === expandedImg) el.scrollIntoView({ behavior: 'instant', inline: 'center', block: 'nearest' }) }}
-                  onError={e => { e.currentTarget.style.display = 'none' }}
-                />
-              ))
-            )}
-          </div>
-          <button onClick={() => setExpandedImg(null)}
-            style={{ position: 'fixed', top: 20, right: 20, background: 'rgba(0,0,0,.5)', border: 'none', color: '#fff', width: 40, height: 40, borderRadius: 20, fontSize: 20, cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
-            ✕
-          </button>
-        </div>,
-        document.body
-      )}
+      <Lightbox
+        url={expandedImg}
+        onClose={() => setExpandedImg(null)}
+        images={screenshots.length > 0 ? screenshots : manualShots}
+      />
 
       {/* Toast */}
       {toast && (
