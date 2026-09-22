@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { pushSourceFilter } from '@/lib/push-sources'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -11,7 +12,7 @@ export const maxDuration = 60
 //   - release (COALESCE initial_release, temp_release) OR created_date within the last N days (default 30)
 //   - release (when known) no older than maxReleaseAgeDays (default 180) — guards the
 //     created_date branch against scrapers crawling old back catalogs
-//   - type IS NULL OR type ILIKE any of: %sync%, %top-pub-scraper%, %apkcombo-scraper%, %appagg-scraper%
+//   - type IS NULL OR type ILIKE one of PUSH_SOURCE_TYPES (lib/push-sources.ts)
 //   - app_link IS NOT NULL AND is_active = true
 //   - metadata->'categories' overlaps the bucket's genre list
 //   - a game may land in MULTIPLE buckets (each bucket matched independently — no
@@ -71,13 +72,11 @@ async function computeEligible(
   windowDays: number,
   maxReleaseAgeDays: number,
 ): Promise<EligibleRow[]> {
-  const mappingJson = JSON.stringify(
-    pairs.map((p) => ({ genre: p.genre.toLowerCase(), category_group: p.category_group })),
-  )
+  const mapping = pairs.map((p) => ({ genre: p.genre.toLowerCase(), category_group: p.category_group }))
   return sql<EligibleRow[]>`
     WITH mapping AS (
       SELECT genre, category_group
-      FROM jsonb_to_recordset(${mappingJson}::jsonb) AS m(genre text, category_group text)
+      FROM jsonb_to_recordset(${sql.json(mapping)}) AS m(genre text, category_group text)
     ),
     eligible AS (
       -- genre_1/genre_2 mirror the first two entries of metadata->'categories', the
@@ -101,8 +100,7 @@ async function computeEligible(
           OR COALESCE(gi.initial_release, gi.temp_release)
                >= (CURRENT_DATE - (${maxReleaseAgeDays} || ' days')::interval)
         )
-        AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
-             OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
+        AND ${pushSourceFilter()}
         AND gi.app_link IS NOT NULL
         AND gi.is_active = true
     )

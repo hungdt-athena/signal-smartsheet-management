@@ -6,13 +6,12 @@
 // one genre per request. This is a GET that cannot write and costs three
 // queries for all three genres.
 //
-// The eligibility predicate below is a fourth copy of the one in
-// /api/cron/push-evaluations (which carries two itself, for its dry-run and its
-// insert). That route's own comment explains why they are copied rather than
-// composed, and it is the authority: if the window or the scraper-type list
-// changes there, change it here too or the panel starts lying. The copy is
-// covered by __tests__/api/assign-setup-preview.test.ts, which asserts the two
-// predicates still read the same.
+// The eligibility predicate below still mirrors the one in
+// /api/cron/push-evaluations by hand, EXCEPT for the scraper-type list, which is
+// now `pushSourceFilter()` in lib/push-sources.ts - the one part of it that drifted
+// in practice, because adding an importer meant editing four files. The window and
+// the remaining clauses are still copies, and __tests__/api/assign-setup-preview.test.ts
+// asserts the two predicates keep reading the same.
 //
 // COST. Counting eligible games means scanning game_info against a date window
 // and a jsonb category test; measured against production it is ~9s for all
@@ -33,6 +32,7 @@ import { BUCKETS, type Bucket } from '@/lib/buckets'
 import { loadGenreTargets } from '@/lib/genre-config-db'
 import { loadPushWindowConfig } from '@/lib/push-window-db'
 import { pushWindowFor, type PushWindowConfig } from '@/lib/push-window'
+import { pushSourceFilter } from '@/lib/push-sources'
 import {
   buildPushPreview, emptyOs,
   type CrewMember, type GenreInput, type OsCounts,
@@ -96,8 +96,7 @@ async function loadIncoming(windows: PushWindowConfig): Promise<Partial<Record<B
               w.rel BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today
               OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today)
             )
-        AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
-             OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
+        AND ${pushSourceFilter()}
         AND gi.app_link IS NOT NULL
         AND gi.is_active = TRUE
         AND EXISTS (

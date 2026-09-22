@@ -3,15 +3,21 @@ import path from 'node:path'
 
 // The preview route carries its own copy of the push-eligibility predicate,
 // because /api/cron/push-evaluations builds its SQL as two literal copies (one
-// for the dry run, one for the insert) and postgres.js template literals do not
-// compose cleanly enough to share one.
+// for the dry run, one for the insert) and the dry-run count is only worth
+// reading if it filters exactly like the insert.
 //
 // A copy that nobody checks is a copy that drifts, and the failure is silent:
 // the panel would keep showing a confident number for a rule the cron no longer
 // uses. So this test reads both files and asserts the parts that decide
 // eligibility still read the same. It is deliberately about the SQL text — if
-// you change the window or the scraper list, this test is the reminder that
-// there is a second place to change.
+// you change the window, this test is the reminder that there is a second place
+// to change.
+//
+// The scraper-type list is the exception. It was a fourth copy, it drifted, and
+// the drift cost 1,935 games: appranking-scraper produced from 2026-09-02 and
+// never entered the queue because three files listed it and the fourth did not.
+// It now lives in lib/push-sources.ts, so the assertion below is that both
+// routes CALL that helper rather than that they spell the same SQL.
 
 const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8')
 
@@ -20,6 +26,10 @@ const squash = (s: string) => s.replace(/\s+/g, ' ').trim()
 
 const CRON = squash(read('app/api/cron/push-evaluations/route.ts'))
 const PREVIEW = squash(read('app/api/assign-setup/preview/route.ts'))
+const SPLIT = squash(read('app/api/admin/push-split/route.ts'))
+// Read as text, not imported: lib/push-sources pulls in lib/db, and this suite
+// has no business opening a connection to assert what a list says.
+const SOURCES = squash(read('lib/push-sources.ts'))
 
 describe('the preview shares the cron\'s push eligibility', () => {
   it('uses the same window on release, falling back to created_date', () => {
@@ -56,17 +66,25 @@ describe('the preview shares the cron\'s push eligibility', () => {
     expect(PREVIEW).toContain(rel)
   })
 
-  it('admits the same scraper types, and only live rows with a link', () => {
-    const types = squash(`
-      (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
-       OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
-    `)
-    expect(CRON).toContain(types)
-    expect(PREVIEW).toContain(types)
+  it('takes the scraper list from one shared helper, not from a fourth copy', () => {
+    for (const src of [CRON, PREVIEW, SPLIT]) {
+      expect(src).toContain('pushSourceFilter')
+      expect(src).toContain("from '@/lib/push-sources'")
+      // The literal list is what drifted. Nobody may spell it inline again.
+      expect(src).not.toContain("ILIKE '%apkcombo-scraper%'")
+    }
+  })
+
+  it('admits only live rows with a link', () => {
     for (const clause of ['gi.app_link IS NOT NULL', 'gi.is_active = TRUE']) {
       expect(CRON).toContain(clause)
       expect(PREVIEW).toContain(clause)
     }
+  })
+
+  it('lists the importer the team calls insight-track', () => {
+    // It is `appranking-scraper` in game_info and `insight-track` on the Report.
+    expect(SOURCES).toContain("'appranking-scraper'")
   })
 
   it('skips games already in game_evaluations for that bucket', () => {

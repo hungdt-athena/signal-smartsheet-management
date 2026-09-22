@@ -5,6 +5,7 @@ import type { Bucket } from '@/lib/buckets'
 import { loadGenreTargets } from '@/lib/genre-config-db'
 import { loadPushWindowConfig } from '@/lib/push-window-db'
 import { pushWindowFor } from '@/lib/push-window'
+import { pushSourceFilter } from '@/lib/push-sources'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -74,9 +75,10 @@ export async function POST(req: NextRequest) {
     }
     let rows: { game_id: string }[]
 
-    // Eligibility window (both branches below carry an identical copy; postgres.js
-    // template literals do not compose cleanly and the dry-run count is only worth
-    // reading if it filters exactly like the insert):
+    // Eligibility window (both branches below carry an identical copy, so the
+    // dry-run count filters exactly like the insert; the scraper-type list is the
+    // one clause that is shared rather than copied, because it is the one that
+    // drifted - see lib/push-sources.ts):
     //   released in the last `windowDays` days, OR — only when the store gave us no
     //   release date at all — first seen in the last `windowDays` days.
     // A game released long ago that merely got crawled today is back catalogue, not
@@ -101,8 +103,7 @@ export async function POST(req: NextRequest) {
                 w.rel BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today
                 OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today)
               )
-          AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
-               OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
+          AND ${pushSourceFilter()}
           AND gi.app_link IS NOT NULL
           AND gi.is_active = TRUE
           AND EXISTS (
@@ -133,8 +134,7 @@ export async function POST(req: NextRequest) {
                 w.rel BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today
                 OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today)
               )
-          AND (gi.type IS NULL OR gi.type::text ILIKE '%sync%' OR gi.type::text ILIKE '%top-pub-scraper%'
-               OR gi.type::text ILIKE '%apkcombo-scraper%' OR gi.type::text ILIKE '%appagg-scraper%')
+          AND ${pushSourceFilter()}
           AND gi.app_link IS NOT NULL
           AND gi.is_active = TRUE
           AND EXISTS (
