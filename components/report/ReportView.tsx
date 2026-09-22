@@ -630,8 +630,67 @@ export function DoBlock({ acts }: { acts: DoAct[] }) {
   )
 }
 
+/* Send the reader to the number a chip (or an action, on Overview) was computed
+   from. The lookup is by `data-rp-focus` from the page root rather than by a ref per
+   target, so adding a KPI or moving a card cannot silently break the link - and a
+   chip never has to know where on the page its evidence ended up.
+
+   Scoped to `.page` rather than the document so a second Report mounted in a test or
+   a modal cannot be scrolled by this one - `ref` has to anchor inside the CALLER's
+   own `.page`, which is why this is a hook a tab attaches to one of its own elements,
+   not a bare function. Originally Overview-only; lifted here (Task 13) so
+   Leaderboard and Individual's chips can be clickable controls too, the same
+   contract Overview's chips have always carried. */
+function useRpFocus<T extends HTMLElement = HTMLDivElement>() {
+  const ref = useRef<T>(null)
+  const focus = (key: string) => {
+    const el = ref.current?.closest('.page')?.querySelector(`[data-rp-focus="${key}"]`)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('rp-flash')
+    window.setTimeout(() => el.classList.remove('rp-flash'), 1200)
+  }
+  return { ref, focus }
+}
+
+/* The verdict: one sentence and the readings it was made from, as ONE object. Used
+   to be Overview-only - a headline and a row of pills stacked in the page flow left
+   the reader to work out that the pills were the evidence for the sentence rather
+   than three more facts. Lifted here (Task 13) so Leaderboard and Individual get the
+   same boxed banner, the same clickable chips and the same "colour of the worst
+   chip" tone rule, instead of the bare, inert `<span className="rp-chip">` row they
+   printed before. `kicker` is per-tab because each tab's chips are keyed by its own
+   vocabulary (Overview: growth/speed/age; Leaderboard: people/top/cal; Individual:
+   share/net/wait) - see the FAM_LABEL comment above for why a raw key must never
+   reach the screen un-translated. */
+function VerdictHeader({ tone, headline, chips, kicker, verdictRef, onChip }: {
+  tone: 'good' | 'warn' | 'bad'
+  headline: React.ReactNode
+  chips: Array<{ key: string; text: React.ReactNode; tone: 'good' | 'warn' | 'bad' }>
+  kicker: (key: string) => string
+  verdictRef: React.RefObject<HTMLDivElement>
+  onChip: (key: string) => void
+}) {
+  return (
+    <div className={`rp-verdict ${tone}`} ref={verdictRef}>
+      <p className="rp-headline">{headline}</p>
+      {chips.length > 0 && (
+        <div className="rp-chips">
+          {chips.map((c) => (
+            <button type="button" className={`rp-chip ${c.tone}`} key={c.key} onClick={() => onChip(c.key)}
+              title={`Go to the ${kicker(c.key).toLowerCase()} number this came from`}>
+              <span className="rp-chip-kicker">{kicker(c.key)}</span>
+              <span className="rp-chip-text">{c.text}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Overview({ d }: { d: Bundle }) {
-  const bannerRef = useRef<HTMLDivElement>(null)
+  const { ref: bannerRef, focus } = useRpFocus<HTMLDivElement>()
   const sd = staleDays(d)
   const t = d.teamTotals
   const p = d.pipeline
@@ -1248,20 +1307,6 @@ function Overview({ d }: { d: Bundle }) {
   const verdictTone = chips.some((c) => c.tone === 'bad') ? 'bad'
     : chips.some((c) => c.tone === 'warn') ? 'warn' : 'good'
 
-  /* Send the reader to the number a chip or an action was computed from. The lookup is
-     by `data-rp-focus` from the page root rather than by a ref per target, so adding a
-     KPI or moving a card cannot silently break the link - and the chip never has to
-     know where on the page its evidence ended up. Scoped to `.page` rather than the
-     document so a second Report mounted in a test or a modal cannot be scrolled by
-     this one. */
-  const focus = (key: Topic) => {
-    const el = bannerRef.current?.closest('.page')?.querySelector(`[data-rp-focus="${key}"]`)
-    if (!el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    el.classList.add('rp-flash')
-    window.setTimeout(() => el.classList.remove('rp-flash'), 1200)
-  }
-
   /* Law 7, applied to the list that actually printed. Two things are decided here and
      nowhere else, because both depend on which lines SURVIVED the cap of three:
 
@@ -1329,21 +1374,10 @@ function Overview({ d }: { d: Bundle }) {
           object. They used to be a headline and a row of pills stacked in the page
           flow, which left the reader to work out that the pills were the evidence for
           the sentence rather than three more facts. Each chip is a control - it takes
-          you to the number it came from. */}
-      <div className={`rp-verdict ${verdictTone}`} ref={bannerRef}>
-        <p className="rp-headline">{headline}</p>
-        {chips.length > 0 && (
-          <div className="rp-chips">
-            {chips.map((c) => (
-              <button type="button" className={`rp-chip ${c.tone}`} key={c.key} onClick={() => focus(c.key)}
-                title={`Go to the ${TOPIC[c.key].toLowerCase()} number this came from`}>
-                <span className="rp-chip-kicker">{TOPIC[c.key]}</span>
-                <span className="rp-chip-text">{c.text}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+          you to the number it came from. Shared with Leaderboard and Individual
+          (Task 13) - see `VerdictHeader`. */}
+      <VerdictHeader tone={verdictTone} headline={headline} chips={chips}
+        kicker={(k) => TOPIC[k as Topic]} verdictRef={bannerRef} onChip={focus} />
 
       {/* Five numbers, read left to right as one sentence: what arrived, what went out,
           what is left over, how fast it is going out, and how much of it was worth
@@ -1519,6 +1553,11 @@ function Overview({ d }: { d: Bundle }) {
 // Thresholds, same shape as Overview's `T`: a line under "Do this" prints only when a
 // number crosses one of these. They belong in report_config next to the score weights;
 // they live here until that page has a home for them.
+// The kicker on Leaderboard's verdict chips. Overview's TOPIC map speaks to the
+// backlog (growth/speed/age); this tab's sentence is about the TEAM, so its chips
+// carry the team's own vocabulary - who worked at all, how concentrated the output
+// is, and whether everyone judges by the same bar.
+const LB_KICKER: Record<string, string> = { people: 'COVERAGE', top: 'CONCENTRATION', cal: 'CALIBRATION' }
 const LB_T = {
   // Gap in bypass share between the strictest and the loosest evaluator. Past this the
   // team's shortlist rate is an average of two different bars, and no quality column on
@@ -1563,6 +1602,7 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
 }) {
   const ev = d.evaluators
   const sd = staleDays(d)
+  const { ref: verdictRef, focus } = useRpFocus<HTMLDivElement>()
   const [flashPerDay] = useState(focusOnce === 'perday')
   useEffect(() => {
     if (focusOnce !== 'perday') return
@@ -1933,12 +1973,16 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
       text: <>{strict.name} keeps {keepPair(strict.survivalRate, loose.survivalRate)[0]}, {loose.name} {keepPair(strict.survivalRate, loose.survivalRate)[1]}</>,
     }] : []),
   ] : []
+  // Same rule as Overview's banner: the verdict takes the colour of its worst chip,
+  // so the sentence cannot read calmer than the numbers under it.
+  const verdictTone = chips.some((c) => c.tone === 'bad') ? 'bad'
+    : chips.some((c) => c.tone === 'warn') ? 'warn' : 'good'
 
   // Eight rank boards became these columns. Sorting is the only state on the tab and it
   // never leaves the browser, so re-asking a question costs a click and not a request.
   const cols: Array<SortCol<Ev>> = [
     {
-      key: 'games', label: 'Games', tip: TIP.evaluated,
+      key: 'games', label: 'Games', tip: TIP.evaluated, focusKey: 'top',
       value: (e) => e.evaluated, cell: (e) => fmt.int(e.evaluated),
       // only where there is work to have been active on: "1 active day" under a
       // Games count of zero is two halves of one cell contradicting each other
@@ -1954,7 +1998,7 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
       value: (e) => e.turnaround, cell: (e) => (e.turnaround == null ? '·' : fmt.days(e.turnaround)),
     },
     {
-      key: 'short', label: 'Shortlist %', tip: TIP.survival,
+      key: 'short', label: 'Shortlist %', tip: TIP.survival, focusKey: 'cal',
       value: (e) => (e.evaluated > 0 ? e.survivalRate : null),
       cell: (e) => (e.evaluated > 0 ? fmt.pct(e.survivalRate) : '·'),
       sub: (e) => (e.evaluated > 0 ? `${fmt.int(e.shortlisted)} of ${fmt.int(e.evaluated)}` : null),
@@ -1993,12 +2037,8 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
           <span key="3">A wide bypass spread always comes first. Until the team judges by one bar, no quality column here compares anybody.</span>,
         ]} />
 
-      <p className="rp-headline">{headline}</p>
-      {chips.length > 0 && (
-        <div className="rp-chips">
-          {chips.map((c) => <span className={`rp-chip ${c.tone}`} key={c.key}>{c.text}</span>)}
-        </div>
-      )}
+      <VerdictHeader tone={verdictTone} headline={headline} chips={chips}
+        kicker={(k) => LB_KICKER[k] ?? k.toUpperCase()} verdictRef={verdictRef} onChip={focus} />
       <DoBlock acts={shown.map((a) => ({
         sev: a.sev, key: a.key, kicker: famLabel(a.fam), do: a.do, why: a.why, cta: a.cta,
       }))} />
@@ -2073,7 +2113,7 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
       </Card>
 
       <div className="rp-section-title">Cadence - who is running, and who has stopped?</div>
-      <Card label="Activity heatmap" note={`games evaluated · person × ${unitName}`}
+      <Card label="Activity heatmap" focusKey="people" note={`games evaluated · person × ${unitName}`}
         tip={<><F>cell = count(evaluated) for that person, that {unitName}</F>Day cells for a week, month or batch window; week cells for a quarter.</>}>
         <Heatmap periods={d.heatmap.periods} rows={d.heatmap.rows} />
         <Foot
@@ -2267,6 +2307,12 @@ function DailyBreakdown({ person, mix, vids, win, onClose }: {
   )
 }
 
+// The kicker on Individual's verdict chips. `net` and `wait` reuse Overview's own
+// words on purpose: this tab's "Backlog +N" chip IS growth and its "oldest Nd" chip
+// IS age - the same two numbers Overview's chips are named for, read for one person
+// instead of the whole team. `share` has no Overview equivalent, so it gets its own
+// word: how much of the team's output this person accounts for.
+const IND_KICKER: Record<string, string> = { share: 'OUTPUT', net: 'GROWTH', wait: 'AGE' }
 // Thresholds for the one "Do this" block on this tab. Same discipline as Overview's
 // `T` and the Leaderboard's `LB_T`: a line prints only when a number crosses one of
 // these, and nothing prints when nothing does.
@@ -2288,6 +2334,7 @@ function Individual({ d }: { d: Bundle }) {
     if (!d.evaluators.length) return null
     return d.evaluators.find((e) => e.key === selKey) || d.evaluators[0]
   }, [d.evaluators, selKey])
+  const { ref: verdictRef, focus } = useRpFocus<HTMLDivElement>()
   if (!selected) return <div className="card"><Empty /></div>
   const e = selected
   const sd = staleDays(d)
@@ -2617,6 +2664,9 @@ function Individual({ d }: { d: Bundle }) {
       text: <>Backlog {fmt.int(bq.n)}, oldest {bq.oldest}d</>,
     }] : []),
   ] : []
+  // Same rule as Overview's and Leaderboard's banners: the worst chip sets the tone.
+  const verdictTone = chips.some((c) => c.tone === 'bad') ? 'bad'
+    : chips.some((c) => c.tone === 'warn') ? 'warn' : 'good'
 
   return (
     <>
@@ -2657,12 +2707,8 @@ function Individual({ d }: { d: Bundle }) {
         <DailyBreakdown person={e.name} mix={d.dailyMix?.[e.key] || {}} vids={vids} win={d.window} onClose={() => setDaily(false)} />
       )}
 
-      <p className="rp-headline">{headline}</p>
-      {chips.length > 0 && (
-        <div className="rp-chips">
-          {chips.map((c) => <span className={`rp-chip ${c.tone}`} key={c.key}>{c.text}</span>)}
-        </div>
-      )}
+      <VerdictHeader tone={verdictTone} headline={headline} chips={chips}
+        kicker={(k) => IND_KICKER[k] ?? k.toUpperCase()} verdictRef={verdictRef} onChip={focus} />
       <DoBlock acts={shown.map((a) => ({
         sev: a.sev, key: a.key, kicker: famLabel(a.fam), do: a.do, why: a.why, payoff: a.payoff,
       }))} />
@@ -2676,11 +2722,11 @@ function Individual({ d }: { d: Bundle }) {
           KPI tile makes an open window look like a collapse - it is on the radar and
           in the funnel, where the lateness can be said). */}
       <div className="rp-kpi-row">
-        <Kpi label="Evaluated" value={fmt.int(e.evaluated)} sub={`judged this ${winName}`} hi
+        <Kpi label="Evaluated" value={fmt.int(e.evaluated)} sub={`judged this ${winName}`} hi focusKey="share"
           spark={personSpark.length >= 2 ? personSpark : undefined} noTrend sparkNote={`games per ${unitName}`}
           tip={TIP.evaluated} bench={cmp(e.evaluated, tb.evaluated, fmt.int, 'up')} />
         <Kpi label="Backlog" value={bq ? fmt.int(bq.n) : '0'} sub={bq ? `oldest ${bq.oldest}d, all history` : 'backlog empty'}
-          tip={TIP.personBacklog} />
+          focusKey="net" tip={TIP.personBacklog} />
         <Kpi label="Games per day" value={fmt.dec(e.throughput)} sub="games / active day" tip={TIP.perDay('Games evaluated')}
           bench={cmp(e.throughput, tb.throughput, (n) => fmt.dec(n), 'up', hasDays)} />
         <Kpi label="Days waiting" value={fmt.days(e.turnaround)} sub="assign → evaluate" tip={TIP.turnaround}
@@ -2763,7 +2809,7 @@ function Individual({ d }: { d: Bundle }) {
       <div className="rp-grid-2">
         <Card label={self ? 'Your backlog' : `${e.name} - backlog`} note="games on their desk now · colour = how long they have held it"
           tip={TIP.personBacklog}>
-          <BandBar label="Backlog by age" total={bq ? `${fmt.int(bq.n)} games` : undefined}
+          <BandBar label="Backlog by age" focusKey="wait" total={bq ? `${fmt.int(bq.n)} games` : undefined}
             bands={bq ? AGE_BANDS.map((b, i) => ({ name: b.label, value: queueParts[i] || 0, color: b.color })) : []}
             empty="Backlog empty - nothing is waiting on them" />
           <Foot
@@ -3039,7 +3085,14 @@ function VideoQueue({ vids }: { vids: Bundle['videos'][string] }) {
 function band(v: number, warn: number, good: number): 'good' | 'warn' | 'bad' {
   return v >= good ? 'good' : v >= warn ? 'warn' : 'bad'
 }
-function Card({ label, note, tip, fill, children }: { label: string; note?: string; tip?: React.ReactNode; fill?: boolean; children: React.ReactNode }) {
+function Card({ label, note, tip, fill, focusKey, children }: {
+  label: string; note?: string; tip?: React.ReactNode; fill?: boolean
+  // Marks the card's own instance (not the modal copy) `data-rp-focus="<focusKey>"`,
+  // same idiom as `Kpi`, `BandBar` and `SortCol` - so a verdict chip can send a
+  // reader straight to a card, not just a KPI tile or a table column.
+  focusKey?: string
+  children: React.ReactNode
+}) {
   const [open, setOpen] = useState(false)
   useEffect(() => {
     if (!open) return
@@ -3077,7 +3130,7 @@ function Card({ label, note, tip, fill, children }: { label: string; note?: stri
   )
   return (
     <>
-      <div className={'card' + (fill ? ' rp-card-fill' : '')}>
+      <div className={'card' + (fill ? ' rp-card-fill' : '')} data-rp-focus={focusKey}>
         {head(false)}
         {inner}
       </div>

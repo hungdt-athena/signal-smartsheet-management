@@ -202,10 +202,79 @@ describe('Individual tab', () => {
     // One backlog, one word, on all three tabs - it used to be "Waiting" here, "Queue"
     // in the chip above it and "Backlog" on Overview, for the same games.
     expect(txt(container)).not.toContain('Waiting by age')
-    expect(Array.from(container.querySelectorAll('.rp-chips .rp-chip')).map(txt)
+    // the chip's SENTENCE (not the kicker Task 13 put in front of it - see
+    // "boxes its chips in the shared verdict banner" above) still starts with
+    // "Backlog"
+    expect(Array.from(container.querySelectorAll('.rp-chips .rp-chip-text')).map(txt)
       .some((c) => c.startsWith('Backlog'))).toBe(true)
     // and it carries no bench: a stock has no team average to be above or below
     expect(waiting.querySelector('.rp-kpi-bench')).toBeNull()
+  })
+
+  // Overview's verdict banner (headline + boxed, clickable chips) is now shared by
+  // all three tabs - Task 13. Individual used to print the same three chips as bare
+  // spans with no kicker; they must now be the same control, labelled with this
+  // tab's own vocabulary. `share`/`net`/`wait` reuse Overview's own words on purpose:
+  // this tab's "Backlog +N" chip IS growth and its "oldest Nd" chip IS age.
+  it('boxes its chips in the shared verdict banner, labelled with its own vocabulary', async () => {
+    const { container } = await individual(bundleOf(TWO()))
+    const verdict = container.querySelector('.rp-verdict')!
+    expect(verdict).not.toBeNull()
+    expect(verdict.querySelector('.rp-headline')).not.toBeNull()
+    const chips = Array.from(verdict.querySelectorAll('.rp-chip'))
+    expect(chips).toHaveLength(3)
+    expect(chips.every((c) => c.tagName === 'BUTTON')).toBe(true)
+    expect(chips.map((c) => c.querySelector('.rp-chip-kicker')?.textContent))
+      .toEqual(['OUTPUT', 'GROWTH', 'AGE'])
+  })
+
+  // Each chip has to take the reader to the number it was computed from, same
+  // contract as Overview and Leaderboard.
+  it('sends each chip to the number it was computed from', async () => {
+    const { container } = await individual(bundleOf(TWO()))
+    // jsdom has no scrollIntoView at all here (unlike report-leaderboard.test.tsx,
+    // which stubs one at module scope), so this file must clean up its own override.
+    const original = Element.prototype.scrollIntoView
+    const seen: string[] = []
+    Element.prototype.scrollIntoView = jest.fn(function (this: Element) {
+      seen.push(this.getAttribute('data-rp-focus') || '?')
+    }) as unknown as typeof Element.prototype.scrollIntoView
+    try {
+      const chips = Array.from(container.querySelectorAll('.rp-verdict .rp-chip'))
+      chips.forEach((c) => fireEvent.click(c))
+      expect(seen).toEqual(['share', 'net', 'wait'])
+      expect(container.querySelector('[data-rp-focus="share"] .rp-kpi-label')!.textContent!.replace('?', ''))
+        .toBe('Evaluated')
+      expect(container.querySelector('[data-rp-focus="net"] .rp-kpi-label')!.textContent!.replace('?', ''))
+        .toBe('Backlog')
+      expect(container.querySelector('[data-rp-focus="wait"]')!.textContent).toContain('Backlog by age')
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
+  // The hazard this task warns about by name: Individual reuses the `.rp-chip` class
+  // for its person-switcher (a different control entirely, outside `.rp-verdict`).
+  // Lifting the verdict's chip styling must not drag the switcher along with it.
+  it('leaves the person-switcher chips exactly as they were', async () => {
+    const { container } = await individual(bundleOf(TWO()))
+    const people = Array.from(container.querySelectorAll('.rp-people .rp-chip'))
+    expect(people).toHaveLength(2)
+    people.forEach((p) => {
+      // no kicker/text split - that is the verdict chip's own shape
+      expect(p.querySelector('.rp-chip-kicker')).toBeNull()
+      expect(p.querySelector('.rp-chip-text')).toBeNull()
+      // no tone class - the switcher was never good/warn/bad
+      expect(p.classList.contains('good')).toBe(false)
+      expect(p.classList.contains('warn')).toBe(false)
+      expect(p.classList.contains('bad')).toBe(false)
+    })
+    expect(txt(people[0])).toContain('Alpha')
+    expect(people[0].classList.contains('active')).toBe(true)
+    expect(people[1].classList.contains('active')).toBe(false)
+    // clicking still switches the selected person - the control still works
+    fireEvent.click(people[1])
+    expect(container.querySelector('.rp-headline')).toHaveTextContent('Beta')
   })
 
   it('leaves the person out of the team rate they are compared with', async () => {

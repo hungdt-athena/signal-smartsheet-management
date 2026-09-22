@@ -182,6 +182,52 @@ describe('Leaderboard tab', () => {
       .toHaveTextContent('The team is judging by one bar, at a comparable pace.')
   })
 
+  // Overview's verdict banner (headline + boxed, clickable chips) is now shared by
+  // all three tabs - Task 13. Leaderboard used to print the same three chips as bare
+  // spans with no kicker at all; they must now be the same control Overview has,
+  // labelled with this tab's own vocabulary rather than Overview's Growth/Speed/Age.
+  it('boxes its chips in the shared verdict banner, labelled with its own vocabulary', async () => {
+    const { container } = await leaderboard(bundleOf(FOUR()))
+    const verdict = container.querySelector('.rp-verdict')!
+    expect(verdict).not.toBeNull()
+    // the headline and chips now live INSIDE the verdict banner, not loose in the flow
+    expect(verdict.querySelector('.rp-headline')).not.toBeNull()
+    const chips = Array.from(verdict.querySelectorAll('.rp-chip'))
+    expect(chips).toHaveLength(3)
+    // a chip is a <button> now, not a bare <span> - it is a control
+    expect(chips.every((c) => c.tagName === 'BUTTON')).toBe(true)
+    expect(chips.map((c) => c.querySelector('.rp-chip-kicker')?.textContent))
+      .toEqual(['COVERAGE', 'CONCENTRATION', 'CALIBRATION'])
+  })
+
+  // Each chip has to take the reader to the number it was computed from, the same
+  // contract Overview's chips already carry. `people` is coverage (who worked at
+  // all - the heatmap), `top` is concentration (the Games column) and `cal` is
+  // calibration (the Shortlist % column).
+  it('sends each chip to the number it was computed from', async () => {
+    const { container } = await leaderboard(bundleOf(FOUR()))
+    // this file's own module-level stub (`scrollIntoViewStub`) is restored below - a
+    // permanent override here would silently break the focus=perday tests after it,
+    // which read `scrolled` rather than a per-key list.
+    const original = Element.prototype.scrollIntoView
+    const seen: string[] = []
+    Element.prototype.scrollIntoView = jest.fn(function (this: Element) {
+      seen.push(this.getAttribute('data-rp-focus') || '?')
+    }) as unknown as typeof Element.prototype.scrollIntoView
+    try {
+      const chips = Array.from(container.querySelectorAll('.rp-verdict .rp-chip'))
+      chips.forEach((c) => fireEvent.click(c))
+      expect(seen).toEqual(['people', 'top', 'cal'])
+      // every target the chips point at actually exists on the tab
+      expect(container.querySelector('[data-rp-focus="people"] .card-label')!.textContent!.replace('?', ''))
+        .toBe('Activity heatmap')
+      expect(container.querySelector('[data-rp-focus="top"]')!.textContent).toContain('Games')
+      expect(container.querySelector('[data-rp-focus="cal"]')!.textContent).toContain('Shortlist %')
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
   it('puts every rate next to the count it was computed from', async () => {
     // Delta's 50% shortlist rate is the best number in the column and rests on 8 games.
     const people = FOUR()
