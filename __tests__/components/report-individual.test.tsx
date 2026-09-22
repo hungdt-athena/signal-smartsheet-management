@@ -251,18 +251,36 @@ describe('Individual tab', () => {
     expect(legend).not.toContain('Team 0%')
   })
 
-  it('names the stale backlog, and only past both gates', async () => {
+  it('names the stale backlog, and only past both gates, as coaching not an operation', async () => {
     const fresh = await individual(bundleOf(TWO()))
-    expect(actions(fresh.container).some((a) => a.do.includes('Rescue'))).toBe(false)
+    expect(actions(fresh.container).some((a) => a.do.includes('5 oldest games'))).toBe(false)
     fresh.unmount()
     // 40 stale games is noise; 30% of a backlog of 400 is not
     const { container } = await individual(bundleOf(TWO(), {
       backlogBy: [{ key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21, stale: 120 }],
     }))
-    const act = actions(container).find((a) => a.do.includes('Rescue'))!
-    expect(act.do).toContain('at 8 days')
-    expect(act.why).toContain('120 of their 400 backlog games')
-    expect(act.why).toContain('oldest 21 days')
+    const act = actions(container).find((a) => a.do.includes('5 oldest games'))!
+    expect(act.do).toContain('Ask Alpha')
+    expect(act.why).toContain('120 of their 400 games')
+    expect(act.why).toContain('oldest 21')
+    // this tab coaches the person, it does not move their games - Leaderboard already did
+    expect(act.do).not.toMatch(/Rescue|Reassign/)
+  })
+
+  it('never offers to move games - that was decided on Leaderboard', async () => {
+    const { container } = await individual(bundleOf(TWO(), {
+      backlogBy: [{ key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21, stale: 120 }],
+    }))
+    const block = container.querySelector('.rp-do-block')!
+    expect(txt(block)).not.toMatch(/Rescue|Reassign|move .* queue|move .* backlog/i)
+  })
+
+  it('does not repeat the Leaderboard idle line', async () => {
+    const { container } = await individual(bundleOf([
+      person('Alpha', { evaluated: 0, assigned: 600 }),
+      person('Beta'),
+    ]))
+    expect(txt(container)).not.toMatch(/whether it is leave/i)
   })
 
   it('says a direction only when the two printed rates differ', async () => {
@@ -350,8 +368,11 @@ describe('Individual tab', () => {
     }))
     expect(txt(container.querySelector('.rp-headline'))).toBe('You have not judged anything this week.')
     const act = actions(container)[0]
-    // a manager reassigns the backlog; the person holding it can only flag it
-    expect(act.do).toBe('Say today what is blocking the backlog')
+    // idle was deleted here (Leaderboard already has that line); the next act to fire
+    // for an assigned-but-untouched backlog is the intake-gap coaching, in the
+    // evaluator's own voice - a manager reassigns the backlog, the person holding it can
+    // only ask for one
+    expect(act.do).toBe('Ask for a rebalance now, not at the end of the week')
     expect(act.do).not.toContain('Ask Alpha')
   })
 })

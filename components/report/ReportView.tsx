@@ -2362,22 +2362,22 @@ function Individual({ d }: { d: Bundle }) {
   // QUEUE (is work piling up on them), CALIBRATION (is their bar the team's),
   // RECORDING (is a video lost). One line per family: three versions of the same
   // complaint would fill the cap and leave the other problems unsaid.
-  type Act = { sev: number; fam: string; key: string; do: React.ReactNode; why: React.ReactNode }
+  type Act = { sev: number; fam: string; key: string; do: React.ReactNode; why: React.ReactNode; payoff?: React.ReactNode }
   const acts: Act[] = []
 
-  if (e.assigned > 0 && e.evaluated === 0) acts.push({
-    sev: 3, fam: 'backlog', key: 'idle',
-    do: self
-      ? <>Say today what is blocking the backlog</>
-      : <>Ask {e.name} today whether it is leave or a stalled backlog</>,
-    why: <>{fmt.int(e.assigned)} games were assigned to {self ? 'you' : 'them'} this {winName} and none {self ? 'have' : 'has'} been judged.</>,
-  })
-  else if (bq && queueStale >= STALE.min && queueStale / bq.n > STALE.share) acts.push({
+  // No `idle` act here any more: the Leaderboard already carries that line, and Law 2
+  // says a story is concluded at exactly one altitude. No `cta` on `stale` either - this
+  // tab coaches what this ONE person should change next week, never moves a game. That
+  // decision is between people, and the Leaderboard's Reassign already made it.
+  if (bq && queueStale >= STALE.min && queueStale / bq.n > STALE.share) acts.push({
     sev: 3, fam: 'backlog', key: 'stale',
     do: self
-      ? <>Clear the {fmt.int(queueStale)} games that have waited {sd}+ days before taking new ones</>
-      : <>Run Team Ops → Rescue on {e.name}&apos;s backlog at {sd} days</>,
-    why: <>{fmt.int(queueStale)} of {their} {fmt.int(bq.n)} backlog games have sat {sd}+ days - {fmt.pct(queueStale / bq.n)} of the backlog, oldest {bq.oldest} days.</>,
+      ? <>Start each day with your 5 oldest games</>
+      : <>Ask {e.name} to start each day with their 5 oldest games</>,
+    why: <>{fmt.int(queueStale)} of {their} {fmt.int(bq.n)} games have gone past {sd} days, oldest {bq.oldest}.</>,
+    // Guarded: `throughput` can be 0 for a quiet window, and dividing by it would print
+    // Infinity on screen.
+    payoff: <>{Their} stale games clear in about {fmt.dec(queueStale / Math.max(1, e.throughput))} working days</>,
   })
   else if (psTotals && psTotals.assigned > 0 && (psTotals.assigned - psTotals.evaluated) / psTotals.assigned > IND_T.intakeGap) acts.push({
     sev: 2, fam: 'backlog', key: 'behind',
@@ -2405,7 +2405,7 @@ function Individual({ d }: { d: Bundle }) {
   })
 
   if (stuck.length) acts.push({
-    sev: 2, fam: 'rec', key: 'stuck',
+    sev: 2, fam: 'rec', key: 'rec',
     do: <>Check the {stuck.length} recording{stuck.length > 1 ? 's' : ''} confirmed over {STUCK_DAYS} days ago with no upload</>,
     why: <>Confirm was pressed but no video has ever matched. A game title that drifted from the store title in the <i>ytb_uploaded</i> sheet makes a real video invisible here.</>,
   })
@@ -2489,7 +2489,7 @@ function Individual({ d }: { d: Bundle }) {
         </div>
       )}
       <DoBlock acts={shown.map((a) => ({
-        sev: a.sev, key: a.key, kicker: a.fam.toUpperCase(), do: a.do, why: a.why,
+        sev: a.sev, key: a.key, kicker: a.fam.toUpperCase(), do: a.do, why: a.why, payoff: a.payoff,
       }))} />
 
       {/* Five, down from twelve. What went: the three per-day mix tiles (one
