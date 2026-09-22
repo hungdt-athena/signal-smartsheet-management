@@ -62,6 +62,11 @@ function healthy(): Bundle {
       survivalRate: 0.08, signalRate: 0.015, personDayThroughput: 100,
     },
     self: null,
+    // The Rescue panel's own threshold (app_config, default 14) - kept at the old
+    // hard-coded value here so every pre-existing "8+ days" assertion in this file
+    // keeps naming the same number it always did; the tests that care about a
+    // DIFFERENT threshold override this explicitly.
+    staleDays: 8, selfStale: null, rescue: null,
     funnel: { assigned: 1000, evaluated: 1000, shortlisted: 80, priorityIV: 10, insight: 5, finalPriority: 15 },
     initialConclusions: [{ name: 'Bypass', count: 920 }, { name: 'List_Idea', count: 80 }],
     finalConclusions: [{ name: 'Theme/Art', count: 9 }, { name: 'Priority IV', count: 6 }],
@@ -410,6 +415,22 @@ describe('Overview tab', () => {
     expect(gpd.querySelector('.rp-kpi-bench')).toBeNull()
   })
 
+  it('names the threshold the Rescue panel is configured with, not a hard-coded 8', async () => {
+    // The action that names a stale-holding person used to always say "8+ days",
+    // whatever admin-editable threshold the Rescue panel was actually running with.
+    // Same person, same stale count, only the configured window changes.
+    await renderTab(withPatch({
+      staleDays: 11,
+      rescue: { staleDays: 11, sources: [], receivers: [], movableTotal: 0 },
+      backlogBy: [
+        { key: 'k0', name: 'Nadia', n: 200, a0: 50, a1: 50, a2: 70, a3: 30, oldest: 40, stale: 100 },
+      ],
+    }))
+    const block = screen.getByText('Do this').closest('.rp-do-block')!
+    expect(block.textContent).toContain('11')
+    expect(block.textContent).not.toMatch(/\b8\+ days\b/)
+  })
+
   it('names who is holding the stale work, without waiting for the team to cross a line', async () => {
     // These are different questions and the aggregate hides the answer to this one: on a
     // real September the team sat at 33% old against a 35% threshold, so nothing fired,
@@ -417,8 +438,8 @@ describe('Overview tab', () => {
     // stale games between them. The action also used to say "by name" and name nobody.
     const { container } = await renderTab(withPatch({
       backlogBy: [
-        { key: 'k0', name: 'Alpha', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 30 },
-        { key: 'k1', name: 'Beta', n: 300, a0: 300, a1: 0, a2: 0, a3: 0, oldest: 2 },
+        { key: 'k0', name: 'Alpha', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 30, stale: 250 },
+        { key: 'k1', name: 'Beta', n: 300, a0: 300, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 },
       ],
     }))
     const act = actions(container).find((a) => a.do.includes('Alpha'))!

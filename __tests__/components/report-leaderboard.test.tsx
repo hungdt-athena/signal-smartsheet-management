@@ -66,6 +66,7 @@ function bundleOf(people: Person[], patch: Bundle = {}): Bundle {
       signalRate: 0.01, survivalRate: 0.2, totalRecorded: 8, linkDead: 0, noteRate: 1,
     },
     bench: {}, baseline: null, self: null,
+    staleDays: 8, selfStale: null, rescue: null,
     funnel: { assigned: totalEvaluated, evaluated: totalEvaluated, shortlisted: 200, priorityIV: 8, insight: 4, finalPriority: 12 },
     initialConclusions: [], finalConclusions: [],
     series: [], metricSeries: [],
@@ -269,8 +270,8 @@ describe('Leaderboard tab', () => {
     const people = [even('Alpha'), even('Beta'), even('Gamma'), even('Delta')]
     const { container } = await leaderboard(bundleOf(people, {
       backlogBy: [
-        { key: 'k0', name: 'Alpha', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 30 },
-        { key: 'k1', name: 'Beta', n: 300, a0: 300, a1: 0, a2: 0, a3: 0, oldest: 2 },
+        { key: 'k0', name: 'Alpha', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 30, stale: 250 },
+        { key: 'k1', name: 'Beta', n: 300, a0: 300, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 },
       ],
     }))
     const head = container.querySelector('.rp-queue-head')!
@@ -305,8 +306,8 @@ describe('Leaderboard tab', () => {
     const people = [even('Alpha', { evaluated: 700 }), even('Beta'), even('Gamma'), even('Delta')]
     const { container } = await leaderboard(bundleOf(people, {
       backlogBy: [
-        { key: 'k0', name: 'Alpha', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 30 },
-        { key: 'k1', name: 'Beta', n: 300, a0: 100, a1: 40, a2: 120, a3: 40, oldest: 22 },
+        { key: 'k0', name: 'Alpha', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 30, stale: 250 },
+        { key: 'k1', name: 'Beta', n: 300, a0: 100, a1: 40, a2: 120, a3: 40, oldest: 22, stale: 160 },
       ],
     }))
     const shown = actions(container)

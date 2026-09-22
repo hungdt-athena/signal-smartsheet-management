@@ -66,6 +66,7 @@ function bundleOf(people: P[], patch: Bundle = {}): Bundle {
       signalRate: 0.01, noteRate: 1, perDay: {},
     },
     baseline: null, prev: null, self: null,
+    staleDays: 8, selfStale: null, rescue: null,
     funnel: {
       assigned: totalEvaluated, evaluated: totalEvaluated, shortlisted: totalShort,
       priorityIV: 8, insight: 4, finalPriority: 12,
@@ -95,7 +96,7 @@ function bundleOf(people: P[], patch: Bundle = {}): Bundle {
     videos: {}, dailyMix: {},
     // everyone is holding a fresh backlog: nothing past 3 days
     backlogBy: people.map((p, i) => ({
-      key: `k${i}`, name: p.name, n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2,
+      key: `k${i}`, name: p.name, n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0,
     })),
     // and clearing it faster than it ages: judged fresh, nothing crossing a boundary
     personMoves: Object.fromEntries(people.map((p, i) => [`k${i}`, BUCKETS.map((b) => ({
@@ -248,7 +249,7 @@ describe('Individual tab', () => {
     fresh.unmount()
     // 40 stale games is noise; 30% of a backlog of 400 is not
     const { container } = await individual(bundleOf(TWO(), {
-      backlogBy: [{ key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21 }],
+      backlogBy: [{ key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21, stale: 120 }],
     }))
     const act = actions(container).find((a) => a.do.includes('Rescue'))!
     expect(act.do).toContain('at 8 days')
@@ -303,7 +304,7 @@ describe('Individual tab', () => {
     solo.unmount()
     // ...and a genuine split still gets the bar
     const split = await individual(bundleOf(TWO(), {
-      backlogBy: [{ key: 'k0', name: 'Alpha', n: 100, a0: 50, a1: 30, a2: 20, a3: 0, oldest: 11 }],
+      backlogBy: [{ key: 'k0', name: 'Alpha', n: 100, a0: 50, a1: 30, a2: 20, a3: 0, oldest: 11, stale: 20 }],
     }))
     const b2 = Array.from(split.container.querySelectorAll('.rp-mix-block'))
       .find((b) => txt(b).startsWith('Backlog by age'))!
@@ -328,7 +329,7 @@ describe('Individual tab', () => {
 
   it('says <1% rather than 0% for a band that is present but tiny', async () => {
     const { container } = await individual(bundleOf(TWO(), {
-      backlogBy: [{ key: 'k0', name: 'Alpha', n: 1000, a0: 700, a1: 298, a2: 2, a3: 0, oldest: 9 }],
+      backlogBy: [{ key: 'k0', name: 'Alpha', n: 1000, a0: 700, a1: 298, a2: 2, a3: 0, oldest: 9, stale: 2 }],
     }))
     const pcts = Array.from(container.querySelectorAll('.rp-band-pct')).map(txt)
     expect(pcts).toContain('<1%')
