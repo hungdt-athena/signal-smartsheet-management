@@ -203,10 +203,11 @@ describe('Individual tab', () => {
     // in the chip above it and "Backlog" on Overview, for the same games.
     expect(txt(container)).not.toContain('Waiting by age')
     // the chip's SENTENCE (not the kicker Task 13 put in front of it - see
-    // "boxes its chips in the shared verdict banner" above) still starts with
-    // "Backlog"
+    // "boxes its chips in the shared verdict banner" above) still names the backlog
+    // in plain words (Task 1 rewrote "Backlog 120, oldest 2d" into a full sentence,
+    // so the check is "mentions the noun", not "starts with the old label").
     expect(Array.from(container.querySelectorAll('.rp-chips .rp-chip-text')).map(txt)
-      .some((c) => c.startsWith('Backlog'))).toBe(true)
+      .some((c) => c.toLowerCase().includes('backlog') || c.includes('waiting'))).toBe(true)
     // and it carries no bench: a stock has no team average to be above or below
     expect(waiting.querySelector('.rp-kpi-bench')).toBeNull()
   })
@@ -275,6 +276,65 @@ describe('Individual tab', () => {
     // clicking still switches the selected person - the control still works
     fireEvent.click(people[1])
     expect(container.querySelector('.rp-headline')).toHaveTextContent('Beta')
+  })
+
+  // Reads a chip's own SENTENCE off the verdict banner by its kicker label
+  // ('OUTPUT'/'GROWTH'/'AGE' for 'share'/'net'/'wait' - see "boxes its chips in the
+  // shared verdict banner" above), the same idiom report-leaderboard.test.tsx uses,
+  // rather than `[data-rp-focus]` which lands on the KPI card the chip scrolls to.
+  const IND_KICKER: Record<string, string> = { share: 'OUTPUT', net: 'GROWTH', wait: 'AGE' }
+  const verdictChipText = (c: HTMLElement, key: string) =>
+    txt(Array.from(c.querySelectorAll('.rp-verdict .rp-chip'))
+      .find((chip) => chip.querySelector('.rp-chip-kicker')?.textContent === IND_KICKER[key])
+      ?.querySelector('.rp-chip-text') ?? null)
+
+  // Task 1: "Backlog +33 this week" and "Backlog 763, oldest 13d" were shorthand -
+  // a number with no noun. Both now read as sentences, and zero/negative get their
+  // own wording rather than a sign in front of the same clause (Overview's `growth`
+  // chip already sets this precedent for `net`). One `it` per fixture: each helper
+  // call renders a fresh tree into `document.body`, and RTL only auto-unmounts
+  // between tests, not between two `individual(...)` calls inside one test.
+  it('reads the net chip as a sentence when the backlog grew', async () => {
+    // Alpha: assigned 636, evaluated 600 -> psTotals nets to +36 across six even buckets.
+    const grew = [person('Alpha', { assigned: 636, evaluated: 600 }), person('Beta')]
+    const { container } = await individual(bundleOf(grew))
+    const net = verdictChipText(container, 'net')
+    expect(net).toBe('36 games joined their backlog this week')
+    expect(net.length).toBeLessThanOrEqual(150)
+  })
+
+  it('reads the net chip as a sentence when the backlog shrank', async () => {
+    // Alpha: assigned 600, evaluated 636 -> nets to -36: the backlog shrank.
+    const shrank = [person('Alpha', { assigned: 600, evaluated: 636 }), person('Beta')]
+    const { container } = await individual(bundleOf(shrank))
+    expect(verdictChipText(container, 'net')).toBe('36 games cleared from their backlog this week')
+  })
+
+  it('reads the net chip with its own wording when nothing changed, not a signed zero', async () => {
+    // TWO()'s Alpha is assigned === evaluated: net is exactly zero, not a sign in
+    // front of "0 games".
+    const { container } = await individual(bundleOf(TWO()))
+    const zeroNet = verdictChipText(container, 'net')
+    expect(zeroNet).toBe('No games joined or cleared from their backlog this week')
+    expect(zeroNet).not.toMatch(/[-+]0 games/)
+  })
+
+  it('reads the wait chip as a sentence naming the count and the oldest game', async () => {
+    const { container } = await individual(bundleOf(TWO(), {
+      backlogBy: [{ key: 'k0', name: 'Alpha', n: 763, a0: 400, a1: 200, a2: 100, a3: 63, oldest: 13, stale: 0 },
+        { key: 'k1', name: 'Beta', n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 }],
+    }))
+    const wait = verdictChipText(container, 'wait')
+    expect(wait).toBe('763 games waiting, the oldest sat 13 days')
+    expect(wait.length).toBeLessThanOrEqual(150)
+  })
+
+  it('reads the wait chip with its own wording for an empty backlog', async () => {
+    const { container } = await individual(bundleOf(TWO(), {
+      backlogBy: [{ key: 'k0', name: 'Alpha', n: 0, a0: 0, a1: 0, a2: 0, a3: 0, oldest: 0, stale: 0 },
+        { key: 'k1', name: 'Beta', n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 }],
+    }))
+    expect(verdictChipText(container, 'wait')).toBe('Nothing is waiting in their backlog')
   })
 
   it('leaves the person out of the team rate they are compared with', async () => {

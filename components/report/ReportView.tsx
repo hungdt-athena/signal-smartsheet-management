@@ -1957,20 +1957,34 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
           ? `Most of the output is ${top.name}.`
           : 'The team is judging by one bar, at a comparable pace.'
 
+  // Two clauses built from `keepPair`'s own strings rather than a fresh calculation,
+  // so this stays true for the whole range keepPair can return - 'nothing', a percent,
+  // or the "1 game in N" thin-rate form - not just the zero/thin example that prompted
+  // the rewrite. The first clause always names what is kept ("shortlists ... of the
+  // games they judge"); the second stays terse ("keeps ...") the way the design table
+  // has it, with "1 in N" spelled out as "1 in every N" so it reads as English rather
+  // than a fraction with the denominator left for the reader to supply.
+  const calWords = calSpread != null ? (() => {
+    const [a, b] = keepPair(strict.survivalRate, loose.survivalRate)
+    const clause1 = a === 'nothing' ? 'none' : a.replace('1 game in', '1 in')
+    const clause2 = b.replace(/^1 in /, '1 in every ')
+    return { clause1, clause2 }
+  })() : null
+
   const chips: Array<{ key: string; text: React.ReactNode; tone: 'good' | 'warn' | 'bad' }> = active.length ? [
     {
       key: 'people', tone: band(ev.length ? active.length / ev.length : 0, 0.6, 0.85),
-      text: <>{active.length} of {ev.length} people judged games</>,
+      text: <><b>{active.length} of {ev.length} people</b> judged anything this {winName}</>,
     },
     ...(top ? [{
       key: 'top',
       tone: (topShare > LB_T.concentration ? 'bad' : topShare > LB_T.concentration * 0.75 ? 'warn' : 'good') as 'good' | 'warn' | 'bad',
-      text: <>{top.name} judged {fmt.pct(topShare)} of all games</>,
+      text: <><b>{top.name}</b> judged <b>{fmt.pct(topShare)}</b> of everything the team got through</>,
     }] : []),
-    ...(calSpread != null ? [{
+    ...(calWords ? [{
       key: 'cal',
-      tone: (calSpread > LB_T.calSpread ? 'bad' : calSpread > LB_T.calSpread / 2 ? 'warn' : 'good') as 'good' | 'warn' | 'bad',
-      text: <>{strict.name} keeps {keepPair(strict.survivalRate, loose.survivalRate)[0]}, {loose.name} {keepPair(strict.survivalRate, loose.survivalRate)[1]}</>,
+      tone: (calSpread! > LB_T.calSpread ? 'bad' : calSpread! > LB_T.calSpread / 2 ? 'warn' : 'good') as 'good' | 'warn' | 'bad',
+      text: <><b>{strict.name}</b> shortlists {calWords.clause1} of the games they judge; <b>{loose.name}</b> keeps {calWords.clause2}</>,
     }] : []),
   ] : []
   // Same rule as Overview's banner: the verdict takes the colour of its worst chip,
@@ -2655,13 +2669,25 @@ function Individual({ d }: { d: Bundle }) {
       key: 'share', tone: 'good' as const,
       text: <>Judged {fmt.pct(outShare)} of the team&apos;s games this {winName}</>,
     }] : []),
+    // Three sentences, not one with a sign in front of it, same as Overview's growth
+    // chip: "0 games joined their backlog" is arithmetic, not English, and "-12 games
+    // joined" is worse.
     ...(queueNet != null ? [{
       key: 'net', tone: (queueNet > 0 ? 'warn' : 'good') as 'good' | 'warn' | 'bad',
-      text: <>Backlog {queueNet >= 0 ? '+' : '−'}{fmt.int(Math.abs(queueNet))} this {winName}</>,
+      text: queueNet > 0
+        ? <><b>{fmt.int(queueNet)} games</b> joined {their} backlog this {winName}</>
+        : queueNet < 0
+          ? <><b>{fmt.int(-queueNet)} games</b> cleared from {their} backlog this {winName}</>
+          : <>No games joined or cleared from {their} backlog this {winName}</>,
     }] : []),
     ...(bq ? [{
       key: 'wait', tone: (queueStale / bq.n > STALE.share ? 'bad' : 'good') as 'good' | 'warn' | 'bad',
-      text: <>Backlog {fmt.int(bq.n)}, oldest {bq.oldest}d</>,
+      // "Nothing is waiting" is its own sentence rather than "0 games waiting, the
+      // oldest sat 0 days" - a zero-day oldest game reads as a fact about a game that
+      // does not exist.
+      text: bq.n > 0
+        ? <><b>{fmt.int(bq.n)} games</b> waiting, the oldest sat <b>{fmt.int(bq.oldest)} days</b></>
+        : <>Nothing is waiting in {their} backlog</>,
     }] : []),
   ] : []
   // Same rule as Overview's and Leaderboard's banners: the worst chip sets the tone.

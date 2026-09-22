@@ -274,4 +274,50 @@ describe('Individual tab, read by a contractor', () => {
     expect(block.textContent).toMatch(/check your 2 recordings/i)
     expect(block.textContent).not.toMatch(/keep the change you made/i)
   })
+
+  // Task 1: the `net`/`wait` chips must read correctly in BOTH voices. The admin
+  // suite (report-individual.test.tsx) covers the third-person reading; this proves
+  // the second-person one - "their" becomes "your" - reads naturally too, including
+  // the zero case, which is its own sentence rather than a signed "0 games".
+  const IND_KICKER: Record<string, string> = { share: 'OUTPUT', net: 'GROWTH', wait: 'AGE' }
+  const verdictChipText = (c: HTMLElement, key: string) =>
+    (Array.from(c.querySelectorAll('.rp-verdict .rp-chip'))
+      .find((chip) => chip.querySelector('.rp-chip-kicker')?.textContent === IND_KICKER[key])
+      ?.querySelector('.rp-chip-text')?.textContent || '').replace(/\s+/g, ' ').trim()
+
+  it('reads the net chip in the second-person voice when the backlog grew', async () => {
+    const b = selfBundle({ assigned: 636, evaluated: 600 }) as Record<string, unknown>
+    b.personSeries = { k0: [{ key: 'b1', label: 'b1', assigned: 636, evaluated: 600, linkDead: 0 }] }
+    const { container } = await renderTab(b)
+    expect(verdictChipText(container, 'net')).toBe('36 games joined your backlog this week')
+  })
+
+  it('reads the net chip in the second-person voice when the backlog shrank', async () => {
+    const b = selfBundle({ assigned: 600, evaluated: 636 }) as Record<string, unknown>
+    b.personSeries = { k0: [{ key: 'b1', label: 'b1', assigned: 600, evaluated: 636, linkDead: 0 }] }
+    const { container } = await renderTab(b)
+    expect(verdictChipText(container, 'net')).toBe('36 games cleared from your backlog this week')
+  })
+
+  it('reads the net chip in the second-person voice with its own wording for zero, not a signed zero', async () => {
+    const b = selfBundle({ assigned: 600, evaluated: 600 }) as Record<string, unknown>
+    b.personSeries = { k0: [{ key: 'b1', label: 'b1', assigned: 600, evaluated: 600, linkDead: 0 }] }
+    const { container } = await renderTab(b)
+    const zeroNet = verdictChipText(container, 'net')
+    expect(zeroNet).toBe('No games joined or cleared from your backlog this week')
+    expect(zeroNet).not.toMatch(/[-+]0 games/)
+  })
+
+  it('reads the wait chip in the second-person voice', async () => {
+    const { container } = await renderTab(selfBundle({}))
+    // selfBundle()'s default backlogBy: n=200, oldest=40
+    expect(verdictChipText(container, 'wait')).toBe('200 games waiting, the oldest sat 40 days')
+  })
+
+  it('reads the wait chip in the second-person voice for an empty backlog', async () => {
+    const b = selfBundle({}) as Record<string, unknown>
+    b.backlogBy = [{ key: 'k0', name: 'Alpha', n: 0, a0: 0, a1: 0, a2: 0, a3: 0, oldest: 0, stale: 0 }]
+    const { container } = await renderTab(b)
+    expect(verdictChipText(container, 'wait')).toBe('Nothing is waiting in your backlog')
+  })
 })

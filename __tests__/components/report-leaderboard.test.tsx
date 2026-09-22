@@ -228,6 +228,66 @@ describe('Leaderboard tab', () => {
     }
   })
 
+  // Task 1: the three chips used to be shorthand written for someone who already
+  // knew the schema ("NhiLV keeps nothing, QuangVN 1 in 11", "9 of 11 people judged
+  // games", "ThuDT judged 16% of all games"). Each one now has to read as a full
+  // sentence that names its own unit, on the same rule Overview's chips already
+  // follow: the number is bold, the sentence around it carries the meaning.
+  const chipText = (container: HTMLElement, kickerLabel: string) =>
+    Array.from(container.querySelectorAll('.rp-verdict .rp-chip'))
+      .find((c) => c.querySelector('.rp-chip-kicker')?.textContent === kickerLabel)
+      ?.querySelector('.rp-chip-text')?.textContent || ''
+
+  it('reads the people and top chips as full sentences that name their unit', async () => {
+    const { container } = await leaderboard(bundleOf(FOUR()))
+    const people2 = chipText(container, 'COVERAGE')
+    expect(people2).toBe('4 of 4 people judged anything this week')
+    expect(people2.length).toBeLessThanOrEqual(150)
+
+    // ThuDT's example became a bold-percentage sentence; on this fixture the top
+    // person is Alpha (all four tied on evaluated, first in array order): 250 of the
+    // team's 1,000 games is 25%.
+    const top = chipText(container, 'CONCENTRATION')
+    expect(top).toBe('Alpha judged 25% of everything the team got through')
+    expect(top.length).toBeLessThanOrEqual(150)
+  })
+
+  it('reads the cal chip as a full sentence naming what is kept, for the zero/thin-rate pair', async () => {
+    // strict = highest bypass share (lowest keep rate), loose = the lowest bypass
+    // share (highest keep rate) among people who clear the calMin floor. NhiLV keeps
+    // nothing at all, QuangVN keeps 1 in 11 - the exact pair the user quoted as a
+    // riddle. Gamma/Delta are held under calMin so they cannot land as `loose` and
+    // blur the fixture.
+    const people = [
+      even('NhiLV', { evaluated: 250, bypass: 250, listIdea: 0, cells: { d1: 250 } }),
+      even('QuangVN', { evaluated: 220, bypass: 200, listIdea: 20, cells: { d1: 220 } }),
+      even('Gamma', { evaluated: 10, bypass: 8, listIdea: 2, cells: { d1: 10 } }),
+      even('Delta', { evaluated: 10, bypass: 8, listIdea: 2, cells: { d1: 10 } }),
+    ]
+    const { container } = await leaderboard(bundleOf(people))
+    const cal = chipText(container, 'CALIBRATION')
+    // The riddle this task exists to remove: "keeps nothing" alone, with no noun,
+    // and "1 in 11" with nothing said about what is being kept.
+    expect(cal).not.toContain('keeps nothing,')
+    expect(cal).toBe('NhiLV shortlists none of the games they judge; QuangVN keeps 1 in every 11')
+    expect(cal.length).toBeLessThanOrEqual(150)
+  })
+
+  // The `cal` chip must stay true for the whole range `keepPair` can return, not just
+  // the zero/low-rate example above: when neither side is a thin rate, both print as
+  // percentages.
+  it('reads the cal chip as a sentence when both keep rates print as percentages', async () => {
+    const people = [
+      even('Strict', { evaluated: 250, bypass: 200, listIdea: 50, cells: { d1: 250 } }),
+      even('Loose', { evaluated: 250, bypass: 50, listIdea: 200, cells: { d1: 250 } }),
+      even('Gamma'), even('Delta'),
+    ]
+    const { container } = await leaderboard(bundleOf(people))
+    const cal = chipText(container, 'CALIBRATION')
+    expect(cal).toBe('Strict shortlists 20% of the games they judge; Loose keeps 80%')
+    expect(cal.length).toBeLessThanOrEqual(150)
+  })
+
   it('puts every rate next to the count it was computed from', async () => {
     // Delta's 50% shortlist rate is the best number in the column and rests on 8 games.
     const people = FOUR()
