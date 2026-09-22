@@ -182,14 +182,14 @@ interface Bundle {
   // means "against last month" and not against a 90-day average nobody selected.
   // Null on all-time and batch, which have no "the one before".
   //
-  // `activeDays` is optional and, as of this task, never populated by the API route -
-  // the query behind `prev` has no evaluator filter at all (see app/api/report/route.ts
-  // `refQuery`), so today it would be a TEAM figure, not this one person's. It is
-  // declared here so Individual's `rhythm` act (a contractor's own active-day count
-  // against their own last window) has somewhere to read a real per-person figure
-  // FROM once the route is extended to carry it for a scoped request. Until then the
-  // field is always absent and `rhythm` never fires - Law 6, no fallback act - rather
-  // than comparing this person's days against the team's days and calling it "their".
+  // `activeDays` is optional: `refQuery` (see app/api/report/route.ts) only spreads it
+  // in for a SCOPED request (one evaluator's own report), reusing the same active-day
+  // expression the per-evaluator `active_days` column uses, filtered to that person.
+  // An unscoped (manager) request's `prev` never carries it - there is no single
+  // person to count - so Individual's `rhythm` act (a contractor's own active-day
+  // count against their own last window) still has nothing to read there and, per
+  // Law 6 (no fallback act), simply never fires for a manager's view rather than
+  // comparing this person's days against the team's and calling it "their".
   prev: null | { from: string; to: string; label: string; evaluated: number; survivalRate: number; signalRate: number; personDayThroughput: number; activeDays?: number }
   // The waiting pile as it stands RIGHT NOW: every pushed game with no evaluation yet,
   // across all history, in the selected category. The one figure on this tab no window

@@ -490,7 +490,17 @@ export async function GET(req: NextRequest) {
     // single person. `selfMatchKey` is only ever `selfKey` on a scoped request; on an
     // unscoped one it is a sentinel no lowercase name can equal, so the column comes
     // back 0 for a manager rather than quietly picking their own name.
-    const selfMatchKey = scoped ? selfKey : '\u0000'
+    //
+    // The sentinel has to be a value Postgres will actually ACCEPT as a text
+    // parameter: it was briefly `'\u0000'`, which is a valid JS string but not valid
+    // Postgres text (NUL is not a legal byte in a Postgres string literal) - every
+    // request that reached `refQuery` (any real window: a real batch, a real week or
+    // month key) 500'd with "invalid byte sequence for encoding UTF8: 0x00", caught
+    // here by Task 11 trying to capture a real payload for anything other than the
+    // degenerate all-time/no-key case. `''` is safe: `initial_evaluator <> ''` is
+    // already part of every one of these queries' WHERE clause, so the lowercased key
+    // this compares against can never legitimately be empty.
+    const selfMatchKey = scoped ? selfKey : ''
     const refQuery = (f: string, t: string) => sql`
       SELECT
         count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> ''
