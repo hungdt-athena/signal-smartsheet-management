@@ -38,7 +38,9 @@ export function PushPreview({ preview, loading, canRun, onRan }: {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="card">
+    // pp-card: in the Assign tab's side column this is the card that absorbs the
+    // height difference against the roster, so the two columns end on one line.
+    <div className="card pp-card">
       <div className="card-head">
         <span className="card-label">Next run</span>
         <span className="card-note">as configured right now</span>
@@ -92,6 +94,8 @@ export function PushPreview({ preview, loading, canRun, onRan }: {
               {n(preview.blocked)} held back by a genre that will not run.
             </p>
           )}
+
+          <div className="pp-fill" aria-hidden="true" />
 
           <button type="button" className="pp-toggle" onClick={() => setOpen(true)}>
             Breakdown

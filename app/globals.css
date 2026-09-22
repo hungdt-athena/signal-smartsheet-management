@@ -275,15 +275,25 @@ body {
    least as wide as its widest row and .tbl-wrap scrolls when the track is
    narrower — a scrollbar, not a clip, and never a wrapped pill row.
    The track itself is therefore free to be minmax(0, 1fr).
-   The side column does not stretch: two short cards next to a tall table
-   should end where their content ends.
+   Both columns end on the same line, whichever one is taller: a stretched row
+   plus a growing card below means a long roster pulls the side column down with
+   it, and a two-person roster is padded up to the side column instead of
+   leaving a step in the layout.
    The breakpoint counts the 232px sidebar and the page gutters, so it fires
    while the pair still has room rather than after it has already overflowed. */
 .assign-grid {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(296px, 344px);
-  gap: var(--gap); align-items: start; min-width: 0;
+  gap: var(--gap); align-items: stretch; min-width: 0;
 }
 .assign-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+/* A card in this pair is a column, because it was stretched to the row's height
+   and now has slack to hand to a child - the table on the left, the figure on
+   the right - rather than leave as dead space under the footer. */
+.assign-grid > .card, .assign-side > .card { display: flex; flex-direction: column; }
+/* The slack goes to Next run, not to Push targets: a three-row table stretched
+   to twice its height reads as broken, while a figure with its button on the
+   bottom edge reads as a panel. */
+.assign-side .pp-card { flex: 1 1 auto; }
 @media (max-width: 1280px) {
   .assign-grid { grid-template-columns: minmax(0, 1fr); }
 }
@@ -376,9 +386,12 @@ body {
 
 .pp-warn { font-size: 11.5px; color: var(--warn); margin: 8px 0 0; }
 
+/* Takes whatever height the card was stretched to and keeps a 12px gap when it
+   was not stretched at all, so Breakdown sits on the bottom edge either way. */
+.pp-fill { flex: 1 1 auto; min-height: 12px; }
 .pp-toggle {
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  width: 100%; margin-top: 12px; padding: 7px; border-radius: 8px;
+  width: 100%; padding: 7px; border-radius: 8px;
   border: 1px solid var(--border-strong); background: var(--surface);
   font-family: var(--font); font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer;
 }
@@ -428,6 +441,12 @@ body {
 /* max-content is the guarantee that a genre row is never squeezed: the table
    fills the space it is given, but never shrinks below its widest row, so the
    pills keep their size and .tbl-wrap scrolls instead. */
+/* A container, so the open genre panel below can be sized against the width
+   that is on screen rather than the width of the table inside it.
+   It is also the part of the card that grows when the card was stretched to
+   match the side column, which leaves + Add evaluator on the bottom edge
+   instead of stranding it above a blank strip. */
+.roster-tbl { container-type: inline-size; flex: 1 1 auto; }
 .roster-tbl .tbl { min-width: max-content; }
 .roster-tbl .tbl th, .roster-tbl .tbl td { padding: 6px 8px; }
 .roster-tbl .tbl td { font-size: 12.5px; vertical-align: middle; }
@@ -491,9 +510,22 @@ body {
    which pill it belongs to. */
 .roster-tbl .tbl tr.genre-xrow > td {
   background: var(--accent-weak); border-top: 1px solid var(--accent-border);
-  padding: 11px 16px;
+  padding: 0;
 }
-.gpanel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 26px; }
+/* The band is the cell, but the controls are this box, and the two are not the
+   same width. The cell runs the full width of the table, which on a narrow
+   screen is wider than the card; sizing the controls to it put Remove genre and
+   Close off the right edge. 100cqw is the width actually on screen, and sticky
+   keeps the panel in it while the roster scrolls sideways underneath. The
+   clamp also stops the panel from being what makes the table scroll: it now
+   wraps onto a second line instead of pushing the track wider.
+   Without container-query support the clamp drops out and the panel falls back
+   to the full cell width. */
+.gpanel {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 26px;
+  position: sticky; left: 0;
+  width: 100%; max-width: 100cqw; padding: 11px 16px;
+}
 .gpanel-title {
   font-size: 11px; font-weight: 700; letter-spacing: .07em;
   text-transform: uppercase; color: var(--accent-strong);
