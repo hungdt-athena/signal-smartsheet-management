@@ -267,6 +267,25 @@ describe('Individual tab', () => {
     expect(act.do).not.toMatch(/Rescue|Reassign/)
   })
 
+  it('guards the stale payoff against a zero throughput', async () => {
+    // Alpha has judged nothing this window (throughput = evaluated / activeDays = 0)
+    // but is still sitting on a real stale backlog - the one case the payoff's
+    // division is guarded for. Dividing by the raw throughput here would print
+    // "Infinity working days" on screen.
+    const { container } = await individual(bundleOf([
+      person('Alpha', { evaluated: 0, assigned: 600 }),
+      person('Beta'),
+    ], {
+      backlogBy: [
+        { key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21, stale: 120 },
+        { key: 'k1', name: 'Beta', n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 },
+      ],
+    }))
+    const payoff = txt(container.querySelector('.rp-do-payoff'))
+    expect(payoff).toBe('Their stale games clear in about 120.0 working days')
+    expect(payoff).not.toMatch(/Infinity|NaN/)
+  })
+
   it('never offers to move games - that was decided on Leaderboard', async () => {
     const { container } = await individual(bundleOf(TWO(), {
       backlogBy: [{ key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21, stale: 120 }],
