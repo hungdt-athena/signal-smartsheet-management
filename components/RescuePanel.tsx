@@ -8,7 +8,7 @@
 // Three explicit steps, nothing automatic: Scan → Preview → Approve & commit. The
 // thresholds live in app_config (key 'rescue_config') and are saved on every Scan.
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 import { DistributionResult, type DistResult } from '@/components/DistributionResult'
@@ -107,7 +107,12 @@ const RESULT_MSG: Record<NonNullable<RescueResult['reason']>, string> = {
   no_stale_games: 'The selected sources have no stale games outside their cool-down window.',
 }
 
-export function RescuePanel() {
+// flash: names the Report's "Move N stale games from X, Y and Z" link meant to ring
+// on arrival — never a threshold. `?staleDays=` and friends are not read from the
+// URL at all: POST /api/operations/rescue persists whatever config it is handed, so
+// a link carrying one would silently rewrite the admin's saved settings the next
+// time this panel scans.
+export function RescuePanel({ flash = [] }: { flash?: string[] } = {}) {
   const [category, setCategory] = useState<Bucket>('puzzle')
   const [config, setConfig] = useState<RescueConfig>(DEFAULT_RESCUE_CONFIG)
   const [rows, setRows] = useState<ScanRow[] | null>(null)
@@ -124,6 +129,22 @@ export function RescuePanel() {
   // screen no longer describes what a commit would do.
   const [scannedKey, setScannedKey] = useState('')
   const [previewKey, setPreviewKey] = useState('')
+
+  const ring = useMemo(() => new Set(flash.map(n => n.toLowerCase())), [flash])
+  // Same idiom as the Config page's ?highlight=: scroll the first row the link
+  // named into view once the scan that produced it resolves, and only that once —
+  // a later Preview/Commit reshuffling `rows` should not re-trigger the scroll.
+  const scrolledRef = useRef(false)
+  useEffect(() => {
+    if (scrolledRef.current || ring.size === 0 || !rows) return
+    const first = rows.find(r => ring.has(r.name.toLowerCase()))
+    if (!first) return
+    scrolledRef.current = true
+    const t = setTimeout(() => {
+      document.getElementById(`rescue-row-${first.name}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 60)
+    return () => clearTimeout(t)
+  }, [rows, ring])
 
   const applyRows = useCallback((next: ScanRow[]) => {
     setRows(next)
@@ -312,7 +333,9 @@ export function RescuePanel() {
                     )
                     const quota = result?.quotas?.[r.name]
                     return (
-                      <tr key={r.name} style={r.role === 'neutral' ? { opacity: 0.55 } : undefined}>
+                      <tr key={r.name} id={`rescue-row-${r.name}`}
+                        className={ring.has(r.name.toLowerCase()) ? 'cfg-highlightable cfg-highlight' : undefined}
+                        style={r.role === 'neutral' ? { opacity: 0.55 } : undefined}>
                         <td>
                           {r.role !== 'neutral' && (
                             <input type="checkbox" checked={picked} onChange={toggle}

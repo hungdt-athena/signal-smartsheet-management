@@ -46,6 +46,11 @@ function TeamOpsInner() {
   const tab = (searchParams.get('tab') as Tab) || 'assign'
   const active: Tab = allowed.includes(tab) ? tab : 'assign'
 
+  // Same shape as the Config page's ?highlight= (app/(manager)/config/page.tsx): a
+  // link may say WHICH rows it meant, never what the tool's settings should be.
+  const flash = (searchParams.get('flash') || '').split(',').map(s => s.trim()).filter(Boolean)
+  const fromParam = searchParams.get('from') || undefined
+
   // Performance renders its own page chrome (header, filters, sub-tabs)
   if (active === 'performance') return <ReportView />
 
@@ -56,8 +61,8 @@ function TeamOpsInner() {
       </div>
 
       {active === 'assign' && <AssignTab />}
-      {active === 'reassign' && <ReassignPanel />}
-      {active === 'rescue' && <RescuePanel />}
+      {active === 'reassign' && <ReassignPanel initialFrom={fromParam} />}
+      {active === 'rescue' && <RescuePanel flash={flash} />}
       {active === 'handover' && <HandoverPanel />}
     </div>
   )

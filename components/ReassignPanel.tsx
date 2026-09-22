@@ -4,7 +4,7 @@
 // (does NOT touch Assign Setup). Preview is manual — the Preview button runs a dryRun
 // (platform + per-day breakdowns); changing any field clears the stale preview.
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { BUCKETS, WEIGHTS, type Bucket } from '@/lib/buckets'
@@ -16,12 +16,15 @@ type Mode = 'range' | 'quantity'
 const BUCKET_LABELS: Record<Bucket, string> = { puzzle: 'Puzzle', arcade: 'Arcade', simulation: 'Simulation' }
 const WEIGHT_OPTS = WEIGHTS.map(w => ({ value: String(w), label: String(w) }))
 
-export function ReassignPanel() {
+// initialFrom: who the Report's "Reassign PhuongNT1's backlog" link meant. It only
+// preselects the source — it can never carry a date range, a quantity or a target
+// pick, because those are decisions the manager still has to make here.
+export function ReassignPanel({ initialFrom }: { initialFrom?: string } = {}) {
   const { data: session } = useSession()
   const isEvaluator = session?.user?.role === 'evaluator'
   const [category, setCategory] = useState<Bucket>('puzzle')
   const [roster, setRoster] = useState<RosterRow[]>([])
-  const [from, setFrom] = useState('')
+  const [from, setFrom] = useState(initialFrom ?? '')
   const [mode, setMode] = useState<Mode>('range')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -43,10 +46,24 @@ export function ReassignPanel() {
     } catch { setRoster([]) }
   }, [category])
 
+  // The first run should keep whatever the URL preselected; only a later category
+  // switch clears the source, since the roster underneath it just changed.
+  const mounted = useRef(false)
   useEffect(() => {
     loadRoster()
-    setFrom(''); setChecked({}); setWeightOverrides({}); setResult(null); setMsg(null)
+    if (mounted.current) setFrom('')
+    mounted.current = true
+    setChecked({}); setWeightOverrides({}); setResult(null); setMsg(null)
   }, [loadRoster])
+
+  // A link can only say a name; it cannot guarantee that name is still on this
+  // bucket's roster by the time it loads. Once the roster is in, drop a preselection
+  // that does not resolve to a real row rather than leaving the select on a value it
+  // cannot show.
+  useEffect(() => {
+    if (!initialFrom || roster.length === 0) return
+    if (!roster.some(r => r.name === initialFrom)) setFrom('')
+  }, [roster, initialFrom])
 
   const targets = useMemo(() => roster.filter(r => r.name !== from), [roster, from])
   // Default target selection: everyone available except the source.
