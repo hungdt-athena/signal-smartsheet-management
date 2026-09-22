@@ -320,4 +320,16 @@ describe('Individual tab, read by a contractor', () => {
     const { container } = await renderTab(b)
     expect(verdictChipText(container, 'wait')).toBe('Nothing is waiting in your backlog')
   })
+  // Both guide lines must stay true in the SECOND-person voice too. "Every card below
+  // is your own work in this week" became false the moment the review table landed:
+  // the table is their own work, but not scoped to this week.
+  it('tells the contractor which block the window filter does not reach, in their own voice', async () => {
+    const { container } = await renderTab(selfBundle({}))
+    fireEvent.click(container.querySelector('.rp-guide button')!)
+    const read = (container.querySelector('.rp-guide .read')?.textContent || '').replace(/\s+/g, ' ').trim()
+    expect(read).toContain('Every card below is your own work in this week, except the review table at the bottom.')
+    expect(read).toContain('Backlog is the only KPI here the week filter does not reach')
+    expect(read).not.toContain('the only number here')
+    expect(read).toContain('the review table at the bottom has its own filters too')
+  })
 })

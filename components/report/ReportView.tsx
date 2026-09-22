@@ -2552,10 +2552,14 @@ function Individual({ d }: { d: Bundle }) {
       <Guide title={self ? 'Your workload, tempo and pick quality' : "Individual - one evaluator's workload, tempo and pick quality"}
         read={[
           self
-            ? <span key="1">One sentence, three chips and five numbers are the answer. Every card below is your own work in this {winName}.</span>
+            ? <span key="1">One sentence, three chips and five numbers are the answer. Every card below is your own work in this {winName}, except the review table at the bottom.</span>
             : <span key="1">One sentence, three chips and five numbers are the answer. <b>The name chips switch person</b> - every card re-renders for them.</span>,
           <span key="2">Each KPI carries a <b>team</b> line: the team&apos;s number on the same metric and the gap in %. Green or red only past ±5%, and only where one direction is genuinely better.</span>,
-          <span key="3"><b>Backlog</b> is the only number here the {winName} filter does not reach: it is every game still sitting with {self ? 'you' : 'them'} right now, whenever it arrived. Overview and the Leaderboard call the same backlog by the same name.</span>,
+          // "only KPI", not "only number": the review table at the bottom ignores the
+          // window too, and says so in its own note. A guide that teaches a rule the
+          // reader then meets an exception to, three screens down, is worse than no
+          // guide - so the exception is named here rather than left to be discovered.
+          <span key="3"><b>Backlog</b> is the only KPI here the {winName} filter does not reach: it is every game still sitting with {self ? 'you' : 'them'} right now, whenever it arrived. Overview and the Leaderboard call the same backlog by the same name, and the review table at the bottom has its own filters too.</span>,
           <span key="4"><b>Pick quality over time</b> is the one chart that says whether {self ? 'you are' : 'they are'} improving. Everything else says how much.</span>,
         ]}
         act={[
@@ -2736,7 +2740,11 @@ function Individual({ d }: { d: Bundle }) {
       <div className="rp-review-section">
         <div className="rp-review-rule" />
         <div className="rp-section-title">Review - check the calls themselves, screenshots included</div>
-        <p className="rp-review-scope-note">This table has its own filters and ignores the window and genre at the top of the page.</p>
+        {/* Names the two controls by the labels the filter bar actually prints -
+            "View by" and "Category" - not "window"/"genre", which appear nowhere in
+            the Report's screen text. A reader who goes looking for a "genre" control
+            will not find one, and this table's own filter is labelled Category too. */}
+        <p className="rp-review-scope-note">This table has its own filters. It ignores the View by and Category filters at the top of the page.</p>
         <ReviewTable evaluator={e.name} canSeeTeam={d.canSeeTeam} />
       </div>
     </>

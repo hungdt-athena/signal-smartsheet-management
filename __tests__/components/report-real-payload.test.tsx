@@ -170,7 +170,7 @@ function assertReviewSeparatorIsLast() {
   expect(rule).not.toBeNull()
   const note = document.querySelector('.rp-review-scope-note')
   expect(note?.textContent?.trim()).toBe(
-    'This table has its own filters and ignores the window and genre at the top of the page.',
+    'This table has its own filters. It ignores the View by and Category filters at the top of the page.',
   )
   // DOM order: the rule/title/note must precede the ReviewTable's own toolbar, i.e.
   // live inside the same `.rp-review-section` wrapper, not just appear somewhere on

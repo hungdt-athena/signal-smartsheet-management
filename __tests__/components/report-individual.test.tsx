@@ -581,6 +581,19 @@ describe('Individual tab', () => {
     expect(sub).toContain('3 final priority')
   })
 
+  // The guide used to teach "Backlog is the only number here the window filter does
+  // not reach" and then, three screens down, the reader met the review table - which
+  // ignores the window too and says so in its own note. A guide whose rule has an
+  // unannounced exception on the same page is worse than no guide.
+  it('does not claim Backlog is the only thing the window filter misses, now the review table misses it too', async () => {
+    const { container } = await individual(bundleOf(TWO()))
+    fireEvent.click(container.querySelector('.rp-guide button')!)
+    const read = txt(container.querySelector('.rp-guide .read'))
+    expect(read).toContain('Backlog is the only KPI here the week filter does not reach')
+    expect(read).not.toContain('the only number here')
+    expect(read).toContain('the review table at the bottom has its own filters too')
+  })
+
   // Task 6: the review table is the last block on the tab, and unlike everything above
   // it, it does not obey the window/genre filter bar - so it must be introduced by its
   // own separator (rule + title + a sentence saying so), or a reader assumes it is the
@@ -603,10 +616,19 @@ describe('Individual tab', () => {
       expect(txt(section!.querySelector('.rp-section-title'))).toMatch(/^Review/)
     })
 
-    it('states in plain words that the table ignores the window and genre filters', async () => {
+    // The note has to name the two controls by the labels the filter bar prints:
+    // "View by" (ReportView.tsx's first Seg) and "Category" (its last one). "genre"
+    // is a word the Report's screen text does not contain anywhere else, and this
+    // table's own filter is ALSO labelled Category, so the mismatch was loud.
+    it('names the filter bar controls by their real labels, not "window" and "genre"', async () => {
       const { container } = await individual(bundleOf(TWO()))
       const note = container.querySelector('.rp-review-scope-note')
-      expect(txt(note)).toBe('This table has its own filters and ignores the window and genre at the top of the page.')
+      expect(txt(note)).toBe('This table has its own filters. It ignores the View by and Category filters at the top of the page.')
+      expect(txt(note)).not.toMatch(/genre/i)
+      // and those labels are really on the page, so the reader can find them
+      const segLabels = Array.from(container.querySelectorAll('.rp-filters .rp-seg-label')).map(txt)
+      expect(segLabels).toContain('View by')
+      expect(segLabels).toContain('Category')
     })
 
     it('renders it for the contractor themselves when the view is scoped to one person', async () => {
