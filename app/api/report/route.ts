@@ -483,6 +483,14 @@ export async function GET(req: NextRequest) {
     // Same shape of aggregate over an arbitrary date range, so the trailing baseline
     // and the previous window are computed by one definition instead of two that can
     // drift apart. Rates only on the reading side - see `baseline` / `prev` below.
+    //
+    // `self_active_days` reuses the SAME active-day expression as the per-evaluator
+    // `active_days` column below (`(ge.evaluate_date AT TIME ZONE VN)::date`, counted
+    // DISTINCT) - it is not a second definition, just this one filtered down to a
+    // single person. `selfMatchKey` is only ever `selfKey` on a scoped request; on an
+    // unscoped one it is a sentinel no lowercase name can equal, so the column comes
+    // back 0 for a manager rather than quietly picking their own name.
+    const selfMatchKey = scoped ? selfKey : '\u0000'
     const refQuery = (f: string, t: string) => sql`
       SELECT
         count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> ''
@@ -494,7 +502,9 @@ export async function GET(req: NextRequest) {
         count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL AND ge.initial_conclusion <> ''
                            AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
                            AND ge.initial_note IS NOT NULL AND btrim(ge.initial_note) <> '')::int AS noted,
-        count(DISTINCT (lower(ge.initial_evaluator), (ge.evaluate_date AT TIME ZONE ${VN})::date))::int AS person_days
+        count(DISTINCT (lower(ge.initial_evaluator), (ge.evaluate_date AT TIME ZONE ${VN})::date))::int AS person_days,
+        count(DISTINCT CASE WHEN lower(ge.initial_evaluator) = ${selfMatchKey}
+                THEN (ge.evaluate_date AT TIME ZONE ${VN})::date END)::int AS self_active_days
       FROM game_evaluations ge
       WHERE ge.evaluate_date IS NOT NULL
         AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
@@ -1267,6 +1277,11 @@ export async function GET(req: NextRequest) {
         survivalRate: p0r.shortlisted / p0r.evaluated,
         signalRate: p0r.final_priority / p0r.evaluated,
         personDayThroughput: p0r.person_days > 0 ? p0r.evaluated / p0r.person_days : 0,
+        // Only meaningful for one person, so only a scoped (evaluator) request gets it -
+        // an admin's `prev` stays exactly the shape it was, per the Bundle type in
+        // ReportView.tsx. This is what lets Individual's `rhythm` act fire for a
+        // contractor reading their own page.
+        ...(scoped ? { activeDays: p0r.self_active_days } : {}),
       }
       : null
 
