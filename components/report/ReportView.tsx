@@ -299,6 +299,9 @@ function ReportInner() {
   // A one-shot focus key for a card an action links to. Read once on mount and then
   // cleared from STATE, not the URL: clearing the URL would fight the browser's back
   // button, and leaving it live in state would re-flash the card on every re-render.
+  // Not consumed yet - no action produces a `focus=` link until a later task wires one
+  // up (e.g. Leaderboard's per-day column, Task 8) and clears it via setFocusOnce('').
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [focusOnce, setFocusOnce] = useState(sp.get('focus') || '')
 
   const setTab = (id: string) => {
