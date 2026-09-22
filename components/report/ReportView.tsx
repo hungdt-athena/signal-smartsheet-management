@@ -467,7 +467,6 @@ const T = {
   intakeGap: 0.15,      // |in − out| ÷ in before the flow counts as out of balance
   agedShare: 0.35,      // share of the waiting stock that is 8 days or older
   clearDays: 5,         // days of work the backlog may hold before it needs a call
-  rateDriftPts: 2,      // move in shortlist rate across the window, in points
   healthShortPts: 10,   // how far below its own baseline a gauge must sit to matter
 }
 /* The four questions this tab answers. Every chip, every KPI the chips point at, and
@@ -494,6 +493,11 @@ export type DoAct = {
   sev: number
   key: string
   kicker: string                       // TOPIC[topic] on Overview, the family on the others
+  // What the kicker button promises when you hover it. The kicker's only other
+  // affordance is a four-letter uppercase word, so without this nothing on screen says
+  // it is a control at all - it was lost when three copies of this block were folded
+  // into one, and a button nobody knows to press is the same as no button.
+  kickerTitle?: string
   do: React.ReactNode
   why: React.ReactNode
   payoff?: React.ReactNode             // what the reader gets, in days or a date
@@ -526,7 +530,7 @@ export function DoBlock({ acts }: { acts: DoAct[] }) {
         {shown.map((a) => (
           <div className={'rp-do' + (a.sev >= 3 ? ' urgent' : '')} key={a.key}>
             {a.onKicker
-              ? <button type="button" className="rp-do-topic" onClick={a.onKicker}>{a.kicker}</button>
+              ? <button type="button" className="rp-do-topic" onClick={a.onKicker} title={a.kickerTitle}>{a.kicker}</button>
               : <span className="rp-do-topic as-text">{a.kicker}</span>}
             <span className="rp-do-line">{a.do}</span>
             <span className="rp-do-why">{a.why}</span>
@@ -622,11 +626,20 @@ function Overview({ d }: { d: Bundle }) {
      for M weeks" against the headcount actually working, the same number either reads as
      a plan or reads as obviously impossible - and when it is impossible, that IS the
      finding, so the line still prints rather than hiding behind a threshold. */
+  // The team size every per-person sentence on this tab divides by. Hoisted out of
+  // `peopleAsk` because the catch-up line needs the SAME divisor: two lines in one
+  // block disagreeing about how many people there are is the fastest way to make the
+  // reader distrust both. `t.evaluators` is who actually judged something this window,
+  // which is the only headcount the pace was measured over.
+  const heads = Math.max(1, t.evaluators || 1)
+  // How long the extra people are being asked for. Kept out here because the payoff
+  // line has to name the date this ask lands on, and computing that date from anything
+  // else - the CURRENT pace, say - puts a sentence under "add 8 people for 3 weeks"
+  // that quietly describes what happens if nobody is added at all.
+  const askWeeks = Math.max(1, Math.round(catchUpPersonDays / (heads * 5)))
   const peopleAsk = (() => {
-    const heads = Math.max(1, t.evaluators || 1)
-    const weeks = Math.max(1, Math.round(catchUpPersonDays / (heads * 5)))
-    const extra = Math.max(1, Math.round(catchUpPersonDays / (weeks * 5)))
-    const forLong = weeks === 1 ? 'a week' : weeks === 4 ? 'a month' : `${weeks} weeks`
+    const extra = Math.max(1, Math.round(catchUpPersonDays / (askWeeks * 5)))
+    const forLong = askWeeks === 1 ? 'a week' : askWeeks === 4 ? 'a month' : `${askWeeks} weeks`
     return <><b>{extra === 1 ? 'one more person' : `${fmt.int(extra)} more people`}</b> for {forLong}</>
   })()
 
@@ -712,24 +725,16 @@ function Overview({ d }: { d: Bundle }) {
       status: band(d.evaluators.length ? t.evaluators / d.evaluators.length : 0, 0.6, 0.85),
     },
   ]
-  // How far a gauge sits below its own baseline, in track points. Speed and quality
-  // get their own action rather than one "fix the worst gauge" line: they are handled
-  // by different people and the move is different, so naming the metric was as far as
-  // a single rule could ever get.
+  // How far a gauge sits below its own baseline, in track points. Only the pace gauge
+  // is read this way now. The quality gauges used to feed an action of their own -
+  // "re-judge a sample of 20 bypassed games" - and that is a verdict on how people
+  // judge, which this tab is not allowed to make: see law 3 and the `acts` list below.
+  // The gauges still print; what was removed is the instruction, not the reading.
   const shortOf = (label: string) => {
     const h = health.find((x) => x.label === label)
     return h && h.target != null ? 66 - Math.min(66, h.pct) : 0
   }
   const paceShort = shortOf('Games per day')
-  // Hit rate is stamped by a moderator days after the evaluation, so a window that
-  // has not closed yet reads 0% no matter how good the work was. Judging it there
-  // produced "Hit rate is the furthest below its baseline" on every fresh week,
-  // which is a fact about the calendar. The right line in that case is the triage one.
-  const signalTooEarly = partialTail && f.finalPriority === 0
-  const qualityWorst = (['Shortlist rate', 'Hit rate'] as const)
-    .filter((label) => !(label === 'Hit rate' && signalTooEarly))
-    .map((label) => ({ label, short: shortOf(label), ref: health.find((h) => h.label === label)?.targetLabel ?? refNote }))
-    .sort((a, b) => b.short - a.short)[0]
 
   // ---- funnel: starts at Evaluated. Assigned counts new intake only - a different
   // scope than Evaluated, which also clears older backlog - so stacking it here
@@ -770,18 +775,10 @@ function Overview({ d }: { d: Bundle }) {
         { name: 'Assigned', color: CAT[5], points: pts((m) => m.assigned) },
         { name: 'Evaluated', color: CAT[0], points: pts((m) => m.evaluated) },
       ]
-  // Drift in shortlist rate across the window, as the first half against the last,
-  // each weighted by how many games it judged. Comparing the first BUCKET with the
-  // last read "fell 8.4 pts, 8% → 0%" off a Sunday that judged a handful of games -
-  // a fact about the weekend, printed as a quality problem.
-  const halfRate = (rows: typeof rated) => {
-    const ev = rows.reduce((s, m) => s + m.evaluated, 0)
-    return ev ? rows.reduce((s, m) => s + m.shortlisted, 0) / ev : 0
-  }
-  const halfN = Math.floor(rated.length / 2)
-  const survFrom = halfN >= 2 ? halfRate(rated.slice(0, halfN)) : 0
-  const survTo = halfN >= 2 ? halfRate(rated.slice(rated.length - halfN)) : 0
-  const survDir = halfN >= 2 ? (survTo - survFrom) * 100 : 0
+  // Shortlist-rate drift across the window used to be computed here, first half
+  // against last, to fire a "re-judge a sample" action. That action is gone (law 3 -
+  // how well a named team judges is the Leaderboard's question), and a number computed
+  // for nothing is a number the next reader has to work out the purpose of.
 
   // ---- intake by source ----
   const srcTotals = p?.sourceYield ?? []
@@ -874,63 +871,81 @@ function Overview({ d }: { d: Bundle }) {
   // `topic` is what ties this line back to the sentence and the chips at the top of the
   // tab. It is required, not optional: an action with no topic is a link missing from
   // that chain, and the reader has to re-derive which of the four problems it answers.
-  type Act = { sev: number; key: string; topic: Topic; do: React.ReactNode; why: React.ReactNode }
+  //
+  // LAW 7. Rebalancing, raising the pace, buying people and dropping work are four ways
+  // out of the SAME problem, and they cost the team four very different things: nothing,
+  // effort, money, and the work itself. They are pushed in that order and rank stably,
+  // so the reader always meets the free answer before the expensive one - the tab used
+  // to lead with "add 4 more people" over a week where 926 games could have been moved
+  // between desks for nothing. Every remedy after the first opens with "Or", which is
+  // why the opening verb is stored apart from the rest of the sentence: "Add 4 more
+  // people" has to become "Or add 4 more people", and a rendered node cannot be
+  // lower-cased. `family` is what makes two lines alternatives; a diagnosis and a
+  // moderator gate are not alternatives to anything and carry none.
+  //
+  // LAW 3. This tab may name a person as the COORDINATE of some games - "926 games are
+  // sitting with X, Y and Z" - and never as a judgement of that person. That is why
+  // there is no quality action here any more: "re-judge a sample of 20 bypassed games"
+  // is a verdict on how the team judges, and it belongs on the Leaderboard, where every
+  // row is a person and the comparison is the whole point. `notriage` stays, because
+  // work stuck at a moderator gate is a fact about the flow, not about anybody.
+  type Act = {
+    sev: number; key: string; topic: Topic
+    lead: string                 // the opening verb, capitalised; lower-cased after "Or"
+    rest: React.ReactNode        // the rest of the instruction
+    why: React.ReactNode         // the evidence, 150 characters at the very most
+    payoff?: React.ReactNode     // what the reader gets, in days or a date
+    cta?: DoAct['cta']
+    family?: 'backlog'           // set on remedies for the same problem - see law 7
+    priciest?: boolean           // says so out loud when a cheaper remedy printed above
+  }
   const acts: Act[] = []
 
-  // -- speed --
-  // A team running below its own pace and a team that needs more people are different
-  // problems with opposite answers, and the list printed both at once: "add 98
-  // person-days" sat directly under "find what changed before adding people". While
-  // the pace is short the diagnosis leads and the capacity ask is held back, because
-  // buying people to cover a drop nobody has explained buys the drop too.
-  const paceIsShort = paceShort > T.healthShortPts
-  if (paceIsShort) acts.push({
-    sev: 3, key: 'pace', topic: 'speed',
-    do: <>Find what changed in the working day before adding people</>,
-    // The KPI row compares with the previous window and this line used to compare with
-    // the trailing 90 days, so the same metric appeared twice on one screen against two
-    // unnamed references. It now leads with the window the reader picked, and says
-    // which reference it is either way.
-    why: prevPerDay > 0
-      ? <>The team cleared {perDayFmt(perDay)} games a day against {perDayFmt(prevPerDay)} {kpiRefNote}, and {perDayFmt(ref.velocity)} over the {bl ? `${bl.days} days` : 'buckets'} before this {winName}</>
-      : <>The team cleared {perDayFmt(perDay)} games a day against {perDayFmt(ref.velocity)}, the {refNote}</>,
-  })
-  if (inTotal > 0 && gap > T.intakeGap) acts.push({
-    sev: 3, key: 'catchup', topic: 'growth',
-    do: <>Clear {fmt.int(net)} more games to break even on intake</>,
-    why: paceIsShort || t.personDayThroughput <= 0
-      ? <>{fmt.int(inTotal)} in against {fmt.int(outTotal)} out this {winName}</>
-      : <>{fmt.int(inTotal)} in against {fmt.int(outTotal)} out · about {fmt.dec(net / t.personDayThroughput)} person-days at {fmt.dec(t.personDayThroughput)}/person/day</>,
-  })
-  if (!paceIsShort && daysToClear != null && daysToClear > T.clearDays && catchUpPersonDays >= 1) acts.push({
-    sev: 2, key: 'capacity', topic: 'speed',
-    // "Add 1,153 person-days" is a true number in a unit nobody hires in, and it is the
-    // one line on the tab that names a quantity of PEOPLE - so it has to say how many
-    // people, for how long. `headcount` is what the team actually runs on, so the ask
-    // is expressed as more of that, over whole weeks.
-    do: <>Add {peopleAsk} to get the backlog under {T.clearDays} days of work</>,
-    why: <>{fmt.int(stock)} games waiting · the team clears {perDayFmt(perDay)} a day · that is {fmt.dec(daysToClear)} days of work in the backlog</>,
-  })
+  // -- age, the free remedy: the games and the people both already exist --
+  // The numbers come from the Rescue scan itself, so this sentence and the panel the
+  // button opens are the same measurement. They used to be two: the report named a
+  // hard-coded 8 days while Rescue ran on the admin's configured 14.
+  const rb = d.rescue
+  const rbSources = rb?.sources ?? []
+  const rbRecv = rb?.receivers ?? []
+  const canRebalance = !!rb && rbSources.length > 0 && rbRecv.length > 0 && rb.movableTotal >= STALE.min
+  if (rb && canRebalance) {
+    const top = rbSources.slice(0, 3)
+    const names = top.length === 1 ? top[0].name
+      : `${top.slice(0, -1).map((s2) => s2.name).join(', ')} and ${top[top.length - 1].name}`
+    const moving = top.reduce((s2, x) => s2 + x.movable, 0)
+    const recvShare = Math.min(rbRecv.length, heads) / heads
+    const movedDays = perDay > 0 && recvShare > 0 ? moving / (perDay * recvShare) : null
+    acts.push({
+      sev: 3, key: 'rebalance', topic: 'age', family: 'backlog',
+      lead: 'Move',
+      rest: <>{fmt.int(moving)} stale games from {names} to the {rbRecv.length === 1 ? 'one person' : `${rbRecv.length} people`} with a clear desk</>,
+      why: <>{rbSources.length === 1 ? 'One person holds' : `${rbSources.length} people hold`} {fmt.int(rb.movableTotal)} games past {rb.staleDays} days. {rbRecv.length === 1 ? 'One other has nothing stale and is still judging.' : `${rbRecv.length} others have nothing stale and are still judging.`}</>,
+      // The moved games measured against the people who will actually eat them: the
+      // receivers' share of the team's pace. The WHOLE team's pace would say the stale
+      // work is gone in a fraction of the time, on the assumption that everybody drops
+      // what they are holding - and `evaluatedRecent` arrives with no window attached,
+      // so a real per-receiver rate cannot be computed from it either.
+      payoff: movedDays != null
+        ? <>Stale games gone in {fmt.dec(movedDays)} days, with nobody added</>
+        : <>Nobody added</>,
+      // Only which rows it meant, never what the threshold should be: a Rescue scan
+      // persists whatever config it is handed, so a link carrying `staleDays` would
+      // rewrite the admin's saved settings just by being clicked.
+      cta: {
+        label: 'Open Rescue',
+        href: `/team-ops?tab=rescue&flash=${encodeURIComponent([...top.map((s2) => s2.name), ...rbRecv.slice(0, 4).map((r) => r.name)].join(','))}`,
+      },
+    })
+  }
 
-  // -- quality --
-  if ((qualityWorst && qualityWorst.short > T.healthShortPts) || (halfN >= 2 && survDir <= -T.rateDriftPts)) acts.push({
-    sev: 2, key: 'quality', topic: 'quality',
-    do: <>Re-judge a sample of 20 bypassed games from this {winName}</>,
-    why: qualityWorst && qualityWorst.short > T.healthShortPts
-      ? <><b>{qualityWorst.label}</b> is the furthest below its own baseline · {qualityWorst.ref}</>
-      : <>Shortlist rate fell {Math.abs(survDir).toFixed(1)} pts across the {winName}, {fmt.pct(survFrom)} → {fmt.pct(survTo)}</>,
-  })
-  if (f.shortlisted > 0 && f.finalPriority === 0) acts.push({
-    sev: 1, key: 'notriage', topic: 'quality',
-    do: <>Ask a moderator to triage this {winName}&apos;s shortlist</>,
-    why: <>{fmt.int(f.shortlisted)} shortlisted, none judged yet</>,
-  })
-
-  // -- age --
-  // Who is actually holding the stale work. This action used to say "into the next assign
-  // run BY NAME" without naming anyone, so the first thing a reader doing it had to do
-  // was go to another tab and work out who. Same test the Leaderboard's backlog flag
-  // uses, so the two tabs never point at different people.
+  // -- age, the ordering remedy: free too, but it only reorders one desk's work --
+  // Who is actually holding the stale work. It fires only where a rebalance cannot:
+  // with somebody standing free the games should MOVE, and offering the same desk two
+  // answers at once is how a reader ends up taking neither. The test is the same one
+  // the Leaderboard's backlog flag uses, so the two tabs never point at different
+  // people. It used to say "into the next assign run BY NAME" and name nobody, so the
+  // first thing a reader doing it had to do was go to another tab and work out who.
   const holderRows = (d.backlogBy || []).map((b) => ({ name: b.name, stale: b.stale, n: b.n }))
   // The denominator comes from the SAME source as the holders, never from `oldStock`.
   // Two reasons: `oldStock` is null on a batch window (no pipeline), which printed
@@ -945,22 +960,119 @@ function Overview({ d }: { d: Bundle }) {
   const holderNames = top3.length === 1 ? top3[0].name
     : `${top3.slice(0, -1).map((b) => b.name).join(', ')} and ${top3[top3.length - 1]?.name}`
   const holderStale = oldHolders.reduce((s2, b) => s2 + b.stale, 0)
+  const top3Stale = top3.reduce((s2, b) => s2 + b.stale, 0)
   // Naming people does NOT wait for the team-level ageing test. Those are different
   // questions and the aggregate hides the answer to this one: on a real September the
   // team sat at 33% old against a 35% threshold - so nothing fired - while three
   // people were each over 25% of their own backlog, holding 871 stale games between
   // them. A backlog problem belonging to three named desks should not need the whole
   // team to cross a line before anyone is told.
-  if (oldHolders.length > 0) acts.push({
-    sev: 3, key: 'holders', topic: 'age',
-    do: <>Clear the {fmt.int(top3.reduce((s2, b) => s2 + b.stale, 0))} games sitting {sd}+ days with {holderNames} before the next assign run</>,
-    why: <>{oldHolders.length === 1 ? 'One person holds' : `${oldHolders.length} people hold`} {fmt.int(holderStale)} of the {fmt.int(staleTotal)} games that have sat {sd}+ days with the same person{staleTotal > 0 ? <> ({fmt.pct(holderStale / staleTotal)} of them)</> : null}, each with over {fmt.pct(STALE.share)} of their own backlog that old.</>,
+  //
+  // No button. Rescue is either unavailable here (a non-manager has no scan at all) or
+  // has nobody to move the games to, and the roster screen sets WHO gets work, not the
+  // order a run hands it out in - so there is no screen this line could open that would
+  // do what it asks. Law 4: a button has to be something the reader can actually run.
+  if (oldHolders.length > 0 && !canRebalance) acts.push({
+    sev: 3, key: 'holders', topic: 'age', family: 'backlog',
+    lead: 'Put',
+    rest: <>the {fmt.int(top3Stale)} games sitting {sd}+ days with {holderNames} at the front of the next assign run</>,
+    why: <>{oldHolders.length === 1 ? 'One person holds' : `${oldHolders.length} people hold`} {fmt.int(holderStale)} of the {fmt.int(staleTotal)} games that have sat {sd}+ days with the same person{staleTotal > 0 ? <> ({fmt.pct(holderStale / staleTotal)})</> : null}, each over {fmt.pct(STALE.share)} of their own backlog.</>,
+    payoff: <>The oldest games get judged first, with nobody added</>,
   })
-  // The generic version, for a tail that is growing with nobody far enough out to name.
-  else if (tailGrowing && agedShare > T.agedShare) acts.push({
-    sev: 3, key: 'tail', topic: 'age',
-    do: <>Put the {fmt.int(p!.current.age.a3)} games past 15 days into the next assign run by name</>,
-    why: <>{fmt.pct(agedShare)} of the backlog is 8d+, but only {fmt.pct(clearedOldShare)} of what cleared was</>,
+
+  // -- speed --
+  // A team running below its own pace and a team that needs more people are different
+  // problems with opposite answers, and the list printed both at once: "add 98
+  // person-days" sat directly under "find what changed before adding people". While
+  // the pace is short the diagnosis leads and the capacity ask is held back, because
+  // buying people to cover a drop nobody has explained buys the drop too.
+  //
+  // No `family`: this is a diagnosis, not a remedy. Nothing below it is an alternative
+  // to finding out what happened, so it never carries or triggers an "Or".
+  const paceIsShort = paceShort > T.healthShortPts
+  if (paceIsShort) acts.push({
+    sev: 3, key: 'pace', topic: 'speed',
+    lead: 'Find',
+    rest: <>what changed in the working day before adding people</>,
+    // The KPI row compares with the previous window and this line used to compare with
+    // the trailing 90 days, so the same metric appeared twice on one screen against two
+    // unnamed references. It now leads with the window the reader picked, and says
+    // which reference it is either way.
+    why: prevPerDay > 0
+      ? <>The team cleared {perDayFmt(perDay)} games a day against {perDayFmt(prevPerDay)} {kpiRefNote}, and {perDayFmt(ref.velocity)} over the {bl ? `${bl.days} days` : 'buckets'} before this {winName}</>
+      : <>The team cleared {perDayFmt(perDay)} games a day against {perDayFmt(ref.velocity)}, the {refNote}</>,
+  })
+
+  // -- growth: the remedy that costs effort --
+  // Said per person per day, because that is the unit the people being asked work in.
+  // "Clear 1,000 more games" is the same arithmetic and nobody can tell from it whether
+  // they are being asked for an extra hour or an extra week. Both figures in the
+  // bracket are rounded BEFORE the difference is taken, so the sum on screen always
+  // adds up - a reader who checks it and finds 22 + 15 = 36 stops reading the rest.
+  const nowPer = Math.round(perDay / heads)
+  const needPer = elapsedDays > 0 ? Math.round(inTotal / elapsedDays / heads) : 0
+  const perPersonWorks = elapsedDays > 0 && needPer > nowPer
+  const addPer = needPer - nowPer
+  if (inTotal > 0 && gap > T.intakeGap) acts.push({
+    sev: 3, key: 'catchup', topic: 'growth', family: 'backlog',
+    lead: perPersonWorks ? 'Each person adds' : 'Clear',
+    // The fallback is all-time and batch-with-no-dates, where there are no days to
+    // divide by and a per-day ask would be a division by zero dressed as advice.
+    rest: perPersonWorks
+      ? <>{fmt.int(addPer)} {addPer === 1 ? 'game' : 'games'} a day ({fmt.int(nowPer)} to {fmt.int(needPer)}) to break even on intake</>
+      : <>{fmt.int(net)} more games to break even on intake</>,
+    why: <>{fmt.int(inTotal)} in against {fmt.int(outTotal)} out this {winName} · {heads === 1 ? '1 person' : `${fmt.int(heads)} people`} working</>,
+    payoff: <>The backlog stops growing from next {winName}</>,
+    // An href, not an in-page tab switch: `focus` is read from the URL once at mount,
+    // so a switch made inside the page would arrive at the Leaderboard without it and
+    // the column this line is about would not be flagged.
+    cta: { label: 'See who is under the pace', href: '/team-ops?tab=performance&rtab=leaderboard&focus=perday' },
+  })
+
+  // -- speed: the remedy that costs money --
+  // The date the ASK lands on - today plus the weeks the sentence above asks for - not
+  // the date the backlog would clear if nothing changed. Those are two different days
+  // and the second one printed under "add 8 more people" reads as a promise the extra
+  // people had nothing to do with.
+  const askBy = (() => {
+    const dt = new Date(`${addDays(vnTodayIso(), askWeeks * 7)}T00:00:00Z`)
+    return Number.isNaN(dt.getTime()) ? '' : `${dt.getUTCDate()} ${MON[dt.getUTCMonth()]}`
+  })()
+  if (!paceIsShort && daysToClear != null && daysToClear > T.clearDays && catchUpPersonDays >= 1) acts.push({
+    sev: 2, key: 'capacity', topic: 'speed', family: 'backlog', priciest: true,
+    // "Add 1,153 person-days" is a true number in a unit nobody hires in, and it is the
+    // one line on the tab that names a quantity of PEOPLE - so it has to say how many
+    // people, for how long. `heads` is what the team actually runs on, so the ask is
+    // expressed as more of that, over whole weeks.
+    lead: 'Add',
+    rest: <>{peopleAsk} to get the backlog under {T.clearDays} days of work</>,
+    why: <>{fmt.int(stock)} games in the backlog · the team clears {perDayFmt(perDay)} a day · that is {fmt.dec(daysToClear)} days of work</>,
+    payoff: askBy ? <>Backlog under {T.clearDays} days of work by {askBy}</> : undefined,
+    cta: { label: 'Open Assign preview', href: '/team-ops?tab=assign' },
+  })
+
+  // -- age: the remedy that costs the work itself --
+  // The oldest band measured against the pace that would have to reach it. Four times
+  // the whole backlog's own target is the line: past that, "we will get to them" is not
+  // a plan, it is a sentence, and saying so is the only honest thing left to print.
+  const oldest = stockAge.a3
+  if (oldest > 0 && perDay > 0 && daysToClear != null && oldest / perDay > T.clearDays * 4) acts.push({
+    sev: 2, key: 'tail', topic: 'age', family: 'backlog',
+    lead: 'Put',
+    rest: <>the {fmt.int(oldest)} games past 15 days at the front, or drop them</>,
+    why: <>Games past 15 days alone are {fmt.dec(oldest / perDay)} days of work at {perDayFmt(perDay)} a day.</>,
+    payoff: <>Days to clear falls from {fmt.dec(daysToClear)} to {fmt.dec(Math.max(0, stock - oldest) / perDay)} if they go</>,
+  })
+
+  // -- quality --
+  // One line left here, and it is about a gate rather than a person: work sitting
+  // un-triaged is a fact about the flow. The re-judge line that used to sit beside it
+  // was a verdict on how the team judges, and left with law 3.
+  if (f.shortlisted > 0 && f.finalPriority === 0) acts.push({
+    sev: 1, key: 'notriage', topic: 'quality',
+    lead: 'Ask',
+    rest: <>a moderator to triage this {winName}&apos;s shortlist</>,
+    why: <>{fmt.int(f.shortlisted)} shortlisted, none judged yet</>,
   })
   const shown = rankActs(acts)
 
@@ -1022,6 +1134,40 @@ function Overview({ d }: { d: Bundle }) {
     el.classList.add('rp-flash')
     window.setTimeout(() => el.classList.remove('rp-flash'), 1200)
   }
+
+  /* Law 7, applied to the list that actually printed. Two things are decided here and
+     nowhere else, because both depend on which lines SURVIVED the cap of three:
+
+     - "Or". A remedy that is not the first of its family is an alternative to the one
+       above it, so it opens with "Or" and its verb drops its capital. This lives in
+       Overview rather than in `DoBlock`, which is shared with two tabs that have no
+       cost ladder to order.
+     - How expensive the capacity ask is, said out loud. ", the most expensive of the
+       three" is a claim about the other lines on the screen, so it prints only when
+       buying people really is the last rung shown: with something above it and nothing
+       below, and counting the remedies that actually survived the cap. Alone, or with
+       "drop the oldest games" printed under it, it says nothing. */
+  const famTotal = new Map<string, number>()
+  for (const a of shown) if (a.family) famTotal.set(a.family, (famTotal.get(a.family) ?? 0) + 1)
+  const famCount = new Map<string, number>()
+  const doActs: DoAct[] = shown.map((a) => {
+    const cheaper = a.family ? famCount.get(a.family) ?? 0 : 0
+    if (a.family) famCount.set(a.family, cheaper + 1)
+    const total = a.family ? famTotal.get(a.family) ?? 1 : 1
+    const isLast = cheaper === total - 1
+    return {
+      sev: a.sev, key: a.key,
+      kicker: TOPIC[a.topic],
+      kickerTitle: `Go to the ${TOPIC[a.topic].toLowerCase()} number behind this`,
+      do: <>{cheaper > 0 ? `Or ${a.lead.toLowerCase()}` : a.lead} {a.rest}</>,
+      why: a.why,
+      payoff: a.payoff != null && a.priciest && cheaper > 0 && isLast
+        ? <>{a.payoff}, the {total >= 3 ? 'most expensive of the three' : 'more expensive of the two'}</>
+        : a.payoff,
+      cta: a.cta,
+      onKicker: () => focus(a.topic),
+    }
+  })
 
   return (
     <>
@@ -1117,10 +1263,7 @@ function Overview({ d }: { d: Bundle }) {
           bands={AGE_BANDS.map((b) => ({ name: b.label, value: stockAge[b.k], color: b.color }))} />
       </div>
 
-      <DoBlock acts={shown.map((a) => ({
-        sev: a.sev, key: a.key, kicker: TOPIC[a.topic], do: a.do, why: a.why,
-        onKicker: () => focus(a.topic),
-      }))} />
+      <DoBlock acts={doActs} />
 
       <div className="rp-section-title">Flow - what came in, what went out</div>
       <div className="rp-grid-70-30">

@@ -132,11 +132,15 @@ const cardNamed = (c: HTMLElement, label: string) =>
   Array.from(c.querySelectorAll('.card-label'))
     .find((l) => l.textContent?.startsWith(label))!.closest('.card') as HTMLElement
 
-// One entry per action: the instruction, then the numbers behind it.
+// One entry per action: the instruction, the numbers behind it, what the reader gets
+// for doing it, and where the button goes.
 const actions = (c: HTMLElement) => Array.from(c.querySelectorAll('.rp-do')).map((el) => ({
   urgent: el.classList.contains('urgent'),
+  topic: el.querySelector('.rp-do-topic')?.textContent || '',
   do: el.querySelector('.rp-do-line')?.textContent || '',
   why: el.querySelector('.rp-do-why')?.textContent || '',
+  payoff: el.querySelector('.rp-do-payoff')?.textContent || '',
+  cta: el.querySelector('.rp-do-cta')?.textContent || '',
 }))
 
 describe('Overview tab', () => {
@@ -295,7 +299,8 @@ describe('Overview tab', () => {
     // the pace diagnostic is a speed problem and the intake gap is a growth one
     const byTopic = Object.fromEntries(rows.map((r) => [r.querySelector('.rp-do-line')?.textContent, r.querySelector('.rp-do-topic')?.textContent]))
     expect(byTopic['Find what changed in the working day before adding people']).toBe('Speed')
-    expect(byTopic['Clear 1,000 more games to break even on intake']).toBe('Growth')
+    // 2,000 in over 5 days across 2 people is 200 each a day; they are clearing 100.
+    expect(byTopic['Each person adds 100 games a day (100 to 200) to break even on intake']).toBe('Growth')
   })
 
   /* The real September numbers printed "Add 1,153 person-days to get the queue under 5
@@ -319,7 +324,16 @@ describe('Overview tab', () => {
     // no raw person-days anywhere in the line the reader acts on
     expect(cap.do).not.toMatch(/person-day/)
     // and the evidence reads as a sentence, not three numbers separated by dots
-    expect(cap.why).toBe('3,747 games waiting · the team clears 200 a day · that is 18.7 days of work in the backlog')
+    expect(cap.why).toBe('3,747 games in the backlog · the team clears 200 a day · that is 18.7 days of work')
+    // It also says when the ask lands, which is the thing the money buys - and the date
+    // is today plus the WEEKS the line above asks for, never the day the backlog would
+    // clear on the current pace. Those are different days, and the second one printed
+    // under "add 6 more people" reads as a promise the extra people had nothing to do
+    // with. The date moves with today, so the shape is asserted, not the day.
+    expect(cap.payoff).toMatch(/^Backlog under 5 days of work by \d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/)
+    // alone on the tab, it makes no claim about how it compares with lines that are
+    // not on the screen
+    expect(cap.payoff).not.toMatch(/expensive/)
   })
 
   it('says nothing when nothing is wrong', async () => {
@@ -330,17 +344,18 @@ describe('Overview tab', () => {
   })
 
   it('caps the action list at three, worst first, and never asks for a smaller push', async () => {
-    // four things wrong at once: intake gap, a rotting tail, a backlog worth weeks of
-    // work, and a source producing nothing (which must NOT become an action)
+    // Four things wrong at once: an intake gap, a backlog worth weeks of work, a 15d+
+    // band four times over the whole backlog's own target, and a source producing
+    // nothing (which must NOT become an action).
     const { container } = await renderTab(withPatch({
       // The stock the KPI and the chips read is the top-level one; `pipeline.current`
       // is the copy the time-axis charts use. Both, or the fixture is describing a
       // payload the server never sends.
-      stock: { backlog: 6000, age: { a0: 1000, a1: 1000, a2: 2000, a3: 2000 } },
+      stock: { backlog: 6000, age: { a0: 400, a1: 400, a2: 1000, a3: 4200 } },
       pipeline: {
         ...healthy().pipeline as object,
         window: { newGames: 2000, evaluated: 1000 },
-        current: { backlog: 6000, age: { a0: 1000, a1: 1000, a2: 2000, a3: 2000 } },
+        current: { backlog: 6000, age: { a0: 400, a1: 400, a2: 1000, a3: 4200 } },
         cleared: ['1/9', '2/9'].map((label, i) => ({ key: `c${i}`, label, a0: 190, a1: 5, a2: 3, a3: 2, avgAge: 1 })),
         sourceYield: [
           { src: 'appagg-scraper', n: 600, evaluated: 600, shortlisted: 48, finalPriority: 9 },
@@ -350,22 +365,33 @@ describe('Overview tab', () => {
     }))
     const shown = actions(container)
     expect(shown).toHaveLength(3)
-    // severity order: the two sev-3 lines (intake gap, rotting tail) come first
-    expect(shown[0].urgent && shown[1].urgent).toBe(true)
-    expect(shown[2].urgent).toBe(false)
-    expect(shown[0].do).toBe('Clear 1,000 more games to break even on intake')
-    expect(shown[0].why).toMatch(/^2,000 in against 1,000 out · about 10.0 person-days/)
-    expect(shown[1].do).toMatch(/games past 15 days/)
-    // The backlog is 30 days of work and the ask is capacity - stated in people and
-    // weeks, because "add 50 person-days" is a unit nobody hires in. 50 person-days
+    // severity first, then cost within a severity: the sev-3 intake gap leads
+    expect(shown[0].urgent).toBe(true)
+    expect(shown[1].urgent || shown[2].urgent).toBe(false)
+    // 2,000 in over 5 days across 2 people is 200 each a day; they are clearing 100.
+    expect(shown[0].do).toBe('Each person adds 100 games a day (100 to 200) to break even on intake')
+    expect(shown[0].why).toBe('2,000 in against 1,000 out this week · 2 people working')
+    // The backlog is 30 days of work and the next ask is capacity - stated in people
+    // and weeks, because "add 50 person-days" is a unit nobody hires in. 50 person-days
     // over a team of 2 is 2 more people for 5 weeks.
-    expect(shown[2].do).toBe('Add 2 more people for 5 weeks to get the backlog under 5 days of work')
-    expect(shown[2].why).toBe('6,000 games waiting · the team clears 200 a day · that is 30.0 days of work in the backlog')
+    expect(shown[1].do).toBe('Or add 2 more people for 5 weeks to get the backlog under 5 days of work')
+    expect(shown[1].why).toBe('6,000 games in the backlog · the team clears 200 a day · that is 30.0 days of work')
+    // ...and it does not claim to be the priciest option while a costlier one is printed
+    // directly under it: dropping the work costs the work.
+    expect(shown[1].payoff).not.toMatch(/expensive/)
+    // Last rung: 4,200 games past 15 days is 21 days of work on its own, four times the
+    // 5-day target for the WHOLE backlog. "We will get to them" is not a plan.
+    expect(shown[2].do).toBe('Or put the 4,200 games past 15 days at the front, or drop them')
+    expect(shown[2].why).toBe('Games past 15 days alone are 21.0 days of work at 200 a day.')
+    expect(shown[2].payoff).toBe('Days to clear falls from 30.0 to 9.0 if they go')
     // every action leads with the move, and no action reaches for the push filter
     for (const a of shown) {
-      expect(a.do).toMatch(/^(Clear|Add|Find|Re-judge|Ask|Put)\b/)
-      expect(`${a.do} ${a.why}`.toLowerCase()).not.toMatch(/push|drop |cut |hold /)
+      expect(a.do).toMatch(/^(Clear|Add|Find|Ask|Put|Move|Each|Or)\b/)
+      expect(`${a.do} ${a.why}`.toLowerCase()).not.toMatch(/push|cut |hold /)
     }
+    // the one place a drop is allowed to be named is the last rung, and it is named
+    // as an alternative to doing the work, never as a smaller push
+    expect(shown.filter((a) => /drop/i.test(a.do))).toHaveLength(1)
   })
 
   it('never asks for more people in the same breath as asking what went wrong', async () => {
@@ -389,9 +415,13 @@ describe('Overview tab', () => {
     // above compares with the previous window, so an unnamed figure here is the same
     // metric shown twice against two different bars with nothing saying which is which.
     expect(shown[0].why).toBe('The team cleared 200 games a day against 129 last week, and 600 over the 90 days before this week')
-    expect(shown.some((a) => /person-days to get the backlog under/.test(a.do))).toBe(false)
-    // and the catch-up line drops its person-day estimate too, for the same reason
-    expect(shown.find((a) => a.do.startsWith('Clear'))!.why).toBe('2,000 in against 1,000 out this week')
+    expect(shown.some((a) => /more (people|person) for/.test(a.do))).toBe(false)
+    // The catch-up line stays, and it is a remedy where the line above it is a
+    // diagnosis - so it does NOT open with "Or". Nothing here is an alternative to
+    // finding out what happened.
+    const catchup = shown.find((a) => a.topic === 'Growth')!
+    expect(catchup.do).toBe('Each person adds 100 games a day (100 to 200) to break even on intake')
+    expect(catchup.why).toBe('2,000 in against 1,000 out this week · 2 people working')
   })
 
   it('compares the KPI row with the window the reader picked, and health with the 90-day bar', async () => {
@@ -496,11 +526,10 @@ describe('Overview tab', () => {
     }))
     const health = container.querySelector('.rp-hb')!
     expect(within(health as HTMLElement).getByText(/avg of prev 90d 20%/)).toBeInTheDocument()
-    // 8% against a 20% norm is a real shortfall, and the move is to re-judge, not to
-    // change what gets pushed
-    const quality = actions(container).find((a) => a.do.startsWith('Re-judge'))!
-    expect(quality.do).toBe('Re-judge a sample of 20 bypassed games from this week')
-    expect(quality.why).toBe('Shortlist rate is the furthest below its own baseline · avg of prev 90d 20%')
+    // 8% against a 20% norm is a real shortfall, and it is printed - as a gauge. It
+    // used to raise "re-judge a sample of 20 bypassed games", which is a verdict on how
+    // the team judges and therefore the Leaderboard's to make, not this tab's (law 3).
+    expect(actions(container).some((a) => /Re-judge|bypassed/i.test(a.do))).toBe(false)
   })
 
   it('falls back to the buckets on screen when the window has no "before"', async () => {
@@ -654,6 +683,139 @@ describe('Overview tab', () => {
     expect(rows[0].querySelector('.rp-div-num.right')!.textContent).toBe('')
     expect(card.querySelector('.rp-readnote')!.textContent).toBe(
       '0 judged this week against 40 that crossed into an older band, 40 of them past 15 days. On the 8+ day backlog alone: 0 cleared, 40 created – the stale backlog is growing.')
+  })
+
+  /* ---- law 7: several ways out of one problem, cheapest first ----
+     Rebalancing is free (the games already exist and so do the people), raising the
+     pace costs effort, adding people costs money, and dropping work costs the work.
+     A reader who meets them in any other order is being sold the expensive answer to
+     a problem the cheap one solves. */
+
+  // One bundle for the whole group: sources with movable games, receivers with clean
+  // desks, and a backlog deep enough that the capacity ask also fires - which is the
+  // only state in which the ORDER of the remedies can be observed at all.
+  function rebalanceable(): Bundle {
+    return withPatch({
+      staleDays: 8,
+      rescue: {
+        staleDays: 8, movableTotal: 926,
+        sources: [{ name: 'PhuongNT1', stale: 500, movable: 480 }, { name: 'ThuDT', stale: 300, movable: 280 }],
+        receivers: [{ name: 'HaiNM', pending: 2, evaluatedRecent: 140 }, { name: 'LinhPT', pending: 1, evaluatedRecent: 120 }],
+      },
+      stock: { backlog: 4698, age: { a0: 900, a1: 1200, a2: 1300, a3: 1298 } },
+    })
+  }
+
+  it('offers the free remedy before the expensive ones, in that order', async () => {
+    await renderTab(rebalanceable())
+    const cards = Array.from(document.querySelectorAll('.rp-do-line')).map(n => n.textContent!)
+    const move = cards.findIndex(t => /Move \d/.test(t))
+    const add = cards.findIndex(t => /add \d+ (more )?pe(ople|rson)/i.test(t))
+    expect(move).toBeGreaterThanOrEqual(0)
+    expect(add).toBeGreaterThanOrEqual(0)
+    expect(move).toBeLessThan(add)
+  })
+
+  // Every remedy after the first opens with "Or", because they are alternatives and
+  // not a to-do list. This fixture fires remedies only - a diagnosis ("find what
+  // changed") is not an alternative to anything and carries no "Or".
+  it('opens with "Or" on every remedy after the first', async () => {
+    await renderTab(rebalanceable())
+    const lines = Array.from(document.querySelectorAll('.rp-do-line')).map(n => n.textContent!.trim())
+    expect(lines.length).toBeGreaterThan(1)
+    lines.slice(1).forEach(t => expect(t.startsWith('Or ')).toBe(true))
+  })
+
+  // The move is free only because somebody is standing there with an empty desk. With
+  // nobody to receive, the same stale games get the ordering remedy instead, and no
+  // button - the Rescue panel would open on a scan that cannot move anything.
+  it('does not ask for a rebalance when nobody can receive', async () => {
+    await renderTab(withPatch({
+      rescue: { staleDays: 8, movableTotal: 926, sources: [{ name: 'PhuongNT1', stale: 500, movable: 480 }], receivers: [] },
+      backlogBy: [
+        { key: 'k0', name: 'PhuongNT1', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 30, stale: 250 },
+      ],
+    }))
+    expect(screen.queryByText('Open Rescue')).toBeNull()
+    expect(screen.getByText(/front of the next assign run/)).toBeInTheDocument()
+  })
+
+  /* Law 3: Overview may name a person as the COORDINATE of some games and never as a
+     judgement of them. "926 games are sitting with X" says where the work is; "X judges
+     carelessly" says what X is like, and that belongs on the Leaderboard, where every
+     row is a person and the comparison is the point. The re-judge line was the one
+     action on this tab that crossed it, so it is gone rather than reworded. */
+  it('never judges a person by name', async () => {
+    // The shortlist rate sits at 8% against a 20% standing bar - exactly the state
+    // that used to print "Re-judge a sample of 20 bypassed games". It is a verdict on
+    // how people judge, so it is not this tab's to make, however the number reads.
+    const { container } = await renderTab(withPatch({
+      ...rebalanceable(),
+      baseline: { ...healthy().baseline as object, survivalRate: 0.2 },
+    }))
+    const block = screen.getByText('Do this').closest('.rp-do-block')!
+    expect(block.textContent).not.toMatch(/re-judge|re-read|bypassed games/i)
+    expect(actions(container).some((a) => /Quality/.test(a.do))).toBe(false)
+    // the gauge still says so - the reading stays, only the instruction goes
+    expect(container.querySelector('.rp-hb')!.textContent).toMatch(/avg of prev 90d 20%/)
+  })
+
+  // Law 6: no fallback actions. A healthy window prints nothing at all - the block
+  // itself does not render.
+  it('prints nothing at all on a healthy window', async () => {
+    await renderTab(healthy())
+    expect(screen.queryByText('Do this')).toBeNull()
+  })
+
+  // Every line ends somewhere the reader can go. The rescue link says which rows it
+  // meant and never what the panel's threshold should be: a scan persists whatever
+  // config it is handed, so a link carrying `staleDays` would rewrite the admin's
+  // saved settings just by being clicked.
+  it('sends each line somewhere, and never puts a threshold in a link', async () => {
+    await renderTab(rebalanceable())
+    const rescue = screen.getByText('Open Rescue') as HTMLAnchorElement
+    expect(rescue.getAttribute('href')).toBe('/team-ops?tab=rescue&flash=PhuongNT1%2CThuDT%2CHaiNM%2CLinhPT')
+    expect(rescue.getAttribute('href')).not.toMatch(/staleDays|days=/)
+  })
+
+  // The pace link is an href, not an in-page tab switch: `focus` is read from the URL
+  // once at mount, so a switch made in the page would arrive without it.
+  it('links the pace remedy at the Leaderboard column that answers it', async () => {
+    const { container } = await renderTab(withPatch({
+      pipeline: { ...healthy().pipeline as object, window: { newGames: 2000, evaluated: 1000 } },
+    }))
+    const cta = Array.from(container.querySelectorAll('.rp-do-cta'))
+      .find((el) => el.textContent === 'See who is under the pace') as HTMLAnchorElement
+    expect(cta).toBeTruthy()
+    expect(cta.tagName).toBe('A')
+    expect(cta.getAttribute('href')).toBe('/team-ops?tab=performance&rtab=leaderboard&focus=perday')
+  })
+
+  // The kicker is a button whose only other affordance is a four-letter uppercase
+  // word. Folding three copies of this block into one dropped its tooltip, and a
+  // control nobody knows is a control is the same as no control.
+  it('says what the topic kicker does when you hover it', async () => {
+    const { container } = await renderTab(rebalanceable())
+    const kickers = Array.from(container.querySelectorAll('.rp-do-topic'))
+    expect(kickers.length).toBeGreaterThan(0)
+    for (const k of kickers) {
+      expect(k.tagName).toBe('BUTTON')
+      expect(k.getAttribute('title')).toMatch(/^Go to the (growth|speed|age|quality) number behind this$/)
+    }
+  })
+
+  // The cards are narrow. Evidence longer than this wraps to four lines and the
+  // instruction above it stops being the thing the eye lands on.
+  it('keeps the evidence under 150 characters', async () => {
+    for (const bundle of [rebalanceable(), withPatch({
+      pipeline: { ...healthy().pipeline as object, window: { newGames: 2000, evaluated: 1000 } },
+      stock: { backlog: 6000, age: { a0: 400, a1: 400, a2: 1000, a3: 4200 } },
+    })]) {
+      const { container } = await renderTab(bundle)
+      const whys = actions(container).map((a) => a.why)
+      expect(whys.length).toBeGreaterThan(0)
+      for (const w of whys) expect(w.length).toBeLessThanOrEqual(150)
+    }
   })
 
   it('has no Pipeline tab - it lives here now', async () => {
