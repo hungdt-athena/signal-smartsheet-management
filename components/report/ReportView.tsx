@@ -181,7 +181,16 @@ interface Bundle {
   // what the KPI row's comparison badges read against, so "+12%" on a month view
   // means "against last month" and not against a 90-day average nobody selected.
   // Null on all-time and batch, which have no "the one before".
-  prev: null | { from: string; to: string; label: string; evaluated: number; survivalRate: number; signalRate: number; personDayThroughput: number }
+  //
+  // `activeDays` is optional and, as of this task, never populated by the API route -
+  // the query behind `prev` has no evaluator filter at all (see app/api/report/route.ts
+  // `refQuery`), so today it would be a TEAM figure, not this one person's. It is
+  // declared here so Individual's `rhythm` act (a contractor's own active-day count
+  // against their own last window) has somewhere to read a real per-person figure
+  // FROM once the route is extended to carry it for a scoped request. Until then the
+  // field is always absent and `rhythm` never fires - Law 6, no fallback act - rather
+  // than comparing this person's days against the team's days and calling it "their".
+  prev: null | { from: string; to: string; label: string; evaluated: number; survivalRate: number; signalRate: number; personDayThroughput: number; activeDays?: number }
   // The waiting pile as it stands RIGHT NOW: every pushed game with no evaluation yet,
   // across all history, in the selected category. The one figure on this tab no window
   // reaches - which is exactly why it is not inside `pipeline`, whose contents all need
@@ -2369,15 +2378,31 @@ function Individual({ d }: { d: Bundle }) {
   // says a story is concluded at exactly one altitude. No `cta` on `stale` either - this
   // tab coaches what this ONE person should change next week, never moves a game. That
   // decision is between people, and the Leaderboard's Reassign already made it.
-  if (bq && queueStale >= STALE.min && queueStale / bq.n > STALE.share) acts.push({
+  //
+  // The TRIGGER splits by voice on purpose. An admin's `stale` reads the band-share
+  // test (`queueStale`/`STALE.min`/`STALE.share`) that matches the language of the
+  // Backlog card next to it - worth a conversation only once it is a real share of a
+  // real pile. A contractor's own reading reads `d.selfStale` instead: the exact same
+  // number the Rescue panel would compute for them (see the Bundle comment on
+  // `selfStale`), at a much lower floor (5, not 60+), because this line is not "does
+  // this deserve a team conversation" - it is "here are five games to start with
+  // today", and it must never disagree with what Rescue would show this person if they
+  // opened it.
+  const selfOldFires = !!bq && self && d.selfStale != null && d.selfStale >= 5
+  const adminOldFires = !!bq && !self && queueStale >= STALE.min && queueStale / bq.n > STALE.share
+  if (bq && (selfOldFires || adminOldFires)) acts.push({
     sev: 3, fam: 'backlog', key: 'stale',
     do: self
       ? <>Start each day with your 5 oldest games</>
       : <>Ask {e.name} to start each day with their 5 oldest games</>,
-    why: <>{fmt.int(queueStale)} of {their} {fmt.int(bq.n)} games have gone past {sd} days, oldest {bq.oldest}.</>,
+    why: self
+      ? <>{fmt.int(d.selfStale!)} of your {fmt.int(bq.n)} games have gone past {sd} days, oldest {bq.oldest}d.</>
+      : <>{fmt.int(queueStale)} of {their} {fmt.int(bq.n)} games have gone past {sd} days, oldest {bq.oldest}.</>,
     // Guarded: `throughput` can be 0 for a quiet window, and dividing by it would print
     // Infinity on screen.
-    payoff: <>{Their} stale games clear in about {fmt.dec(queueStale / Math.max(1, e.throughput))} working days</>,
+    payoff: self
+      ? <>Your stale games gone in about {Math.ceil(Math.max(1, d.selfStale ?? 0) / 5)} days</>
+      : <>{Their} stale games clear in about {fmt.dec(queueStale / Math.max(1, e.throughput))} working days</>,
   })
   else if (psTotals && psTotals.assigned > 0 && (psTotals.assigned - psTotals.evaluated) / psTotals.assigned > IND_T.intakeGap) acts.push({
     sev: 2, fam: 'backlog', key: 'behind',
@@ -2389,10 +2414,18 @@ function Individual({ d }: { d: Bundle }) {
 
   // Calibration only where the sample can carry it. Under 50 games a rate is chance,
   // and a conversation started on chance teaches the wrong lesson.
+  //
+  // `callow` is the one line whose trigger reads the TEAM on purpose, in both voices:
+  // a bar that is not shared makes the data downstream (Priority IV, Insight) useless
+  // for everyone, so unlike `stale`/`behind`/`rhythm` this is never judged against the
+  // reader's own past. Only the self `do` changes here - "20 games" read as an audit
+  // when a manager assigns it, but reads as busywork when a contractor is asked to
+  // grade their own homework 20 times over; "your last 5" is a task they can start
+  // before lunch.
   if (enoughToJudge && keepRatio != null && keepRatio < IND_T.calLow) acts.push({
     sev: 3, fam: 'cal', key: 'callow',
     do: self
-      ? <>Walk 20 of {their} bypasses through with a moderator</>
+      ? <>Send your last 5 bypasses to a moderator to check the bar together</>
       : <>Re-read 20 games {e.name} bypassed, with a moderator</>,
     why: <>{They} keep{self ? '' : 's'} {fmt.pct(e.survivalRate)} where the rest of the team keeps {fmt.pct(restKeep!)}. At their rate {their} {fmt.int(e.evaluated)} games would have sent on about {fmt.int(e.evaluated * restKeep!)} instead of {fmt.int(e.shortlisted)}.</>,
   })
@@ -2406,8 +2439,47 @@ function Individual({ d }: { d: Bundle }) {
 
   if (stuck.length) acts.push({
     sev: 2, fam: 'rec', key: 'rec',
-    do: <>Check the {stuck.length} recording{stuck.length > 1 ? 's' : ''} confirmed over {STUCK_DAYS} days ago with no upload</>,
-    why: <>Confirm was pressed but no video has ever matched. A game title that drifted from the store title in the <i>ytb_uploaded</i> sheet makes a real video invisible here.</>,
+    do: self
+      ? <>Check your {stuck.length} recording{stuck.length > 1 ? 's' : ''} confirmed over {STUCK_DAYS} days ago with no upload</>
+      : <>Check the {stuck.length} recording{stuck.length > 1 ? 's' : ''} confirmed over {STUCK_DAYS} days ago with no upload</>,
+    // Second-person, and under the 150-char evidence budget (the admin copy just
+    // below stays as it was - see the task note on `rec`'s pre-existing 158/178-char
+    // exception, which this rewrite does not inherit because it is a genuinely new
+    // string, not that one reworded).
+    why: self
+      ? <>Confirm was pressed but no video has matched yet. A title that drifted from the store name in <i>ytb_uploaded</i> can hide a real upload.</>
+      : <>Confirm was pressed but no video has ever matched. A game title that drifted from the store title in the <i>ytb_uploaded</i> sheet makes a real video invisible here.</>,
+  })
+
+  // ---- self-only: rhythm and a good-news line, neither of which is an admin's to see ----
+  // Both read against THIS PERSON'S OWN previous window (`d.prev`), never the team's
+  // current pace - a freelancer who works three sessions a week and always has is not
+  // doing anything wrong, so there is nothing here for a manager to act on about
+  // anyone but themselves. `callow` above is the one line in this family that reads
+  // the team instead, and on purpose: a shared bar is the one thing that has to be
+  // shared to mean anything.
+  const prevThroughputRef = d.prev?.personDayThroughput ?? null
+  const prevActiveDaysRef = d.prev?.activeDays ?? null
+  // Total calendar days in the CURRENT window - absent on batch/all-time, where there
+  // is no "how many of them were you out" to ask.
+  const winDays = d.window.from && d.window.to
+    ? Math.max(1, Math.round((Date.parse(d.window.to) - Date.parse(d.window.from)) / 86400_000))
+    : null
+
+  if (self && prevActiveDaysRef != null && prevActiveDaysRef > 0 && e.activeDays < prevActiveDaysRef * 0.7 && winDays != null) acts.push({
+    sev: 2, fam: 'rhythm', key: 'rhythm',
+    do: <>Spread the same work over more days</>,
+    why: <>You were out {fmt.int(Math.max(0, winDays - e.activeDays))} of {fmt.int(winDays)} days; on the days you worked you cleared {fmt.dec(e.throughput)} a day, against {fmt.dec(prevThroughputRef ?? e.throughput)} last {winName} and {fmt.dec(tb.throughput)} for the team.</>,
+  })
+
+  // The one good-news line on this tab (binding constraint: a tab that only ever
+  // criticises stops being opened). Its own threshold, and `sev: 0` - the lowest of
+  // any act here - so `rankActs`' worst-first sort can never let it bump a red line
+  // out of the cap of three.
+  if (self && prevThroughputRef != null && prevThroughputRef > 0 && e.throughput > prevThroughputRef * 1.2) acts.push({
+    sev: 0, fam: 'output', key: 'up',
+    do: <>Keep the change you made this {winName}</>,
+    why: <>{fmt.dec(e.throughput)} a day, up from {fmt.dec(prevThroughputRef)} last {winName}, and the team is at {fmt.dec(tb.throughput)}.</>,
   })
 
   const fams = new Set<string>()
