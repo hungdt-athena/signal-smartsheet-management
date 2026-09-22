@@ -33,12 +33,25 @@ const CONCLUSION_DEFAULTS = [
   'Need Direction', 'List_Idea', 'Playtest & Bypass',
 ]
 
-// Canonical-first, then any live values the canonical list doesn't know about
-// (sorted), same ordering /api/evaluations/route.ts computes for available_conclusions
-// server-side and app/(manager)/evaluations/page.tsx's fetchFacets mirrors client-side.
-// `selected` is folded in so the currently-chosen filter value never disappears from
-// its own dropdown mid-fetch or if the live list temporarily omits it.
+// The canonical 17 are the FLOOR: live data can only add to them or reorder them,
+// and an empty `live` (a failed fetch, or a genuinely empty answer) must leave that
+// floor intact rather than collapsing the dropdown to just the current selection.
+// app/(manager)/evaluations/page.tsx's fetchFacets guards the identical case with
+// `if (json.available_conclusions?.length) { ... }`, simply not touching state (which
+// started as the full canonical list) on an empty/failed response. This does the
+// same thing at the merge itself, so it holds regardless of who calls it.
+//
+// When `live` is non-empty: canonical-first, then any live values the canonical list
+// doesn't know about (sorted) -- same ordering /api/evaluations/route.ts computes for
+// available_conclusions server-side and that page's fetchFacets mirrors client-side.
+// `selected` is folded in either way so the currently-chosen filter value never
+// disappears from its own dropdown mid-fetch or if the live list omits it.
 function mergeConclusionOptions(live: string[], selected: string): string[] {
+  if (live.length === 0) {
+    return selected && !CONCLUSION_DEFAULTS.includes(selected)
+      ? [...CONCLUSION_DEFAULTS, selected]
+      : CONCLUSION_DEFAULTS.slice()
+  }
   const merged = Array.from(new Set([...live, selected]))
   return CONCLUSION_DEFAULTS.filter(c => merged.includes(c))
     .concat(merged.filter(c => !CONCLUSION_DEFAULTS.includes(c)).sort())

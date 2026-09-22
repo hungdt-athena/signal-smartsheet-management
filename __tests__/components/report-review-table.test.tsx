@@ -59,12 +59,14 @@ function parseCalls(mock: jest.Mock) {
 function mockApi(opts: {
   probe?: unknown[]
   facets?: string[]
+  facetsReject?: boolean
   pages?: Record<string, unknown[]>
   list?: unknown[] // shorthand for pages: { '1': list } when there is only one page
 } = {}) {
   return jest.fn(async (url: string) => {
     const u = new URL(String(url), 'http://x')
     if (u.pathname.endsWith('/facets')) {
+      if (opts.facetsReject) throw new Error('network error')
       return { ok: true, json: async () => ({ available_conclusions: opts.facets || [] }) } as Response
     }
     const isProbe = u.searchParams.get('limit') === '100'
@@ -288,6 +290,42 @@ describe('ReviewTable', () => {
     // (the value is what gets sent back to the server; only the label changes).
     const goodOption = Array.from(select.options).find(o => o.value === 'List_Idea')!
     expect(goodOption.textContent).toBe('List Idea')
+  })
+
+  it('keeps the full canonical conclusion list when the facets fetch fails, instead of collapsing to just the current selection', async () => {
+    const fetchMock = mockApi({ facetsReject: true, list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    // Give the (failing) facets fetch a turn to resolve and, if the bug were
+    // still present, narrow the dropdown down to just ['List_Idea'].
+    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
+    await waitFor(() => {
+      const values = Array.from(select.options).map(o => o.value)
+      // A manager who hits a transient network error must still be able to
+      // change the filter -- the canonical floor, not a single option.
+      expect(values).toContain('Bypass')
+      expect(values).toContain('Skip')
+      expect(values).toContain('Playtest & Bypass')
+    })
+  })
+
+  it('keeps the full canonical conclusion list when the facets fetch resolves empty', async () => {
+    const fetchMock = mockApi({ facets: [], list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
+    await waitFor(() => {
+      const values = Array.from(select.options).map(o => o.value)
+      expect(values).toContain('Bypass')
+      expect(values).toContain('Skip')
+      expect(values).toContain('Playtest & Bypass')
+    })
   })
 
   it('shows the pretty conclusion label on the row pill, never the raw stored value', async () => {
