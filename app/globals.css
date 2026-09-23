@@ -2835,7 +2835,10 @@ input:checked + .slider:before {
   border-radius: var(--radius); }
 @media (max-width: 900px) { .rp-review-row { grid-template-columns: 1fr; } }
 .rp-review-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.rp-review-icon img, .rp-review-icon-fallback { width: 52px; height: 52px; border-radius: 12px; flex-shrink: 0; }
+/* The icon carries the placeholder tint too, so a row that is still fetching reads
+   as a row with its picture on the way rather than as a row with a broken picture. */
+.rp-review-icon img, .rp-review-icon-fallback { width: 52px; height: 52px; border-radius: 12px;
+  flex-shrink: 0; background: var(--surface-3); }
 .rp-review-icon-fallback { background: var(--surface-3); }
 .rp-review-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .rp-review-title { font-size: 14px; font-weight: 700; color: var(--text); }

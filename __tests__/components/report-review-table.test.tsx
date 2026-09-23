@@ -458,6 +458,50 @@ describe('ReviewTable', () => {
     expect(tone(6)).toContain('rp-tone-none')  // no call at all
   })
 
+  // ---- images ----
+
+  it('asks the store CDN for a thumbnail, but hands the lightbox the original', async () => {
+    const shot = 'https://play-lh.googleusercontent.com/AbC=w1080-h1920'
+    const fetchMock = mockApi({
+      list: [row({ icon_url: 'https://play-lh.googleusercontent.com/Ico=s512', screenshot_urls: [shot] })],
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const img = document.querySelector('.rp-review-shot') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('https://play-lh.googleusercontent.com/AbC=h320')
+    expect(img.getAttribute('loading')).toBe('lazy')
+    // An <img> renders its alt text while it is still in flight, which filled every
+    // strip with "Screenshot 1 Screenshot 2 ..." next to a broken-image glyph and
+    // made a loading table read as a broken one. The name lives on aria-label.
+    expect(img.getAttribute('alt')).toBe('')
+    expect(img.getAttribute('aria-label')).toBe('Screenshot 1')
+
+    // Zooming is the one place the full-size image is actually wanted.
+    fireEvent.click(img)
+    const zoomed = document.querySelectorAll('.lightbox-backdrop img')
+    expect((zoomed[0] as HTMLImageElement).getAttribute('src')).toBe(shot)
+  })
+
+  it('falls back to the original image once, not forever, when a thumbnail 404s', async () => {
+    const shot = 'https://play-lh.googleusercontent.com/AbC=w1080-h1920'
+    global.fetch = mockApi({ list: [row({ screenshot_urls: [shot] })] }) as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const img = document.querySelector('.rp-review-shot') as HTMLImageElement
+    fireEvent.error(img)
+    expect(img.getAttribute('src')).toBe(shot)
+    // A genuinely broken image must not swap src forever: the second failure is the
+    // original's own, and re-setting it would be an endless request loop.
+    fireEvent.error(img)
+    expect(img.getAttribute('src')).toBe(shot)
+    expect(img.dataset.fellBack).toBe('1')
+  })
+
   // ---- scrolling ----
 
   it('never intercepts the wheel, so scrolling stays on the compositor thread', async () => {

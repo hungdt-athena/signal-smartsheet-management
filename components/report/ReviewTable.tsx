@@ -1,8 +1,9 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react'
 import { Lightbox } from '@/components/Lightbox'
 import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
 import { prettyConclusion } from '@/lib/buckets'
+import { thumbUrl } from '@/lib/image-thumbs'
 
 // The Individual tab's bottom block: one evaluator's judged games, one row each,
 // with the StoreKit screenshots visible so a wrong call is obvious at a glance --
@@ -163,6 +164,24 @@ function shotsFor(row: ReviewRow): string[] {
 // How far back the newest-days probe looks before it gives up and asks all-time.
 // 90 days is far past any window a person is plausibly reviewing and still short
 // enough to be an index-friendly range predicate.
+// What to ask the store CDNs for, in device pixels: the CSS box times a 2x screen,
+// rounded up a little. The originals behind these are phone-resolution PNGs, so a
+// row of eight is megabytes of transfer and eight full-size decodes for boxes 144px
+// and 52px tall. See lib/image-thumbs.ts.
+const SHOT_PX = 320
+const ICON_PX = 128
+
+// A rewritten URL is a guess about someone else's CDN, so every <img> that uses one
+// falls back to the original on error -- once. Without the guard a genuinely broken
+// image swaps src forever, and an onError that sets the same src it just failed on
+// is an infinite request loop.
+function fallbackToOriginal(e: SyntheticEvent<HTMLImageElement>, original: string) {
+  const img = e.currentTarget
+  if (img.dataset.fellBack === '1' || img.src === original) return
+  img.dataset.fellBack = '1'
+  img.src = original
+}
+
 const PROBE_DAYS = 90
 
 // Today in Asia/Ho_Chi_Minh (UTC+7) -- the timezone /api/evaluations resolves its
@@ -442,7 +461,12 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
         pageRef.current += 1
         fetchPage(pageRef.current, true)
       }
-    }, { root: rowsRef.current, rootMargin: '200px' })
+      // 600px, not the 200 the Evaluations page uses. There the sentinel sits in a
+      // page-height viewport; here it sits in a box one screen tall whose rows are
+      // ~170px each, so 200px of warning is barely one row -- the reader reaches the
+      // end and waits. 600 starts the next page about three rows early, which is
+      // roughly the time the request takes from here.
+    }, { root: rowsRef.current, rootMargin: '600px' })
     observer.observe(el)
     return () => observer.disconnect()
   }, [hasMore, loading, loadingMore, fetchPage])
@@ -580,8 +604,9 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                 <div className="rp-review-main">
                   <div className="rp-review-icon">
                     {row.icon_url ? (
-                      <img src={row.icon_url} alt="" width={52} height={52}
-                        loading="lazy" decoding="async" />
+                      <img src={thumbUrl(row.icon_url, ICON_PX)} alt="" width={52} height={52}
+                        loading="lazy" decoding="async"
+                        onError={e => fallbackToOriginal(e, row.icon_url!)} />
                     ) : (
                       <div className="rp-review-icon-fallback" />
                     )}
@@ -618,13 +643,24 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                         control: no role, no tab stop, no key handler. role/tabIndex/
                         onKeyDown make the same zoom reachable from the keyboard. */}
                     {shots.map((url, i) => (
-                      <img key={i} src={url} alt={`Screenshot ${i + 1}`}
+                      // `alt=""` with the name on aria-label, deliberately. An <img>
+                      // that has not arrived yet renders its alt text, so alt here
+                      // filled every strip with "Screenshot 1 Screenshot 2 ..." beside
+                      // a broken-image glyph while the images were still in flight --
+                      // a loading table that reads as a broken one. Empty alt leaves
+                      // the grey placeholder box (globals.css) showing instead, and
+                      // aria-label keeps the name for the button this <img> really is.
+                      <img key={i} src={thumbUrl(url, SHOT_PX)} alt=""
+                        aria-label={`Screenshot ${i + 1}`}
                         className="rp-review-shot"
-                        // A page of 20 rows is ~160 full-size StoreKit images. Eager,
-                        // that is tens of megabytes before the first row is readable;
-                        // lazy, the browser fetches the strips the reader reaches.
+                        // A page of 20 rows is ~160 StoreKit images. Eager, that is
+                        // megabytes before the first row is readable; lazy, the
+                        // browser fetches the strips the reader reaches.
                         loading="lazy" decoding="async"
+                        onError={e => fallbackToOriginal(e, url)}
                         role="button" tabIndex={0}
+                        // The LIGHTBOX gets the originals, never the thumbnails: the
+                        // whole point of the zoom is to look closely.
                         onClick={() => openShot(url, shots)}
                         onKeyDown={e => {
                           if (e.key === 'Enter' || e.key === ' ') {
@@ -639,6 +675,8 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
             )
           })}
           <div ref={sentinelRef} style={{ height: 1 }} />
+          {/* First page: say so rather than showing a screen-tall empty box. */}
+          {loading && rows.length === 0 && <div className="rp-review-loading">Loading...</div>}
           {loadingMore && <div className="rp-review-loading">Loading more...</div>}
         </div>
       )}
