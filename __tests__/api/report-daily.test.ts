@@ -270,6 +270,47 @@ describe('GET /api/report/daily', () => {
     sessionMock.mockResolvedValue({ user: { name: 'NhiLV', role: 'evaluator' } })
     const res = await get()
     expect(res.status).toBe(403)
-    expect(sqlMock).not.toHaveBeenCalled()
+    expect(queries().filter(q => q.includes('FROM game_evaluations'))).toEqual([])
+  })
+
+  // ---- the one thing a contractor MAY read here: their own days ----
+  // A blanket guard at the top of this route shipped once, and it answered 403 to the
+  // day breakdown on a contractor's OWN Individual tab - the one tab they are allowed
+  // to open. The team table stays manager-only; by=day is their own numbers.
+
+  it('gives a contractor their own day breakdown', async () => {
+    sessionMock.mockResolvedValue({ user: { name: 'NhiLV', role: 'evaluator' } })
+    setupSql([])
+    const res = await get('by=day&evaluator=NhiLV&from=2026-09-01&to=2026-09-30')
+    expect(res.status).toBe(200)
+    expect(boundNames()).toContain('NhiLV')
+  })
+
+  it('ignores the name a contractor asks for and uses their own', async () => {
+    // REPLACED, not compared: comparing would still answer differently for a name
+    // that exists and one that does not, which is a way to probe the roster.
+    sessionMock.mockResolvedValue({ user: { name: 'NhiLV', role: 'evaluator' } })
+    setupSql([])
+    const res = await get('by=day&evaluator=ThuDT&from=2026-09-01&to=2026-09-30')
+    expect(res.status).toBe(200)
+    const bound = boundNames()
+    expect(bound).toContain('NhiLV')
+    expect(bound).not.toContain('ThuDT')
+  })
+
+  it('still refuses a contractor the whole team s day, even alongside by=day', async () => {
+    sessionMock.mockResolvedValue({ user: { name: 'NhiLV', role: 'evaluator' } })
+    setupSql([])
+    // no `by=day`, so this is the team table whatever else is on the query string
+    const res = await get('evaluator=NhiLV&from=2026-09-01&to=2026-09-30')
+    expect(res.status).toBe(403)
+    expect(queries().filter(q => q.includes('FROM game_evaluations'))).toEqual([])
+  })
+
+  it('lets a manager ask for anybody by name', async () => {
+    setupSql([])
+    const res = await get('by=day&evaluator=ThuDT&from=2026-09-01&to=2026-09-30')
+    expect(res.status).toBe(200)
+    expect(boundNames()).toContain('ThuDT')
   })
 })

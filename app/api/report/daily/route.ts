@@ -91,10 +91,18 @@ function isoDay(d: Date): string {
 
 export async function GET(req: NextRequest) {
   try {
+    // Two different answers live behind this route and they are NOT equally open.
+    //
+    //   the whole team's day  - manager only, like the Leaderboard it sits on
+    //   by=day for one person - that person's own numbers, which they may read
+    //
+    // The guard used to be one blanket check at the top, which meant the day
+    // breakdown on a contractor's OWN Individual tab answered 403 to them. SKIP_AUTH
+    // local dev has no session and gets the manager view on purpose, same as
+    // /api/report.
     const session = process.env.SKIP_AUTH === 'true' ? null : await getSession()
-    if (session && !isManagerRole(session.user?.role)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    const isManager = !session || isManagerRole(session.user?.role)
+    const selfName = (session?.user?.name || '').trim()
 
     const { searchParams } = req.nextUrl
     const rawFrom = (searchParams.get('from') || '').trim()
@@ -122,7 +130,11 @@ export async function GET(req: NextRequest) {
     // Served from this route rather than its own so the counting rule, the exclusions
     // and the tagging join stay in ONE place - a second copy is how a person's row on
     // the Individual tab ends up disagreeing with their row on the Leaderboard.
-    const evaluator = (searchParams.get('evaluator') || '').trim()
+    // A scoped reader's own name REPLACES the parameter rather than being compared
+    // with it: comparing would still answer differently for a name that exists and one
+    // that does not, which is a way to probe the roster. Ignoring it entirely cannot.
+    const askedFor = (searchParams.get('evaluator') || '').trim()
+    const evaluator = isManager ? askedFor : selfName
     if (searchParams.get('by') === 'day' && evaluator) {
       const rows = await sql<Array<{
         date: string; total: number; idea: number; pbp: number; bypass: number
@@ -190,6 +202,9 @@ export async function GET(req: NextRequest) {
     const hi = day
       ? sql`((${day}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')`
       : sql`((${to}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')`
+    // Past the by=day branch, everything below is the whole team's table.
+    if (!isManager) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
     // WHICH DAY, resolved once and applied to BOTH sides.
     //
     // This block shipped with the tagging side bounded by the whole PERIOD while only
