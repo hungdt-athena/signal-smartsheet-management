@@ -170,8 +170,8 @@ function assertRemovedBlocksAbsent() {
 // The separator + its scope note must exist, and must sit AFTER every other section
 // on the tab (Design section C: "Last block on the tab, after the recording list").
 // Checking the note's plain text, not just its presence, is the point: a reader who
-// only sees the review table with no note above it reads the tab as contradicting
-// itself (numbers not matching the window/genre bar at the top).
+// only sees the review table with no note above it reads the narrowing as a bug
+// (numbers not matching the filter bar at the top).
 function assertReviewSeparatorIsLast() {
   const titles = Array.from(document.querySelectorAll('.rp-section-title')).map((n) => n.textContent!.trim())
   expect(titles.length).toBeGreaterThan(0)
@@ -180,7 +180,7 @@ function assertReviewSeparatorIsLast() {
   expect(rule).not.toBeNull()
   const note = document.querySelector('.rp-review-scope-note')
   expect(note?.textContent?.trim()).toBe(
-    'This table has its own filters. It ignores the View by, period and Category filters at the top of the page.',
+    'This table has its own Category and Initial conclusion. Its dates open on the whole period selected at the top of the page and can only be narrowed inside it.',
   )
   // DOM order: the rule/title/note must precede the ReviewTable's own toolbar, i.e.
   // live inside the same `.rp-review-section` wrapper, not just appear somewhere on

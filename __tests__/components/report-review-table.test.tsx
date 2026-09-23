@@ -196,29 +196,153 @@ describe('ReviewTable', () => {
     expect((lightboxImgs[1] as HTMLImageElement).style.border).toContain('var(--accent)')
   })
 
-  // NAME IS THE POINT. This asserts the class toggle and the button's label flip,
-  // and NOTHING about painted width: jsdom loads no stylesheet, so
-  // `.rp-review-table-expanded`'s actual box is unobservable here. The old name
-  // ("expands the table out of the content column") claimed the paint, and under
-  // that name a version of the rule that gained exactly zero content width -- a
-  // +60px border-box spent entirely on 60px of its own padding -- passed this test
-  // through seven reviews. Whether Expand widens anything is a browser check, not
-  // a jsdom one.
-  it('toggles the expanded class and the button label, and can be toggled back', async () => {
+  // The wide form is now the only form. This asserts the CONTROL is gone, which is
+  // observable in jsdom; it asserts NOTHING about painted width, which is not --
+  // jsdom loads no stylesheet. A test named for the paint is how a version of the
+  // old Expand rule that gained exactly zero content width (a +60px border-box spent
+  // entirely on 60px of its own padding) passed through seven reviews. Whether the
+  // block is actually wider than the cards above it is a browser check.
+  it('has no Expand/Collapse control: the wide form is the only form', async () => {
     const fetchMock = mockApi({ list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    expect(screen.queryByRole('button', { name: /expand|collapse/i })).toBeNull()
+  })
+
+  // ---- the page's own period owns this table's dates ----
+
+  it('opens on the page period and never pays for the newest-days probe', async () => {
+    const fetchMock = mockApi({ list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false}
+      windowFrom="2026-09-01" windowTo="2026-09-30" />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const calls = parseCalls(fetchMock)
+    // The probe is the limit=100 request. With real bounds in hand there is nothing
+    // to resolve, so it must not be sent at all -- that is a whole round trip to a
+    // database on another continent, on every Individual tab open.
+    expect(calls.find(c => c.limit === '100')).toBeUndefined()
+
+    const listCall = calls.find(c => c.limit === '20')!
+    expect(listCall.from).toBe('2026-09-01')
+    expect(listCall.to).toBe('2026-09-30')
+
+    expect((screen.getByLabelText('From date') as HTMLInputElement).value).toBe('2026-09-01')
+    expect((screen.getByLabelText('To date') as HTMLInputElement).value).toBe('2026-09-30')
+  })
+
+  it('bounds both pickers to the page period, so neither can be pushed outside it', async () => {
+    const fetchMock = mockApi({ list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false}
+      windowFrom="2026-09-01" windowTo="2026-09-30" />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const fromBox = screen.getByLabelText('From date') as HTMLInputElement
+    const toBox = screen.getByLabelText('To date') as HTMLInputElement
+    expect(fromBox.min).toBe('2026-09-01')
+    expect(toBox.max).toBe('2026-09-30')
+
+    // min/max are advisory in several browsers once a date is TYPED rather than
+    // picked, so the value is clamped in the handler too -- this is that clamp.
+    fireEvent.change(fromBox, { target: { value: '2026-08-11' } })
+    await waitFor(() => expect((screen.getByLabelText('From date') as HTMLInputElement).value).toBe('2026-09-01'))
+    fireEvent.change(screen.getByLabelText('To date'), { target: { value: '2026-12-25' } })
+    await waitFor(() => expect((screen.getByLabelText('To date') as HTMLInputElement).value).toBe('2026-09-30'))
+
+    const listCalls = parseCalls(fetchMock).filter(c => c.limit === '20')
+    for (const c of listCalls) {
+      expect(c.from! >= '2026-09-01').toBe(true)
+      expect(c.to! <= '2026-09-30').toBe(true)
+    }
+  })
+
+  it('puts the page period back when a date box is cleared, instead of going all-time', async () => {
+    const fetchMock = mockApi({ list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false}
+      windowFrom="2026-09-01" windowTo="2026-09-30" />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('From date'), { target: { value: '2026-09-20' } })
+    await waitFor(() => expect((screen.getByLabelText('From date') as HTMLInputElement).value).toBe('2026-09-20'))
+
+    fireEvent.change(screen.getByLabelText('From date'), { target: { value: '' } })
+    await waitFor(() => expect((screen.getByLabelText('From date') as HTMLInputElement).value).toBe('2026-09-01'))
+    expect((screen.getByLabelText('To date') as HTMLInputElement).value).toBe('2026-09-30')
+
+    // And the query went with it: no request ever loses its bounds.
+    const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
+    expect(last.from).toBe('2026-09-01')
+    expect(last.to).toBe('2026-09-30')
+  })
+
+  it('follows the page period when the reader changes it upstairs', async () => {
+    const fetchMock = mockApi({ list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { rerender } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={false}
+      windowFrom="2026-09-01" windowTo="2026-09-30" />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    rerender(<ReviewTable evaluator="NhiLV" canSeeTeam={false}
+      windowFrom="2026-08-01" windowTo="2026-08-31" />)
+    await waitFor(() => expect((screen.getByLabelText('From date') as HTMLInputElement).value).toBe('2026-08-01'))
+
+    const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
+    expect(last.from).toBe('2026-08-01')
+    expect(last.to).toBe('2026-08-31')
+  })
+
+  // ---- the row itself ----
+
+  it('carries the whole call on one side of the row: title, publisher, platform, release, tags, verdict', async () => {
+    const fetchMock = mockApi({
+      list: [row({
+        initial_evaluator: 'NhiLV',
+        tags: [{ field_value: 'Merge', sub_value_name: 'Board', pending: false }],
+      })],
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={true} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const main = container.querySelector('.rp-review-main') as HTMLElement
+    expect(within(main).getByText('Merge Puzzle')).toBeInTheDocument()
+    expect(within(main).getByText('Acme Studio')).toBeInTheDocument()
+    expect(within(main).getByText('IOS')).toBeInTheDocument()
+    expect(within(main).getByText('01/08/26')).toBeInTheDocument()
+    expect(within(main).getByText('Merge')).toBeInTheDocument()
+    // The verdict moved OUT of its own column and onto this side of the row, next
+    // to the game it is a verdict on -- conclusion, when, and by whom.
+    expect(within(main).getByText('List Idea')).toBeInTheDocument()
+    expect(within(main).getByText(/Judged 22\/09\/26/)).toBeInTheDocument()
+    expect(within(main).getByText('NhiLV')).toBeInTheDocument()
+    // Two grid cells only: the call, and the screenshots that back it.
+    const cells = container.querySelector('.rp-review-row')!.children
+    expect(cells.length).toBe(2)
+    expect(cells[1].className).toContain('rp-review-shots')
+  })
+
+  it('leaves the tag line out entirely when a game has no tags', async () => {
+    const fetchMock = mockApi({ list: [row({ tags: [] })] })
     global.fetch = fetchMock as unknown as typeof fetch
 
     const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
 
-    const root = container.querySelector('.rp-review-table') as HTMLElement
-    expect(root.className).not.toMatch(/expanded/)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Expand' }))
-    expect(root.className).toMatch(/expanded/)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }))
-    expect(root.className).not.toMatch(/expanded/)
+    const meta = container.querySelector('.rp-review-meta') as HTMLElement
+    // Platform badge and release date only -- no empty chip row, and no lone em dash
+    // standing in for tags nobody asked about.
+    expect(meta.children.length).toBe(2)
   })
 
   it('renders a sentence naming the filters when the result is empty, instead of a blank area', async () => {
@@ -343,7 +467,7 @@ describe('ReviewTable', () => {
     const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
 
-    const pill = container.querySelector('.rp-review-conclusion .pill')
+    const pill = container.querySelector('.rp-review-verdict .pill')
     expect(pill).not.toBeNull()
     expect(pill!.textContent).toBe('List Idea')
     // The raw underscored value must not leak into any rendered TEXT (the <option

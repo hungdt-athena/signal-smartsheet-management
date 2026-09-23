@@ -634,18 +634,19 @@ describe('Individual tab', () => {
       expect(txt(section!.querySelector('.rp-section-title'))).toMatch(/^Review/)
     })
 
-    // The note has to name the filter bar's controls by the labels it actually
-    // prints: "View by" (ReportView.tsx's first Seg), "Category" (its last one),
-    // and the adaptive period picker between them, whose own label changes with
-    // the view (Batch/Week/Month/Quarter/Year, or Range on a custom window) - so
-    // the note says "period" rather than naming one label that would only be
-    // true some of the time. "genre" is a word the Report's screen text does not
-    // contain anywhere else, and this table's own filter is ALSO labelled
+    // The note has to be TRUE and it has to name the filter bar's controls by the
+    // labels it actually prints. True: the table's dates are bounded by the page's
+    // period now, so a note claiming it "ignores" that period would be a lie the
+    // reader can check in two seconds. Named right: the adaptive period picker's own
+    // label changes with the view (Batch/Week/Month/Quarter/Year, or Range on a
+    // custom window), so the note says "period" rather than naming one label that
+    // would only be true some of the time. "genre" is a word the Report's screen text
+    // does not contain anywhere else, and this table's own filter is ALSO labelled
     // Category, so that mismatch was loud.
     it('names the filter bar controls by their real labels, not "window" and "genre"', async () => {
       const { container } = await individual(bundleOf(TWO()))
       const note = container.querySelector('.rp-review-scope-note')
-      expect(txt(note)).toBe('This table has its own filters. It ignores the View by, period and Category filters at the top of the page.')
+      expect(txt(note)).toBe('This table has its own Category and Initial conclusion. Its dates open on the whole period selected at the top of the page and can only be narrowed inside it.')
       expect(txt(note)).not.toMatch(/genre/i)
       // and those labels are really on the page, so the reader can find them
       const segLabels = Array.from(container.querySelectorAll('.rp-filters .rp-seg-label')).map(txt)

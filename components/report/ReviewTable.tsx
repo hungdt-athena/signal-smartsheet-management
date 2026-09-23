@@ -1,13 +1,20 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Lightbox } from '@/components/Lightbox'
+import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
 import { prettyConclusion } from '@/lib/buckets'
 
 // The Individual tab's bottom block: one evaluator's judged games, one row each,
 // with the StoreKit screenshots visible so a wrong call is obvious at a glance --
 // closing the gap where a reviewer had to leave the Report and rebuild the same
-// filters on the Evaluations screen. It owns its own filter state and ignores the
-// window/genre filter at the top of the page (Task 6 says so in the copy above it).
+// filters on the Evaluations screen.
+//
+// It owns its Category and Initial conclusion filters. Its DATES do not float free:
+// they open on the whole period the page's own filter bar is showing (`windowFrom` /
+// `windowTo`) and the two pickers are clamped to that period, so this table can only
+// ever narrow what the reader already selected above -- never contradict it. Only
+// when the page is on a window with no bounds at all (All batches / all time) does
+// it fall back to resolving its own "newest days that have rows" default.
 
 const PAGE_SIZE = 20
 
@@ -88,8 +95,10 @@ interface ReviewRow {
   os: string | null
   app_link: string | null
   initial_conclusion: string | null
+  initial_evaluator: string | null
   evaluate_date: string | null
   updated_at: string | null
+  tags: GameTrendTag[] | null
   screenshot_urls: string[] | null
   manual_screenshot_urls: string[] | null
 }
@@ -169,6 +178,10 @@ async function probeDays(
 // one extra round trip on mount purely to read off which days are present, then
 // the real paginated fetch runs against the resolved [from, to] window.
 //
+// ONLY REACHED ON AN UNBOUNDED PAGE WINDOW (All batches / all time). When the page's
+// filter bar has real bounds, those ARE the default and this probe never runs -- the
+// common path now costs one round trip fewer than it used to.
+//
 // BOUNDED FIRST, and that bound is load-bearing. Without from/to the route's
 // rangeFilter is EMPTY (app/api/evaluations/route.ts, `rangeFilterFor` only fires
 // when both ends are present), which makes this one request pay for two unbounded
@@ -202,7 +215,15 @@ async function fetchNewestDays(
   return { from: unbounded.from, to: unbounded.to }
 }
 
-export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canSeeTeam: boolean }): JSX.Element {
+export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo = null }: {
+  evaluator: string
+  canSeeTeam: boolean
+  // The page filter bar's resolved window, INCLUSIVE at both ends (the report payload
+  // carries an exclusive `to`; the call site subtracts the day). Null on a window with
+  // no bounds -- All batches / all time -- which is the only case that still probes.
+  windowFrom?: string | null
+  windowTo?: string | null
+}): JSX.Element {
   const [category, setCategory] = useState('puzzle')
   const [conclusion, setConclusion] = useState('List_Idea')
   // Full canonical list until the live facets response narrows it -- same as
@@ -213,19 +234,23 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
   const [to, setTo] = useState<string | null>(null)
   const [initializing, setInitializing] = useState(true)
   const [rows, setRows] = useState<ReviewRow[]>([])
-  // Starts true: the very first paint is always waiting on the newest-days probe
+  // Starts true: the very first paint is always waiting on the resolved window
   // (and then page 1), so there is no in-between frame where "no rows yet" would
   // be mistaken for "no rows ever" and flash the empty sentence.
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(false)
-  const [expanded, setExpanded] = useState(false)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [lightboxImages, setLightboxImages] = useState<string[]>([])
 
   const pageRef = useRef(1)
   const fetchSeqRef = useRef(0)
   const sentinelRef = useRef<HTMLDivElement>(null)
+  // The rows area is its own scroll container now (one screen tall, the list runs
+  // inside it), so the sentinel is NOT in the viewport's scrolling box any more.
+  // An IntersectionObserver left on the default root watches the viewport and would
+  // either never fire or fire once forever, so the observer below is rooted here.
+  const rowsRef = useRef<HTMLDivElement>(null)
   // Read inside the conclusion-options effect below without making `conclusion`
   // one of its dependencies -- that fetch only needs to re-run when evaluator or
   // category changes, not on every selection the person makes in that same dropdown.
@@ -239,18 +264,18 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
   //      effect it is not: there is a frame where `initializing` is true, `loading` is
   //      false and `rows` still holds the PREVIOUS person's games, so an admin clicking
   //      through the name chips sees one person's games under another's name.
-  //   2. The probe effect below keys on [evaluator, category]. Resetting category in an
-  //      effect would let that effect fire once with the outgoing category and again
-  //      with 'puzzle' -- two probes per person switch.
+  //   2. The window effect below keys on [evaluator, category, ...]. Resetting category
+  //      in an effect would let that effect fire once with the outgoing category and
+  //      again with 'puzzle' -- two resolutions per person switch.
   const [lastEvaluator, setLastEvaluator] = useState(evaluator)
   if (evaluator !== lastEvaluator) {
     setLastEvaluator(evaluator)
     // Bump the sequence too, not just the visible state: an outgoing person's
-    // page-1 fetchPage may still be in flight (it awaited the probe before this
-    // reset ran), and until a new fetchPage call bumps fetchSeqRef itself -- which
-    // does not happen until the probe below resolves -- that stale response's
-    // `seq` still equals fetchSeqRef.current and would repopulate `rows` with the
-    // previous person's games under the new name.
+    // page-1 fetchPage may still be in flight (it awaited the window resolution
+    // before this reset ran), and until a new fetchPage call bumps fetchSeqRef
+    // itself -- which does not happen until the effect below resolves -- that stale
+    // response's `seq` still equals fetchSeqRef.current and would repopulate `rows`
+    // with the previous person's games under the new name.
     fetchSeqRef.current++
     setCategory('puzzle')
     setConclusion('List_Idea')
@@ -262,16 +287,28 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
     setInitializing(true)
   }
 
-  // Resolve the newest-3-days default. Keyed on the person AND the category: the
-  // whole reason this default exists ("a person who did not work over the weekend
-  // must not open an empty table and read it as broken") applies just as much to
-  // switching Category to Arcade, where the puzzle window would otherwise be kept
-  // and an evaluator with no arcade work in those exact three days reads as broken.
-  // Not keyed on conclusion: that dropdown is a deliberate narrowing the reader just
-  // made, and "no Puzzle games marked Priority I between these dates" is a coherent
-  // answer to it, not a broken-looking one -- and re-probing on every pick would
-  // double the request count of using that dropdown at all.
+  // Resolve the default date window.
+  //
+  // With page bounds, that is simply the page's own period -- no request, and the
+  // table opens showing exactly what the filter bar above it says it is showing.
+  // Re-runs when the reader changes the period up there, so the two never drift.
+  //
+  // Without them (All batches / all time) it falls back to the newest-3-days probe,
+  // keyed on the person AND the category: the whole reason that default exists ("a
+  // person who did not work over the weekend must not open an empty table and read it
+  // as broken") applies just as much to switching Category to Arcade, where the puzzle
+  // window would otherwise be kept and an evaluator with no arcade work in those exact
+  // three days reads as broken. Not keyed on conclusion: that dropdown is a deliberate
+  // narrowing the reader just made, and "no Puzzle games marked Priority I between
+  // these dates" is a coherent answer to it, not a broken-looking one -- and
+  // re-probing on every pick would double the request count of using that dropdown.
   useEffect(() => {
+    if (windowFrom && windowTo) {
+      setFrom(windowFrom)
+      setTo(windowTo)
+      setInitializing(false)
+      return
+    }
     let cancelled = false
     setInitializing(true)
     void (async () => {
@@ -282,7 +319,7 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
       setInitializing(false)
     })()
     return () => { cancelled = true }
-  }, [evaluator, category])
+  }, [evaluator, category, windowFrom, windowTo])
 
   // Live conclusion options for the dropdown, merged with the canonical default
   // ordering. Re-fetches on evaluator or category change; a selection change alone
@@ -342,7 +379,8 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
 
   // The repo's existing infinite-scroll idiom (app/(manager)/evaluations/page.tsx,
   // ~1258-1270): an IntersectionObserver on a 1px sentinel, same rootMargin, same
-  // triple guard.
+  // triple guard -- rooted on the rows scroller rather than the viewport, because
+  // that is the box the sentinel now scrolls inside.
   useEffect(() => {
     const el = sentinelRef.current
     if (!el) return
@@ -351,7 +389,7 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
         pageRef.current += 1
         fetchPage(pageRef.current, true)
       }
-    }, { rootMargin: '200px' })
+    }, { root: rowsRef.current, rootMargin: '200px' })
     observer.observe(el)
     return () => observer.disconnect()
   }, [hasMore, loading, loadingMore, fetchPage])
@@ -362,7 +400,7 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
   }
 
   // Category owns the date window too, so it has to flip `initializing` here, in the
-  // event handler, not in the probe effect: an effect runs one flush too late, and the
+  // event handler, not in the effect: an effect runs one flush too late, and the
   // page-1 effect below (which also depends on `category`) would fire once against the
   // outgoing category's dates before the new window is even asked for.
   function changeCategory(next: string) {
@@ -373,26 +411,41 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
     setLoading(true)
   }
 
-  // The route applies a range only when BOTH ends are present (rangeFilterFor in
-  // lib/evaluations-filters.ts), so a half-filled pair is silently all-time while one
-  // box still shows a date -- the table would then be lying about its own scope in
-  // its own toolbar. Clearing either box therefore clears both: "no dates" is a state
-  // the reader can see and the query actually has.
-  //
-  // And a reversed pair has no rows by construction, but would print "between
+  // A date the reader picks can only ever land inside the page's own period. The
+  // pickers already carry min/max, but a typed date bypasses those in several
+  // browsers, so the value is clamped here as well -- this table must never show
+  // rows from outside the window the rest of the page is reporting on.
+  function clampToWindow(v: string): string {
+    if (windowFrom && v < windowFrom) return windowFrom
+    if (windowTo && v > windowTo) return windowTo
+    return v
+  }
+
+  // Clearing a box goes back to the page's period when there is one. Where there
+  // isn't, it clears both: the route applies a range only when BOTH ends are present
+  // (rangeFilterFor in lib/evaluations-filters.ts), so a half-filled pair is silently
+  // all-time while one box still shows a date -- the table would then be lying about
+  // its own scope in its own toolbar. "No dates" is a state the reader can see and
+  // the query actually has.
+  function resetDates() {
+    if (windowFrom && windowTo) { setFrom(windowFrom); setTo(windowTo) }
+    else { setFrom(null); setTo(null) }
+  }
+
+  // A reversed pair has no rows by construction, but would print "between
   // 22/09/2026 and 18/09/2026" in the empty sentence, which reads as a bug rather
   // than as the reader's own reversed input. Moving one end past the other carries
   // the other end with it, the way a date picker normally behaves, so the pair is
   // never stored reversed.
   function changeFrom(raw: string) {
-    const next = raw || null
-    if (!next) { setFrom(null); setTo(null); return }
+    if (!raw) { resetDates(); return }
+    const next = clampToWindow(raw)
     setFrom(next)
     if (to && next > to) setTo(next)
   }
   function changeTo(raw: string) {
-    const next = raw || null
-    if (!next) { setFrom(null); setTo(null); return }
+    if (!raw) { resetDates(); return }
+    const next = clampToWindow(raw)
     setTo(next)
     if (from && next < from) setFrom(next)
   }
@@ -408,7 +461,7 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
   const showEmpty = !initializing && !loading && rows.length === 0
 
   return (
-    <div className={`rp-review-table${expanded ? ' rp-review-table-expanded' : ''}`}>
+    <div className="rp-review-table">
       <div className="rp-review-toolbar">
         <div className="rp-review-filters">
           <label className="rp-review-filter">
@@ -425,51 +478,57 @@ export function ReviewTable({ evaluator, canSeeTeam }: { evaluator: string; canS
           </label>
           <label className="rp-review-filter">
             <span>From</span>
-            <input aria-label="From date" type="date" value={from || ''} max={to || undefined}
+            <input aria-label="From date" type="date" value={from || ''}
+              min={windowFrom || undefined} max={to || windowTo || undefined}
               onChange={e => changeFrom(e.target.value)} />
           </label>
           <label className="rp-review-filter">
             <span>To</span>
-            <input aria-label="To date" type="date" value={to || ''} min={from || undefined}
+            <input aria-label="To date" type="date" value={to || ''}
+              min={from || windowFrom || undefined} max={windowTo || undefined}
               onChange={e => changeTo(e.target.value)} />
           </label>
         </div>
-        <button type="button" className="btn btn-sm" onClick={() => setExpanded(v => !v)}>
-          {expanded ? 'Collapse' : 'Expand'}
-        </button>
       </div>
 
       {showEmpty ? (
         <div className="rp-review-empty">{emptySentence}</div>
       ) : (
-        <div className="rp-review-rows">
+        <div className="rp-review-rows" ref={rowsRef}>
           {rows.map(row => {
             const shots = shotsFor(row)
             const judged = fmtDate(row.evaluate_date || row.updated_at)
+            const tags = Array.isArray(row.tags) ? row.tags : []
             return (
               <div className="rp-review-row" key={row.id}>
-                <div className="rp-review-icon">
-                  {row.icon_url ? (
-                    <img src={row.icon_url} alt="" width={40} height={40} />
-                  ) : (
-                    <div className="rp-review-icon-fallback" />
-                  )}
-                </div>
-                <div className="rp-review-info">
-                  <div className="rp-review-title">
-                    {row.app_link ? (
-                      <a href={row.app_link} target="_blank" rel="noopener">{row.title || 'Untitled'}</a>
-                    ) : (row.title || 'Untitled')}
+                <div className="rp-review-main">
+                  <div className="rp-review-icon">
+                    {row.icon_url ? (
+                      <img src={row.icon_url} alt="" width={52} height={52} />
+                    ) : (
+                      <div className="rp-review-icon-fallback" />
+                    )}
                   </div>
-                  <div className="rp-review-meta">
-                    <span>{row.publisher_name || 'Unknown developer'}</span>
-                    <span>{row.os ? row.os.toUpperCase() : '—'}</span>
-                    <span>{fmtDate(row.release_date)}</span>
+                  <div className="rp-review-info">
+                    <div className="rp-review-title">
+                      {row.app_link ? (
+                        <a href={row.app_link} target="_blank" rel="noopener">{row.title || 'Untitled'}</a>
+                      ) : (row.title || 'Untitled')}
+                    </div>
+                    <div className="rp-review-pub">{row.publisher_name || 'Unknown developer'}</div>
+                    <div className="rp-review-meta">
+                      <span className="rp-review-os">{row.os ? row.os.toUpperCase() : '—'}</span>
+                      <span>{fmtDate(row.release_date)}</span>
+                      {/* Tags only when the game has any -- an empty row of chips would
+                          add a line to every row to say nothing. */}
+                      {tags.length > 0 && <TrendTagCell tags={tags} maxWidth={260} />}
+                    </div>
+                    <div className="rp-review-verdict">
+                      <span className="pill tag">{prettyConclusion(row.initial_conclusion)}</span>
+                      <span className="rp-review-judged">Judged {judged}</span>
+                      <span className="rp-review-by">{row.initial_evaluator || evaluator}</span>
+                    </div>
                   </div>
-                </div>
-                <div className="rp-review-conclusion">
-                  <span className="pill tag">{prettyConclusion(row.initial_conclusion)}</span>
-                  <span className="rp-review-judged">Judged {judged}</span>
                 </div>
                 {shots.length > 0 && (
                   <div className="rp-review-shots">
