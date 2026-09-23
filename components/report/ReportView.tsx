@@ -2735,24 +2735,31 @@ function Individual({ d }: { d: Bundle }) {
               : <>{fmt.int(e.recorded)} recorded ({e.rec5} × 5min, {e.rec20} × 20min), nothing stuck.</>} />
       </Card>
 
-      {/* Last block on the tab, and the one exception to the rule above it: every
-          other card obeys the window/genre filter bar, this one owns its own filters
-          and defaults to the newest work instead. Without the rule+title+note a reader
-          assumes it is the same selection as the charts above and reads a contradiction
-          as a bug (plan doc, "The review table", Design section C). */}
+      {/* Last block on the tab, and the one that carries its own controls. It is not
+          a second, unrelated selection: its dates OPEN on the same period the filter
+          bar above is showing and can only be narrowed inside it, so this table can
+          never contradict the charts it sits under. What it does own is Category and
+          Initial conclusion. Without the rule+title+note a reader assumes the whole
+          thing is the selection above and reads the narrowing as a bug (plan doc,
+          "The review table", Design section C). */}
       <div className="rp-review-section">
         <div className="rp-review-rule" />
         <div className="rp-section-title">Review - check the calls themselves, screenshots included</div>
-        {/* Names the controls by the labels the filter bar actually prints - "View
-            by" and "Category" - not "window"/"genre", which appear nowhere in the
-            Report's screen text. A reader who goes looking for a "genre" control
-            will not find one, and this table's own filter is labelled Category too.
-            The middle control isn't named literally: its label changes with the
-            view (Batch/Week/Month/Quarter/Year, or Range on a custom window), so
-            "period" stands in for whichever one is showing rather than one that
-            would only be true some of the time. */}
-        <p className="rp-review-scope-note">This table has its own filters. It ignores the View by, period and Category filters at the top of the page.</p>
-        <ReviewTable evaluator={e.name} canSeeTeam={d.canSeeTeam} />
+        {/* Names the control by the label the filter bar actually prints - "Category" -
+            not "genre", which appears nowhere in the Report's screen text. A reader
+            who goes looking for a "genre" control will not find one, and this table's
+            own filter is labelled Category too. "period" stands in for the middle
+            control rather than naming it literally: its label changes with the view
+            (Batch/Week/Month/Quarter/Year, or Range on a custom window), so any one
+            name would only be true some of the time. */}
+        <p className="rp-review-scope-note">This table has its own Category and Initial conclusion. Its dates open on the whole period selected at the top of the page and can only be narrowed inside it.</p>
+        {/* `window.to` is EXCLUSIVE on the payload (see the Bundle type); the picker
+            below is inclusive at both ends, so the last day is to-1. Absent on a
+            window with no bounds at all (All batches), where the table resolves its
+            own newest-days default instead. */}
+        <ReviewTable evaluator={e.name} canSeeTeam={d.canSeeTeam}
+          windowFrom={d.window.from || null}
+          windowTo={d.window.to ? addDays(d.window.to, -1) : null} />
       </div>
     </>
   )

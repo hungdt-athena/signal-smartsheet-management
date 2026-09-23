@@ -50,10 +50,15 @@ const CONCLUSION_DEFAULTS = [
 // plenty of work -- is offering to review something that was never a decision.
 const HOUSEKEEPING = ['Link_dead', 'Stale_release']
 
-// The dropdown's "no conclusion filter" entry. It is not a value the API knows: it
-// is expanded at request time into the explicit list of the other options, so "All"
-// means "all the real calls", housekeeping still excluded. Sending nothing instead
-// would quietly widen the table to rows the rest of the Report does not count.
+// The dropdown's "every real call" entry, and the default. It is not a value the API
+// stores: it travels as `exclude_conclusions`, which the route reads as "judged, and
+// not one of these" -- the same line app/api/report's `judged` predicate draws, so
+// this table and the KPIs above it count the same rows.
+//
+// An exclusion, not the list of everything else, because the list of everything else
+// would have to be built from the live facets -- which arrive in a second request, so
+// page 1 would be fetched once against a guess and again when that landed. This is a
+// constant, and it stays right when an admin adds a conclusion in Config.
 const ALL_CONCLUSIONS = '__all__'
 
 // The canonical 17 are the FALLBACK, not a floor: they are what the dropdown offers
@@ -162,22 +167,20 @@ function shiftDays(iso: string, delta: number): string {
 // `conclusion` -> the query parameter for it. One real value goes on `conclusion`;
 // ALL_CONCLUSIONS expands onto `conclusions` (the route's IN-list form) so the
 // request still names every value it wants and housekeeping stays out.
-// `allList` is the comma-joined expansion of ALL_CONCLUSIONS, and is '' for every
-// other selection -- see `allList` in the component, which keeps it out of the fetch
-// callback's identity unless the reader is actually on "All".
-function conclusionParams(conclusion: string, allList: string): Record<string, string> {
-  if (conclusion !== ALL_CONCLUSIONS) return { conclusion }
-  return allList ? { conclusions: allList } : {}
+function conclusionParams(conclusion: string): Record<string, string> {
+  return conclusion === ALL_CONCLUSIONS
+    ? { exclude_conclusions: HOUSEKEEPING.join(',') }
+    : { conclusion }
 }
 
 async function probeDays(
-  evaluator: string, category: string, conclusion: string, allList: string,
+  evaluator: string, category: string, conclusion: string,
   range: { from: string; to: string } | null,
 ): Promise<{ from: string | null; to: string | null; ok: boolean }> {
   const params = new URLSearchParams({
     evaluator, category, date_basis: 'evaluated',
-    sort: 'desc', page: '1', limit: '100', meta: '0',
-    ...conclusionParams(conclusion, allList),
+    sort: 'desc', page: '1', limit: '100', meta: '0', stats: '0',
+    ...conclusionParams(conclusion),
   })
   if (range) { params.set('from', range.from); params.set('to', range.to) }
   try {
@@ -213,13 +216,12 @@ async function probeDays(
 //
 // BOUNDED FIRST, and that bound is load-bearing. Without from/to the route's
 // rangeFilter is EMPTY (app/api/evaluations/route.ts, `rangeFilterFor` only fires
-// when both ends are present), which makes this one request pay for two unbounded
-// queries over that evaluator's whole history: the rows query, whose
+// when both ends are present), which makes this one request pay for an unbounded
+// scan of that evaluator's whole history: the rows query, whose
 // `ORDER BY COALESCE(ge.evaluate_date, ge.updated_at) DESC` is an expression order
-// no plain index serves, and -- because `wantListMeta = page === 1` and `meta=0`
-// suppresses only the FACET block -- an all-time `count(*)` stats aggregate on top.
-// Passing a range bounds both of them at once, which is why this is the fix rather
-// than teaching `meta=0` to skip the stats: that would leave the unbounded scan.
+// no plain index serves. Passing a range bounds it. (`stats=0` now drops the page-1
+// count(*) that used to ride along with it -- but a bound is still the fix, because
+// dropping the count would have left the unbounded row scan.)
 // The database is on another continent from the app, so a heavy scan here is paid
 // in full, every time the Individual tab opens.
 //
@@ -230,17 +232,17 @@ async function probeDays(
 // of "no rows here", and escalating it would mean a network hiccup on the cheap
 // bounded probe reaches the expensive unbounded one every time.
 async function fetchNewestDays(
-  evaluator: string, category: string, conclusion: string, allList: string,
+  evaluator: string, category: string, conclusion: string,
 ): Promise<{ from: string | null; to: string | null }> {
   const today = vnToday()
   // `to` is tomorrow, not today: the route's upper bound is exclusive-of-the-next-day
   // already, and one extra day absorbs a row whose evaluate_date was written slightly
   // ahead of VN midnight rather than dropping it and reading as "no recent work".
-  const bounded = await probeDays(evaluator, category, conclusion, allList,
+  const bounded = await probeDays(evaluator, category, conclusion,
     { from: shiftDays(today, -PROBE_DAYS), to: shiftDays(today, 1) })
   if (bounded.from) return bounded
   if (!bounded.ok) return { from: null, to: null }
-  const unbounded = await probeDays(evaluator, category, conclusion, allList, null)
+  const unbounded = await probeDays(evaluator, category, conclusion, null)
   return { from: unbounded.from, to: unbounded.to }
 }
 
@@ -254,7 +256,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
   windowTo?: string | null
 }): JSX.Element {
   const [category, setCategory] = useState('puzzle')
-  const [conclusion, setConclusion] = useState('List_Idea')
+  const [conclusion, setConclusion] = useState(ALL_CONCLUSIONS)
   // Full canonical list until the live facets response narrows it -- same as
   // app/(manager)/evaluations/page.tsx's own availableConclusions state, so the
   // dropdown never flashes down to just the one selected value on first paint.
@@ -290,17 +292,6 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
   const conclusionRef = useRef(conclusion)
   useEffect(() => { conclusionRef.current = conclusion }, [conclusion])
 
-  // "All" is the only selection whose request text depends on the OPTION LIST, and
-  // the option list arrives from a second request. Deriving it here, as '' for every
-  // other selection, keeps that dependency out of `fetchPage`'s identity unless the
-  // reader is really on All -- otherwise the facets response landing would re-run the
-  // page-1 effect and every tab open would fetch page 1 twice.
-  const allList = conclusion === ALL_CONCLUSIONS
-    ? conclusionOptions.filter(c => c !== ALL_CONCLUSIONS).join(',')
-    : ''
-  const allListRef = useRef(allList)
-  useEffect(() => { allListRef.current = allList }, [allList])
-
   // Switching person resets this table to a clean, known state. Done DURING RENDER
   // (React's documented "adjusting state when a prop changes" pattern) rather than in
   // an effect, for two reasons:
@@ -322,7 +313,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     // with the previous person's games under the new name.
     fetchSeqRef.current++
     setCategory('puzzle')
-    setConclusion('List_Idea')
+    setConclusion(ALL_CONCLUSIONS)
     setFrom(null)
     setTo(null)
     setRows([])
@@ -356,8 +347,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     let cancelled = false
     setInitializing(true)
     void (async () => {
-      const { from: f, to: t } = await fetchNewestDays(
-        evaluator, category, conclusionRef.current, allListRef.current)
+      const { from: f, to: t } = await fetchNewestDays(evaluator, category, conclusionRef.current)
       if (cancelled) return
       setFrom(f)
       setTo(t)
@@ -385,8 +375,8 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     const params = new URLSearchParams({
       evaluator, category, date_basis: 'evaluated',
       page: String(page), limit: String(PAGE_SIZE), with_screenshots: '1',
-      sort: 'desc', meta: '0',
-      ...conclusionParams(conclusion, allList),
+      sort: 'desc', meta: '0', stats: '0',
+      ...conclusionParams(conclusion),
     })
     if (from) params.set('from', from)
     if (to) params.set('to', to)
@@ -415,7 +405,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
       }
     }
     if (seq === fetchSeqRef.current) { setLoading(false); setLoadingMore(false) }
-  }, [evaluator, category, conclusion, allList, from, to])
+  }, [evaluator, category, conclusion, from, to])
 
   useEffect(() => {
     if (initializing) return
@@ -587,7 +577,8 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                 <div className="rp-review-main">
                   <div className="rp-review-icon">
                     {row.icon_url ? (
-                      <img src={row.icon_url} alt="" width={52} height={52} />
+                      <img src={row.icon_url} alt="" width={52} height={52}
+                        loading="lazy" decoding="async" />
                     ) : (
                       <div className="rp-review-icon-fallback" />
                     )}
@@ -599,17 +590,21 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                       ) : (row.title || 'Untitled')}
                     </div>
                     <div className="rp-review-pub">{row.publisher_name || 'Unknown developer'}</div>
+                    {/* Every fact on these two lines is a badge, and the two dates say
+                        which date they are. Two bare dd/mm/yy in one row, one of them
+                        the store's and one the team's, is a guess the reader should
+                        not have to make. */}
                     <div className="rp-review-meta">
-                      <span className="rp-review-os">{row.os ? row.os.toUpperCase() : '—'}</span>
-                      <span>{fmtDate(row.release_date)}</span>
+                      <span className="rp-review-badge">{row.os ? row.os.toUpperCase() : '—'}</span>
+                      <span className="rp-review-badge">Release: {fmtDate(row.release_date)}</span>
                       {/* Tags only when the game has any -- an empty row of chips would
                           add a line to every row to say nothing. */}
                       {tags.length > 0 && <TrendTagCell tags={tags} maxWidth={260} />}
                     </div>
                     <div className="rp-review-verdict">
                       <span className="pill tag">{prettyConclusion(row.initial_conclusion)}</span>
-                      <span className="rp-review-judged">Judged {judged}</span>
-                      <span className="rp-review-by">{row.initial_evaluator || evaluator}</span>
+                      <span className="rp-review-badge">Evaluated: {judged}</span>
+                      <span className="rp-review-badge">{row.initial_evaluator || evaluator}</span>
                     </div>
                   </div>
                 </div>
@@ -621,6 +616,10 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                     {shots.map((url, i) => (
                       <img key={i} src={url} alt={`Screenshot ${i + 1}`}
                         className="rp-review-shot"
+                        // A page of 20 rows is ~160 full-size StoreKit images. Eager,
+                        // that is tens of megabytes before the first row is readable;
+                        // lazy, the browser fetches the strips the reader reaches.
+                        loading="lazy" decoding="async"
                         role="button" tabIndex={0}
                         onClick={() => openShot(url, shots)}
                         onKeyDown={e => {

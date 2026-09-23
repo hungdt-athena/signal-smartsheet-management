@@ -2789,6 +2789,12 @@ input:checked + .slider:before {
    which is what an earlier version of that rule actually did. */
 .rp-review-table { border-top: 1px solid var(--border); padding-top: 20px; margin-top: 4px;
   display: flex; flex-direction: column; }
+/* This block is the last thing on the tab, and it ends in a scroll box that already
+   stops one hairline short of the viewport. .page's own `padding-bottom: 60px` (see
+   its rule at the top of this file) then left a band of empty page under it that the
+   reader could scroll to and find nothing in. Cancelling exactly that number here
+   keeps the padding for every other page and every other tab. */
+.rp-review-section { margin-bottom: -60px; }
 .rp-review-toolbar { display: flex; align-items: flex-end; justify-content: space-between;
   gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
 .rp-review-filters { display: flex; gap: 14px; flex-wrap: wrap; }
@@ -2828,11 +2834,13 @@ input:checked + .slider:before {
 .rp-review-pub { font-size: 12px; color: var(--muted); }
 .rp-review-meta { display: flex; align-items: center; gap: 8px; font-size: 11.5px;
   color: var(--faint); flex-wrap: wrap; }
-/* The platform reads as a badge rather than as one more grey word in the line. */
-.rp-review-os { font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 1px 6px;
-  border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+/* Every fact on the two lines under the title is a badge: platform, release date,
+   evaluated date, who made the call. A bare grey date next to another bare grey date
+   makes the reader work out which is which. */
+.rp-review-badge { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; padding: 1px 7px;
+  border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--muted); white-space: nowrap; }
 .rp-review-verdict { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
-.rp-review-judged, .rp-review-by { font-size: 11px; color: var(--faint); }
 /* 1.5x the old height: a StoreKit shot has to be readable at a glance, which is the
    whole reason this column exists. Scrolls horizontally within its own grid cell. */
 .rp-review-shots { display: flex; gap: 8px; overflow-x: auto; min-width: 0; padding-bottom: 4px; }

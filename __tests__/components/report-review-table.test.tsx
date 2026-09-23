@@ -82,7 +82,7 @@ beforeEach(() => {
 })
 
 describe('ReviewTable', () => {
-  it('defaults to the newest 3 days with rows, puzzle, List_Idea', async () => {
+  it('defaults to the newest 3 days with rows, puzzle, every real conclusion', async () => {
     const probeRows = [
       row({ id: 1, evaluate_date: '2026-09-22T09:00:00Z', updated_at: '2026-09-22T09:00:00Z' }),
       row({ id: 2, evaluate_date: '2026-09-22T08:00:00Z', updated_at: '2026-09-22T08:00:00Z' }),
@@ -101,15 +101,24 @@ describe('ReviewTable', () => {
     const calls = parseCalls(fetchMock)
     const probeCall = calls.find(c => c.limit === '100')!
     expect(probeCall.category).toBe('puzzle')
-    expect(probeCall.conclusion).toBe('List_Idea')
+    // The default is All, which travels as an exclusion, not as a value: see
+    // ALL_CONCLUSIONS. Link_dead and Stale_release are housekeeping and are what
+    // "every real conclusion" leaves out.
+    expect(probeCall.exclude_conclusions).toBe('Link_dead,Stale_release')
+    expect(probeCall.conclusion).toBeUndefined()
     expect(probeCall.evaluator).toBe('NhiLV')
 
     const listCall = calls.find(c => c.limit === '20')!
     expect(listCall.category).toBe('puzzle')
-    expect(listCall.conclusion).toBe('List_Idea')
+    expect(listCall.exclude_conclusions).toBe('Link_dead,Stale_release')
+    expect(listCall.conclusion).toBeUndefined()
     expect(listCall.with_screenshots).toBe('1')
     expect(listCall.date_basis).toBe('evaluated')
     expect(listCall.page).toBe('1')
+    // This table pages with a sentinel and never prints a count, so it opts out of
+    // the page-1 count(*) -- which runs over the same filtered set as the rows.
+    expect(listCall.stats).toBe('0')
+    expect(probeCall.stats).toBe('0')
     // Newest 3 distinct days present: 09-22, 09-20, 09-18 -- the gap and the
     // older 09-10 row must not shift the window.
     expect(listCall.from).toBe('2026-09-18')
@@ -319,13 +328,18 @@ describe('ReviewTable', () => {
     expect(within(main).getByText('Merge Puzzle')).toBeInTheDocument()
     expect(within(main).getByText('Acme Studio')).toBeInTheDocument()
     expect(within(main).getByText('IOS')).toBeInTheDocument()
-    expect(within(main).getByText('01/08/26')).toBeInTheDocument()
+    // Both dates say WHICH date they are. Two bare dd/mm/yy on the same row -- one
+    // the store's, one the team's -- is a guess the reader should not have to make.
+    expect(within(main).getByText(/^Release: 01\/08\/26$/)).toBeInTheDocument()
     expect(within(main).getByText('Merge')).toBeInTheDocument()
     // The verdict moved OUT of its own column and onto this side of the row, next
     // to the game it is a verdict on -- conclusion, when, and by whom.
     expect(within(main).getByText('List Idea')).toBeInTheDocument()
-    expect(within(main).getByText(/Judged 22\/09\/26/)).toBeInTheDocument()
+    expect(within(main).getByText(/^Evaluated: 22\/09\/26$/)).toBeInTheDocument()
     expect(within(main).getByText('NhiLV')).toBeInTheDocument()
+    // and all four of those facts are badges, not loose grey words
+    expect(within(main).getAllByText(/^(IOS|Release: .*|Evaluated: .*|NhiLV)$/)
+      .every(n => n.className.includes('rp-review-badge'))).toBe(true)
     // Two grid cells only: the call, and the screenshots that back it.
     const cells = container.querySelector('.rp-review-row')!.children
     expect(cells.length).toBe(2)
@@ -357,7 +371,7 @@ describe('ReviewTable', () => {
     expect(values).not.toContain('Stale_release')
   })
 
-  it('offers All, and asks for every real conclusion by name rather than dropping the filter', async () => {
+  it('opens on All, and narrows to one value when the reader picks one', async () => {
     const fetchMock = mockApi({
       facets: ['List_Idea', 'Stale_release', 'Bypass'],
       list: [row()],
@@ -366,25 +380,16 @@ describe('ReviewTable', () => {
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
-    // The default the reader asked for is unchanged: List Idea, not All.
-    expect(select.value).toBe('List_Idea')
-    await waitFor(() => expect(Array.from(select.options).map(o => o.value)).toContain('Bypass'))
+    expect(select.value).toBe('__all__')
     expect(within(select).getByText('All')).toBeInTheDocument()
+    await waitFor(() => expect(Array.from(select.options).map(o => o.value)).toContain('Bypass'))
 
-    fireEvent.change(select, { target: { value: '__all__' } })
-
+    fireEvent.change(select, { target: { value: 'Bypass' } })
     await waitFor(() => {
       const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
-      expect(last.conclusions).toBeDefined()
+      expect(last.conclusion).toBe('Bypass')
     })
-    const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
-    // Named explicitly, so "All" cannot quietly widen the table to the housekeeping
-    // rows the rest of the Report does not count.
-    const asked = last.conclusions!.split(',')
-    expect(asked).toContain('Bypass')
-    expect(asked).toContain('List_Idea')
-    expect(asked).not.toContain('Stale_release')
-    expect(last.conclusion).toBeUndefined()
+    expect(parseCalls(fetchMock).filter(c => c.limit === '20').pop()!.exclude_conclusions).toBeUndefined()
   })
 
   it('says "judged" rather than printing the All sentinel in the empty sentence', async () => {
@@ -403,10 +408,12 @@ describe('ReviewTable', () => {
   })
 
   it('does not fetch page 1 twice when the facets response lands after it', async () => {
-    // `allList` is derived from the option list, which arrives in its own request.
-    // Depending on it unconditionally would change fetchPage's identity the moment
-    // facets resolved and re-run the page-1 effect -- a second full page request,
-    // with screenshots, on every single tab open.
+    // The default selection is All, and the obvious way to express All -- the list
+    // of every other value -- is derived from the option list, which arrives in its
+    // OWN request. That would change fetchPage's identity the moment facets resolved
+    // and re-run the page-1 effect: a second full page request, with screenshots, on
+    // every single tab open. Expressing All as a constant exclusion is what keeps
+    // this at one.
     const fetchMock = mockApi({ facets: ['List_Idea', 'Bypass'], list: [row()] })
     global.fetch = fetchMock as unknown as typeof fetch
 
@@ -444,10 +451,24 @@ describe('ReviewTable', () => {
     const empty = document.querySelector('.rp-review-empty')
     expect(empty).not.toBeNull()
     expect(empty!.textContent).toMatch(/puzzle/i)
-    // Pretty label, not the raw stored/transmitted value -- see prettyConclusion.
-    expect(empty!.textContent).toMatch(/List Idea/)
-    expect(empty!.textContent).not.toMatch(/List_Idea/)
+    // On the default (All) there is no conclusion to name, so the sentence says what
+    // the filter really is -- judged at all -- and never the sentinel.
+    expect(empty!.textContent).toMatch(/no Puzzle games judged/)
+    expect(empty!.textContent).not.toMatch(/__all__/)
     expect(empty!.textContent).toMatch(/You/)
+  })
+
+  it('names the chosen conclusion in the empty sentence, prettily, once one is picked', async () => {
+    const fetchMock = mockApi()
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(document.querySelector('.rp-review-empty')).not.toBeNull())
+    fireEvent.change(screen.getByLabelText('Initial conclusion'), { target: { value: 'List_Idea' } })
+
+    // Pretty label, not the raw stored/transmitted value -- see prettyConclusion.
+    await waitFor(() => expect(document.querySelector('.rp-review-empty')!.textContent).toMatch(/List Idea/))
+    expect(document.querySelector('.rp-review-empty')!.textContent).not.toMatch(/List_Idea/)
   })
 
   it('names the evaluator (not "You") in the empty sentence when the viewer can see the team', async () => {
@@ -484,8 +505,9 @@ describe('ReviewTable', () => {
     // date read as the codebase's existing "no value" glyph -- not a blank cell.
     expect(screen.getByText('Untitled')).toBeInTheDocument()
     expect(screen.getByText('Unknown developer')).toBeInTheDocument()
-    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3) // platform, release date, conclusion
-    expect(screen.getByText(/Judged —/)).toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2) // platform, conclusion
+    expect(screen.getByText(/^Release: —$/)).toBeInTheDocument()
+    expect(screen.getByText(/^Evaluated: —$/)).toBeInTheDocument()
   })
 
   it('offers the real, admin-editable conclusion list, not a hardcoded shortlist', async () => {
