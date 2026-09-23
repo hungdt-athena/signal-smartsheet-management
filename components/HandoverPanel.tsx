@@ -8,6 +8,7 @@ import { StyledSelect } from '@/components/StyledSelect'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 import { DistributionResult, type DistResult } from '@/components/DistributionResult'
 import { OperationHistory } from '@/components/OperationHistory'
+import { usePendingHolders } from '@/hooks/usePendingHolders'
 
 interface RosterRow { id: number; name: string; today_available: boolean }
 const BUCKET_LABELS: Record<Bucket, string> = { puzzle: 'Puzzle', arcade: 'Arcade', simulation: 'Simulation' }
@@ -26,13 +27,25 @@ export function HandoverPanel() {
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [histToken, setHistToken] = useState(0) // bump to reload the history container
 
+  // ?group= matters: without it the API hands back every genre, so anyone on two
+  // rosters arrived twice -- both in this list and in the available-target count.
   const loadRoster = useCallback(async () => {
     try {
       const res = await fetch(`/api/assign-setup?group=${category}`, { cache: 'no-store' })
       const json = await res.json()
-      setRoster((json.initial ?? []) as RosterRow[])
+      const rows = (json.initial ?? []) as RosterRow[]
+      const seen = new Set<string>()
+      setRoster(rows.filter(r => {
+        if (seen.has(r.name)) return false
+        seen.add(r.name)
+        return true
+      }))
     } catch { setRoster([]) }
   }, [category])
+
+  // Source list = who actually holds pending games in this bucket. Evaluators are
+  // locked to themselves, so they never need it.
+  const { options: fromOptions, loading: holdersLoading } = usePendingHolders(category, !isEvaluator)
 
   useEffect(() => {
     loadRoster()
@@ -79,10 +92,12 @@ export function HandoverPanel() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div className="field">
               <span className="label">Evaluator on leave</span>
-              <StyledSelect value={from} onChange={setFrom} placeholder="-- Select evaluator --" disabled={isEvaluator}
-                options={isEvaluator
-                  ? [{ value: selfName, label: selfName }]
-                  : roster.map(r => ({ value: r.name, label: r.name }))} />
+              <StyledSelect value={from} onChange={setFrom} disabled={isEvaluator || fromOptions.length === 0}
+                placeholder={isEvaluator ? selfName
+                  : holdersLoading ? 'Loading…'
+                  : fromOptions.length === 0 ? '-- Nobody holds pending games here --'
+                  : '-- Select evaluator --'}
+                options={isEvaluator ? [{ value: selfName, label: selfName }] : fromOptions} />
             </div>
             <div className="field">
               <span className="label">Start date</span>
