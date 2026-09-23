@@ -428,6 +428,62 @@ describe('ReviewTable', () => {
     expect(pageOnes.length).toBe(1)
   })
 
+  it('colours the conclusion pill by what the conclusion means', async () => {
+    const fetchMock = mockApi({
+      list: [
+        row({ id: 1, title: 'A', initial_conclusion: 'List_Idea' }),
+        row({ id: 2, title: 'B', initial_conclusion: 'Bypass' }),
+        // The bypass rule is `/bypass/i`, the same line the server draws with
+        // `NOT ILIKE '%bypass%'` -- so these two land red, not amber or green.
+        row({ id: 3, title: 'C', initial_conclusion: 'Playtest & Bypass' }),
+        row({ id: 4, title: 'D', initial_conclusion: 'M_ByPass' }),
+        row({ id: 5, title: 'E', initial_conclusion: 'Need deeper testing' }),
+        row({ id: 6, title: 'F', initial_conclusion: 'Priority IV: Idea' }),
+        row({ id: 7, title: 'G', initial_conclusion: null }),
+      ],
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('A')).toBeInTheDocument())
+
+    const tone = (i: number) =>
+      (container.querySelectorAll('.rp-review-verdict .pill')[i] as HTMLElement).className
+    expect(tone(0)).toContain('rp-tone-good')  // List Idea - kept
+    expect(tone(1)).toContain('rp-tone-bad')   // Bypass - dropped
+    expect(tone(2)).toContain('rp-tone-bad')   // Playtest & Bypass - dropped
+    expect(tone(3)).toContain('rp-tone-bad')   // M_ByPass - dropped
+    expect(tone(4)).toContain('rp-tone-hold')  // Need deeper testing - not decided
+    expect(tone(5)).toContain('rp-tone-good')  // a Priority - kept
+    expect(tone(6)).toContain('rp-tone-none')  // no call at all
+  })
+
+  // ---- scrolling ----
+
+  it('never intercepts the wheel, so scrolling stays on the compositor thread', async () => {
+    // REGRESSION GUARD, and the reason is specific. A non-passive `wheel` listener
+    // takes scrolling off the compositor thread for that element: every frame then
+    // waits on JS. With a mouse wheel that is invisible; with a trackpad -- a stream
+    // of small fractional deltas plus momentum -- it stutters and then stops dead,
+    // while dragging the scrollbar stays smooth. This block had such a handler, to
+    // make the page finish scrolling the table into view before the list moved, and
+    // that behaviour is not worth the cost. If one comes back, this goes red.
+    const content = document.createElement('div')
+    content.className = 'content'
+    document.body.appendChild(content)
+    global.fetch = mockApi({ list: [row()] }) as unknown as typeof fetch
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />, { container: content })
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const box = content.querySelector('.rp-review-rows') as HTMLElement
+    for (const deltaY of [120, -120, 3, -3]) {
+      const ev = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true })
+      box.dispatchEvent(ev)
+      expect(ev.defaultPrevented).toBe(false)
+    }
+    content.remove()
+  })
+
   it('leaves the tag line out entirely when a game has no tags', async () => {
     const fetchMock = mockApi({ list: [row({ tags: [] })] })
     global.fetch = fetchMock as unknown as typeof fetch

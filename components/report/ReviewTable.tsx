@@ -125,6 +125,23 @@ interface ReviewRow {
   manual_screenshot_urls: string[] | null
 }
 
+// What a conclusion MEANS, in four tones, so a column of pills reads as kept /
+// dropped / not decided without anyone learning seventeen labels.
+//
+// Rules, not a table of seventeen values, because the list is admin-editable in
+// Config -- a table would leave every new value colourless. The bypass rule is not
+// invented here either: `NOT ILIKE '%bypass%'` is exactly how the server decides what
+// counts as shortlisted (app/api/report/route.ts), so "Playtest & Bypass" and
+// "M_ByPass" land on the same side of the line here as they do in the KPI above.
+function conclusionTone(v: string | null | undefined): string {
+  if (!v) return 'rp-tone-none'
+  if (HOUSEKEEPING.includes(v)) return 'rp-tone-none'
+  if (/bypass/i.test(v) || /^skip$/i.test(v)) return 'rp-tone-bad'
+  // Not a verdict yet -- it asks for more work before anyone can call it.
+  if (/^(need|wait|check)\b/i.test(v)) return 'rp-tone-hold'
+  return 'rp-tone-good'
+}
+
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '—' // em dash used ONLY as the established placeholder glyph for a
   // missing data value (matches EvalRow/InfoField elsewhere in this codebase) -- never
@@ -430,38 +447,24 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     return () => observer.disconnect()
   }, [hasMore, loading, loadingMore, fetchPage])
 
-  // Scroll handoff between this box and the page.
+  // NO WHEEL HANDLER HERE, and that is a decision, not an omission.
   //
-  // Upward is native: `overscroll-behavior` is left at `auto`, so once the list is at
-  // its own top the wheel chains straight on to the page and the reader is never
-  // trapped in the middle of the tab.
+  // This block used to intercept downward wheel events so the page finished scrolling
+  // the table into view before the list started moving. It worked with a mouse wheel
+  // and was unusable with a trackpad: a non-passive `wheel` listener takes scrolling
+  // off the compositor thread entirely, so every frame has to wait for JS -- and a
+  // trackpad delivers a continuous stream of small, fractional deltas plus momentum,
+  // which the handler then fought by assigning `scrollTop` on each one. The symptom
+  // was exactly that: smooth on the scrollbar, smooth upward, stuttering and then
+  // dead on the way down. The cost is on the LISTENER, so returning early does not
+  // buy it back -- the only fix is not to listen.
   //
-  // Downward is not, and that is what this handler is for. The default is that a
-  // wheel over this box scrolls the LIST, even while half the table is still below
-  // the fold -- so the rows start moving before the reader has seen the table.
-  // While any of it is still off-screen, the wheel is redirected to the page
-  // instead, and only the part of the delta that is needed to close that gap is
-  // spent; the list takes over on the tick after the table is whole.
-  //
-  // `.content` is the scrolling element here, not the window: the app shell puts
-  // `overflow-y: auto` on it (globals.css) and the window itself never scrolls, so
-  // `window.scrollBy` would do nothing at all. A non-passive listener is required
-  // because the redirect needs preventDefault, which is why this is not `onWheel`.
-  useEffect(() => {
-    const el = rowsRef.current
-    if (!el) return
-    function onWheel(e: WheelEvent) {
-      if (e.deltaY <= 0 || !el) return
-      const scroller = el.closest('.content') as HTMLElement | null
-      if (!scroller) return
-      const gap = el.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom
-      if (gap <= 0) return
-      e.preventDefault()
-      scroller.scrollTop += Math.min(e.deltaY, gap)
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [rows.length])
+  // What is left is what the browser does natively and does well: the wheel scrolls
+  // whichever box is under the pointer, and `overscroll-behavior` is left at `auto`
+  // (see globals.css) so reaching either end of the list chains straight on to the
+  // page. Nothing traps the reader in the middle of the tab, which was the original
+  // complaint; what is gone is "the page scrolls first, then the list", which cannot
+  // be had smoothly alongside momentum scrolling.
 
   function openShot(url: string, images: string[]) {
     setLightboxImages(images)
@@ -602,7 +605,8 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                       {tags.length > 0 && <TrendTagCell tags={tags} maxWidth={260} />}
                     </div>
                     <div className="rp-review-verdict">
-                      <span className="pill tag">{prettyConclusion(row.initial_conclusion)}</span>
+                      <span className={`pill ${conclusionTone(row.initial_conclusion)}`}>
+                        {prettyConclusion(row.initial_conclusion)}</span>
                       <span className="rp-review-badge">Evaluated: {judged}</span>
                       <span className="rp-review-badge">{row.initial_evaluator || evaluator}</span>
                     </div>

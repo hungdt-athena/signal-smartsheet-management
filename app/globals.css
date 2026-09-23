@@ -609,6 +609,14 @@ body {
 .pill.off   { background: var(--bad-weak);  color: var(--bad);  }
 .pill.tag   { background: var(--accent-weak); color: var(--accent-strong); }
 .pill.muted { background: var(--surface-3);  color: var(--muted); }
+/* Verdict tones for a conclusion pill: kept / dropped / not decided / not a call.
+   Single-class selectors, so they must stay AFTER `.pill` in this file -- they carry
+   the same specificity and win on source order alone. See conclusionTone() in
+   components/report/ReviewTable.tsx for which conclusion lands on which. */
+.rp-tone-good { background: var(--good-weak); color: var(--good); }
+.rp-tone-bad  { background: var(--bad-weak);  color: var(--bad); }
+.rp-tone-hold { background: var(--warn-weak); color: var(--warn); }
+.rp-tone-none { background: var(--surface-3); color: var(--muted); }
 
 .status-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--faint); }
 .status-dot .sd { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); }
@@ -2811,12 +2819,13 @@ input:checked + .slider:before {
    sentinel below scrolls in THIS box, which is why the observer in ReviewTable.tsx is
    rooted on it.
    NO `overscroll-behavior: contain` here, deliberately: containing it is exactly what
-   traps a reader who has scrolled the list back to its top and wants to carry on up
-   the page. Chaining is the wanted behaviour upward; downward is handled by the wheel
-   handler in ReviewTable.tsx, which spends the page's scroll first and hands over to
-   the list once the whole table is on screen. `calc(100vh - 40px)` is what lets that
-   handover land somewhere sensible: at the end of it the table fills the viewport with
-   a hairline of page left showing, rather than ending in a band of dead space. */
+   traps a reader who has scrolled the list to one of its ends and wants to carry on
+   through the page. Left at `auto`, the wheel chains in both directions, and that
+   chaining plus the browser's own compositor-thread scrolling is the WHOLE scrolling
+   behaviour of this block -- there is no JS scroll handler, on purpose; see the long
+   note in ReviewTable.tsx for what one cost on a trackpad. `calc(100vh - 40px)` keeps
+   the box a screen tall and, with .page's bottom padding cancelled below, lets it end
+   at the bottom of the viewport rather than above a band of dead space. */
 .rp-review-rows { display: flex; flex-direction: column; gap: 10px;
   max-height: calc(100vh - 40px); min-height: 360px; overflow-y: auto;
   padding: 2px 4px 6px; }
@@ -2844,7 +2853,11 @@ input:checked + .slider:before {
 /* 1.5x the old height: a StoreKit shot has to be readable at a glance, which is the
    whole reason this column exists. Scrolls horizontally within its own grid cell. */
 .rp-review-shots { display: flex; gap: 8px; overflow-x: auto; min-width: 0; padding-bottom: 4px; }
-.rp-review-shot { height: 144px; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; cursor: pointer; }
+/* min-width + a filled background so a lazily-loaded shot occupies its space BEFORE
+   it arrives: without it each image is a zero-width sliver that pops the whole strip
+   wider as it decodes, which is reflow under the reader's scroll. */
+.rp-review-shot { height: 144px; min-width: 64px; background: var(--surface-2);
+  border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; cursor: pointer; }
 .rp-review-loading { text-align: center; font-size: 12px; color: var(--faint); padding: 10px 0; }
 .rp-review-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--muted);
   background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius); }
