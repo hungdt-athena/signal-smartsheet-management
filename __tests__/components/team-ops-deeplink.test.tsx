@@ -49,6 +49,14 @@ const ROSTER = [
   { id: 3, name: 'KietCD', today_available: true, game_platform: 'all', weight: 100 },
 ]
 
+// Reassign's source picker lists who is HOLDING pending games, not the roster, so
+// ?from= has to resolve against this list. Deliberately not the same shape as ROSTER:
+// KietCD is on the roster with nothing pending, and so is not a source at all.
+const HOLDERS = [
+  { name: 'PhuongNT1', pending: 40 },
+  { name: 'ThuDT', pending: 30 },
+]
+
 function scanBody() {
   const calls = (global.fetch as jest.Mock).mock.calls
   const call = calls.find(([input, init]) =>
@@ -68,6 +76,9 @@ beforeEach(() => {
     if (url.startsWith('/api/assign-setup')) {
       return Promise.resolve({ ok: true, json: async () => ({ initial: ROSTER }) } as Response)
     }
+    if (url.startsWith('/api/operations/pending-holders')) {
+      return Promise.resolve({ ok: true, json: async () => ({ holders: HOLDERS }) } as Response)
+    }
     if (url.startsWith('/api/operations/runs')) {
       return Promise.resolve({ ok: true, json: async () => ({ rows: [], viewer: null }) } as Response)
     }
@@ -82,25 +93,35 @@ describe('team-ops deep links', () => {
     params = new URLSearchParams('tab=reassign&from=PhuongNT1')
     render(<TeamOpsPage />)
     // ReassignPanel's source picker is a StyledSelect (a button showing the chosen
-    // name, not a native <select>) — its accessible name IS the selected label.
-    await waitFor(() => expect(screen.getByRole('button', { name: 'PhuongNT1' })).toBeInTheDocument())
+    // name, not a native <select>) — its accessible name IS the selected label, and
+    // that label carries the backlog the name stands for: "PhuongNT1 · 40 pending".
+    await waitFor(() => expect(screen.getByRole('button', { name: /^PhuongNT1 · 40 pending$/ })).toBeInTheDocument())
   })
 
-  it('resolves a casing-drifted ?from= to the roster’s own spelling', async () => {
-    // The Report builds this link from game_evaluations.initial_evaluator; the roster
-    // it has to match against is evaluator_roster.name — a table with a known history
-    // of casing drift against that one. A case-sensitive match would land on an empty
-    // select and say nothing about why.
+  it('resolves a casing-drifted ?from= to the source list’s own spelling', async () => {
+    // The Report builds this link from game_evaluations.initial_evaluator, which is
+    // also where the source list comes from — but evaluator names have drifted in
+    // casing between tables before, and the link is a string in a URL besides. A
+    // case-sensitive match would land on an empty select and say nothing about why.
     params = new URLSearchParams('tab=reassign&from=phuongnt1')
     render(<TeamOpsPage />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'PhuongNT1' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^PhuongNT1 · 40 pending$/ })).toBeInTheDocument())
   })
 
-  it('drops the preselection when the named evaluator is not on this roster', async () => {
+  it('drops the preselection when the named evaluator holds nothing here', async () => {
     params = new URLSearchParams('tab=reassign&from=NobodyHere')
     render(<TeamOpsPage />)
     await waitFor(() => expect(screen.getByText(/select evaluator/i)).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'NobodyHere' })).not.toBeInTheDocument()
+  })
+
+  it('drops a ?from= who is on the roster but holds no pending games', async () => {
+    // KietCD can RECEIVE in this bucket, which is what the roster says; he has nothing
+    // to hand over, so he is not a source and the link resolves to nothing.
+    params = new URLSearchParams('tab=reassign&from=KietCD')
+    render(<TeamOpsPage />)
+    await waitFor(() => expect(screen.getByText(/select evaluator/i)).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'KietCD' })).not.toBeInTheDocument()
   })
 
   it('rings the rows named in the URL on Rescue', async () => {

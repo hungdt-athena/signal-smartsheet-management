@@ -10,6 +10,7 @@ import { StyledSelect } from '@/components/StyledSelect'
 import { BUCKETS, WEIGHTS, type Bucket } from '@/lib/buckets'
 import { DistributionResult, type DistResult } from '@/components/DistributionResult'
 import { OperationHistory } from '@/components/OperationHistory'
+import { usePendingHolders } from '@/hooks/usePendingHolders'
 
 interface RosterRow { id: number; name: string; today_available: boolean; game_platform: string; weight: number }
 type Mode = 'range' | 'quantity'
@@ -41,12 +42,22 @@ export function ReassignPanel({ initialFrom, initialCategory }: { initialFrom?: 
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [histToken, setHistToken] = useState(0) // bump to reload the history container
 
-  // Load the bucket's initial-evaluator roster; reset everything on bucket change.
+  // Load THIS bucket's initial-evaluator roster; reset everything on bucket change.
+  // ?group= matters: the route ignored it until now and handed back every genre, so
+  // anyone on two rosters (HuyDD and NhiLV are on both arcade and puzzle) arrived
+  // twice and was listed twice. Dedupe by name as well, so one stale cache or a
+  // future duplicate row cannot put the same person in the list twice again.
   const loadRoster = useCallback(async () => {
     try {
       const res = await fetch(`/api/assign-setup?group=${category}`, { cache: 'no-store' })
       const json = await res.json()
-      setRoster((json.initial ?? []) as RosterRow[])
+      const rows = (json.initial ?? []) as RosterRow[]
+      const seen = new Set<string>()
+      setRoster(rows.filter(r => {
+        if (seen.has(r.name)) return false
+        seen.add(r.name)
+        return true
+      }))
     } catch { setRoster([]) }
   }, [category])
 
@@ -60,19 +71,37 @@ export function ReassignPanel({ initialFrom, initialCategory }: { initialFrom?: 
     setChecked({}); setWeightOverrides({}); setResult(null); setMsg(null)
   }, [loadRoster])
 
-  // A link can only say a name; it cannot guarantee that name is still on this
-  // bucket's roster by the time it loads, or that it spells it the same way. The
-  // Report's names come from game_evaluations.initial_evaluator, the roster from
-  // evaluator_roster.name - two tables with a known history of casing drift - so the
-  // match is case-insensitive, and the select is seeded with the ROSTER's own spelling
-  // (never the URL's) so it shows what the roster shows. A name that resolves to
-  // nothing real drops the preselection rather than leaving the select on a value it
-  // cannot display.
+  // The source list is the people actually HOLDING pending games in this bucket. The
+  // roster answers a different question -- who may RECEIVE this genre -- and the two
+  // sets drift: someone on the arcade roster can hold zero arcade games (nothing to
+  // move), and someone dropped from the roster can still be holding games that have
+  // to be moved off them. Listing the roster showed all eleven people under Arcade
+  // when only HuyDD and NhiLV had anything there.
+  const { holders, options: fromOptions, loading: holdersLoading, refresh: refreshHolders } =
+    usePendingHolders(category, !isEvaluator)
+
+  // A link can only say a name; it cannot guarantee that name still holds games in
+  // this bucket by the time it loads, or that it spells it the same way. The Report's
+  // names and this list both come from game_evaluations.initial_evaluator now, but the
+  // match stays case-insensitive and the select is seeded with the LIST's own spelling
+  // (never the URL's) because casing has drifted between tables before. A name that
+  // resolves to nothing real drops the preselection rather than leaving the select on
+  // a value it cannot display.
   useEffect(() => {
-    if (!initialFrom || roster.length === 0) return
-    const match = roster.find(r => r.name.toLowerCase() === initialFrom.toLowerCase())
+    if (!initialFrom || holders.length === 0) return
+    const match = holders.find(h => h.name.toLowerCase() === initialFrom.toLowerCase())
     setFrom(match ? match.name : '')
-  }, [roster, initialFrom])
+  }, [holders, initialFrom])
+
+  // Switching bucket, or draining a source to zero, drops a source that holds
+  // nothing here rather than leaving a name in the box that the list no longer has.
+  // Case-insensitive on purpose: the effect above runs first and hands this one a
+  // `from` still holding the URL's spelling, so a case-sensitive test would throw
+  // away a ?from=phuongnt1 the instant the effect above resolved it to PhuongNT1.
+  const holderNames = useMemo(() => new Set(holders.map(h => h.name.toLowerCase())), [holders])
+  useEffect(() => {
+    if (from && !holdersLoading && holders.length > 0 && !holderNames.has(from.toLowerCase())) setFrom('')
+  }, [from, holders.length, holderNames, holdersLoading])
 
   const targets = useMemo(() => roster.filter(r => r.name !== from), [roster, from])
   // Default target selection: everyone available except the source.
@@ -140,6 +169,7 @@ export function ReassignPanel({ initialFrom, initialCategory }: { initialFrom?: 
       setResult(json as DistResult)
       setMsg({ type: 'ok', text: `Re-assigned ${json.assigned ?? 0} games from ${from} to ${selected.length} evaluators.` })
       setHistToken(t => t + 1)
+      refreshHolders() // the counts just moved; a drained source drops off the list
     } catch { setMsg({ type: 'err', text: 'Network error' }) }
     finally { setCommitting(false) }
   }
@@ -186,8 +216,12 @@ export function ReassignPanel({ initialFrom, initialCategory }: { initialFrom?: 
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
             <div className="field" style={{ flex: '1 1 220px', minWidth: 180 }}>
               <span className="label">Re-assign from</span>
-              <StyledSelect value={from} onChange={setFrom} placeholder="-- Select evaluator --"
-                options={roster.map(r => ({ value: r.name, label: r.name }))} />
+              <StyledSelect value={from} onChange={setFrom}
+                disabled={fromOptions.length === 0}
+                placeholder={holdersLoading ? 'Loading…'
+                  : fromOptions.length === 0 ? '-- Nobody holds pending games here --'
+                  : '-- Select evaluator --'}
+                options={fromOptions} />
             </div>
             <div className="field">
               <span className="label">Mode</span>

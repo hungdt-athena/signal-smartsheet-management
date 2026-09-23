@@ -32,12 +32,35 @@ describe('/api/assign-setup', () => {
       { id: 2, name: 'Ann', category_group: 'arcade', today_available: true, game_platform: 'ios', game_category: 'action', weight: 50, list_type: 'initial' },
       { id: 3, name: 'Bob', category_group: 'puzzle', today_available: false, game_platform: 'ios', game_category: 'word', weight: 70, list_type: 'final' },
     ])
-    const res = await GET()
+    const res = await GET(req('/api/assign-setup'))
     const json = await res.json()
     expect(res.status).toBe(200)
     expect(json.initial).toHaveLength(2)
     expect(json.final).toHaveLength(1)
     expect(json.initial[0].category_group).toBe('puzzle')
+  })
+
+  // Regression: the Re-assign / Handover panels are per-bucket and have always sent
+  // ?group=. The route ignored it, so anyone on two genre rosters came back twice and
+  // showed up twice in their dropdowns (HuyDD and NhiLV, on arcade + puzzle).
+  it('GET với ?group= chỉ trả genre đó, không trả người trùng tên 2 lần', async () => {
+    sqlMock.mockResolvedValueOnce([
+      { id: 1, name: 'Ann', category_group: 'puzzle', today_available: true, game_platform: 'all', game_category: 'All', weight: 100, list_type: 'initial' },
+      { id: 2, name: 'Ann', category_group: 'arcade', today_available: true, game_platform: 'ios', game_category: 'action', weight: 50, list_type: 'initial' },
+      { id: 3, name: 'Bob', category_group: 'puzzle', today_available: true, game_platform: 'all', game_category: 'All', weight: 70, list_type: 'initial' },
+    ])
+    const json = await (await GET(req('/api/assign-setup?group=arcade'))).json()
+    expect(json.initial.map((r: { name: string }) => r.name)).toEqual(['Ann'])
+    expect(json.final).toEqual([])
+  })
+
+  it('GET với ?group= rác thì bỏ qua, trả nguyên cả 3 genre', async () => {
+    sqlMock.mockResolvedValueOnce([
+      { id: 1, name: 'Ann', category_group: 'puzzle', today_available: true, game_platform: 'all', game_category: 'All', weight: 100, list_type: 'initial' },
+      { id: 2, name: 'Ann', category_group: 'arcade', today_available: true, game_platform: 'ios', game_category: 'action', weight: 50, list_type: 'initial' },
+    ])
+    const json = await (await GET(req('/api/assign-setup?group=bogus'))).json()
+    expect(json.initial).toHaveLength(2)
   })
 
   it('GET với evaluator chỉ trả dòng của chính họ, và không trả Final list', async () => {
@@ -47,7 +70,7 @@ describe('/api/assign-setup', () => {
       { id: 2, name: 'Bob', category_group: 'puzzle', today_available: true, game_platform: 'all', game_category: 'All', weight: 100, list_type: 'initial' },
       { id: 3, name: 'Ann', category_group: 'puzzle', today_available: true, game_platform: 'all', game_category: 'All', weight: 100, list_type: 'final' },
     ])
-    const json = await (await GET()).json()
+    const json = await (await GET(req('/api/assign-setup'))).json()
     expect(json.initial.map((r: { name: string }) => r.name)).toEqual(['Ann'])
     expect(json.final).toEqual([])
   })

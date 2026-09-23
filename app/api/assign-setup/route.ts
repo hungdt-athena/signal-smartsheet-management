@@ -14,15 +14,21 @@ interface RosterRow {
 
 const PLATFORMS = ['all', 'ios', 'android']
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   // Read is open to evaluators too, but scoped to their own Initial-list rows
   // (no Final list). Managers see the full roster. Writes stay manager-only.
   //
-  // One request returns every genre: the Assign tab is a single page now, so a
-  // per-bucket read would just be three round-trips for one table. Order is by
-  // person, then a fixed genre order, because the table groups rows by person.
+  // With no ?group=, one request returns every genre: the Assign tab is a single
+  // page now, so a per-bucket read would just be three round-trips for one table.
+  // Order is by person, then a fixed genre order, because the table groups rows
+  // by person. With ?group=<bucket>, the read is narrowed to that genre -- the
+  // Re-assign and Handover panels are per-bucket, and a person registered in two
+  // genres would otherwise come back twice and show up twice in their dropdowns.
   const guard = await requireRole(['admin', 'moderator', 'evaluator'])
   if (guard) return guard
+
+  const groupParam = req.nextUrl.searchParams.get('group')
+  const group = isBucket(groupParam) ? groupParam : null
 
   const rows = await sql<RosterRow[]>`
     SELECT id, name, category_group, today_available, game_platform, game_category, weight, list_type
@@ -30,8 +36,9 @@ export async function GET() {
     ORDER BY name ASC,
              array_position(ARRAY['puzzle','arcade','simulation']::text[], category_group)
   `
-  let initial = rows.filter(r => r.list_type === 'initial')
-  let final = rows.filter(r => r.list_type === 'final')
+  const scoped = group ? rows.filter(r => r.category_group === group) : rows
+  let initial = scoped.filter(r => r.list_type === 'initial')
+  let final = scoped.filter(r => r.list_type === 'final')
 
   const session = await getSession()
   if (session?.user?.role === 'evaluator') {
