@@ -103,7 +103,7 @@ function BucketTable({ b }: { b: DailyBucket }): JSX.Element {
             <th scope="col" className="num">P&amp;BP</th>
             <th scope="col" className="num">Bypass</th>
             {showOther && <th scope="col" className="num">Other</th>}
-            {showTags && <th scope="col" className="num">Tags/Games</th>}
+            {showTags && <th scope="col" className="num">&sum;Tag/&sum;Game</th>}
           </tr>
         </thead>
         <tbody>
@@ -347,7 +347,7 @@ export function DayBreakdown({ evaluator, windowFrom, windowTo, category }: {
             <th scope="col" className="num">P&amp;BP</th>
             <th scope="col" className="num">Bypass</th>
             {showOther && <th scope="col" className="num">Other</th>}
-            {showTags && <th scope="col" className="num">Tags/Games</th>}
+            {showTags && <th scope="col" className="num">&sum;Tag/&sum;Game</th>}
           </tr>
         </thead>
         <tbody>
