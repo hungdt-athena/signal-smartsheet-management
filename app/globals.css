@@ -2864,3 +2864,48 @@ input:checked + .slider:before {
 .rp-review-loading { text-align: center; font-size: 12px; color: var(--faint); padding: 10px 0; }
 .rp-review-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--muted);
   background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius); }
+
+/* ===== Report › Leaderboard › daily block (one day at a time) ===== */
+/* Counts, never rates: this block answers "did the day's work happen", which is a
+   different question from the rest of the tab's "where do people differ". The styling
+   follows that -- a plain dense table, no bars, no colour scale, nothing that invites
+   reading one day as a judgement of anybody. */
+.rp-daily-scope { font-size: 12px; color: var(--muted); margin: -4px 2px 12px; max-width: 82ch; }
+.rp-daily-note { font-size: 13px; color: var(--muted); text-align: center; padding: 20px 0; }
+.rp-daily { display: flex; flex-direction: column; gap: 16px; }
+.rp-daily-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; }
+.rp-daily-when { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rp-daily-nav { display: flex; gap: 6px; flex-shrink: 0; }
+/* The strip is the fast way between days, so it stays one line and scrolls rather
+   than reflowing into a block that pushes the table off screen. */
+.rp-daily-strip { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 4px; }
+.rp-daily-chip { font-family: var(--num); font-size: 11.5px; font-weight: 600;
+  padding: 4px 9px; border-radius: 7px; cursor: pointer; flex-shrink: 0;
+  color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); }
+.rp-daily-chip:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+.rp-daily-chip.on { background: var(--accent-weak); border-color: var(--accent);
+  color: var(--accent-strong); }
+/* A day nobody worked is shown, not hidden: on a daily check that is information.
+   It just cannot be selected, because there is no table behind it. */
+.rp-daily-chip.quiet { background: transparent; border-style: dashed; color: var(--faint);
+  cursor: default; opacity: .65; }
+.rp-daily-date { font-size: 15px; font-weight: 700; color: var(--text); }
+.rp-daily-count { font-size: 12px; color: var(--faint); font-family: var(--num); }
+.rp-daily-bucket-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 6px; }
+.rp-daily-bucket-name { font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); }
+.rp-daily-bucket-sub { font-size: 11.5px; color: var(--faint); }
+.rp-daily-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rp-daily-table th, .rp-daily-table td { padding: 6px 10px; text-align: left;
+  border-bottom: 1px solid var(--border); }
+.rp-daily-table thead th { font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--faint); border-bottom: 1px solid var(--border-strong); }
+.rp-daily-table tbody th { font-weight: 600; color: var(--text); }
+.rp-daily-table .num { text-align: right; font-family: var(--num); font-variant-numeric: tabular-nums; }
+.rp-daily-table .strong { font-weight: 700; }
+/* The total row closes the table, so it carries no bottom hairline of its own. */
+.rp-daily-total th, .rp-daily-total td { border-bottom: none; border-top: 1px solid var(--border-strong);
+  font-weight: 700; }
+.rp-daily-foot { font-size: 11.5px; color: var(--warn); margin: 8px 2px 0; }

@@ -10,6 +10,7 @@ import {
 import type { BenchStats } from '@/lib/report'
 import { isBucket } from '@/lib/buckets'
 import { ReviewTable } from '@/components/report/ReviewTable'
+import { DailyBlock } from '@/components/report/DailyBlock'
 
 type View = 'week' | 'month' | 'quarter' | 'year' | 'batch' | 'custom'
 // The axis keys below have to stay 'Signal'/'Survival' - they index the `axes` map the
@@ -2066,6 +2067,26 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
       <DoBlock acts={shown.map((a) => ({
         sev: a.sev, key: a.key, kicker: famLabel(a.fam), do: a.do, why: a.why, cta: a.cta,
       }))} />
+
+      {/* One day at a time, directly under the actions. It is the only block on this
+          tab that is not about the whole period, and that is the point: everything
+          else here asks where people differ from each other, which needs a window
+          long enough to mean something, and this asks whether a particular day's work
+          happened, which does not. So it counts and never rates - no percentage, no
+          ranking - and the note says which of the filters above still reach it.
+          Its data is its own request, not part of the report payload: Overview and
+          Individual must not pay for a table they never show. `window.to` is
+          EXCLUSIVE on the payload, so the last day is to-1; absent on a window with
+          no bounds, where the route falls back to a recent span of its own. */}
+      <div className="rp-section-title">Day by day - did the day&apos;s work happen?</div>
+      <p className="rp-daily-scope">
+        Counts for a single day, never rates - a day is far too short to read anyone&apos;s bar
+        from. The period above chooses which days you can step through; the Category filter
+        chooses which buckets appear.
+      </p>
+      <DailyBlock category={d.category}
+        windowFrom={d.window.from || null}
+        windowTo={d.window.to ? addDays(d.window.to, -1) : null} />
 
       <div className="rp-section-title">Everyone - who produces, and does it hold up?</div>
       <Card label="Volume vs shortlist rate" note="x = games evaluated · y = shortlist % · bubble = games per day"
