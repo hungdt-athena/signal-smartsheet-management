@@ -73,7 +73,7 @@ const int = (n: number) => Math.round(n).toLocaleString('en-US')
 
 // "11/6" reads as eleven tags spread over six games; one number alone cannot say
 // whether a person tagged many games or one game many times.
-function tagCell(row: DailyRow): string {
+function tagCell(row: { tagRows: number; tagged: number }): string {
   if (row.tagRows === 0 && row.tagged === 0) return '—'
   return `${int(row.tagRows)}/${int(row.tagged)}`
 }
@@ -91,7 +91,7 @@ function BucketTable({ b }: { b: DailyBucket }): JSX.Element {
       <div className="rp-daily-bucket-head">
         <span className="rp-daily-bucket-name">{BUCKET_LABEL[b.bucket] || b.bucket}</span>
         <span className="rp-daily-bucket-sub">
-          {int(b.evaluators)} {b.evaluators === 1 ? 'evaluator' : 'evaluators'} · {int(b.total)} judged
+          {int(b.evaluators)} {b.evaluators === 1 ? 'evaluator' : 'evaluators'} · {int(b.total)} evaluated
         </span>
       </div>
       <table className="rp-daily-table">
@@ -222,7 +222,7 @@ export function DailyBlock({ windowFrom, windowTo, category }: {
       <div className="rp-daily-head">
         <div className="rp-daily-when">
           <span className="rp-daily-date">{dayLabel(day.date)}</span>
-          <span className="rp-daily-count">{int(day.total)} judged</span>
+          <span className="rp-daily-count">{int(day.total)} evaluated</span>
         </div>
         <div className="rp-daily-nav">
           <button type="button" className="btn btn-sm" disabled={!older || switching}
@@ -243,7 +243,7 @@ export function DailyBlock({ windowFrom, windowTo, category }: {
                   + (dte === selected ? ' on' : '')
                   + (quiet ? ' quiet' : '')}
                 disabled={quiet || switching}
-                title={quiet ? `${dayLabel(dte)} — no work` : `${dayLabel(dte)} — ${int(n!)} judged`}
+                title={quiet ? `${dayLabel(dte)} — no work` : `${dayLabel(dte)} — ${int(n!)} evaluated`}
                 aria-current={dte === selected ? 'true' : undefined}
                 onClick={() => load(dte)}>
                 {shortLabel(dte)}
@@ -254,9 +254,145 @@ export function DailyBlock({ windowFrom, windowTo, category }: {
       )}
 
       {day.buckets.length === 0
-        ? <div className="rp-daily-note">Nothing was judged on this day.</div>
+        ? <div className="rp-daily-note">Nothing was evaluated on this day.</div>
         : day.buckets.slice().sort((a, b) => bucketOrder(a.bucket) - bucketOrder(b.bucket))
             .map((b) => <BucketTable key={b.bucket} b={b} />)}
+    </div>
+  )
+}
+
+
+// ---- the Individual tab's breakdown -----------------------------------------
+// The same table turned on its side: one row per DAY for one person, over the whole
+// period, instead of one row per person for one day. Same columns, same counting rule,
+// same endpoint - a second query would be how this person's row here and their row in
+// the Leaderboard's block start disagreeing.
+//
+// No day chips: every day is already a row, so a picker would only scroll the page.
+
+interface PersonDay {
+  date: string; total: number; idea: number; pbp: number; bypass: number
+  other: number; linkDead: number; staleRelease: number; tagRows: number; tagged: number
+}
+
+export function DayBreakdown({ evaluator, windowFrom, windowTo, category }: {
+  evaluator: string
+  windowFrom?: string | null
+  windowTo?: string | null
+  category: string
+}): JSX.Element {
+  const [rows, setRows] = useState<PersonDay[]>([])
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  const seqRef = useRef(0)
+
+  useEffect(() => {
+    const seq = ++seqRef.current
+    setLoading(true)
+    setFailed(false)
+    void (async () => {
+      const params = new URLSearchParams({ by: 'day', evaluator, category })
+      if (windowFrom) params.set('from', windowFrom)
+      if (windowTo) params.set('to', windowTo)
+      try {
+        const res = await fetch(`/api/report/daily?${params}`)
+        const json = await res.json()
+        if (seq !== seqRef.current) return
+        setRows(json.byDay || [])
+        setRange(json.from && json.to ? { from: json.from, to: json.to } : null)
+      } catch {
+        if (seq !== seqRef.current) return
+        setRows([])
+        setRange(null)
+        setFailed(true)
+      }
+      if (seq === seqRef.current) setLoading(false)
+    })()
+  }, [evaluator, windowFrom, windowTo, category])
+
+  if (loading) return <div className="card"><div className="rp-daily-note">Loading...</div></div>
+  if (failed) {
+    return <div className="card"><div className="rp-daily-note">Could not load the day breakdown. Try again in a moment.</div></div>
+  }
+  if (rows.length === 0) {
+    return <div className="card"><div className="rp-daily-note">No evaluation work on any day in this period.</div></div>
+  }
+
+  const byDate = new Map(rows.map((r) => [r.date, r]))
+  const span = range ? eachDay(range.from, range.to) : []
+  // Same rule as the strip on the Leaderboard, and the same reason: up to a month, a
+  // zero row is worth printing, because "which days did they not work" is half of what
+  // this table is for. Past a month it would be hundreds of rows to say it, so only
+  // the days with work are listed and the quiet ones are counted underneath.
+  const full = span.length > 0 && span.length <= FULL_STRIP_DAYS
+  const listed = full ? span.slice().reverse() : rows.map((r) => r.date)
+  const quiet = full ? 0 : span.length > 0 ? span.length - rows.length : 0
+
+  const pick = (d: string) => byDate.get(d)
+  const showOther = rows.some((r) => r.other > 0)
+  const showTags = rows.some((r) => r.tagRows > 0 || r.tagged > 0)
+  const add = (f: (r: PersonDay) => number) => rows.reduce((a, r) => a + f(r), 0)
+  const linkDead = add((r) => r.linkDead)
+  const staleRelease = add((r) => r.staleRelease)
+
+  return (
+    <div className="card rp-daily">
+      <table className="rp-daily-table">
+        <thead>
+          <tr>
+            <th scope="col">Day</th>
+            <th scope="col" className="num">Total</th>
+            <th scope="col" className="num">Idea</th>
+            <th scope="col" className="num">P&amp;BP</th>
+            <th scope="col" className="num">Bypass</th>
+            {showOther && <th scope="col" className="num">Other</th>}
+            {showTags && <th scope="col" className="num">Tags/Games</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {listed.map((d) => {
+            const r = pick(d)
+            // A day they did not work is a row of zeroes, dimmed - not a gap in the
+            // table that the reader has to notice is missing.
+            return (
+              <tr key={d} className={r ? undefined : 'rp-daily-quiet-row'}>
+                <th scope="row">{dayLabel(d)}</th>
+                <td className="num strong">{int(r?.total ?? 0)}</td>
+                <td className="num">{int(r?.idea ?? 0)}</td>
+                <td className="num">{int(r?.pbp ?? 0)}</td>
+                <td className="num">{int(r?.bypass ?? 0)}</td>
+                {showOther && <td className="num">{int(r?.other ?? 0)}</td>}
+                {showTags && <td className="num">{r ? tagCell(r) : '—'}</td>}
+              </tr>
+            )
+          })}
+          <tr className="rp-daily-total">
+            <th scope="row">Total</th>
+            <td className="num strong">{int(add((r) => r.total))}</td>
+            <td className="num">{int(add((r) => r.idea))}</td>
+            <td className="num">{int(add((r) => r.pbp))}</td>
+            <td className="num">{int(add((r) => r.bypass))}</td>
+            {showOther && <td className="num">{int(add((r) => r.other))}</td>}
+            {showTags && (
+              <td className="num">{int(add((r) => r.tagRows))}/{int(add((r) => r.tagged))}</td>
+            )}
+          </tr>
+        </tbody>
+      </table>
+      {(linkDead > 0 || staleRelease > 0) && (
+        <p className="rp-daily-foot">
+          {[
+            linkDead > 0 ? `${int(linkDead)} link dead` : '',
+            staleRelease > 0 ? `${int(staleRelease)} stale release` : '',
+          ].filter(Boolean).join(' · ')} — handled, not counted in Total
+        </p>
+      )}
+      {quiet > 0 && (
+        <p className="rp-daily-quiet-note">
+          {int(quiet)} other {quiet === 1 ? 'day' : 'days'} in this period had no evaluation work.
+        </p>
+      )}
     </div>
   )
 }

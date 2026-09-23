@@ -671,7 +671,7 @@ describe('Overview tab', () => {
     // EVENTS - a game is judged once and crosses each boundary once - which is what
     // makes them safe to read per bucket and safe to add across buckets.
     const { container } = await renderTab(healthy())
-    const card = cardNamed(container, 'Judged vs aged')
+    const card = cardNamed(container, 'Evaluated vs aged')
     const rows = Array.from(card.querySelectorAll('.rp-div-row'))
     expect(rows).toHaveLength(5)                       // one per bucket
     const row = rows[0]
@@ -690,12 +690,12 @@ describe('Overview tab', () => {
     expect(Math.round(width(tracks[1]))).toBe(100)
 
     expect(card.querySelector('.rp-div-heads .left')!.textContent).toBe('◀ Aged into')
-    expect(card.querySelector('.rp-div-heads .right')!.textContent).toBe('Judged ▶')
+    expect(card.querySelector('.rp-div-heads .right')!.textContent).toBe('Evaluated ▶')
     // The verdict weighs stale work CLEARED against stale work CREATED - both counted on
     // the 8+ day backlog. Weighing all-ages-cleared against crossings-into-15d+ once
     // printed "cleared faster than created" over a window where the backlog grew.
     expect(card.querySelector('.rp-readnote')!.textContent).toMatch(
-      /^1,000 judged this week against 300 that crossed into an older band, 100 of them past 15 days\. On the 8\+ day backlog alone: 100 cleared, 150 created – the stale backlog is growing\./)
+      /^1,000 evaluated this week against 300 that crossed into an older band, 100 of them past 15 days\. On the 8\+ day backlog alone: 100 cleared, 150 created – the stale backlog is growing\./)
   })
 
   it('still counts a bucket where games aged but nothing was judged', async () => {
@@ -708,14 +708,14 @@ describe('Overview tab', () => {
         aged: [{ key: 'k0', label: '9/9', parts: { a3: 40 } }],
       },
     }))
-    const card = cardNamed(container, 'Judged vs aged')
+    const card = cardNamed(container, 'Evaluated vs aged')
     const rows = Array.from(card.querySelectorAll('.rp-div-row'))
     expect(rows).toHaveLength(1)
     expect(rows[0].querySelector('.rp-div-name')!.textContent).toBe('9/9')
     expect(rows[0].querySelector('.rp-div-num.left')!.textContent).toBe('40')
     expect(rows[0].querySelector('.rp-div-num.right')!.textContent).toBe('')
     expect(card.querySelector('.rp-readnote')!.textContent).toBe(
-      '0 judged this week against 40 that crossed into an older band, 40 of them past 15 days. On the 8+ day backlog alone: 0 cleared, 40 created – the stale backlog is growing.')
+      '0 evaluated this week against 40 that crossed into an older band, 40 of them past 15 days. On the 8+ day backlog alone: 0 cleared, 40 created – the stale backlog is growing.')
   })
 
   /* ---- law 7: several ways out of one problem, cheapest first ----
@@ -900,7 +900,7 @@ describe('Overview tab', () => {
     const move = actions(container).find((a) => a.do.startsWith('Move '))!
     expect(move.do).toContain('to the 2 people Rescue would hand them to')
     expect(move.do).not.toMatch(/clear desk/i)
-    expect(move.why).toContain("2 others pass Rescue's receiver check and are still judging.")
+    expect(move.why).toContain("2 others pass Rescue's receiver check and are still evaluating.")
     expect(move.why).not.toMatch(/nothing stale/i)
   })
 

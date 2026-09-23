@@ -507,7 +507,7 @@ describe('Individual tab', () => {
       })) },
     }))
     const now = nowLines(container).find((n) => n.includes('only got older'))!
-    expect(now).toContain('90 judged against 120 that only got older')
+    expect(now).toContain('90 evaluated against 120 that only got older')
     expect(now).toContain('30 cleared against 120 that crossed in')
     expect(now).toContain('stale work arrived faster than it was cleared')
     // a movement sentence, never a claim about what is on the desk right now
@@ -540,7 +540,7 @@ describe('Individual tab', () => {
     // the 1,842 they came from, under a sentence calling it a subset.
     const { container } = await individual(bundleOf(TWO()))
     const tier = Array.from(container.querySelectorAll('.rp-mix-block'))
-      .find((b) => txt(b).startsWith('How those picks were judged'))!
+      .find((b) => txt(b).startsWith('How those picks were ruled on'))!
     expect(txt(tier)).toContain('of 600 ruled on')
     const bar = tier.querySelector('.rp-band-bar')!
     expect(bar.classList.contains('scaled')).toBe(true)
@@ -564,7 +564,7 @@ describe('Individual tab', () => {
     const { container } = await individual(bundleOf([person('Alpha', { evaluated: 0, assigned: 600 })], {
       canSeeTeam: false, self: 'k0',
     }))
-    expect(txt(container.querySelector('.rp-headline'))).toBe('You have not judged anything this week.')
+    expect(txt(container.querySelector('.rp-headline'))).toBe('You have not evaluated anything this week.')
     const act = actions(container)[0]
     // idle was deleted here (Leaderboard already has that line); the next act to fire
     // for an assigned-but-untouched backlog is the intake-gap coaching, in the

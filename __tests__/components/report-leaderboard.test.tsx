@@ -154,6 +154,42 @@ describe('Leaderboard tab', () => {
     expect(container.querySelector('.rp-kpi')).toBeNull()
   })
 
+  it('prints no multiple for somebody who keeps nothing, instead of a billion', async () => {
+    // SHIPPED BUG. The sentence divided 1 by the person's ratio, and a ratio of zero
+    // was guarded with `Math.max(1e-9, r)` -- so "keeps nothing" came out as
+    // "1000000000.0x under" on screen. The guard hid the case rather than handling it:
+    // a multiple of a zero rate is not a number anybody can read, and "keeps nothing
+    // where the others keep 1 in 5" is already the whole story.
+    const { container } = await leaderboard(bundleOf([
+      even('Alpha', { listIdea: 0, bypass: 250 }), even('Beta'), even('Gamma'), even('Delta'),
+    ]))
+    const now = nowLines(container).join(' ')
+    expect(now).toContain('Alpha')
+    expect(now).toContain('keeps nothing')
+    expect(now).not.toMatch(/\d{4,}(\.\d+)?x/)   // no 1000000000.0x
+    expect(now).not.toMatch(/Infinity|NaN/)
+    // the rest of the sentence still reads, and still carries the sample size
+    expect(now).toMatch(/on 250 games/)
+  })
+
+  it('takes you to the named person s row, flashed, when you click their name in a chart', async () => {
+    // Naming somebody in a chart's sentence and leaving the reader to find them in a
+    // table of fifteen rows is half a navigation. Same contract the design doc sets
+    // for Overview's buttons: the right screen, with the named row flashed.
+    const { container } = await leaderboard(bundleOf([
+      even('Alpha', { listIdea: 0, bypass: 250 }), even('Beta'), even('Gamma'), even('Delta'),
+    ]))
+    expect(rowNamed(container, 'Alpha').className).not.toContain('rp-lbt-flash')
+
+    const link = screen.getByRole('button', { name: 'Alpha' })
+    fireEvent.click(link)
+
+    expect(rowNamed(container, 'Alpha').className).toContain('rp-lbt-flash')
+    // ...and only that row, or the flash says nothing
+    expect(rowNamed(container, 'Beta').className).not.toContain('rp-lbt-flash')
+    expect(scrolled).toBe(true)
+  })
+
   it('carries six cards and none of the blocks the redesign removed', async () => {
     const { container } = await leaderboard(bundleOf(FOUR()))
     const labels = Array.from(container.querySelectorAll('.card-label')).map((l) => l.textContent?.replace('?', ''))
@@ -179,7 +215,7 @@ describe('Leaderboard tab', () => {
     const { container } = await leaderboard(bundleOf(FOUR()))
     expect(actions(container)).toEqual([])
     expect(container.querySelector('.rp-headline'))
-      .toHaveTextContent('The team is judging by one bar, at a comparable pace.')
+      .toHaveTextContent('The team is evaluating by one bar, at a comparable pace.')
   })
 
   // Overview's verdict banner (headline + boxed, clickable chips) is now shared by
@@ -247,14 +283,14 @@ describe('Leaderboard tab', () => {
   it('reads the people and top chips as full sentences that name their unit', async () => {
     const { container } = await leaderboard(bundleOf(FOUR()))
     const people2 = chipText(container, 'COVERAGE')
-    expect(people2).toBe('4 of 4 people judged anything this week')
+    expect(people2).toBe('4 of 4 people evaluated anything this week')
     expect(people2.length).toBeLessThanOrEqual(150)
 
     // ThuDT's example became a bold-percentage sentence; on this fixture the top
     // person is Alpha (all four tied on evaluated, first in array order): 250 of the
     // team's 1,000 games is 25%.
     const top = chipText(container, 'CONCENTRATION')
-    expect(top).toBe('Alpha judged 25% of everything the team got through')
+    expect(top).toBe('Alpha evaluated 25% of everything the team got through')
     expect(top.length).toBeLessThanOrEqual(150)
   })
 
@@ -275,7 +311,7 @@ describe('Leaderboard tab', () => {
     // The riddle this task exists to remove: "keeps nothing" alone, with no noun,
     // and "1 in 11" with nothing said about what is being kept.
     expect(cal).not.toContain('keeps nothing,')
-    expect(cal).toBe('NhiLV shortlists none of the games they judge; QuangVN keeps 1 in every 11')
+    expect(cal).toBe('NhiLV shortlists none of the games they evaluate; QuangVN keeps 1 in every 11')
     expect(cal.length).toBeLessThanOrEqual(150)
   })
 
@@ -308,7 +344,7 @@ describe('Leaderboard tab', () => {
     ]
     const { container } = await leaderboard(bundleOf(people))
     const cal = chipText(container, 'CALIBRATION')
-    expect(cal).toBe('Strict shortlists 20% of the games they judge; Loose keeps 80%')
+    expect(cal).toBe('Strict shortlists 20% of the games they evaluate; Loose keeps 80%')
     expect(cal.length).toBeLessThanOrEqual(150)
   })
 
@@ -332,7 +368,7 @@ describe('Leaderboard tab', () => {
     const cal = chipText(container, 'CALIBRATION')
     expect(cal).not.toContain('∞')
     expect(cal).not.toMatch(/Infinity|NaN|undefined/)
-    expect(cal).toBe('Strict shortlists 1 in every 10 of the games they judge; Loose keeps none')
+    expect(cal).toBe('Strict shortlists 1 in every 10 of the games they evaluate; Loose keeps none')
   })
 
   // Code review Important 1, both sides at once: strict keeps nothing at the top of
@@ -355,7 +391,7 @@ describe('Leaderboard tab', () => {
     const cal = chipText(container, 'CALIBRATION')
     expect(cal).not.toContain('∞')
     expect(cal).not.toMatch(/Infinity|NaN|undefined/)
-    expect(cal).toBe('Strict shortlists none of the games they judge; Loose keeps none')
+    expect(cal).toBe('Strict shortlists none of the games they evaluate; Loose keeps none')
   })
 
   // Code review Important 2: the two clauses used to use different phrasing for the
@@ -374,7 +410,7 @@ describe('Leaderboard tab', () => {
     const { container } = await leaderboard(bundleOf(people))
     const cal = chipText(container, 'CALIBRATION')
     // both clauses spelled out as "1 in every N", never "1 in N" or "1 game in N"
-    expect(cal).toBe('Strict shortlists 1 in every 10 of the games they judge; Loose keeps 1 in every 7')
+    expect(cal).toBe('Strict shortlists 1 in every 10 of the games they evaluate; Loose keeps 1 in every 7')
   })
 
   it('puts every rate next to the count it was computed from', async () => {
@@ -424,7 +460,7 @@ describe('Leaderboard tab', () => {
     people[0] = even('Alpha', { bypass: 210, listIdea: 40 })  // 84% bypass, 16% kept
     people[1] = even('Beta', { bypass: 165, listIdea: 85 })   // 66% bypass, 34% kept
     const { container } = await leaderboard(bundleOf(people))
-    expect(container.querySelector('.rp-headline')).toHaveTextContent('not judging by the same bar')
+    expect(container.querySelector('.rp-headline')).toHaveTextContent('not evaluating by the same bar')
     expect(container.querySelectorAll('.rp-scatter-lbl.hot')).toHaveLength(0)
     const [first] = actions(container)
     expect(first.do).toContain('Alpha')

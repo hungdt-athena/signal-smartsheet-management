@@ -77,6 +77,13 @@ export interface DailyDay {
   buckets: DailyBucket[]
 }
 export interface DailyIndexEntry { date: string; total: number }
+// `by=day`: the same columns as a day's table, but one row per DAY for one person.
+// The Individual tab's breakdown - same counting rule, same exclusions, same source,
+// so a person's row there and their row in the Leaderboard's block cannot disagree.
+export interface DailyPersonRow {
+  date: string; total: number; idea: number; pbp: number; bypass: number
+  other: number; linkDead: number; staleRelease: number; tagRows: number; tagged: number
+}
 
 function isoDay(d: Date): string {
   return d.toISOString().slice(0, 10)
@@ -110,6 +117,68 @@ export async function GET(req: NextRequest) {
 
     const { config: rcfg } = await loadReportConfig()
     const excluded = Array.from(new Set([...SYSTEM_EVALUATOR_KEY_LIST, ...rcfg.excluded]))
+
+    // `by=day` + `evaluator`: one row per day for one person, over the whole period.
+    // Served from this route rather than its own so the counting rule, the exclusions
+    // and the tagging join stay in ONE place - a second copy is how a person's row on
+    // the Individual tab ends up disagreeing with their row on the Leaderboard.
+    const evaluator = (searchParams.get('evaluator') || '').trim()
+    if (searchParams.get('by') === 'day' && evaluator) {
+      const rows = await sql<Array<{
+        date: string; total: number; idea: number; pbp: number; bypass: number
+        link_dead: number; stale_release: number; tag_rows: number; tagged: number
+      }>>`
+        WITH ev AS (
+          SELECT (ge.evaluate_date AT TIME ZONE ${VN})::date AS d,
+                 count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL
+                                    AND ge.initial_conclusion <> ''
+                                    AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS total,
+                 count(*) FILTER (WHERE ge.initial_conclusion = 'List_Idea')::int AS idea,
+                 count(*) FILTER (WHERE ge.initial_conclusion = 'Playtest & Bypass')::int AS pbp,
+                 count(*) FILTER (WHERE ge.initial_conclusion = 'Bypass')::int AS bypass,
+                 count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead,
+                 count(*) FILTER (WHERE ge.initial_conclusion = 'Stale_release')::int AS stale_release
+          FROM game_evaluations ge
+          WHERE ge.evaluate_date >= (${from}::timestamp AT TIME ZONE ${VN})
+            AND ge.evaluate_date < ((${to}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')
+            AND lower(ge.initial_evaluator) = lower(${evaluator})
+            ${catFilter}
+          GROUP BY 1
+        ),
+        tg AS (
+          SELECT (pt.tagged_at AT TIME ZONE ${VN})::date AS d,
+                 count(*)::int AS tag_rows,
+                 count(DISTINCT pt.game_id)::int AS tagged
+          FROM playtest_tags pt
+          JOIN dashboard_users du ON lower(du.email) = lower(pt.tagged_by)
+          JOIN game_evaluations ge ON ge.game_id = pt.game_id
+          WHERE pt.tagged_at >= (${from}::timestamp AT TIME ZONE ${VN})
+            AND pt.tagged_at < ((${to}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')
+            AND pt.status <> 'removed'
+            AND lower(du.name) = lower(${evaluator})
+            ${catFilter}
+          GROUP BY 1
+        )
+        SELECT COALESCE(e.d, t.d)::text AS date,
+               COALESCE(e.total, 0) AS total, COALESCE(e.idea, 0) AS idea,
+               COALESCE(e.pbp, 0) AS pbp, COALESCE(e.bypass, 0) AS bypass,
+               COALESCE(e.link_dead, 0) AS link_dead,
+               COALESCE(e.stale_release, 0) AS stale_release,
+               COALESCE(t.tag_rows, 0) AS tag_rows, COALESCE(t.tagged, 0) AS tagged
+        FROM ev e
+        FULL OUTER JOIN tg t ON t.d = e.d
+        ORDER BY 1 DESC
+      `
+      return NextResponse.json({
+        byDay: rows.map((r) => ({
+          date: r.date, total: r.total, idea: r.idea, pbp: r.pbp, bypass: r.bypass,
+          other: Math.max(0, r.total - r.idea - r.pbp - r.bypass),
+          linkDead: r.link_dead, staleRelease: r.stale_release,
+          tagRows: r.tag_rows, tagged: r.tagged,
+        })),
+        from, to, category,
+      })
+    }
 
     // Day boundaries are built as timestamptz BEFORE the comparison, so the index on
     // evaluate_date / tagged_at is still usable. Writing

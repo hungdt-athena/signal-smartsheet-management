@@ -60,7 +60,7 @@ describe('DailyBlock', () => {
     expect(p.get('from')).toBe('2026-09-20')
     expect(p.get('to')).toBe('2026-09-22')
     expect(p.get('day')).toBeNull() // the server picks it, in the same round trip
-    expect(screen.getByText('140 judged')).toBeInTheDocument()
+    expect(screen.getByText('140 evaluated')).toBeInTheDocument()
   })
 
   it('passes the page Category through, so the block cannot contradict the bar above it', async () => {

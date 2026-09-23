@@ -138,7 +138,7 @@ it('ignores a tab an evaluator may not see', async () => {
   const { container } = render(<ReportView />)
   await waitFor(() => expect(screen.queryByText('Loading…')).not.toBeInTheDocument())
   expect(screen.queryByRole('button', { name: 'Leaderboard' })).not.toBeInTheDocument()
-  expect(container.querySelector('.rp-headline')?.textContent).toBe('You have not judged anything this week.')
+  expect(container.querySelector('.rp-headline')?.textContent).toBe('You have not evaluated anything this week.')
 })
 
 it('writes rtab back to the URL on tab change without touching other params', async () => {

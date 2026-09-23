@@ -553,8 +553,8 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     ? (from === to ? ` on ${fmtDate(from)}` : ` between ${fmtDate(from)} and ${fmtDate(to)}`)
     : ''
   // On "All" there is no conclusion to name, so the sentence says what the filter
-  // really is -- judged at all -- rather than printing the sentinel.
-  const markedText = conclusion === ALL_CONCLUSIONS ? 'judged' : `marked ${prettyConclusion(conclusion)}`
+  // really is -- evaluated at all -- rather than printing the sentinel.
+  const markedText = conclusion === ALL_CONCLUSIONS ? 'evaluated' : `marked ${prettyConclusion(conclusion)}`
   const emptySentence = `${who} ${have} no ${catLabel} games ${markedText}${rangeText}.`
 
   const showEmpty = !initializing && !loading && rows.length === 0
@@ -597,7 +597,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
         <div className="rp-review-rows" ref={rowsRef}>
           {rows.map(row => {
             const shots = shotsFor(row)
-            const judged = fmtDate(row.evaluate_date || row.updated_at)
+            const evaluatedOn = fmtDate(row.evaluate_date || row.updated_at)
             const tags = Array.isArray(row.tags) ? row.tags : []
             return (
               <div className="rp-review-row" key={row.id}>
@@ -632,7 +632,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                     <div className="rp-review-verdict">
                       <span className={`pill ${conclusionTone(row.initial_conclusion)}`}>
                         {prettyConclusion(row.initial_conclusion)}</span>
-                      <span className="rp-review-badge">Evaluated: {judged}</span>
+                      <span className="rp-review-badge">Evaluated: {evaluatedOn}</span>
                       <span className="rp-review-badge">{row.initial_evaluator || evaluator}</span>
                     </div>
                   </div>

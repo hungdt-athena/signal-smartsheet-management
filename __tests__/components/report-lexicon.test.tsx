@@ -24,6 +24,12 @@ const BANNED: Array<[string, RegExp]> = [
   ['Signal rate', /Signal rate/],
   ['Credibility', /Credibility/],
   ['turnaround', /(^|[^\w.])turnaround([^\w(:]|$)/i],
+  // One verb for what an evaluator does to a game. The tab used both, sometimes in
+  // the same sentence as the KPI named "Evaluated", and the two read as different
+  // steps. Identifiers are exempt by the leading [^\w.] (finJudged, enoughToJudge),
+  // and "judgement" is not matched: the noun is still the right word for a verdict.
+  // What the MODERATOR does is "ruled on", which is a third step and stays distinct.
+  ['judge/judged/judging', /(^|[^\w.])judg(e|ed|es|ing)([^\w(:]|$)/i],
 ]
 
 describe('Report lexicon', () => {

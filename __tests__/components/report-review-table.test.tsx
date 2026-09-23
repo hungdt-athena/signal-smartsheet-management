@@ -402,7 +402,7 @@ describe('ReviewTable', () => {
 
     await waitFor(() => {
       const text = document.querySelector('.rp-review-empty')!.textContent!
-      expect(text).toMatch(/no Puzzle games judged/)
+      expect(text).toMatch(/no Puzzle games evaluated/)
     })
     expect(document.querySelector('.rp-review-empty')!.textContent).not.toMatch(/__all__/)
   })
@@ -553,7 +553,7 @@ describe('ReviewTable', () => {
     expect(empty!.textContent).toMatch(/puzzle/i)
     // On the default (All) there is no conclusion to name, so the sentence says what
     // the filter really is -- judged at all -- and never the sentinel.
-    expect(empty!.textContent).toMatch(/no Puzzle games judged/)
+    expect(empty!.textContent).toMatch(/no Puzzle games evaluated/)
     expect(empty!.textContent).not.toMatch(/__all__/)
     expect(empty!.textContent).toMatch(/You/)
   })

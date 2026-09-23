@@ -2870,6 +2870,13 @@ input:checked + .slider:before {
    different question from the rest of the tab's "where do people differ". The styling
    follows that -- a plain dense table, no bars, no colour scale, nothing that invites
    reading one day as a judgement of anybody. */
+/* A person's name inside a chart's sentence, when clicking it moves the page to their
+   row. It keeps the bold weight the plain name had so the sentence reads unchanged,
+   and only picks up a control's affordances on hover and focus. */
+.rp-who { font: inherit; font-weight: 700; color: var(--accent-strong); background: none;
+  border: none; padding: 0; cursor: pointer; border-bottom: 1px dotted transparent; }
+.rp-who:hover, .rp-who:focus-visible { border-bottom-color: currentColor; }
+
 .rp-daily-scope { font-size: 12px; color: var(--muted); margin: -4px 2px 12px; max-width: 82ch; }
 .rp-daily-note { font-size: 13px; color: var(--muted); text-align: center; padding: 20px 0; }
 .rp-daily { display: flex; flex-direction: column; gap: 16px; }
@@ -2909,3 +2916,7 @@ input:checked + .slider:before {
 .rp-daily-total th, .rp-daily-total td { border-bottom: none; border-top: 1px solid var(--border-strong);
   font-weight: 700; }
 .rp-daily-foot { font-size: 11.5px; color: var(--warn); margin: 8px 2px 0; }
+/* A day nobody worked is a row of zeroes, dimmed - not a gap the reader has to notice
+   is missing. Same decision as the greyed day on the Leaderboard's strip. */
+.rp-daily-quiet-row th, .rp-daily-quiet-row td { color: var(--faint); }
+.rp-daily-quiet-note { font-size: 11.5px; color: var(--faint); margin: 8px 2px 0; }
