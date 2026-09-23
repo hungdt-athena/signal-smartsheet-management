@@ -332,6 +332,95 @@ describe('ReviewTable', () => {
     expect(cells[1].className).toContain('rp-review-shots')
   })
 
+  // ---- what belongs in the conclusion dropdown ----
+
+  it('keeps housekeeping out of the conclusion dropdown, however the facets answer', async () => {
+    // Link_dead ("the store page went away") and Stale_release ("the build aged
+    // out") are not calls anybody made. The Report's own `judged` predicate excludes
+    // both, so every KPI on the tabs above this table already counts them out -- and
+    // a block titled "check the calls themselves" that opens on one shows an empty
+    // table under a person who did plenty of work. Live values, not just the
+    // canonical defaults: the facets endpoint is where they actually came from.
+    const fetchMock = mockApi({
+      facets: ['List_Idea', 'Link_dead', 'Stale_release', 'Bypass'],
+      list: [row()],
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
+    await waitFor(() => {
+      expect(Array.from(select.options).map(o => o.value)).toContain('Bypass')
+    })
+    const values = Array.from(select.options).map(o => o.value)
+    expect(values).not.toContain('Link_dead')
+    expect(values).not.toContain('Stale_release')
+  })
+
+  it('offers All, and asks for every real conclusion by name rather than dropping the filter', async () => {
+    const fetchMock = mockApi({
+      facets: ['List_Idea', 'Stale_release', 'Bypass'],
+      list: [row()],
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
+    // The default the reader asked for is unchanged: List Idea, not All.
+    expect(select.value).toBe('List_Idea')
+    await waitFor(() => expect(Array.from(select.options).map(o => o.value)).toContain('Bypass'))
+    expect(within(select).getByText('All')).toBeInTheDocument()
+
+    fireEvent.change(select, { target: { value: '__all__' } })
+
+    await waitFor(() => {
+      const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
+      expect(last.conclusions).toBeDefined()
+    })
+    const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
+    // Named explicitly, so "All" cannot quietly widen the table to the housekeeping
+    // rows the rest of the Report does not count.
+    const asked = last.conclusions!.split(',')
+    expect(asked).toContain('Bypass')
+    expect(asked).toContain('List_Idea')
+    expect(asked).not.toContain('Stale_release')
+    expect(last.conclusion).toBeUndefined()
+  })
+
+  it('says "judged" rather than printing the All sentinel in the empty sentence', async () => {
+    const fetchMock = mockApi({ facets: ['List_Idea', 'Bypass'] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(document.querySelector('.rp-review-empty')).not.toBeNull())
+    fireEvent.change(screen.getByLabelText('Initial conclusion'), { target: { value: '__all__' } })
+
+    await waitFor(() => {
+      const text = document.querySelector('.rp-review-empty')!.textContent!
+      expect(text).toMatch(/no Puzzle games judged/)
+    })
+    expect(document.querySelector('.rp-review-empty')!.textContent).not.toMatch(/__all__/)
+  })
+
+  it('does not fetch page 1 twice when the facets response lands after it', async () => {
+    // `allList` is derived from the option list, which arrives in its own request.
+    // Depending on it unconditionally would change fetchPage's identity the moment
+    // facets resolved and re-run the page-1 effect -- a second full page request,
+    // with screenshots, on every single tab open.
+    const fetchMock = mockApi({ facets: ['List_Idea', 'Bypass'], list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+    await waitFor(() => {
+      const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
+      expect(Array.from(select.options).map(o => o.value)).toContain('Bypass')
+    })
+
+    const pageOnes = parseCalls(fetchMock).filter(c => c.limit === '20' && c.page === '1')
+    expect(pageOnes.length).toBe(1)
+  })
+
   it('leaves the tag line out entirely when a game has no tags', async () => {
     const fetchMock = mockApi({ list: [row({ tags: [] })] })
     global.fetch = fetchMock as unknown as typeof fetch

@@ -40,6 +40,22 @@ const CONCLUSION_DEFAULTS = [
   'Need Direction', 'List_Idea', 'Playtest & Bypass',
 ]
 
+// Not calls -- housekeeping. `Link_dead` says the store page went away and
+// `Stale_release` says the build aged out; nobody judged anything in either case.
+// The whole Report already draws this line: its `judged` predicate is
+// "initial_conclusion IS NOT NULL AND NOT IN ('Link_dead', 'Stale_release')"
+// (app/api/report/route.ts), which is why every KPI on the tabs above this table
+// counts them out. A block titled "check the calls themselves" that offers them as
+// filters -- and could open on one, showing an empty table under a person who did
+// plenty of work -- is offering to review something that was never a decision.
+const HOUSEKEEPING = ['Link_dead', 'Stale_release']
+
+// The dropdown's "no conclusion filter" entry. It is not a value the API knows: it
+// is expanded at request time into the explicit list of the other options, so "All"
+// means "all the real calls", housekeeping still excluded. Sending nothing instead
+// would quietly widen the table to rows the rest of the Report does not count.
+const ALL_CONCLUSIONS = '__all__'
+
 // The canonical 17 are the FALLBACK, not a floor: they are what the dropdown offers
 // when there is no live answer, and the live answer REPLACES them when there is one.
 //
@@ -60,14 +76,15 @@ const CONCLUSION_DEFAULTS = [
 // `selected` is folded in either way so the currently-chosen filter value never
 // disappears from its own dropdown mid-fetch or if the live list omits it.
 function mergeConclusionOptions(live: string[], selected: string): string[] {
+  const keep = (list: string[]) => list.filter(c => !HOUSEKEEPING.includes(c))
+  const defaults = keep(CONCLUSION_DEFAULTS)
+  const sel = selected === ALL_CONCLUSIONS || HOUSEKEEPING.includes(selected) ? '' : selected
   if (live.length === 0) {
-    return selected && !CONCLUSION_DEFAULTS.includes(selected)
-      ? [...CONCLUSION_DEFAULTS, selected]
-      : CONCLUSION_DEFAULTS.slice()
+    return sel && !defaults.includes(sel) ? [...defaults, sel] : defaults
   }
-  const merged = Array.from(new Set([...live, selected]))
-  return CONCLUSION_DEFAULTS.filter(c => merged.includes(c))
-    .concat(merged.filter(c => !CONCLUSION_DEFAULTS.includes(c)).sort())
+  const merged = Array.from(new Set(keep(live).concat(sel ? [sel] : [])))
+  return defaults.filter(c => merged.includes(c))
+    .concat(merged.filter(c => !defaults.includes(c)).sort())
 }
 
 // The live, admin-editable conclusion list for this evaluator/category (Config tab,
@@ -142,13 +159,25 @@ function shiftDays(iso: string, delta: number): string {
 // `ok: false` marks a probe that never got an answer (network/parse failure), which
 // callers must NOT treat the same as `ok: true` with no days -- that pair is a real
 // answer ("nothing in this range") and is what licenses the unbounded retry below.
+// `conclusion` -> the query parameter for it. One real value goes on `conclusion`;
+// ALL_CONCLUSIONS expands onto `conclusions` (the route's IN-list form) so the
+// request still names every value it wants and housekeeping stays out.
+// `allList` is the comma-joined expansion of ALL_CONCLUSIONS, and is '' for every
+// other selection -- see `allList` in the component, which keeps it out of the fetch
+// callback's identity unless the reader is actually on "All".
+function conclusionParams(conclusion: string, allList: string): Record<string, string> {
+  if (conclusion !== ALL_CONCLUSIONS) return { conclusion }
+  return allList ? { conclusions: allList } : {}
+}
+
 async function probeDays(
-  evaluator: string, category: string, conclusion: string,
+  evaluator: string, category: string, conclusion: string, allList: string,
   range: { from: string; to: string } | null,
 ): Promise<{ from: string | null; to: string | null; ok: boolean }> {
   const params = new URLSearchParams({
-    evaluator, category, conclusion, date_basis: 'evaluated',
+    evaluator, category, date_basis: 'evaluated',
     sort: 'desc', page: '1', limit: '100', meta: '0',
+    ...conclusionParams(conclusion, allList),
   })
   if (range) { params.set('from', range.from); params.set('to', range.to) }
   try {
@@ -201,17 +230,17 @@ async function probeDays(
 // of "no rows here", and escalating it would mean a network hiccup on the cheap
 // bounded probe reaches the expensive unbounded one every time.
 async function fetchNewestDays(
-  evaluator: string, category: string, conclusion: string,
+  evaluator: string, category: string, conclusion: string, allList: string,
 ): Promise<{ from: string | null; to: string | null }> {
   const today = vnToday()
   // `to` is tomorrow, not today: the route's upper bound is exclusive-of-the-next-day
   // already, and one extra day absorbs a row whose evaluate_date was written slightly
   // ahead of VN midnight rather than dropping it and reading as "no recent work".
-  const bounded = await probeDays(evaluator, category, conclusion,
+  const bounded = await probeDays(evaluator, category, conclusion, allList,
     { from: shiftDays(today, -PROBE_DAYS), to: shiftDays(today, 1) })
   if (bounded.from) return bounded
   if (!bounded.ok) return { from: null, to: null }
-  const unbounded = await probeDays(evaluator, category, conclusion, null)
+  const unbounded = await probeDays(evaluator, category, conclusion, allList, null)
   return { from: unbounded.from, to: unbounded.to }
 }
 
@@ -229,7 +258,11 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
   // Full canonical list until the live facets response narrows it -- same as
   // app/(manager)/evaluations/page.tsx's own availableConclusions state, so the
   // dropdown never flashes down to just the one selected value on first paint.
-  const [conclusionOptions, setConclusionOptions] = useState<string[]>(() => CONCLUSION_DEFAULTS.slice())
+  // Housekeeping is filtered out of the FIRST paint too, not only after the facets
+  // response merges: the canonical list is what the dropdown shows until that lands,
+  // so seeding it raw put Link_dead in front of the reader on every tab open.
+  const [conclusionOptions, setConclusionOptions] = useState<string[]>(
+    () => CONCLUSION_DEFAULTS.filter(c => !HOUSEKEEPING.includes(c)))
   const [from, setFrom] = useState<string | null>(null)
   const [to, setTo] = useState<string | null>(null)
   const [initializing, setInitializing] = useState(true)
@@ -256,6 +289,17 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
   // category changes, not on every selection the person makes in that same dropdown.
   const conclusionRef = useRef(conclusion)
   useEffect(() => { conclusionRef.current = conclusion }, [conclusion])
+
+  // "All" is the only selection whose request text depends on the OPTION LIST, and
+  // the option list arrives from a second request. Deriving it here, as '' for every
+  // other selection, keeps that dependency out of `fetchPage`'s identity unless the
+  // reader is really on All -- otherwise the facets response landing would re-run the
+  // page-1 effect and every tab open would fetch page 1 twice.
+  const allList = conclusion === ALL_CONCLUSIONS
+    ? conclusionOptions.filter(c => c !== ALL_CONCLUSIONS).join(',')
+    : ''
+  const allListRef = useRef(allList)
+  useEffect(() => { allListRef.current = allList }, [allList])
 
   // Switching person resets this table to a clean, known state. Done DURING RENDER
   // (React's documented "adjusting state when a prop changes" pattern) rather than in
@@ -312,7 +356,8 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     let cancelled = false
     setInitializing(true)
     void (async () => {
-      const { from: f, to: t } = await fetchNewestDays(evaluator, category, conclusionRef.current)
+      const { from: f, to: t } = await fetchNewestDays(
+        evaluator, category, conclusionRef.current, allListRef.current)
       if (cancelled) return
       setFrom(f)
       setTo(t)
@@ -338,9 +383,10 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     const seq = ++fetchSeqRef.current
     if (append) setLoadingMore(true); else setLoading(true)
     const params = new URLSearchParams({
-      evaluator, category, conclusion, date_basis: 'evaluated',
+      evaluator, category, date_basis: 'evaluated',
       page: String(page), limit: String(PAGE_SIZE), with_screenshots: '1',
       sort: 'desc', meta: '0',
+      ...conclusionParams(conclusion, allList),
     })
     if (from) params.set('from', from)
     if (to) params.set('to', to)
@@ -369,7 +415,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
       }
     }
     if (seq === fetchSeqRef.current) { setLoading(false); setLoadingMore(false) }
-  }, [evaluator, category, conclusion, from, to])
+  }, [evaluator, category, conclusion, allList, from, to])
 
   useEffect(() => {
     if (initializing) return
@@ -393,6 +439,39 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     observer.observe(el)
     return () => observer.disconnect()
   }, [hasMore, loading, loadingMore, fetchPage])
+
+  // Scroll handoff between this box and the page.
+  //
+  // Upward is native: `overscroll-behavior` is left at `auto`, so once the list is at
+  // its own top the wheel chains straight on to the page and the reader is never
+  // trapped in the middle of the tab.
+  //
+  // Downward is not, and that is what this handler is for. The default is that a
+  // wheel over this box scrolls the LIST, even while half the table is still below
+  // the fold -- so the rows start moving before the reader has seen the table.
+  // While any of it is still off-screen, the wheel is redirected to the page
+  // instead, and only the part of the delta that is needed to close that gap is
+  // spent; the list takes over on the tick after the table is whole.
+  //
+  // `.content` is the scrolling element here, not the window: the app shell puts
+  // `overflow-y: auto` on it (globals.css) and the window itself never scrolls, so
+  // `window.scrollBy` would do nothing at all. A non-passive listener is required
+  // because the redirect needs preventDefault, which is why this is not `onWheel`.
+  useEffect(() => {
+    const el = rowsRef.current
+    if (!el) return
+    function onWheel(e: WheelEvent) {
+      if (e.deltaY <= 0 || !el) return
+      const scroller = el.closest('.content') as HTMLElement | null
+      if (!scroller) return
+      const gap = el.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom
+      if (gap <= 0) return
+      e.preventDefault()
+      scroller.scrollTop += Math.min(e.deltaY, gap)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [rows.length])
 
   function openShot(url: string, images: string[]) {
     setLightboxImages(images)
@@ -456,7 +535,10 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
   const rangeText = from && to
     ? (from === to ? ` on ${fmtDate(from)}` : ` between ${fmtDate(from)} and ${fmtDate(to)}`)
     : ''
-  const emptySentence = `${who} ${have} no ${catLabel} games marked ${prettyConclusion(conclusion)}${rangeText}.`
+  // On "All" there is no conclusion to name, so the sentence says what the filter
+  // really is -- judged at all -- rather than printing the sentinel.
+  const markedText = conclusion === ALL_CONCLUSIONS ? 'judged' : `marked ${prettyConclusion(conclusion)}`
+  const emptySentence = `${who} ${have} no ${catLabel} games ${markedText}${rangeText}.`
 
   const showEmpty = !initializing && !loading && rows.length === 0
 
@@ -473,6 +555,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
           <label className="rp-review-filter">
             <span>Initial conclusion</span>
             <select aria-label="Initial conclusion" value={conclusion} onChange={e => setConclusion(e.target.value)}>
+              <option value={ALL_CONCLUSIONS}>All</option>
               {conclusionOptions.map(c => <option key={c} value={c}>{prettyConclusion(c)}</option>)}
             </select>
           </label>
