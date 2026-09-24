@@ -327,10 +327,21 @@ export async function GET(req: NextRequest) {
     // screen and Pending on the other. Both now resolve to the same moment: the
     // upload if we have one (migration 034), otherwise the Confirm click.
     const recAt = sql`COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at)`
+    // The slot a game is recorded in, same rule as the Record tab: a manual
+    // record_bucket wins, else Priority IV is 20', everything else 5'. Only this
+    // slot is credited. The other slot's column can hold a stray name (the
+    // recorder sync used to fill it from a same-title game on the other OS).
+    const ownSlot = (slot: '5min' | '20min') => sql`AND (CASE
+      WHEN ge.record_bucket IN ('5min','20min') THEN ge.record_bucket
+      WHEN ge.final_conclusion = 'Priority IV' THEN '20min' ELSE '5min' END) = ${slot}`
     // Only ever used as a FILTER, so it compares the raw column against VN-local
     // boundaries rather than casting the column to a VN date -- same reason as vnBound
     // above, plus it makes idx_game_evaluations_recorded_at (which indexes exactly this
     // COALESCE) usable instead of dead weight.
+    // The stored link is the game's DEMO video: shared by title across Android and
+    // iOS, 20' preferred. youtube_uploaded_at is set only when the game's own-slot
+    // record video exists, so the queue shows the link as "Recorded" only then.
+    const ownVideoLink = sql`CASE WHEN ge.youtube_uploaded_at IS NOT NULL THEN ge.youtube_link END`
     const recAtFrom = (d: string) => sql`AND ${recAt} >= ${vnBound(d)}`
     const recAtTo   = (d: string) => sql`AND ${recAt} < ${vnBound(d)}`
 
@@ -710,7 +721,7 @@ export async function GET(req: NextRequest) {
           SELECT lower(ge.record_5min_assignee) AS k, ge.record_5min_assignee AS name, '5min' AS slot
           FROM game_evaluations ge
           WHERE ${recAt} IS NOT NULL AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
-            ${recOk('record_5min_assignee')}
+            ${recOk('record_5min_assignee')} ${ownSlot('5min')}
             ${catF}
             ${winOn(sql`
               ${win.from ? recAtFrom(win.from) : sql``}
@@ -719,7 +730,7 @@ export async function GET(req: NextRequest) {
           SELECT lower(ge.record_20min_assignee), ge.record_20min_assignee, '20min'
           FROM game_evaluations ge
           WHERE ${recAt} IS NOT NULL AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
-            ${recOk('record_20min_assignee')}
+            ${recOk('record_20min_assignee')} ${ownSlot('20min')}
             ${catF}
             ${winOn(sql`
               ${win.from ? recAtFrom(win.from) : sql``}
@@ -758,14 +769,14 @@ export async function GET(req: NextRequest) {
       sql`
         WITH rec AS (
           SELECT lower(ge.record_5min_assignee) AS k, '5min' AS slot, ge.game_id, gi.title, gi.os,
-                 ge.batch, ge.record_confirmed_at, ge.youtube_link, ${recAt} AS rec_at
+                 ge.batch, ge.record_confirmed_at, ${ownVideoLink} AS youtube_link, ${recAt} AS rec_at
           FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-          WHERE ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> '' ${recOk('record_5min_assignee')} ${catF}
+          WHERE ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> '' ${recOk('record_5min_assignee')} ${ownSlot('5min')} ${catF}
           UNION ALL
           SELECT lower(ge.record_20min_assignee), '20min', ge.game_id, gi.title, gi.os,
-                 ge.batch, ge.record_confirmed_at, ge.youtube_link, ${recAt}
+                 ge.batch, ge.record_confirmed_at, ${ownVideoLink}, ${recAt}
           FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-          WHERE ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> '' ${recOk('record_20min_assignee')} ${catF}
+          WHERE ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> '' ${recOk('record_20min_assignee')} ${ownSlot('20min')} ${catF}
         )
         SELECT k, slot, game_id, title, os, batch,
           (rec_at AT TIME ZONE ${VN})::date::text AS recorded_on,

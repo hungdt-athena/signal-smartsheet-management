@@ -806,8 +806,10 @@ function ExtractChatModal({ games, onClose }: {
       })
       sections.push(`${label}\n${lines.join('\n')}`)
     }
-    build("20'", g => g.record_20min_assignee)
-    build("5'", g => g.record_5min_assignee)
+    // A game goes under its own bucket only, the same recorder the grid shows.
+    // The other bucket's column can still hold a stale name.
+    build("20'", g => effectiveBucket(g) === '20min' ? recorderOf(g) || null : null)
+    build("5'", g => effectiveBucket(g) === '5min' ? recorderOf(g) || null : null)
     return sections.join('\n\n')
   }, [games, selected])
 
@@ -864,8 +866,9 @@ function ExtractChatModal({ games, onClose }: {
                     )}
                     <span className="cell-name" style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
                     <span style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                      {g.record_20min_assignee && <span className="pill tag" style={{ fontSize: 9, padding: '1px 5px' }}>20&apos; {g.record_20min_assignee}</span>}
-                      {g.record_5min_assignee && <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>5&apos; {g.record_5min_assignee}</span>}
+                      {recorderOf(g) && (effectiveBucket(g) === '20min'
+                        ? <span className="pill tag" style={{ fontSize: 9, padding: '1px 5px' }}>20&apos; {recorderOf(g)}</span>
+                        : <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>5&apos; {recorderOf(g)}</span>)}
                     </span>
                   </label>
                 )
@@ -1721,7 +1724,7 @@ function RecordTab() {
 
   // Games that have a recorder — fed to the Extract Chat modal.
   const assignedGames = useMemo(() =>
-    data.filter(d => d.record_5min_assignee || d.record_20min_assignee),
+    data.filter(d => recorderOf(d)),
     [data]
   )
 
