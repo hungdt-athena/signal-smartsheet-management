@@ -46,8 +46,9 @@ interface CountRow { os: string; n: string }
 interface CrewRow { name: string; category_group: string; game_platform: string; weight: number }
 
 const INCOMING_TTL_MS = 60_000
-// Keyed on the windows as well as the clock: changing a genre's window in Config
-// must move the panel immediately, not a minute later.
+// Keyed on the windows and on which genres run as well as the clock: changing a
+// genre's window in Config, or switching a genre on, must move the panel
+// immediately, not a minute later.
 let incomingCache: { at: number; key: string; data: Partial<Record<Bucket, OsCounts>> } | null = null
 
 /** 'ios' | 'android' | anything else (including null) → the OsCounts key. */
@@ -72,8 +73,16 @@ function tally(rows: OsRow[]): Partial<Record<Bucket, OsCounts>> {
  *
  * One query per genre, in the same EXISTS shape /api/cron/push-evaluations
  * uses. See the COST note at the top before changing the shape.
+ *
+ * One game, one genre (see the cron): a game with a row in any genre is not
+ * incoming, and a game an EARLIER running genre will take in the same run is not
+ * incoming for a later one. The run walks BUCKETS in order, so a Casual+Action
+ * game new today is counted under puzzle and not again under arcade.
  */
-async function loadIncoming(windows: PushWindowConfig): Promise<Partial<Record<Bucket, OsCounts>>> {
+async function loadIncoming(
+  windows: PushWindowConfig,
+  running: Bucket[],
+): Promise<Partial<Record<Bucket, OsCounts>>> {
   const mappings = await sql<{ genre: string; category_group: string }[]>`
     SELECT lower(genre) AS genre, category_group
     FROM category_mappings WHERE active = TRUE
@@ -81,10 +90,30 @@ async function loadIncoming(windows: PushWindowConfig): Promise<Partial<Record<B
   const catsFor = (bucket: Bucket) =>
     mappings.filter(m => m.category_group === bucket).map(m => m.genre)
 
-  const pairs = await Promise.all(BUCKETS.map(async bucket => {
+  // "This genre would push the game": its categories AND its window. Used to take
+  // out of a later genre's count what an earlier one claims first.
+  const claimedBy = (bucket: Bucket) => {
+    const windowDays = pushWindowFor(windows, bucket)
+    return sql`(
+      EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(gi.metadata -> 'categories') AS cat
+        WHERE lower(cat) = ANY(${catsFor(bucket)})
+      )
+      AND (
+        w.rel BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today
+        OR (w.rel IS NULL AND gi.created_date BETWEEN (w.today - (${windowDays} || ' days')::interval) AND w.today)
+      )
+    )`
+  }
+
+  const pairs = await Promise.all(BUCKETS.map(async (bucket, i) => {
     const cats = catsFor(bucket)
     if (cats.length === 0) return [bucket, emptyOs()] as const
     const windowDays = pushWindowFor(windows, bucket)
+    const earlier = BUCKETS.slice(0, i).filter(b => running.includes(b) && catsFor(b).length > 0)
+    // Folded into ONE fragment: postgres.js renders an empty array of fragments as a
+    // bare parameter (a syntax error), and puzzle's list is always empty.
+    const notClaimedEarlier = earlier.reduce((acc, b) => sql`${acc} AND NOT ${claimedBy(b)}`, sql``)
     const rows = await sql<CountRow[]>`
       SELECT COALESCE(lower(gi.os), 'other') AS os, count(*)::text AS n
       FROM game_info gi
@@ -105,8 +134,9 @@ async function loadIncoming(windows: PushWindowConfig): Promise<Partial<Record<B
         )
         AND NOT EXISTS (
           SELECT 1 FROM game_evaluations ge
-          WHERE ge.game_id = gi.game_id AND ge.category_group = ${bucket}
+          WHERE ge.game_id = gi.game_id
         )
+        ${notClaimedEarlier}
       GROUP BY 1
     `
     const counts = emptyOs()
@@ -124,14 +154,15 @@ export async function GET(req: NextRequest) {
   const fresh = req.nextUrl.searchParams.get('fresh') === '1'
 
   try {
-    const windows = await loadPushWindowConfig()
-    const cacheKey = JSON.stringify(windows)
+    const [windows, targets] = await Promise.all([loadPushWindowConfig(), loadGenreTargets()])
+    const running = targets.filter(t => t.active).map(t => t.bucket)
+    const cacheKey = JSON.stringify({ windows, running })
     const cacheHit = !fresh && incomingCache
       && incomingCache.key === cacheKey
       && Date.now() - incomingCache.at < INCOMING_TTL_MS
 
-    const [incoming, waitingRows, crewRows, targets] = await Promise.all([
-      cacheHit ? Promise.resolve(incomingCache!.data) : loadIncoming(windows),
+    const [incoming, waitingRows, crewRows] = await Promise.all([
+      cacheHit ? Promise.resolve(incomingCache!.data) : loadIncoming(windows, running),
       // Step 2's leftovers: rows the last assign run did not place. Cheap, and
       // it moves when the operator acts, so it is never cached.
       sql<OsRow[]>`
@@ -149,7 +180,6 @@ export async function GET(req: NextRequest) {
         WHERE list_type = 'initial' AND today_available = TRUE
         ORDER BY sort_order NULLS LAST, name
       `,
-      loadGenreTargets(),
     ])
 
     if (!cacheHit) incomingCache = { at: Date.now(), key: cacheKey, data: incoming }

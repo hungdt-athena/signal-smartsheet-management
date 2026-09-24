@@ -190,4 +190,34 @@ describe('POST /api/cron/push-evaluations', () => {
       expect(json.skipped).toBe('disabled')
     })
   })
+
+  // One game, one genre. category_mappings overlap (casual -> puzzle, action ->
+  // arcade), so a Casual+Action game matches both. Deduping per genre gave it a row
+  // in each, assigned to two people: arcade's first run on 2026-09-21 did that to
+  // 436 games already in puzzle, and the Evaluate panel then opened the other
+  // person's row. A row in ANY genre means the game is taken.
+  describe('one game, one genre', () => {
+    const dedupe = () => {
+      const q = queries().replace(/\s+/g, ' ')
+      const m = q.match(/NOT EXISTS \( SELECT 1 FROM game_evaluations ge WHERE ([^)]*)\)/g) || []
+      return m
+    }
+
+    it('skips a game that already has a row in another genre (insert)', async () => {
+      setupSql({ pushed: [] })
+      await post({ category: 'arcade', categories: ['action'] })
+      const clauses = dedupe()
+      expect(clauses).toHaveLength(1)
+      expect(clauses[0]).toContain('ge.game_id = gi.game_id')
+      expect(clauses[0]).not.toContain('category_group')
+    })
+
+    it('skips it on the dryRun path too, so the count matches the push', async () => {
+      setupSql({ pushed: [] })
+      await post({ category: 'arcade', categories: ['action'], dryRun: true })
+      const clauses = dedupe()
+      expect(clauses).toHaveLength(1)
+      expect(clauses[0]).not.toContain('category_group')
+    })
+  })
 })

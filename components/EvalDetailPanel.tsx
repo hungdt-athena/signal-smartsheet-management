@@ -112,9 +112,12 @@ function fmtDateTime(d: string | null) {
   return `${day} - ${time}`
 }
 
-export async function fetchEvalByGameId(gameId: string): Promise<EvalDetail | null> {
+/** `category` picks the row when a game has one in more than one genre, each
+ *  assigned to someone else. Without it the server prefers the caller's own row. */
+export async function fetchEvalByGameId(gameId: string, category?: string): Promise<EvalDetail | null> {
   try {
-    const res = await fetch(`/api/evaluations/${encodeURIComponent(gameId)}`)
+    const qs = category ? `?${new URLSearchParams({ category })}` : ''
+    const res = await fetch(`/api/evaluations/${encodeURIComponent(gameId)}${qs}`)
     if (!res.ok) return null
     const json = await res.json()
     return json.data as EvalDetail
@@ -397,6 +400,10 @@ function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: 
 interface Props {
   initialGameId: string
   gameList: EvalListItem[]
+  /** The genre of the list the panel was opened from. A game can have a row in
+   *  two genres, assigned to two people; this is how the panel opens the row the
+   *  list showed and not the other one. */
+  category?: string
   role: string | undefined
   userName: string
   readOnly?: boolean
@@ -430,7 +437,7 @@ function useYtbUploads(): Map<string, YtMatch> {
   return map
 }
 
-export default function EvalDetailPanel({ initialGameId, gameList, role, userName, readOnly, canAssignRecords, hideRecordSections, showFinalConclusion, onNavigate, onSaved, onClose }: Props) {
+export default function EvalDetailPanel({ initialGameId, gameList, category, role, userName, readOnly, canAssignRecords, hideRecordSections, showFinalConclusion, onNavigate, onSaved, onClose }: Props) {
   const ytMap = useYtbUploads()
   const [currentGameId, setCurrentGameId] = useState(initialGameId)
   const [ev, setEv] = useState<EvalDetail | null>(null)
@@ -557,7 +564,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     } else {
       setLoading(true)
     }
-    const data = await fetchEvalByGameId(gameId)
+    const data = await fetchEvalByGameId(gameId, category)
     if (!data) return
     cacheRef.current.set(gameId, data)
     // Drop a response for a game we have already navigated away from. Holding
@@ -575,7 +582,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     }
     applyData(data)
     setLoading(false)
-  }, [applyData])
+  }, [applyData, category])
 
   const goTo = useCallback((gameId: string) => {
     setCurrentGameId(gameId)
@@ -708,7 +715,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
     prefetchIdx.forEach(idx => {
       const gid = gameList[idx].game_id
       if (!cacheRef.current.has(gid)) {
-        fetchEvalByGameId(gid).then(data => { if (data) cacheRef.current.set(gid, data) })
+        fetchEvalByGameId(gid, category).then(data => { if (data) cacheRef.current.set(gid, data) })
       }
       // The Trends section is a second request on the same navigation, and it used to
       // be the one Prev/Next actually waited on: the game itself was prefetched, its
@@ -719,7 +726,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
           .catch(() => { /* the real load will surface the failure */ })
       }
     })
-  }, [currentIdx, hasNav, gameList])
+  }, [currentIdx, hasNav, gameList, category])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -892,7 +899,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
         // a screenshot outage can never make an evaluator think their note was lost.
         if (shotsOk) showToast('Saved')
         else showToast('Evaluation saved — screenshots failed to upload', true)
-        const fresh = await fetchEvalByGameId(ev.game_id)
+        const fresh = await fetchEvalByGameId(ev.game_id, category)
         if (fresh) {
           cacheRef.current.set(ev.game_id, fresh)
           applyData(fresh)
@@ -914,7 +921,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, role, userNam
         body: JSON.stringify({ ids: [ev.id], unset: true }),
       })
       if (!res.ok) { showToast('Failed to reset', true); return }
-      const fresh = await fetchEvalByGameId(ev.game_id)
+      const fresh = await fetchEvalByGameId(ev.game_id, category)
       if (fresh) {
         cacheRef.current.set(ev.game_id, fresh)
         applyData(fresh)

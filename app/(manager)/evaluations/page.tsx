@@ -914,6 +914,7 @@ function ShortListEvalTab() {
             <EvalDetailPanel
               initialGameId={detailGameId}
               gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
+              category={filterCategory}
               role={role}
               userName={userName}
               hideRecordSections
@@ -1547,6 +1548,7 @@ function EvaluationsPageInner() {
             <EvalDetailPanel
               initialGameId={detailGameId}
               gameList={detailList}
+              category={category}
               role={role}
               userName={userName}
               hideRecordSections={false}

@@ -14,6 +14,12 @@ export const maxDuration = 60
 // new releases from game_info become unassigned game_evaluations rows.
 // Dedupe via the UNIQUE(game_id, category_group) constraint instead of the
 // ID-ledger sheet.
+// One game, one genre: the NOT EXISTS below skips a game that already has a row in
+// ANY category, not just this one. Genres overlap in category_mappings (casual ->
+// puzzle, action -> arcade), and a Casual+Action game used to get a row in both,
+// each assigned to a different person. The Evaluate list shows one of them and the
+// panel could open the other. The first genre to push a game keeps it; the daily
+// run walks BUCKETS in order, so puzzle goes first.
 // NOTE: never hard-delete game_evaluations rows for dead links (mark
 // Link_dead) — a deleted row inside the 30-day window would be re-pushed.
 
@@ -113,7 +119,7 @@ export async function POST(req: NextRequest) {
           -- intentional: mirrors the INSERT dedupe so the dry-run count is comparable to a real push
           AND NOT EXISTS (
             SELECT 1 FROM game_evaluations ge
-            WHERE ge.game_id = gi.game_id AND ge.category_group = ${category}
+            WHERE ge.game_id = gi.game_id
           )
       `
     } else {
@@ -143,7 +149,7 @@ export async function POST(req: NextRequest) {
           )
           AND NOT EXISTS (
             SELECT 1 FROM game_evaluations ge
-            WHERE ge.game_id = gi.game_id AND ge.category_group = ${category}
+            WHERE ge.game_id = gi.game_id
           )
         ON CONFLICT (game_id, category_group) DO NOTHING
         RETURNING game_id

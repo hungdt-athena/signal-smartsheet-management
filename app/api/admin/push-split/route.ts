@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { pushSourceFilter } from '@/lib/push-sources'
+import { BUCKETS } from '@/lib/buckets'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -15,8 +16,10 @@ export const maxDuration = 60
 //   - type IS NULL OR type ILIKE one of PUSH_SOURCE_TYPES (lib/push-sources.ts)
 //   - app_link IS NOT NULL AND is_active = true
 //   - metadata->'categories' overlaps the bucket's genre list
-//   - a game may land in MULTIPLE buckets (each bucket matched independently — no
-//     cross-bucket dedup, same as the Smartsheet flow)
+//   - a game lands in ONE bucket: a game with a row in any bucket is already_in_db,
+//     and a game matching several buckets is inserted into the first in BUCKETS
+//     order. The Smartsheet flow put it in every matching bucket; that gave one
+//     game two rows assigned to two people (see /api/cron/push-evaluations).
 //
 // Bucket membership comes from category_mappings (genre -> category_group), or from
 // an inline `mappings` override in the request body (useful before the table is seeded).
@@ -104,10 +107,9 @@ async function computeEligible(
         AND gi.app_link IS NOT NULL
         AND gi.is_active = true
     )
-    SELECT e.game_id, e.category_group, e.genre_1, e.genre_2, (ge.game_id IS NOT NULL) AS already_in_db
+    SELECT e.game_id, e.category_group, e.genre_1, e.genre_2,
+           EXISTS (SELECT 1 FROM game_evaluations ge WHERE ge.game_id = e.game_id) AS already_in_db
     FROM eligible e
-    LEFT JOIN game_evaluations ge
-      ON ge.game_id = e.game_id AND ge.category_group = e.category_group
     ORDER BY e.category_group, e.game_id
   `
 }
@@ -156,7 +158,15 @@ async function run(req: NextRequest, write: boolean) {
     Number(body.maxReleaseAgeDays) > 0 ? Number(body.maxReleaseAgeDays) : DEFAULT_MAX_RELEASE_AGE_DAYS
 
   const rows = await computeEligible(pairs, windowDays, maxReleaseAgeDays)
-  const toInsert = rows.filter((r) => !r.already_in_db)
+  // One row per game, in the first bucket (BUCKETS order) that matched it.
+  const rank = (b: string) => { const i = (BUCKETS as readonly string[]).indexOf(b); return i < 0 ? BUCKETS.length : i }
+  const firstBucket = new Map<string, EligibleRow>()
+  for (const r of rows) {
+    if (r.already_in_db) continue
+    const seen = firstBucket.get(r.game_id)
+    if (!seen || rank(r.category_group) < rank(seen.category_group)) firstBucket.set(r.game_id, r)
+  }
+  const toInsert = Array.from(firstBucket.values())
 
   let inserted = 0
   if (!dryRun && toInsert.length > 0) {

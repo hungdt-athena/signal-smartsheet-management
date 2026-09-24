@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { getSession } from '@/lib/session'
 import { isStorageConfigured, deleteGameScreenshots } from '@/lib/screenshot-store'
 
 export const dynamic = 'force-dynamic'
@@ -27,7 +28,9 @@ export async function GET(
     if (!gameId) return NextResponse.json({ error: 'Invalid game_id' }, { status: 400 })
 
     // Optional: scope to a category so a game with eval rows in more than one
-    // category returns the right one (the record popup passes this).
+    // category returns the right one. Every list that opens the panel is per genre
+    // and passes it; without it a game in two genres opened whichever row came
+    // back first, often another evaluator's.
     const category = req.nextUrl.searchParams.get('category') || ''
     const categoryFilter = category ? sql`AND ge.category_group = ${category}` : sql``
 
@@ -66,6 +69,7 @@ export async function GET(
       LEFT JOIN developer dev ON gi.publisher_id = dev.id
       WHERE ge.game_id = ${gameId}
         ${categoryFilter}
+      ORDER BY ge.id
     `,
       sql<{ key: string; value: string }[]>`
         SELECT key, value FROM app_config WHERE key LIKE 'current_batch:%'
@@ -76,7 +80,15 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
-    const row = rows[0]
+    // Still two rows (no category given): the caller's own comes first, so an
+    // evaluator opening a game from a list without a genre gets the row they can
+    // edit and not a colleague's. Otherwise the older row, which is the one the
+    // push created first.
+    let row = rows[0]
+    if (rows.length > 1) {
+      const me = (await getSession())?.user?.name?.toLowerCase()
+      if (me) row = rows.find(r => (r.initial_evaluator as string | null)?.toLowerCase() === me) ?? row
+    }
     const hasStoreKit = Array.isArray(row.screenshot_urls) && row.screenshot_urls.length > 0
     const hasManual = Array.isArray(row.manual_screenshot_urls) && row.manual_screenshot_urls.length > 0
     if (hasStoreKit) {

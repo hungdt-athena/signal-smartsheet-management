@@ -1894,6 +1894,7 @@ function RecordTab() {
             <EvalDetailPanel
               initialGameId={detailGameId}
               gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
+              category={filterCategory}
               role={role}
               userName={userName}
               onClose={() => setDetailGameId(null)}
