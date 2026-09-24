@@ -1993,8 +1993,9 @@ input:checked + .slider:before {
 .rp-kpi-main { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
 .rp-kpi-value { font-size: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.05; }
 .rp-kpi-sub { font-size: 11.5px; color: var(--faint); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-/* What the sparkline plots. Pushed right so it sits under the line it describes. */
-.rp-kpi-sparknote { margin-left: auto; font-size: 10.5px; color: var(--muted); font-style: normal; white-space: nowrap; }
+/* What the sparkline plots, directly under the line it describes. */
+.rp-kpi-spark { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+.rp-kpi-sparknote { font-size: 10px; color: var(--faint); font-style: normal; white-space: nowrap; line-height: 1.2; }
 .rp-trend { font-weight: 700; font-variant-numeric: tabular-nums; }
 /* The badge never prints without this - see `trendLabel` in charts.tsx. */
 .rp-trend i { font-style: normal; font-weight: 500; color: var(--muted); }
@@ -2002,7 +2003,10 @@ input:checked + .slider:before {
 .rp-trend.down { color: var(--bad); }
 /* "vs team" benchmark line on Individual KPIs */
 .rp-kpi-bench { font-size: 11px; color: var(--faint); display: flex; align-items: center; gap: 6px;
-  border-top: 1px dashed var(--border); padding-top: 5px; margin-top: 1px; font-variant-numeric: tabular-nums; }
+  border-top: 1px dashed var(--border); padding-top: 7px; font-variant-numeric: tabular-nums;
+  /* pinned to the tile's floor, so the team lines of a row sit on one level whatever
+     the height of the sub-line above them */
+  margin-top: auto; }
 .rp-bench-delta { font-weight: 700; margin-left: auto; }
 .rp-bench-delta.good { color: var(--good); }
 .rp-bench-delta.bad { color: var(--bad); }
@@ -2331,6 +2335,23 @@ input:checked + .slider:before {
 .rp-chip-n { opacity: .7; font-weight: 700; }
 .rp-chip-title { opacity: .65; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin-left: 5px; }
 
+/* Flow table under a flow chart: metrics as rows, buckets as columns, so time runs
+   the same way as the chart above. Columns grow with the window, so the wrapper scrolls
+   sideways with the metric names and the Total column pinned. Only Change is tinted. */
+.rp-flow-scroll { overflow-x: auto; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.rp-flow-table { border-collapse: separate; border-spacing: 0; font-size: 11.5px; min-width: 100%; font-variant-numeric: tabular-nums; }
+.rp-flow-table th, .rp-flow-table td { padding: 5px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.rp-flow-table thead th { color: var(--muted); font-weight: 600; }
+.rp-flow-table thead th small { display: block; font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.rp-flow-table thead th.partial { color: var(--faint); }
+.rp-flow-table tbody th { text-align: left; color: var(--muted); font-weight: 600; }
+.rp-flow-table tbody td { color: var(--text); }
+.rp-flow-table tr.rp-flow-stock th, .rp-flow-table tr.rp-flow-stock td { font-weight: 700; }
+.rp-flow-table tbody tr:last-child th, .rp-flow-table tbody tr:last-child td { border-bottom: 0; }
+.rp-flow-table th:first-child, .rp-flow-table td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+.rp-flow-table .rp-flow-total { position: sticky; right: 0; background: var(--surface); font-weight: 700; border-left: 1px solid var(--border); z-index: 1; }
+.rp-flow-table td.up { color: var(--warn); }
+.rp-flow-table td.down { color: var(--good); }
 .rp-readnote { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--border); }
 /* Config tab: roster checkboxes + all-rounder weight sliders */
 .rp-cfg-list { display: flex; flex-direction: column; gap: 2px; }
@@ -2346,6 +2367,135 @@ input:checked + .slider:before {
 .rp-cfg-share { font-size: 12px; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
 .rp-cfg-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
 .rp-cfg-state { font-size: 11px; color: var(--muted); }
+/* ===== Config tab: five sections, a sticky list of them, one save bar ===== */
+.cfg { position: relative; }
+.cfg-layout { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: 24px; align-items: start; }
+.cfg-nav { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 2px; }
+.cfg-nav-i { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: 1fr auto;
+  padding: 9px 12px; border-radius: 9px; border-left: 3px solid transparent; }
+.cfg-nav-i:hover { background: var(--surface-2); }
+.cfg-nav-i.on { background: var(--surface); border-left-color: var(--accent); box-shadow: var(--shadow-sm); }
+.cfg-nav-i:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cfg-nav-l { font-size: 13px; font-weight: 700; color: var(--text); }
+.cfg-nav-s { grid-column: 1; font-size: 11px; color: var(--faint); }
+.cfg-nav-flag { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 10.5px; font-weight: 700;
+  color: var(--warn); background: var(--warn-weak); border-radius: 99px; padding: 2px 7px; }
+.cfg-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; padding-bottom: 12px; }
+.cfg-sec { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 22px 24px; box-shadow: var(--shadow-sm); scroll-margin-top: 16px; display: flex; flex-direction: column; gap: 16px; }
+.cfg-sec-h { display: grid; grid-template-columns: 1fr auto; column-gap: 16px; row-gap: 4px; }
+.cfg-sec-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: var(--text); }
+.cfg-sec-h p { grid-column: 1; margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.cfg-sec-meta { grid-column: 2; grid-row: 1 / span 2; align-self: start; font-size: 12px; color: var(--muted); text-align: right; }
+.cfg-sec-meta a { color: var(--accent); text-decoration: none; }
+.cfg-sec-foot { margin: 0; font-size: 11.5px; color: var(--faint); }
+.cfg-sec-actions { display: flex; justify-content: flex-end; }
+/* people: tiles in a grid, the tick is the whole tile */
+.cfg-people { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.cfg-person { display: grid; grid-template-columns: 16px 1fr; column-gap: 10px; align-items: center; cursor: pointer;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.cfg-person.on { background: var(--surface); border-color: var(--accent-border); }
+.cfg-person:hover { border-color: var(--border-strong); }
+.cfg-person input { grid-row: 1 / span 2; width: 15px; height: 15px; accent-color: var(--accent); }
+.cfg-person-n { font-size: 13px; font-weight: 600; color: var(--text); }
+.cfg-person:not(.on) .cfg-person-n { color: var(--faint); text-decoration: line-through; }
+.cfg-person-m { font-size: 11px; color: var(--faint); }
+/* score: sliders on the left, the mix they produce on the right */
+.cfg-score { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 900px) { .cfg-score { grid-template-columns: 1fr; } }
+.cfg-weights { display: flex; flex-direction: column; gap: 2px; align-items: stretch; }
+.cfg-weights .rp-cfg-w { grid-template-columns: 124px 1fr 42px; }
+.cfg-weights .rv-ctl-def { align-self: flex-start; margin: 6px 0 0 8px; }
+.cfg-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
+.cfg-mix { display: flex; flex-direction: column; gap: 10px; padding-top: 6px; }
+/* 2px surface gap between segments, 4px rounded ends */
+.cfg-mix-bar { display: flex; gap: 2px; height: 22px; border-radius: 4px; overflow: hidden; }
+.cfg-mix-bar span { min-width: 2px; }
+.cfg-mix-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
+.cfg-mix-legend b { color: var(--text); font-weight: 700; }
+.cfg-formula { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+.cfg-formula b { color: var(--text); }
+.cfg-sub { border-top: 1px solid var(--border); padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.cfg-switch { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.cfg-switch input { width: 15px; height: 15px; margin-top: 2px; accent-color: var(--accent); }
+.cfg-switch b { color: var(--text); }
+/* sticky save bar - the only Save on the tab */
+.cfg-savebar { position: sticky; bottom: 12px; z-index: 5; margin: 6px 0 0 212px; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-md); }
+.cfg-savebar.dirty { border-color: var(--accent-border); background: var(--accent-weak); }
+.cfg-savebar-s { flex: 1; font-size: 12.5px; color: var(--muted); }
+.cfg-savebar-s b { color: var(--text); }
+.cfg-savebar-s b.bad { color: var(--bad); }
+@media (max-width: 900px) {
+  .cfg-layout { grid-template-columns: 1fr; }
+  .cfg-nav { position: static; flex-direction: row; overflow-x: auto; gap: 6px; }
+  .cfg-nav-i { flex: 0 0 auto; border-left: 0; border-bottom: 3px solid transparent; }
+  .cfg-nav-i.on { border-bottom-color: var(--accent); }
+  .cfg-savebar { margin-left: 0; }
+  .cfg-sec { padding: 18px 16px; }
+  .cfg-sec-h { grid-template-columns: 1fr; }
+  .cfg-sec-meta { grid-column: 1; grid-row: auto; text-align: left; }
+  .rv-rule-head { flex-direction: column; gap: 6px; }
+  .rv-ctl input[type="range"] { width: 120px; }
+}
+
+/* ===== Rule blocks: what the rule is, its control, the live picture, what it flags ===== */
+.rv-rule { border: 1px solid var(--border); border-radius: 11px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.rv-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.rv-rule-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+.rv-rule-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.rv-rule-what { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 2px; max-width: 640px; }
+.rv-rule-where { flex-shrink: 0; font-size: 10.5px; font-weight: 600; color: var(--muted); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 99px; padding: 2px 9px; white-space: nowrap; }
+.rv-rule-ctls { display: flex; flex-wrap: wrap; gap: 10px 26px; }
+.rv-rule-viz { min-width: 0; }
+.rv-rule-verdict { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--text); line-height: 1.5;
+  padding: 8px 11px; border-radius: 8px; background: var(--surface-2); }
+.rv-rule-verdict.flag { background: var(--warn-weak); }
+.rv-rule-verdict.ok { background: var(--good-weak); }
+.rv-rule-verdict-i { font-weight: 800; width: 12px; text-align: center; }
+.rv-rule-verdict.flag .rv-rule-verdict-i { color: var(--warn); }
+.rv-rule-verdict.ok .rv-rule-verdict-i { color: var(--good); }
+.rv-note { margin: 6px 0 0; font-size: 11px; color: var(--faint); }
+.rv-empty { margin: 0; padding: 14px; text-align: center; font-size: 12px; color: var(--faint); background: var(--surface-2); border-radius: 8px; }
+/* control: slider for the everyday range, box for the exact number */
+.rv-ctl { display: flex; align-items: center; gap: 10px; }
+.rv-ctl input[type="range"] { width: 180px; accent-color: var(--accent); cursor: pointer; }
+.rv-ctl-box { display: inline-flex; align-items: center; gap: 5px; }
+.rv-ctl-box input { width: 66px; text-align: right; font: inherit; font-size: 13px; font-weight: 700; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 4px 7px; font-variant-numeric: tabular-nums; }
+.rv-ctl-box input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+.rv-ctl.changed .rv-ctl-box input { border-color: var(--accent-border); background: var(--accent-weak); }
+.rv-ctl-unit { font-size: 11.5px; color: var(--muted); min-width: 30px; }
+.rv-ctl-def { all: unset; cursor: pointer; font-size: 11px; color: var(--accent-strong); font-weight: 600; white-space: nowrap; }
+.rv-ctl-def.is { cursor: default; color: var(--faint); font-weight: 500; }
+.rv-ctl-def:not(.is):hover { text-decoration: underline; }
+/* svg illustrations */
+.rv-svg { display: block; overflow: visible; max-width: 100%; }
+.rv-svg text { font-family: var(--font); }
+.rv-name { font-size: 11.5px; fill: var(--text); font-weight: 600; }
+.rv-name.flag { fill: var(--warn); }
+.rv-name.muted { fill: var(--faint); font-weight: 500; }
+.rv-val { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.rv-val.muted { fill: var(--faint); }
+.rv-limit-l { font-size: 10.5px; font-weight: 700; fill: var(--text); }
+.rv-tick { font-size: 10px; fill: var(--faint); }
+.rv-tick.strong { fill: var(--muted); font-weight: 600; }
+.rv-zone-l { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; fill: var(--warn); }
+.rv-dot-l { font-size: 11px; font-weight: 600; fill: var(--text); }
+.rv-dot-l.flag { fill: var(--warn); }
+.rv-svg g[tabindex]:focus { outline: none; }
+.rv-svg g[tabindex]:focus circle:nth-of-type(2) { stroke: var(--accent); }
+/* meter: same-track fill, limit tick with its label */
+.rv-meter { display: flex; flex-direction: column; gap: 8px; padding-top: 18px; }
+.rv-meter-track { position: relative; height: 12px; border-radius: 99px; background: var(--track); }
+.rv-meter-fill { height: 100%; border-radius: 99px; transition: width .15s ease; }
+.rv-meter-limit { position: absolute; top: -5px; bottom: -5px; width: 0; border-left: 1.5px dashed var(--text); }
+.rv-meter-limit span { position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); font-size: 10.5px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.rv-meter-read { font-size: 12.5px; color: var(--muted); }
+.rv-meter-read b { font-size: 20px; color: var(--text); margin-right: 6px; }
+.rv-over { color: var(--warn); font-weight: 700; }
+.rv-under { color: var(--good); font-weight: 600; }
 
 .rp-empty { padding: 30px; text-align: center; color: var(--faint); font-size: 13px; }
 
@@ -2355,10 +2505,10 @@ input:checked + .slider:before {
 
 /* funnel is drawn as an SVG shape — these style its captions */
 .rp-funnel-svg { display: block; }
-.rp-fn-label { font-size: 12px; font-weight: 700; fill: var(--text); }
-.rp-fn-val { font-size: 14px; font-weight: 700; fill: var(--text); font-variant-numeric: tabular-nums; }
-.rp-fn-sub { font-size: 9px; fill: var(--faint); }
-.rp-fn-conv { font-size: 10px; font-weight: 600; fill: var(--muted); }
+.rp-fn-label { font-size: 12.5px; font-weight: 700; fill: var(--text); }
+.rp-fn-val { font-size: 16px; font-weight: 700; fill: var(--text); }
+.rp-fn-sub { font-size: 11px; fill: var(--faint); }
+.rp-fn-conv { font-size: 11px; font-weight: 600; fill: var(--muted); }
 
 /* team health gauges: value + target marker + raw counts + delta vs previous period */
 .rp-hb { display: flex; flex-direction: column; gap: 16px; }
@@ -2572,14 +2722,36 @@ input:checked + .slider:before {
 .rp-foot-key circle { fill: none; stroke: var(--faint); stroke-width: 1.2; }
 .rp-foot-key-cap { font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
 .rp-foot-key-val { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.rp-foot-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.rp-foot-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
 .rp-foot-text .rp-readnote { margin: 0; }
-.rp-foot-now { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text); }
+/* legend: drawn glyphs for what the chart's own legend does not name */
+.rp-foot-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  font-size: 11px; color: var(--muted); }
+.rp-fkey { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.rp-fkey-g { flex: none; display: block; }
+.rp-foot-hint { color: var(--faint); }
+/* facts: a label, the number in bold, an optional note - one pill each */
+.rp-foot-now { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: 12px; line-height: 1.35; color: var(--text); }
 .rp-foot-now b { font-weight: 700; }
+.rp-fact { display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 9px;
+  border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border);
+  white-space: nowrap; max-width: 100%; }
+.rp-fact-l { font-size: 11px; color: var(--muted); }
+.rp-fact-v { font-variant-numeric: tabular-nums; color: var(--text); }
+.rp-fact-n { font-size: 11px; color: var(--faint); }
+.rp-fact-i { font-size: 9px; align-self: center; }
+.rp-fact.good { background: var(--good-weak); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+.rp-fact.good .rp-fact-v, .rp-fact.good .rp-fact-i { color: var(--good); }
+.rp-fact.warn { background: var(--warn-weak); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.rp-fact.warn .rp-fact-v, .rp-fact.warn .rp-fact-i { color: var(--warn); }
+.rp-fact.bad { background: var(--bad-weak); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
+.rp-fact.bad .rp-fact-v, .rp-fact.bad .rp-fact-i { color: var(--bad); }
+.rp-fact .rp-who { font-weight: 700; }
 .rp-now-tag { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--accent-strong); background: var(--accent-weak); border-radius: 4px; padding: 2px 5px; margin-right: 7px;
-  vertical-align: 1px; }
+  color: var(--accent-strong); background: var(--accent-weak); border-radius: 4px; padding: 2px 5px; margin-right: 1px; }
 @media (max-width: 620px) {
+  .rp-fact { white-space: normal; }
   .rp-foot { flex-direction: column; gap: 10px; }
   .rp-foot-key { flex-direction: row; gap: 8px; align-items: center; border-right: none; padding: 0; }
 }
@@ -2829,38 +3001,59 @@ input:checked + .slider:before {
 .rp-review-rows { display: flex; flex-direction: column; gap: 10px;
   max-height: calc(100vh - 40px); min-height: 360px; overflow-y: auto;
   padding: 2px 4px 6px; }
-/* Two columns, 4/6: the call on the left, the evidence for it on the right. */
-.rp-review-row { display: grid; grid-template-columns: 4fr 6fr; gap: 16px; align-items: center;
-  padding: 14px 16px; background: var(--surface); border: 1px solid var(--border);
+/* Two columns, 5/7: the call on the left, the evidence for it on the right. */
+.rp-review-row { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 28px; align-items: start;
+  padding: 22px 24px; background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); }
-@media (max-width: 900px) { .rp-review-row { grid-template-columns: 1fr; } }
-.rp-review-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
-/* The icon carries the placeholder tint too, so a row that is still fetching reads
-   as a row with its picture on the way rather than as a row with a broken picture. */
-.rp-review-icon img, .rp-review-icon-fallback { width: 52px; height: 52px; border-radius: 12px;
-  flex-shrink: 0; background: var(--surface-3); }
-.rp-review-icon-fallback { background: var(--surface-3); }
-.rp-review-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.rp-review-title { font-size: 14px; font-weight: 700; color: var(--text); }
+@media (max-width: 900px) { .rp-review-row { grid-template-columns: 1fr; gap: 18px; } }
+.rp-review-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.rp-review-head { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+/* A fixed square, and the image covers it: a source that is not square is cropped,
+   never squeezed. The box carries the placeholder tint, so a row still fetching reads
+   as a picture on the way rather than a broken one. */
+.rp-review-icon { flex: 0 0 56px; width: 56px; height: 56px; border-radius: 13px; overflow: hidden;
+  background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--border); }
+.rp-review-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.rp-review-icon-fallback { width: 100%; height: 100%; }
+.rp-review-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding-top: 1px; }
+.rp-review-title { font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--text); }
 .rp-review-title a { color: var(--accent); text-decoration: none; }
-.rp-review-pub { font-size: 12px; color: var(--muted); }
-.rp-review-meta { display: flex; align-items: center; gap: 8px; font-size: 11.5px;
-  color: var(--faint); flex-wrap: wrap; }
-/* Every fact on the two lines under the title is a badge: platform, release date,
-   evaluated date, who made the call. A bare grey date next to another bare grey date
-   makes the reader work out which is which. */
-.rp-review-badge { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; padding: 1px 7px;
-  border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border);
-  color: var(--muted); white-space: nowrap; }
-.rp-review-verdict { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
-/* 1.5x the old height: a StoreKit shot has to be readable at a glance, which is the
-   whole reason this column exists. Scrolls horizontally within its own grid cell. */
-.rp-review-shots { display: flex; gap: 8px; overflow-x: auto; min-width: 0; padding-bottom: 4px; }
+.rp-review-title a:hover { text-decoration: underline; }
+.rp-review-pub { font-size: 12.5px; color: var(--muted); }
+/* platform · release date, as plain text with a dot between */
+.rp-review-meta { display: flex; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--faint); }
+.rp-review-fact { white-space: nowrap; }
+.rp-review-fact + .rp-review-fact::before { content: '·'; margin: 0 7px; color: var(--border-strong); }
+.rp-review-tags { margin-top: 3px; }
+/* initial and final, one box, two cells */
+.rp-review-calls { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface-2); }
+.rp-review-call { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 11px 14px; min-width: 0; }
+.rp-review-call + .rp-review-call { border-left: 1px solid var(--border); }
+.rp-review-call-l, .rp-review-note-l { font-size: 10px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--faint); }
+.rp-review-call-by { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rp-review-final-none { font-size: 12px; color: var(--faint); font-style: italic; padding: 3px 0; }
+/* StoreKit shots, readable at a glance - the whole reason this column exists. The strip
+   scrolls sideways inside its own grid cell. */
+.rp-review-shots { display: flex; gap: 10px; overflow-x: auto; min-width: 0; padding-bottom: 6px; }
 /* min-width + a filled background so a lazily-loaded shot occupies its space BEFORE
    it arrives: without it each image is a zero-width sliver that pops the whole strip
    wider as it decodes, which is reflow under the reader's scroll. */
-.rp-review-shot { height: 144px; min-width: 64px; background: var(--surface-2);
-  border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; cursor: pointer; }
+.rp-review-shot { height: 240px; min-width: 110px; background: var(--surface-2);
+  border-radius: 10px; border: 1px solid var(--border); flex-shrink: 0; cursor: pointer; }
+/* the notes, clamped to four lines; a click opens one in full */
+.rp-review-note { all: unset; box-sizing: border-box; display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4; overflow: hidden; padding: 9px 12px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); font-size: 12.5px; line-height: 1.55;
+  color: var(--text); white-space: pre-wrap; word-break: break-word; cursor: pointer; }
+.rp-review-note:hover { border-color: var(--border-strong); }
+.rp-review-note.open { -webkit-line-clamp: unset; display: block; }
+.rp-review-note.final { background: var(--accent-weak); border-color: var(--accent-border); }
+.rp-review-note-l { margin-right: 8px; }
+.rp-review-check { display: flex; align-items: center; gap: 7px; align-self: flex-end; padding: 7px 2px;
+  font-size: 12.5px; font-weight: 600; color: var(--text); cursor: pointer; }
+.rp-review-check input { width: 15px; height: 15px; accent-color: var(--accent); }
 .rp-review-loading { text-align: center; font-size: 12px; color: var(--faint); padding: 10px 0; }
 .rp-review-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--muted);
   background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius); }
@@ -2912,6 +3105,12 @@ input:checked + .slider:before {
 .rp-daily-table tbody th { font-weight: 600; color: var(--text); }
 .rp-daily-table .num { text-align: right; font-family: var(--num); font-variant-numeric: tabular-nums; }
 .rp-daily-table .strong { font-weight: 700; }
+/* Day-by-day dates as four columns: weekday, day (right-aligned), month, year */
+.rp-dd { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rp-dd-wd { width: 2.2em; color: var(--muted); font-weight: 500; }
+.rp-dd-d { width: 1.3em; text-align: right; }
+.rp-dd-m { width: 2em; }
+.rp-dd-y { color: var(--muted); font-weight: 500; }
 /* The total row closes the table, so it carries no bottom hairline of its own. */
 .rp-daily-total th, .rp-daily-total td { border-bottom: none; border-top: 1px solid var(--border-strong);
   font-weight: 700; }
@@ -2920,3 +3119,29 @@ input:checked + .slider:before {
    is missing. Same decision as the greyed day on the Leaderboard's strip. */
 .rp-daily-quiet-row th, .rp-daily-quiet-row td { color: var(--faint); }
 .rp-daily-quiet-note { font-size: 11.5px; color: var(--faint); margin: 8px 2px 0; }
+
+/* Config -> Chart colours: one card per validated preset, the real charts redrawn below */
+.cfg-pals { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.cfg-pal { position: relative; display: flex; flex-direction: column; gap: 9px; padding: 14px 16px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 11px; background: var(--surface); }
+.cfg-pal:hover { border-color: var(--border-strong); }
+.cfg-pal.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+.cfg-pal input { position: absolute; top: 15px; right: 14px; accent-color: var(--accent); }
+.cfg-pal-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text); padding-right: 22px; }
+.cfg-pal-tag { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted);
+  background: var(--surface-2); border-radius: 99px; padding: 1px 7px; }
+/* 2px surface gap between swatches */
+.cfg-pal-strip { display: flex; gap: 2px; height: 16px; border-radius: 4px; overflow: hidden; }
+.cfg-pal-strip i { flex: 1; }
+.cfg-pal-note { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+.cfg-pal-roles { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 11.5px; color: var(--text); }
+.cfg-pal-roles i, .cfg-pal-fixed i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.cfg-pal-check { font-size: 11px; font-weight: 600; }
+.cfg-pal-check.ok { color: var(--good); }
+.cfg-pal-check.warn { color: var(--warn); }
+.cfg-pal-sample { display: grid; grid-template-columns: 1fr; gap: 18px;
+  padding: 14px 16px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); }
+.cfg-pal-sample-l { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.cfg-pal-fixed { display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; font-size: 11.5px; color: var(--muted); }
+.cfg-pal-fixed i { margin-right: 2px; }
+.cfg-pal-fixed-l { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }

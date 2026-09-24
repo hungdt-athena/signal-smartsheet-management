@@ -131,6 +131,9 @@ async function renderTab(bundle: Bundle) {
 const cardNamed = (c: HTMLElement, label: string) =>
   Array.from(c.querySelectorAll('.card-label'))
     .find((l) => l.textContent?.startsWith(label))!.closest('.card') as HTMLElement
+// The footer's fact pills, one string each, as a reader (or a screen reader) gets them.
+const factsOf = (el: HTMLElement) => Array.from(el.querySelectorAll('.rp-foot-now .rp-fact'))
+  .map((f) => (f.textContent || '').replace(/\s+/g, ' ').trim())
 
 // One entry per action: the instruction, the numbers behind it, what the reader gets
 // for doing it, and where the button goes.
@@ -148,7 +151,7 @@ describe('Overview tab', () => {
 
   it('reads guide, then sentence, then chips, then five numbers, and folds nothing away', async () => {
     const { container } = await renderTab(healthy())
-    expect(container.querySelector('.rp-headline')).toHaveTextContent('The team is on top of the backlog.')
+    expect(container.querySelector('.rp-headline')).toHaveTextContent('The backlog did not change: 400 games waiting.')
 
     // In / out / stock / speed / quality, left to right. Assigned used to appear ONLY
     // on batch view - where the pipeline is null - so the row changed shape depending
@@ -191,9 +194,9 @@ describe('Overview tab', () => {
     // "since import" is load-bearing: the `holders` action on this same screen counts
     // stale games from the ASSIGN date at the admin's threshold, so the two numbers
     // can legitimately disagree and only the labels say why.
-    expect(chips[2]).toBe('40 games have waited 8+ days since import - 10% of the backlog')
+    expect(chips[2]).toBe('40 games (10% of the backlog) have waited 8+ days since import')
     // days-to-clear works because the batch brought dates: 1,000 over 5 days = 200/day
-    expect(chips[1]).toBe('2.0 days to clear the whole backlog at the current 200 games/day')
+    expect(chips[1]).toBe('2.0 days to clear the backlog at 200 games/day')
   })
 
   // The guide used to be pinned open above everything, on the reasoning that a reader
@@ -232,11 +235,38 @@ describe('Overview tab', () => {
     const body = (c: Element) => c.querySelector('.rp-chip-text')?.textContent || ''
     // "this week", not "this day": the buckets are days but the selection is a week,
     // and mixing the two nouns is what printed "Queue +1,413 this day".
-    expect(body(chips[0])).toBe('As many games were cleared as arrived this week')
-    expect(body(chips[1])).toBe('2.0 days to clear the whole backlog at the current 200 games/day')
-    expect(body(chips[2])).toBe('40 games have waited 8+ days since import - 10% of the backlog')
+    expect(body(chips[0])).toBe('Backlog did not change this week')
+    expect(body(chips[1])).toBe('2.0 days to clear the backlog at 200 games/day')
+    expect(body(chips[2])).toBe('40 games (10% of the backlog) have waited 8+ days since import')
     // a healthy backlog reads green, not "no colour"
     expect(chips.every((c) => c.classList.contains('good'))).toBe(true)
+  })
+
+  // The sentence is about the WHOLE backlog, never just the window. It used to read
+  // "The backlog is small and being cleared fast" whenever the pace could clear it in
+  // five days - on a real batch that evaluated its own games, over 3,505 games still
+  // waiting, a third of them 8+ days old, under an amber banner.
+  it('never calls the backlog small when a third of it is old', async () => {
+    const age = { a0: 1684, a1: 615, a2: 1154, a3: 52 }
+    const { container } = await renderTab(withPatch({
+      stock: { backlog: 3505, age },
+      pipeline: { current: { backlog: 3505, age }, window: { newGames: 2032, evaluated: 4000 } },
+    }))
+    const headline = container.querySelector('.rp-headline')!.textContent
+    expect(headline).toBe('The backlog is shrinking, but 34% of it has waited 8+ days.')
+    expect(headline).not.toMatch(/small|fast/i)
+    // the sentence carries the same colour as its worst chip
+    expect(container.querySelector('.rp-verdict')!.className).toMatch(/warn/)
+  })
+
+  it('names the slow pace when the backlog is growing and not old', async () => {
+    const age = { a0: 6000, a1: 0, a2: 0, a3: 0 }
+    const { container } = await renderTab(withPatch({
+      stock: { backlog: 6000, age },
+      pipeline: { current: { backlog: 6000, age }, window: { newGames: 1400, evaluated: 1000 } },
+    }))
+    expect(container.querySelector('.rp-headline')!.textContent)
+      .toMatch(/^The backlog is growing, and it takes 30(\.0)? days to clear at the current pace\.$/)
   })
 
   // A backlog that is growing has to say so in words, in both directions - the balanced
@@ -247,10 +277,10 @@ describe('Overview tab', () => {
     })
     const grew = await renderTab(flow(1400))
     expect(grew.container.querySelector('.rp-chip .rp-chip-text')!.textContent)
-      .toBe('400 more games arrived than were cleared this week')
+      .toBe('Backlog grew by 400 games this week')
     const shrank = await renderTab(flow(700))
     expect(shrank.container.querySelector('.rp-chip .rp-chip-text')!.textContent)
-      .toBe('300 more games were cleared than arrived this week')
+      .toBe('Backlog shrank by 300 games this week')
   })
 
   // The chips, the KPI row and the actions are three views of the same three questions.
@@ -301,9 +331,9 @@ describe('Overview tab', () => {
     expect(topics.every((t) => t && ['Growth', 'Speed', 'Age', 'Quality'].includes(t))).toBe(true)
     // the pace diagnostic is a speed problem and the intake gap is a growth one
     const byTopic = Object.fromEntries(rows.map((r) => [r.querySelector('.rp-do-line')?.textContent, r.querySelector('.rp-do-topic')?.textContent]))
-    expect(byTopic['Find what changed in the working day before adding people']).toBe('Speed')
+    expect(byTopic['Find out why the pace dropped before adding people']).toBe('Speed')
     // 2,000 in over 5 days across 2 people is 200 each a day; they are clearing 100.
-    expect(byTopic['Each person adds 100 games a day (100 to 200) to break even on intake']).toBe('Growth')
+    expect(byTopic['Each person adds 100 games a day (100 to 200) to evaluate as many games as arrive']).toBe('Growth')
   })
 
   /* The real September numbers printed "Add 1,153 person-days to get the queue under 5
@@ -327,13 +357,13 @@ describe('Overview tab', () => {
     // no raw person-days anywhere in the line the reader acts on
     expect(cap.do).not.toMatch(/person-day/)
     // and the evidence reads as a sentence, not three numbers separated by dots
-    expect(cap.why).toBe('3,747 games in the backlog · the team clears 200 a day · that is 18.7 days of work')
+    expect(cap.why).toBe('3,747 games in the backlog · the team evaluates 200 a day · that is 18.7 days of work')
     // The payoff is the size of the move, not a date. Two dates were tried and both
     // were promises the arithmetic does not buy: the day the backlog would CLEAR is
     // what happens if nobody is added, and the day the ASK lands is computed from a
     // stock snapshot that ignores intake - while the intake gap is printed two rows
     // above it on the same card.
-    expect(cap.payoff).toBe('18.7 days of work down to 5')
+    expect(cap.payoff).toBe('Backlog drops from 18.7 days of work to 5')
     expect(cap.payoff).not.toMatch(/Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/)
     // alone on the tab, it makes no claim about how it compares with lines that are
     // not on the screen
@@ -373,13 +403,13 @@ describe('Overview tab', () => {
     expect(shown[0].urgent).toBe(true)
     expect(shown[1].urgent || shown[2].urgent).toBe(false)
     // 2,000 in over 5 days across 2 people is 200 each a day; they are clearing 100.
-    expect(shown[0].do).toBe('Each person adds 100 games a day (100 to 200) to break even on intake')
-    expect(shown[0].why).toBe('2,000 in against 1,000 out this week · 2 people working')
+    expect(shown[0].do).toBe('Each person adds 100 games a day (100 to 200) to evaluate as many games as arrive')
+    expect(shown[0].why).toBe('2,000 games arrived, 1,000 evaluated this week · 2 people working')
     // The backlog is 30 days of work and the next ask is capacity - stated in people
     // and weeks, because "add 50 person-days" is a unit nobody hires in. 50 person-days
     // over a team of 2 is 2 more people for 5 weeks.
     expect(shown[1].do).toBe('Or add 2 more people for 5 weeks to get the backlog under 5 days of work')
-    expect(shown[1].why).toBe('6,000 games in the backlog · the team clears 200 a day · that is 30.0 days of work')
+    expect(shown[1].why).toBe('6,000 games in the backlog · the team evaluates 200 a day · that is 30.0 days of work')
     // ...and it does not claim to be the priciest option while a costlier one is printed
     // directly under it: dropping the work costs the work.
     expect(shown[1].payoff).not.toMatch(/expensive/)
@@ -390,9 +420,9 @@ describe('Overview tab', () => {
     // false of the reordering, which moves no work at all. No "or" inside the sentence
     // either - law 7 already puts one at the front, and "Or drop them, or accept X"
     // makes the reader work out which of the two the number underneath belongs to.
-    expect(shown[2].do).toBe('Or drop the 4,200 games past 15 days')
+    expect(shown[2].do).toBe('Or drop the 4,200 games that have waited 15+ days since import')
     expect(shown[2].do.slice(3)).not.toMatch(/\bor\b/)
-    expect(shown[2].why).toBe('Games past 15 days alone are 21.0 days of work at 200 a day.')
+    expect(shown[2].why).toBe('The games waiting 15+ days alone are 21.0 days of work at 200 a day.')
     expect(shown[2].payoff).toBe('Days to clear falls from 30.0 to 9.0')
     // every action leads with the move, and no action reaches for the push filter
     for (const a of shown) {
@@ -420,18 +450,18 @@ describe('Overview tab', () => {
       stock: { backlog: 6000, age: { a0: 4000, a1: 1000, a2: 800, a3: 200 } },
     }))
     const shown = actions(container)
-    expect(shown[0].do).toBe('Find what changed in the working day before adding people')
+    expect(shown[0].do).toBe('Find out why the pace dropped before adding people')
     // It names BOTH references rather than quoting one of them unlabelled: the KPI row
     // above compares with the previous window, so an unnamed figure here is the same
     // metric shown twice against two different bars with nothing saying which is which.
-    expect(shown[0].why).toBe('The team cleared 200 games a day against 129 last week, and 600 over the 90 days before this week')
+    expect(shown[0].why).toBe('The team evaluated 200 games a day, vs 129 last week and 600 over the 90 days before this week')
     expect(shown.some((a) => /more (people|person) for/.test(a.do))).toBe(false)
     // The catch-up line stays, and it is a remedy where the line above it is a
     // diagnosis - so it does NOT open with "Or". Nothing here is an alternative to
     // finding out what happened.
     const catchup = shown.find((a) => a.topic === 'Growth')!
-    expect(catchup.do).toBe('Each person adds 100 games a day (100 to 200) to break even on intake')
-    expect(catchup.why).toBe('2,000 in against 1,000 out this week · 2 people working')
+    expect(catchup.do).toBe('Each person adds 100 games a day (100 to 200) to evaluate as many games as arrive')
+    expect(catchup.why).toBe('2,000 games arrived, 1,000 evaluated this week · 2 people working')
   })
 
   it('compares the KPI row with the window the reader picked, and health with the 90-day bar', async () => {
@@ -476,8 +506,8 @@ describe('Overview tab', () => {
     }))
     const block = screen.getByText('Do this').closest('.rp-do-block')!
     // The whole phrase, not the bare digits: '11' alone also matches "1,100 games".
-    expect(block.textContent).toContain('11+ days')
-    expect(block.textContent).not.toMatch(/\b8\+ days\b/)
+    expect(block.textContent).toContain('more than 11 days')
+    expect(block.textContent).not.toMatch(/\bpast 8 days\b/)
   })
 
   it('names who is holding the stale work, without waiting for the team to cross a line', async () => {
@@ -492,8 +522,8 @@ describe('Overview tab', () => {
       ],
     }))
     const act = actions(container).find((a) => a.do.includes('Alpha'))!
-    expect(act.do).toContain('250 games sitting 8+ days with Alpha')
-    expect(act.why).toContain('One person holds 250 of the 250 games')
+    expect(act.do).toContain('250 games that have waited more than 8 days with Alpha')
+    expect(act.why).toContain("One person holds 250 of the team's 250 games")
     expect(act.do).not.toContain('Beta')
     // one holder, so there is no "of N" to add
     expect(act.do).not.toMatch(/the top \d+ of/)
@@ -515,11 +545,12 @@ describe('Overview tab', () => {
       ],
     }))
     const act = actions(container).find((a) => a.do.includes('Alpha'))!
-    expect(act.do).toContain('Alpha, Beta and Gamma, the top 3 of 4,')
+    expect(act.do).toContain('with Alpha, Beta and Gamma first')
+    expect(act.why).toContain('most of them these 3')
     expect(act.do).not.toContain('Delta')
     // the evidence still counts all four, which is exactly why the instruction has to
     // say that it does not
-    expect(act.why).toContain('4 people hold 940 of the 940 games')
+    expect(act.why).toContain("4 people hold 940 of the team's 940 games")
   })
 
   it('never shows a +/- badge without saying what it is a change from', async () => {
@@ -550,7 +581,7 @@ describe('Overview tab', () => {
     }))
     const shown = actions(container)
     expect(shown.some((a) => /Hit rate/.test(a.why))).toBe(false)
-    expect(shown.some((a) => a.do === "Ask a moderator to triage this week's shortlist")).toBe(true)
+    expect(shown.some((a) => a.do === "Ask a moderator to give final conclusions on this week's shortlist")).toBe(true)
   })
 
   it('reads the health gauges against the trailing 90 days, not a fixed target', async () => {
@@ -639,9 +670,10 @@ describe('Overview tab', () => {
     // it is not drawn in days any more
     expect(byAge.querySelector('svg text.rp-dotval')).toBeNull()
     expect(byAge.textContent).not.toMatch(/Median wait\s*$/)
-    // ...but the age numbers survive, computed, in the note
-    expect(byAge.querySelector('.rp-readnote')!.textContent)
-      .toBe('Median wait went 3d → 5d across the window, and the slowest tenth is at 14d: games are being added to the backlog faster than the middle of it moves.')
+    // ...but the age numbers survive, computed, as footer facts - one pill each, and
+    // the rising median carries an arrow as well as the colour
+    expect(factsOf(byAge)).toEqual(['▲Median wait 3d → 5d', 'Slowest 10% 14d', 'Oldest 22d'])
+    expect(byAge.querySelector('.rp-fact.bad')!.textContent).toContain('Median wait')
   })
 
   it('charts the headcount that Games per day divides by', async () => {
@@ -657,12 +689,35 @@ describe('Overview tab', () => {
       },
     }))
     const card = cardNamed(container, 'People working')
-    expect(card.querySelector('.rp-readnote')!.textContent)
-      .toBe('Thinnest day was 3/9 with 2 working, against 7 at the fullest.')
+    expect(factsOf(card)).toEqual(['Fewest 2 3/9', 'Most 7'])
     // it sits beside the flow chart, sharing the same buckets
-    const flow = cardNamed(container, 'Flow & stock')
+    const flow = cardNamed(container, 'Flow & backlog')
     expect(flow.parentElement).toBe(card.parentElement)
     expect(flow.parentElement!.className).toContain('rp-grid-70-30')
+  })
+
+  it('counts who is working today while today is still running', async () => {
+    // Real time: the team wants today's headcount during the day. The running bucket is
+    // drawn faded ("so far") and kept out of Fewest/Most, which compare whole days - so a
+    // 2 at 08:40 is never named the thinnest day of the week.
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())
+    const { container } = await renderTab(withPatch({
+      window: { label: 'This week', from: '2026-09-01', to: '2999-01-01' },
+      pipeline: {
+        ...healthy().pipeline as object,
+        series: ['1/9', '2/9', '3/9', 'today'].map((label, i) => ({
+          key: `k${i}`, label, newGames: 200, evaluated: 200, backlog: 400, people: [6, 5, 7, 2][i],
+        })),
+      },
+    }))
+    expect(today).toBeTruthy()
+    const card = cardNamed(container, 'People working')
+    const bars = Array.from(card.querySelectorAll('svg rect[rx="4"]'))
+    expect(bars).toHaveLength(4)                                // today is drawn, not trimmed
+    expect(bars[3].getAttribute('stroke-dasharray')).toBe('4 3')
+    expect(bars[2].getAttribute('stroke-dasharray')).toBeNull()
+    expect(factsOf(card)).toEqual(['Today so far 2', 'Fewest 5 2/9', 'Most 7'])
+    expect(card.querySelector('.rp-foot-legend')!.textContent).toContain('Today, so far')
   })
 
   it('puts work finished and work that only got older on the same days', async () => {
@@ -671,7 +726,7 @@ describe('Overview tab', () => {
     // EVENTS - a game is judged once and crosses each boundary once - which is what
     // makes them safe to read per bucket and safe to add across buckets.
     const { container } = await renderTab(healthy())
-    const card = cardNamed(container, 'Evaluated vs aged')
+    const card = cardNamed(container, 'Evaluated vs got older')
     const rows = Array.from(card.querySelectorAll('.rp-div-row'))
     expect(rows).toHaveLength(5)                       // one per bucket
     const row = rows[0]
@@ -689,13 +744,13 @@ describe('Overview tab', () => {
     expect(Math.round(width(tracks[0]))).toBe(30)
     expect(Math.round(width(tracks[1]))).toBe(100)
 
-    expect(card.querySelector('.rp-div-heads .left')!.textContent).toBe('◀ Aged into')
+    expect(card.querySelector('.rp-div-heads .left')!.textContent).toBe('◀ Got older')
     expect(card.querySelector('.rp-div-heads .right')!.textContent).toBe('Evaluated ▶')
     // The verdict weighs stale work CLEARED against stale work CREATED - both counted on
     // the 8+ day backlog. Weighing all-ages-cleared against crossings-into-15d+ once
     // printed "cleared faster than created" over a window where the backlog grew.
-    expect(card.querySelector('.rp-readnote')!.textContent).toMatch(
-      /^1,000 evaluated this week against 300 that crossed into an older band, 100 of them past 15 days\. On the 8\+ day backlog alone: 100 cleared, 150 created – the stale backlog is growing\./)
+    expect(factsOf(card).slice(0, 4)).toEqual([
+      'Evaluated 1,000', 'Got older 300 100 reached 15+ days', '8+ days 100 evaluated vs 150 new', '▲Stale backlog growing'])
   })
 
   it('still counts a bucket where games aged but nothing was judged', async () => {
@@ -708,14 +763,14 @@ describe('Overview tab', () => {
         aged: [{ key: 'k0', label: '9/9', parts: { a3: 40 } }],
       },
     }))
-    const card = cardNamed(container, 'Evaluated vs aged')
+    const card = cardNamed(container, 'Evaluated vs got older')
     const rows = Array.from(card.querySelectorAll('.rp-div-row'))
     expect(rows).toHaveLength(1)
     expect(rows[0].querySelector('.rp-div-name')!.textContent).toBe('9/9')
     expect(rows[0].querySelector('.rp-div-num.left')!.textContent).toBe('40')
     expect(rows[0].querySelector('.rp-div-num.right')!.textContent).toBe('')
-    expect(card.querySelector('.rp-readnote')!.textContent).toBe(
-      '0 evaluated this week against 40 that crossed into an older band, 40 of them past 15 days. On the 8+ day backlog alone: 0 cleared, 40 created – the stale backlog is growing.')
+    expect(factsOf(card)).toEqual([
+      'Evaluated 0', 'Got older 40 40 reached 15+ days', '8+ days 0 evaluated vs 40 new', '▲Stale backlog growing'])
   })
 
   /* ---- law 7: several ways out of one problem, cheapest first ----
@@ -770,7 +825,7 @@ describe('Overview tab', () => {
       ],
     }))
     expect(screen.queryByText('Open Rescue')).toBeNull()
-    expect(screen.getByText(/front of the next assign run/)).toBeInTheDocument()
+    expect(screen.getByText(/first in the next assign run/)).toBeInTheDocument()
   })
 
   /* Law 3: Overview may name a person as the COORDINATE of some games and never as a
@@ -834,7 +889,7 @@ describe('Overview tab', () => {
       pipeline: { ...healthy().pipeline as object, window: { newGames: 2000, evaluated: 1000 } },
     }))
     const shown = actions(container)
-    const pace = shown.findIndex((a) => a.do.startsWith('Find what changed'))
+    const pace = shown.findIndex((a) => a.do.startsWith('Find out why the pace dropped'))
     expect(pace).toBeGreaterThanOrEqual(0)
     // There has to BE a line under the diagnosis for this test to mean anything: the
     // assertion below no-ops the moment `pace` ranks last, so the precondition is
@@ -898,9 +953,9 @@ describe('Overview tab', () => {
   it('does not promise a clear desk the Rescue table disproves', async () => {
     const { container } = await renderTab(rebalanceable())
     const move = actions(container).find((a) => a.do.startsWith('Move '))!
-    expect(move.do).toContain('to the 2 people Rescue would hand them to')
+    expect(move.do).toContain('to the 2 evaluators Rescue picked')
     expect(move.do).not.toMatch(/clear desk/i)
-    expect(move.why).toContain("2 others pass Rescue's receiver check and are still evaluating.")
+    expect(move.why).toContain('Rescue found 2 evaluators who can take them.')
     expect(move.why).not.toMatch(/nothing stale/i)
   })
 

@@ -91,7 +91,7 @@ function bundleOf(people: P[], patch: Bundle = {}): Bundle {
     heatmap: { periods: [], rows: [] },
     config: {
       excluded: [], included: true,
-      weights: { Volume: 40, Consistency: 15, Signal: 15, Survival: 15, Recording: 15 },
+      weights: { Volume: 40, Consistency: 20, Signal: 20, Survival: 20 },
       credibility: true,
     },
     personSeries: Object.fromEntries(people.map((p, i) => [`k${i}`, BUCKETS.map((b) => ({
@@ -184,7 +184,7 @@ describe('Individual tab', () => {
     const { container } = await individual(bundleOf(TWO()))
     expect(actions(container)).toEqual([])
     expect(container.querySelector('.rp-headline'))
-      .toHaveTextContent('Alpha is keeping up, and their picks hold up.')
+      .toHaveTextContent('Alpha is keeping up, and their shortlist rate is in line with the team.')
   })
 
   it('reads Backlog as a stock, not as part of the window', async () => {
@@ -198,7 +198,7 @@ describe('Individual tab', () => {
     // ...and the tab says so where the reader can see it without opening anything. The
     // guide says it too, but the guide now starts closed, so the guide cannot be the
     // only place a number's scope is stated.
-    expect(txt(container)).toContain('the week filter does not reach it')
+    expect(txt(container)).toContain('the week filter does not affect it')
     // One backlog, one word, on all three tabs - it used to be "Waiting" here, "Queue"
     // in the chip above it and "Backlog" on Overview, for the same games.
     expect(txt(container)).not.toContain('Waiting by age')
@@ -315,7 +315,7 @@ describe('Individual tab', () => {
     const grew = [person('Alpha', { assigned: 636, evaluated: 600 }), person('Beta')]
     const { container } = await individual(bundleOf(grew))
     const net = verdictChipText(container, 'net')
-    expect(net).toBe('36 games joined their backlog this week')
+    expect(net).toBe('Their backlog grew by 36 games this week')
     expect(net.length).toBeLessThanOrEqual(150)
   })
 
@@ -323,7 +323,7 @@ describe('Individual tab', () => {
     // Alpha: assigned 600, evaluated 636 -> nets to -36: the backlog shrank.
     const shrank = [person('Alpha', { assigned: 600, evaluated: 636 }), person('Beta')]
     const { container } = await individual(bundleOf(shrank))
-    expect(verdictChipText(container, 'net')).toBe('36 games cleared from their backlog this week')
+    expect(verdictChipText(container, 'net')).toBe('Their backlog shrank by 36 games this week')
   })
 
   it('reads the net chip with its own wording when nothing changed, not a signed zero', async () => {
@@ -331,7 +331,7 @@ describe('Individual tab', () => {
     // front of "0 games".
     const { container } = await individual(bundleOf(TWO()))
     const zeroNet = verdictChipText(container, 'net')
-    expect(zeroNet).toBe('No games joined or cleared from their backlog this week')
+    expect(zeroNet).toBe('Their backlog did not change this week')
     expect(zeroNet).not.toMatch(/[-+]0 games/)
   })
 
@@ -341,7 +341,7 @@ describe('Individual tab', () => {
         { key: 'k1', name: 'Beta', n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 }],
     }))
     const wait = verdictChipText(container, 'wait')
-    expect(wait).toBe('763 games waiting, the oldest sat 13 days')
+    expect(wait).toBe('763 games in their backlog, the oldest waiting 13 days')
     expect(wait.length).toBeLessThanOrEqual(150)
   })
 
@@ -350,7 +350,22 @@ describe('Individual tab', () => {
       backlogBy: [{ key: 'k0', name: 'Alpha', n: 0, a0: 0, a1: 0, a2: 0, a3: 0, oldest: 0, stale: 0 },
         { key: 'k1', name: 'Beta', n: 120, a0: 120, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 }],
     }))
-    expect(verdictChipText(container, 'wait')).toBe('Nothing is waiting in their backlog')
+    expect(verdictChipText(container, 'wait')).toBe('Their backlog is empty')
+  })
+
+  it('never prints a green banner over a problem it names', async () => {
+    // MyTL, on the real payload: output up, backlog shrinking, nothing old - three green
+    // chips - and the headline "bypasses far more games than the team" over a red
+    // "review 20 games" action. The banner was green because only the chips set it.
+    const { container } = await individual(bundleOf([
+      person('Alpha', { evaluated: 1000, shortlisted: 10, assigned: 1000 }),
+      person('Beta', { evaluated: 100, shortlisted: 50, assigned: 100 }),
+    ]))
+    expect(container.querySelector('.rp-headline')!.textContent).toBe('Alpha bypasses far more games than the team.')
+    expect(Array.from(container.querySelectorAll('.rp-verdict .rp-chip')).length).toBeGreaterThan(0)
+    const banner = container.querySelector('.rp-verdict')!
+    expect(banner.className).toContain('warn')
+    expect(banner.className).not.toMatch(/\bgood\b/)
   })
 
   it('leaves the person out of the team rate they are compared with', async () => {
@@ -363,12 +378,12 @@ describe('Individual tab', () => {
       person('Beta', { evaluated: 100, shortlisted: 50, assigned: 100 }),
     ]))
     const why = actions(container).find((a) => a.do.includes('bypassed'))!.why
-    expect(why).toContain('the rest of the team keeps 50%')
+    expect(why).toContain('the rest of the team shortlists 50%')
     expect(why).not.toContain('5.5%')
     // and the projection says whose rate it applies. "At their rate their 1,000
     // games..." over a sentence whose subject is this person reads as their OWN rate,
     // which would make the clause say nothing at all.
-    expect(why).toContain("At the team's rate their 1,000 games")
+    expect(why).toContain("At the team's rate that is about 500 shortlisted of 1,000 games")
     expect(why).not.toContain('At their rate')
   })
 
@@ -429,12 +444,14 @@ describe('Individual tab', () => {
     }))
     const act = actions(container).find((a) => a.do.includes('5 oldest games'))!
     expect(act.do).toContain('Ask Alpha')
-    expect(act.why).toContain('120 of their 400 games')
+    expect(act.why).toContain('120 of Alpha\'s 400 games have been in their backlog for more than 8 days')
     // with its unit. The self voice says "oldest 41d"; this one used to stop at the
     // bare number, so the same field read as two different quantities across voices.
-    expect(act.why).toContain('oldest 21d.')
+    expect(act.why).toContain('Oldest: 21 days.')
     // this tab coaches the person, it does not move their games - Leaderboard already did
     expect(act.do).not.toMatch(/Rescue|Reassign/)
+    // the headline says the same thing, rather than "Alpha is keeping up"
+    expect(container.querySelector('.rp-headline')!.textContent).toBe('120 games have been in Alpha\'s backlog for more than 8 days.')
   })
 
   /* The payoff answers the instruction on the card, which asks for FIVE games a day -
@@ -448,7 +465,7 @@ describe('Individual tab', () => {
   it('prices the stale backlog at the five a day it just asked for', async () => {
     const { container } = await individual(bundleOf(TWO(), { backlogBy: [staleRow, cleanRow] }))
     // 120 stale games, five a day: 24 days.
-    expect(txt(container.querySelector('.rp-do-payoff'))).toBe('Their stale games gone in about 24 days')
+    expect(txt(container.querySelector('.rp-do-payoff'))).toBe('Their stale games cleared in about 24 days')
   })
 
   it('gives the same answer whatever pace the person happens to be running at', async () => {
@@ -461,16 +478,21 @@ describe('Individual tab', () => {
       person('Beta'),
     ], { backlogBy: [staleRow, cleanRow] }))
     const payoff = txt(container.querySelector('.rp-do-payoff'))
-    expect(payoff).toBe('Their stale games gone in about 24 days')
+    expect(payoff).toBe('Their stale games cleared in about 24 days')
     expect(payoff).not.toMatch(/Infinity|NaN/)
   })
 
-  it('never offers to move games - that was decided on Leaderboard', async () => {
+  it('offers Reassign as the second answer to a stale backlog, opened on this person', async () => {
+    // The user's call (2026-09-24): beside "ask them to start with their oldest games",
+    // a manager gets the move itself - Reassign, with this person already the source.
     const { container } = await individual(bundleOf(TWO(), {
       backlogBy: [{ key: 'k0', name: 'Alpha', n: 400, a0: 200, a1: 80, a2: 100, a3: 20, oldest: 21, stale: 120 }],
     }))
-    const block = container.querySelector('.rp-do-block')!
-    expect(txt(block)).not.toMatch(/Rescue|Reassign|move .* queue|move .* backlog/i)
+    const cta = container.querySelector('.rp-do-block a.rp-do-cta') as HTMLAnchorElement
+    expect(txt(cta)).toBe("Or reassign Alpha's games")
+    expect(cta.getAttribute('href')).toBe('/team-ops?tab=reassign&cat=puzzle&from=Alpha')
+    // Rescue stays an Overview operation
+    expect(txt(container.querySelector('.rp-do-block'))).not.toMatch(/Rescue/)
   })
 
   it('does not repeat the Leaderboard idle line', async () => {
@@ -493,7 +515,7 @@ describe('Individual tab', () => {
     // every footer carries a reading, and none of them is an instruction
     const all = nowLines(container)
     expect(all.length).toBeGreaterThanOrEqual(5)
-    expect(all.some((n) => /^Now(Ask|Have|Move|Run|Re-read|Clear|Check) /.test(n))).toBe(false)
+    expect(all.some((n) => /^Now(Ask|Have|Move|Run|Review|Clear|Check) /.test(n))).toBe(false)
   })
 
   it('draws judged against aged, and reads the two as movement rather than as a stock', async () => {
@@ -506,10 +528,11 @@ describe('Individual tab', () => {
         key: b, label: b, cleared: [10, 0, 5, 0], aged: [0, i < 3 ? 40 : 0, 0],
       })) },
     }))
-    const now = nowLines(container).find((n) => n.includes('only got older'))!
-    expect(now).toContain('90 evaluated against 120 that only got older')
-    expect(now).toContain('30 cleared against 120 that crossed in')
-    expect(now).toContain('stale work arrived faster than it was cleared')
+    const now = nowLines(container).find((n) => n.includes('Got older'))!
+    expect(now).toContain('Evaluated 90')
+    expect(now).toContain('Got older 120')
+    expect(now).toContain('8+ days 30 evaluated vs 120 new')
+    expect(now).toContain('More old games were added than evaluated')
     // a movement sentence, never a claim about what is on the desk right now
     expect(now).not.toMatch(/backlog (grew|shrank)/)
   })
@@ -540,8 +563,8 @@ describe('Individual tab', () => {
     // the 1,842 they came from, under a sentence calling it a subset.
     const { container } = await individual(bundleOf(TWO()))
     const tier = Array.from(container.querySelectorAll('.rp-mix-block'))
-      .find((b) => txt(b).startsWith('How those picks were ruled on'))!
-    expect(txt(tier)).toContain('of 600 ruled on')
+      .find((b) => txt(b).startsWith('Final conclusions'))!
+    expect(txt(tier)).toContain('of 600 have one')
     const bar = tier.querySelector('.rp-band-bar')!
     expect(bar.classList.contains('scaled')).toBe(true)
     // the unfilled remainder is track, so it carries no legend entry
@@ -570,7 +593,7 @@ describe('Individual tab', () => {
     // for an assigned-but-untouched backlog is the intake-gap coaching, in the
     // evaluator's own voice - a manager reassigns the backlog, the person holding it can
     // only ask for one
-    expect(act.do).toBe('Ask for a rebalance now, not at the end of the week')
+    expect(act.do).toBe('Ask to have some of your games moved to someone else now')
     expect(act.do).not.toContain('Ask Alpha')
   })
 
@@ -607,9 +630,9 @@ describe('Individual tab', () => {
     const { container } = await individual(bundleOf(TWO()))
     fireEvent.click(container.querySelector('.rp-guide button')!)
     const read = txt(container.querySelector('.rp-guide .read'))
-    expect(read).toContain('Backlog is the only KPI here the week filter does not reach')
+    expect(read).toContain('Backlog is the only KPI the week filter does not affect')
     expect(read).not.toContain('the only number here')
-    expect(read).toContain('the review table at the bottom has its own filters too')
+    expect(read).toContain('The review table at the bottom has its own filters.')
   })
 
   // Task 6: the review table is the last block on the tab, and unlike everything above

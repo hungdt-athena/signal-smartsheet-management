@@ -94,7 +94,7 @@ function bundleOf(people: Person[], patch: Bundle = {}): Bundle {
     },
     config: {
       excluded: [], included: true,
-      weights: { Volume: 40, Consistency: 15, Signal: 15, Survival: 15, Recording: 15 },
+      weights: { Volume: 40, Consistency: 20, Signal: 20, Survival: 20 },
       credibility: true,
     },
     personSeries: {}, videos: {},
@@ -129,7 +129,7 @@ const names = (c: HTMLElement) => rows(c).map((r) => r.querySelector('.rp-lbt-na
 // by the name cell, not the row text: a ranked row starts with its rank number
 const rowNamed = (c: HTMLElement, name: string) =>
   rows(c).find((r) => r.querySelector('.rp-lbt-name')?.textContent === name)!
-const readNotes = (c: HTMLElement) => Array.from(c.querySelectorAll('.rp-readnote')).map((r) => r.textContent || '')
+const footers = (c: HTMLElement) => Array.from(c.querySelectorAll('.rp-foot')).map((r) => r.textContent || '')
 // the computed half of a chart footer: what this window's numbers say, as opposed to
 // the standing explanation of how to read the chart
 const nowLines = (c: HTMLElement) => Array.from(c.querySelectorAll('.rp-foot-now')).map((r) => r.textContent || '')
@@ -165,11 +165,11 @@ describe('Leaderboard tab', () => {
     ]))
     const now = nowLines(container).join(' ')
     expect(now).toContain('Alpha')
-    expect(now).toContain('keeps nothing')
+    expect(now).toContain('Alpha 0% vs 20%')
     expect(now).not.toMatch(/\d{4,}(\.\d+)?x/)   // no 1000000000.0x
-    expect(now).not.toMatch(/Infinity|NaN/)
-    // the rest of the sentence still reads, and still carries the sample size
-    expect(now).toMatch(/on 250 games/)
+    expect(now).not.toMatch(/\bx less\b|Infinity|NaN/)
+    // the pill still carries the sample size
+    expect(now).toMatch(/250 games/)
   })
 
   it('takes you to the named person s row, flashed, when you click their name in a chart', async () => {
@@ -196,10 +196,10 @@ describe('Leaderboard tab', () => {
     expect(labels).toEqual([
       'Volume vs shortlist rate',
       'Everyone, side by side',
-      'Whose backlog is it',
+      'Backlog by person',
       'Activity heatmap',
       'Initial conclusions by evaluator',
-      'Their picks - final outcomes',
+      'Shortlisted games - final conclusions',
     ])
     // Eight rank boards, an eight-series radar and two bump charts used to live here.
     expect(container.querySelector('.rp-rank')).toBeNull()
@@ -208,14 +208,14 @@ describe('Leaderboard tab', () => {
     // A ReadNote explains a chart; an Act tells someone to do something. Actions live
     // in one block at the top, or the tab has eight of them and therefore none.
     expect(container.querySelectorAll('.rp-act')).toHaveLength(0)
-    expect(readNotes(container).length).toBe(6)
+    expect(footers(container).length).toBe(6)
   })
 
   it('prints no actions when nothing crosses a threshold', async () => {
     const { container } = await leaderboard(bundleOf(FOUR()))
     expect(actions(container)).toEqual([])
     expect(container.querySelector('.rp-headline'))
-      .toHaveTextContent('The team is evaluating by one bar, at a comparable pace.')
+      .toHaveTextContent('Everyone is evaluating at a similar pace and shortlist rate.')
   })
 
   // Overview's verdict banner (headline + boxed, clickable chips) is now shared by
@@ -233,7 +233,7 @@ describe('Leaderboard tab', () => {
     // a chip is a <button> now, not a bare <span> - it is a control
     expect(chips.every((c) => c.tagName === 'BUTTON')).toBe(true)
     expect(chips.map((c) => c.querySelector('.rp-chip-kicker')?.textContent))
-      .toEqual(['COVERAGE', 'CONCENTRATION', 'CALIBRATION'])
+      .toEqual(['ACTIVE', 'TOP EVALUATOR', 'SHORTLIST RATE'])
   })
 
   // Each chip has to take the reader to the number it was computed from, the same
@@ -282,15 +282,15 @@ describe('Leaderboard tab', () => {
 
   it('reads the people and top chips as full sentences that name their unit', async () => {
     const { container } = await leaderboard(bundleOf(FOUR()))
-    const people2 = chipText(container, 'COVERAGE')
-    expect(people2).toBe('4 of 4 people evaluated anything this week')
+    const people2 = chipText(container, 'ACTIVE')
+    expect(people2).toBe('4 of 4 evaluators active this week')
     expect(people2.length).toBeLessThanOrEqual(150)
 
     // ThuDT's example became a bold-percentage sentence; on this fixture the top
     // person is Alpha (all four tied on evaluated, first in array order): 250 of the
     // team's 1,000 games is 25%.
-    const top = chipText(container, 'CONCENTRATION')
-    expect(top).toBe('Alpha evaluated 25% of everything the team got through')
+    const top = chipText(container, 'TOP EVALUATOR')
+    expect(top).toBe('Alpha evaluated 25% of all games this week')
     expect(top.length).toBeLessThanOrEqual(150)
   })
 
@@ -307,11 +307,12 @@ describe('Leaderboard tab', () => {
       even('Delta', { evaluated: 10, bypass: 8, listIdea: 2, cells: { d1: 10 } }),
     ]
     const { container } = await leaderboard(bundleOf(people))
-    const cal = chipText(container, 'CALIBRATION')
+    const cal = chipText(container, 'SHORTLIST RATE')
     // The riddle this task exists to remove: "keeps nothing" alone, with no noun,
     // and "1 in 11" with nothing said about what is being kept.
-    expect(cal).not.toContain('keeps nothing,')
-    expect(cal).toBe('NhiLV shortlists none of the games they evaluate; QuangVN keeps 1 in every 11')
+    expect(cal).not.toContain('shortlists nothing,')
+    // Percentages, the same unit as the Shortlist % column the chip points at.
+    expect(cal).toBe('NhiLV shortlists 0% of their games; QuangVN shortlists 9.1%')
     expect(cal.length).toBeLessThanOrEqual(150)
   })
 
@@ -327,10 +328,10 @@ describe('Leaderboard tab', () => {
       even('Delta', { evaluated: 10, bypass: 8, listIdea: 2, cells: { d1: 10 } }),
     ]
     const { container } = await leaderboard(bundleOf(people))
-    expect(chipBolds(container, 'COVERAGE')).toEqual(['4 of 4 people'])
-    expect(chipBolds(container, 'CONCENTRATION')).toEqual(['NhiLV', '51%'])
+    expect(chipBolds(container, 'ACTIVE')).toEqual(['4 of 4 evaluators'])
+    expect(chipBolds(container, 'TOP EVALUATOR')).toEqual(['NhiLV', '51%'])
     // name, rate, name, rate - the rates are the point, and they were plain before
-    expect(chipBolds(container, 'CALIBRATION')).toEqual(['NhiLV', 'none', 'QuangVN', '1 in every 11'])
+    expect(chipBolds(container, 'SHORTLIST RATE')).toEqual(['NhiLV', '0%', 'QuangVN', '9.1%'])
   })
 
   // The `cal` chip must stay true for the whole range `keepPair` can return, not just
@@ -343,8 +344,8 @@ describe('Leaderboard tab', () => {
       even('Gamma'), even('Delta'),
     ]
     const { container } = await leaderboard(bundleOf(people))
-    const cal = chipText(container, 'CALIBRATION')
-    expect(cal).toBe('Strict shortlists 20% of the games they evaluate; Loose keeps 80%')
+    const cal = chipText(container, 'SHORTLIST RATE')
+    expect(cal).toBe('Strict shortlists 20% of their games; Loose shortlists 80%')
     expect(cal.length).toBeLessThanOrEqual(150)
   })
 
@@ -365,10 +366,10 @@ describe('Leaderboard tab', () => {
       even('Delta', { evaluated: 10, bypass: 5, listIdea: 5, cells: { d1: 10 } }),
     ]
     const { container } = await leaderboard(bundleOf(people))
-    const cal = chipText(container, 'CALIBRATION')
+    const cal = chipText(container, 'SHORTLIST RATE')
     expect(cal).not.toContain('∞')
     expect(cal).not.toMatch(/Infinity|NaN|undefined/)
-    expect(cal).toBe('Strict shortlists 1 in every 10 of the games they evaluate; Loose keeps none')
+    expect(cal).toBe('Strict shortlists 10% of their games; Loose shortlists 0%')
   })
 
   // Code review Important 1, both sides at once: strict keeps nothing at the top of
@@ -388,10 +389,10 @@ describe('Leaderboard tab', () => {
     // through the "tot > 0 ? ... : 0" fallback, but this is the unambiguous case).
     ;(bundle.evaluators as Array<Record<string, unknown>>)[1].initialConclusions = { Something: 1 }
     const { container } = await leaderboard(bundle)
-    const cal = chipText(container, 'CALIBRATION')
+    const cal = chipText(container, 'SHORTLIST RATE')
     expect(cal).not.toContain('∞')
     expect(cal).not.toMatch(/Infinity|NaN|undefined/)
-    expect(cal).toBe('Strict shortlists none of the games they evaluate; Loose keeps none')
+    expect(cal).toBe('Strict shortlists 0% of their games; Loose shortlists 0%')
   })
 
   // Code review Important 2: the two clauses used to use different phrasing for the
@@ -408,9 +409,10 @@ describe('Leaderboard tab', () => {
       even('Delta', { evaluated: 10, bypass: 5, listIdea: 5, cells: { d1: 10 } }),
     ]
     const { container } = await leaderboard(bundleOf(people))
-    const cal = chipText(container, 'CALIBRATION')
-    // both clauses spelled out as "1 in every N", never "1 in N" or "1 game in N"
-    expect(cal).toBe('Strict shortlists 1 in every 10 of the games they evaluate; Loose keeps 1 in every 7')
+    const cal = chipText(container, 'SHORTLIST RATE')
+    // both clauses in the same unit, and never the old "1 in N" form
+    expect(cal).toBe('Strict shortlists 10% of their games; Loose shortlists 15%')
+    expect(cal).not.toMatch(/1 in /)
   })
 
   it('puts every rate next to the count it was computed from', async () => {
@@ -460,18 +462,18 @@ describe('Leaderboard tab', () => {
     people[0] = even('Alpha', { bypass: 210, listIdea: 40 })  // 84% bypass, 16% kept
     people[1] = even('Beta', { bypass: 165, listIdea: 85 })   // 66% bypass, 34% kept
     const { container } = await leaderboard(bundleOf(people))
-    expect(container.querySelector('.rp-headline')).toHaveTextContent('not evaluating by the same bar')
+    expect(container.querySelector('.rp-headline')).toHaveTextContent('Shortlist rates differ a lot between evaluators.')
     expect(container.querySelectorAll('.rp-scatter-lbl.hot')).toHaveLength(0)
     const [first] = actions(container)
     expect(first.do).toContain('Alpha')
     expect(first.do).toContain('Beta')
     expect(first.urgent).toBe(true)
     // The evidence is what the gap costs in games, not two percentages to convert.
-    expect(first.why).toContain('would have sent on about 85 instead of 40')
+    expect(first.why).toContain('would have shortlisted about 85 of 250 games, not 40')
     // and it asks for a re-read of games already judged. Every game goes to exactly one
     // person and is never judged twice, so "put them through the same 20 games" asked
     // for something the assignment model cannot do.
-    expect(first.do).toMatch(/re-read/i)
+    expect(first.do).toMatch(/review/i)
     expect(first.do).not.toMatch(/the same 20 games/i)
   })
 
@@ -528,10 +530,16 @@ describe('Leaderboard tab', () => {
     // the flagged rows, the footer and the action all name the same person
     const flagged = Array.from(container.querySelectorAll('.rp-queue-row.warn .rp-queue-name')).map((n) => n.textContent)
     expect(flagged).toEqual(['Alpha'])
-    const now = nowLines(container).find((n) => n.includes('flagged'))!
+    const now = nowLines(container).find((n) => n.includes('waiting 8+ days'))!
     expect(now).toContain('Alpha')
     expect(now).not.toContain('Beta')
     expect(actions(container).find((a) => a.do.includes('Reassign'))!.do).toContain('Alpha')
+    // and the sentence at the top does not call the team fine over that action
+    // and says WHERE the games have been waiting, not an ambiguous "past 8 days"
+    expect(container.querySelector('.rp-headline')!.textContent).toBe('250 games have been in Alpha\'s backlog for more than 8 days.')
+    // None of the three chips reads the backlog, so they can all be green; the banner
+    // still turns amber, because there is an action under it.
+    expect(container.querySelector('.rp-verdict')!.className).not.toMatch(/\bgood\b/)
   })
 
   it('never prints two moves about the same person', async () => {
@@ -570,7 +578,7 @@ describe('Leaderboard tab', () => {
     // parses it as two backlog shares, when the second is actually a share of a
     // smaller, different pool - the denominator has to be named.
     expect(beta.why).toMatch(/of their backlog/)
-    expect(beta.why).toMatch(/of the team's stale total/)
+    expect(beta.why).toMatch(/of the team's stale games/)
     expect(beta.why.length).toBeLessThanOrEqual(150)
   })
 
@@ -589,7 +597,7 @@ describe('Leaderboard tab', () => {
     expect(kickers.length).toBeGreaterThan(0)
     expect(kickers).toContain('Speed')
     for (const k of kickers) {
-      expect(['Backlog', 'Calibration', 'Coverage', 'Output', 'Picks', 'Recording', 'Rhythm', 'Speed']).toContain(k)
+      expect(['Backlog', 'Shortlist rate', 'Activity', 'Output', 'Final conclusions', 'Recording', 'Work days', 'Speed']).toContain(k)
     }
   })
 
@@ -665,7 +673,7 @@ describe('Leaderboard tab', () => {
     const people = [even('Alpha', { evaluated: 700, bypass: 350, listIdea: 350 }), even('Beta', { evaluated: 100 }),
       even('Gamma', { evaluated: 100 }), even('Delta', { evaluated: 100 })]
     const { container } = await leaderboard(bundleOf(people, { window: { label: 'All time' } }))
-    const share = actions(container).find((a) => a.do.includes('second person'))!
+    const share = actions(container).find((a) => a.do.includes('second evaluator'))!
     expect(share.do).toContain('this window')
     expect(share.do).not.toContain('this week')
   })
@@ -757,7 +765,8 @@ describe('Leaderboard tab', () => {
     // pooled = (10+50+50+50) / (1000+250*3) = 160/1750 = 9.1%, one game in 11.
     // the mean of the four rates would be 15.3%, one in 7.
     const quad = Array.from(container.querySelectorAll('.rp-quad-lbl')).map((t) => t.textContent)
-    expect(quad).toContain('team keeps 1 in 11')
+    expect(quad).toContain('average shortlist rate, 9.1%')
+    expect(quad).toContain('average evaluated, 438 games')
   })
 
   it('calls out a rate half the team or five times it, and nothing in between', async () => {
@@ -774,8 +783,8 @@ describe('Leaderboard tab', () => {
     expect(nowLines(container)[0]).toContain('Big')
     // measured against EVERYONE ELSE (150 of 750 = 1 in 5), not against a pool Big is
     // inside, which Big's own 1,000 games would otherwise drag down to 1 in 11
-    expect(nowLines(container)[0]).toMatch(/1 game in 100 where the others keep 1 in 5/)
-    expect(actions(container).some((a) => a.do.includes('Re-read 20 games Big bypassed'))).toBe(true)
+    expect(nowLines(container)[0]).toMatch(/Big 1\.0% vs 20% 20\.0x less · 1,000 games/)
+    expect(actions(container).some((a) => a.do.includes('Review 20 games Big bypassed'))).toBe(true)
   })
 
   it('cuts an empty middle out of the y axis and says it did', async () => {
@@ -787,8 +796,22 @@ describe('Leaderboard tab', () => {
       even('Delta', { evaluated: 225, bypass: 214, listIdea: 11, cells: { d1: 225 } })]
     const { container } = await leaderboard(bundleOf(people))
     const ticks = Array.from(container.querySelectorAll('.rp-ylabel')).map((t) => t.textContent)
-    expect(ticks).toEqual(['0%', '5%', '10%', '15%', '20%', '25%', '75%', '100%'])
-    expect(container.querySelector('.rp-brk-cap')).toHaveTextContent('nobody between 25% and 75%')
+    expect(ticks).toEqual(['0%', '5%', '10%', '15%', '20%', '25%', '80%', '100%'])
+    expect(container.querySelector('.rp-brk-cap')).toHaveTextContent('nobody between 25% and 80%')
+  })
+
+  it('fits the y axis to the highest point instead of rounding 12% up to 20%', async () => {
+    // Nobody sat between 15% and 20% on the real batch, and the old four-tick scale still
+    // drew that band - a quarter of the plot, empty. The x axis gets the same fit.
+    const people = [even('A', { evaluated: 130, bypass: 114, listIdea: 16, cells: { d1: 130 } }),
+      even('B', { evaluated: 404, bypass: 363, listIdea: 41, cells: { d1: 404 } }),
+      even('C', { evaluated: 458, bypass: 438, listIdea: 20, cells: { d1: 458 } }),
+      even('D', { evaluated: 350, bypass: 345, listIdea: 5, cells: { d1: 350 } })]
+    const { container } = await leaderboard(bundleOf(people))
+    const y = Array.from(container.querySelectorAll('.rp-ylabel')).map((t) => t.textContent)
+    expect(y).toEqual(['0%', '5%', '10%', '15%'])
+    const x = Array.from(container.querySelectorAll('.rp-xlabel')).map((t) => t.textContent)
+    expect(x[x.length - 1]).toBe('500')
   })
 
   it('leaves the y axis alone when the gap is just how the team is spread', async () => {
@@ -820,7 +843,7 @@ describe('Leaderboard tab', () => {
     const now = nowLines(container).join(' ')
     expect(now).toContain('Star')
     expect(now).not.toContain('1 game in 1 ')
-    expect(now).toMatch(/Star<\/b>? ?keeps 88%|Star keeps 88%/)
+    expect(now).toMatch(/Star 88% vs 9\.1%/)
   })
 
   it('reads movement as half the window against the other half', async () => {
@@ -831,8 +854,8 @@ describe('Leaderboard tab', () => {
     people[0] = even('Alpha', { cells: { d1: 1, d2: 1, d3: 1, d4: 200, d5: 200, d6: 200 } })
     people[1] = even('Beta', { cells: { d1: 200, d2: 200, d3: 200, d4: 1, d5: 1, d6: 1 } })
     const { container } = await leaderboard(bundleOf(people))
-    const heat = nowLines(container).find((n) => n.includes('First half'))!
-    expect(heat).toContain('First half of these 6 days against the second')
+    const heat = nowLines(container).find((n) => n.includes('Compared'))!
+    expect(heat).toContain('first vs second half of the week')
     expect(heat).toContain('Alpha')
     expect(heat).toContain('Beta')
   })
@@ -848,5 +871,20 @@ describe('Leaderboard tab', () => {
     expect(now.filter((n) => /\d/.test(n)).length).toBeGreaterThanOrEqual(4)
     // ... and none of them is an instruction. Actions live in "Do this" and nowhere else.
     expect(now.some((n) => /^(Ask|Have|Move|Share|Re-read|Review|Put) /.test(n.replace(/^Now/, '').trim()))).toBe(false)
+  })
+
+  it('colours the scatter by title, and names both groups in its key', async () => {
+    // Position already says volume and rate; the colour adds the one thing it cannot
+    // show - fulltime or freelancer. Standard preset: Fulltime violet, Freelancer aqua.
+    const b = bundleOf([even('Alpha'), even('Beta'), even('Gamma'), even('Delta')]) as { evaluators: Array<{ title: string | null }> }
+    b.evaluators[0].title = 'Fulltime'; b.evaluators[1].title = 'Fulltime'; b.evaluators[2].title = 'Freelancer'
+    const { container } = await leaderboard(b as unknown as Bundle)
+    const fills = Array.from(container.querySelectorAll('.rp-svg circle[fill]'))
+      .map((c) => c.getAttribute('fill')).filter((f) => f && f.startsWith('#'))
+    expect(new Set(fills)).toEqual(new Set(['#4a3aa7', '#1baf7a', '#94a3b8']))  // Delta has no title
+    const keys = Array.from(container.querySelectorAll('.rp-foot-legend')).map((n) => n.textContent).join(' ')
+    expect(keys).toContain('Fulltime')
+    expect(keys).toContain('Freelancer')
+    expect(keys).toContain('No title')
   })
 })
