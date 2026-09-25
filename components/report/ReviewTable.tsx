@@ -114,6 +114,7 @@ interface ReviewRow {
   title: string | null
   icon_url: string | null
   publisher_name: string | null
+  publisher_country?: string | null
   release_date: string | null
   os: string | null
   app_link: string | null
@@ -152,6 +153,78 @@ function fmtOs(os: string | null | undefined): string {
   if (!os) return '—'
   const v = os.trim().toLowerCase()
   return v === 'ios' ? 'iOS' : v === 'android' ? 'Android' : os
+}
+
+// Where the dev account is based, as one chip: a flag and one name per country.
+//
+// The store writes it several ways -- a full name ('Pakistan'), an ISO code ('US',
+// 'JP'; ~9k evaluated games), a local spelling ('Brasil', 'Việt Nam') -- and the same
+// account must not read as two places. So every value is resolved to its ISO code
+// first, and the chip is drawn from the code: the flag comes from it, and the name is
+// ICU's English name for it, pinned where the DB's usual spelling is shorter.
+//
+// A value that does not resolve is not shown. What fails to resolve is not a country
+// the list forgot: it is the importer taking the wrong address line -- a postcode
+// ('22003', '邮政编码: 650000', ~2k games) or a building ('서해아파트)'). A wrong
+// country is worse than none.
+const REGION_NAMES: Intl.DisplayNames | null = (() => {
+  try { return new Intl.DisplayNames(['en'], { type: 'region' }) } catch { return null }
+})()
+const NAME_BY_CODE: Record<string, string> = {
+  HK: 'Hong Kong', MO: 'Macau', TR: 'Turkey', MM: 'Myanmar', PS: 'Palestine',
+  CD: 'DR Congo', CG: 'Congo',
+}
+// Spellings in the DB that ICU's English names do not match, keyed lower-case.
+const CODE_BY_ALIAS: Record<string, string> = {
+  'turkey': 'TR', 'türkiye': 'TR', 'hong kong': 'HK', 'macau': 'MO', 'macao': 'MO',
+  'czech republic': 'CZ', 'myanmar': 'MM', 'macedonia': 'MK',
+  'bosnia and herzegovina': 'BA', 'congo (democratic republic of the)': 'CD',
+  'palestine': 'PS', 'palestine, state of': 'PS', 'cote d ivoire': 'CI',
+  'ivory coast': 'CI', 'the bahamas': 'BS', 'cabo verde': 'CV',
+  'brasil': 'BR', 'españa': 'ES', 'việt nam': 'VN', 'perú': 'PE', 'românia': 'RO',
+  'lietuva': 'LT', 'suomi': 'FI',
+}
+// Retired codes ICU still names -- each with the SAME name as the code that replaced
+// it ('VD' and 'VN' are both "Vietnam", 'UK' and 'GB' both "United Kingdom"). None has
+// a flag emoji, so a name must never resolve to one, and a stored retired code is
+// read as its successor.
+const CURRENT_CODE: Record<string, string> = {
+  AN: 'CW', BU: 'MM', CS: 'RS', DD: 'DE', DY: 'BJ', FX: 'FR', HV: 'BF', NH: 'VU',
+  RH: 'ZW', SU: 'RU', TP: 'TL', UK: 'GB', VD: 'VN', YD: 'YE', YU: 'RS', ZR: 'CD',
+}
+let codeByName: Map<string, string> | null = null
+function codeForName(name: string): string | undefined {
+  if (!codeByName) {
+    codeByName = new Map()
+    for (let a = 65; a <= 90; a++) for (let b = 65; b <= 90; b++) {
+      const code = String.fromCharCode(a, b)
+      if (CURRENT_CODE[code]) continue
+      const n = regionName(code)
+      if (n) codeByName.set(n.toLowerCase(), code)
+    }
+  }
+  return codeByName.get(name)
+}
+// ICU answers an unassigned code with the code itself or 'Unknown Region'.
+function regionName(code: string): string | null {
+  try {
+    const n = REGION_NAMES?.of(code)
+    return n && n !== code && n !== 'Unknown Region' ? n : null
+  } catch { return null }
+}
+function resolveCountry(v: string | null | undefined): { flag: string; name: string } | null {
+  const s = v?.trim()
+  if (!s) return null
+  const key = s.toLowerCase()
+  const upper = s.toUpperCase()
+  const code = CODE_BY_ALIAS[key]
+    ?? (/^[A-Z]{2}$/.test(upper) && regionName(upper) ? CURRENT_CODE[upper] ?? upper : codeForName(key))
+  if (!code) return null
+  const name = NAME_BY_CODE[code] ?? regionName(code)
+  if (!name) return null
+  // Two regional-indicator letters make the flag emoji: 'JP' -> 🇯🇵.
+  const flag = String.fromCodePoint(...Array.from(code, c => 0x1f1e6 + c.charCodeAt(0) - 65))
+  return { flag, name }
 }
 
 function fmtDate(d: string | null | undefined): string {
@@ -627,6 +700,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
             const shots = shotsFor(row)
             const evaluatedOn = fmtDate(row.evaluate_date || row.updated_at)
             const tags = Array.isArray(row.tags) ? row.tags : []
+            const country = resolveCountry(row.publisher_country)
             return (
               <div className="rp-review-row" key={row.id}>
                 <div className="rp-review-main">
@@ -648,7 +722,19 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                           <a href={row.app_link} target="_blank" rel="noopener">{row.title || 'Untitled'}</a>
                         ) : (row.title || 'Untitled')}
                       </div>
-                      <div className="rp-review-pub">{row.publisher_name || 'Unknown developer'}</div>
+                      {/* The country is a chip, not more grey text: two names in the same
+                          grey, dot or "from" between them, still read as one run of text.
+                          Left out, not "unknown", when there is none: that is most iOS rows,
+                          and a placeholder on each says nothing. */}
+                      <div className="rp-review-pub">
+                        <span>{row.publisher_name || 'Unknown developer'}</span>
+                        {country && (
+                          <span className="rp-review-country" title="Developer's country">
+                            <span className="rp-review-flag" aria-hidden="true">{country.flag}</span>
+                            {country.name}
+                          </span>
+                        )}
+                      </div>
                       {/* Plain text with a dot between, not a row of boxes: a boxed
                           platform next to a boxed date next to boxed tags was three
                           kinds of chip in one line. The date still says which date. */}

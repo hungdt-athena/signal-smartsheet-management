@@ -378,6 +378,45 @@ describe('ReviewTable', () => {
     expect(cells[1].className).toContain('rp-review-shots')
   })
 
+  it('puts the developer country next to the developer as a flag chip, one name per country', async () => {
+    const fetchMock = mockApi({
+      list: [
+        row({ id: 1, game_id: 'g1', title: 'Coded', publisher_name: 'Acme Studio', publisher_country: 'US' }),
+        row({ id: 2, game_id: 'g2', title: 'Named', publisher_name: 'Calamanci', publisher_country: 'Montenegro' }),
+        row({ id: 3, game_id: 'g3', title: 'Aliased', publisher_name: 'Istanbul Games', publisher_country: 'Türkiye' }),
+        row({ id: 4, game_id: 'g4', title: 'Missing', publisher_name: 'Nowhere Ltd', publisher_country: null }),
+        row({ id: 5, game_id: 'g5', title: 'Postcode', publisher_name: 'Shhvjji', publisher_country: '邮政编码: 571900' }),
+        row({ id: 6, game_id: 'g6', title: 'Building', publisher_name: 'Seoul Soft', publisher_country: '서해아파트)' }),
+        row({ id: 7, game_id: 'g7', title: 'Local', publisher_name: 'Rio Games', publisher_country: 'Brasil' }),
+        row({ id: 8, game_id: 'g8', title: 'British', publisher_name: 'Tripledot', publisher_country: 'United Kingdom' }),
+        row({ id: 9, game_id: 'g9', title: 'Reserved', publisher_name: 'London Ltd', publisher_country: 'UK' }),
+        row({ id: 10, game_id: 'g10', title: 'Viet', publisher_name: 'Tenfun', publisher_country: 'Vietnam' }),
+      ],
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={true} />)
+    await waitFor(() => expect(screen.getByText('Coded')).toBeInTheDocument())
+
+    const chips = Array.from(container.querySelectorAll('.rp-review-row')).map(r => {
+      const chip = r.querySelector('.rp-review-pub .rp-review-country')
+      if (!chip) return null
+      return [chip.querySelector('.rp-review-flag')!.textContent, chip.lastChild!.textContent]
+    })
+    // A code is spelled out, a name stays, local and alternate spellings land on one
+    // name. A postcode or a building the importer mistook for a country, or no value
+    // at all, draws no chip -- never a placeholder.
+    expect(chips).toEqual([
+      ['🇺🇸', 'United States'], ['🇲🇪', 'Montenegro'], ['🇹🇷', 'Turkey'],
+      null, null, null, ['🇧🇷', 'Brazil'],
+      // The current code's flag, never a retired one's: ICU names 'UK' "United
+      // Kingdom" and 'VD' "Vietnam" too, and neither has a flag emoji.
+      ['🇬🇧', 'United Kingdom'], ['🇬🇧', 'United Kingdom'], ['🇻🇳', 'Vietnam'],
+    ])
+    // The developer name is still its own text, not glued to the chip.
+    expect(screen.getByText('Acme Studio')).toBeInTheDocument()
+  })
+
   // ---- what belongs in the conclusion dropdown ----
 
   it('keeps housekeeping out of the conclusion dropdown, however the facets answer', async () => {

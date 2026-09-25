@@ -3019,7 +3019,13 @@ input:checked + .slider:before {
 .rp-review-title { font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--text); }
 .rp-review-title a { color: var(--accent); text-decoration: none; }
 .rp-review-title a:hover { text-decoration: underline; }
-.rp-review-pub { font-size: 12.5px; color: var(--muted); }
+.rp-review-pub { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px;
+  font-size: 12.5px; color: var(--muted); }
+/* developer's country: flag + name in a small outlined chip */
+.rp-review-country { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px 1px 6px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2);
+  color: var(--text); font-size: 11.5px; font-weight: 500; line-height: 18px; white-space: nowrap; }
+.rp-review-flag { font-size: 13px; line-height: 1; }
 /* platform · release date, as plain text with a dot between */
 .rp-review-meta { display: flex; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--faint); }
 .rp-review-fact { white-space: nowrap; }
