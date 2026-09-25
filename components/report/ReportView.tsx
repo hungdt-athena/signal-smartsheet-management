@@ -3,7 +3,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ALL_ROUNDER_AXES, allRounderScore, DEFAULT_REPORT_CONFIG, DEFAULT_REPORT_RULES, REPORT_RULE_BOUNDS, parseReportRules, type AxisName, type ReportConfig, type ReportRules } from '@/lib/report-config'
 import {
-  Kpi, RankBars, Heatmap, Funnel, HealthBars, StackedBars, ColumnChart, DivergingBars, QueueBars,
+  Kpi, Heatmap, Funnel, HealthBars, StackedBars, ColumnChart, DivergingBars, QueueBars,
   LineChart, Scatter, SortTable, Empty, fmt, InfoTip, conclusionColor, usePalette, PaletteContext, inkOn,
   type Bench, type SortCol,
 } from '@/components/report/charts'
@@ -982,7 +982,6 @@ function Overview({ d }: { d: Bundle }) {
   // ---- clearing mix ----
   const clearedTot = p ? p.cleared.reduce((s, r) => s + ageTotal(r), 0) : 0
   const clearedOld = p ? p.cleared.reduce((s, r) => s + r.a2 + r.a3, 0) : 0
-  const clearedOldShare = clearedTot ? clearedOld / clearedTot : 0
   const avgWait = p && clearedTot ? p.cleared.reduce((s, r) => s + r.avgAge * ageTotal(r), 0) / clearedTot : null
 
   // ---- who was actually working, per bucket ----
