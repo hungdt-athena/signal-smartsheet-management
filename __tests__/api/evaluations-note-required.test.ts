@@ -103,4 +103,14 @@ describe('/api/evaluations PATCH — initial note is required', () => {
     expect(res.status).toBe(200)
     expect(calls.some(c => /SELECT\s+initial_conclusion FROM game_evaluations/.test(c.text))).toBe(false)
   })
+
+  // A re-save with the same verdict (the panel always resends it) must not
+  // restamp evaluate_date — the Effort Tracker reads that stamp as work time.
+  it('only restamps evaluate_date when the initial conclusion changes', async () => {
+    routeSql({ initial_conclusion: 'List_Idea' })
+    const res = await PATCH(patchReq({ id: 1, initial_conclusion: 'List_Idea', initial_note: 'a real note here' }))
+    expect(res.status).toBe(200)
+    const upd = calls.find(c => /UPDATE game_evaluations/.test(c.text))!
+    expect(upd.text).toMatch(/initial_conclusion IS DISTINCT FROM\s+\$?\s*::text THEN NOW\(\)/)
+  })
 })
