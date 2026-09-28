@@ -46,3 +46,8 @@ externalPort = 80
 
 [objectStorage]
 defaultBucketID = "replit-objstore-21b16b82-187b-4e57-a575-ff9d17e030b8"
+
+[userenv]
+
+[userenv.shared]
+EFFORT_TRACKER_API_KEY = "4a551dcd2ef5a128"
