@@ -1,0 +1,108 @@
+{
+ "ranAt": "2026-09-29T22:10:50.771Z",
+ "results": [
+  {
+   "step": "1 copy template into Draft folder",
+   "ok": true,
+   "ms": 4131,
+   "detail": {
+    "id": "1Zgy4GOm1GCwfYF7QS9nul5E-VyuyGpkrwuwl3jWT8LA",
+    "parents": [
+     "1FEBZ4c-ueBhy_kIq6nLHi1ak744iCHN1"
+    ]
+   }
+  },
+  {
+   "step": "2 read copy (slide + element ids)",
+   "ok": true,
+   "ms": 689,
+   "detail": {
+    "slides": 9
+   }
+  },
+  {
+   "step": "3 duplicate Insight slide x2 and move to end",
+   "ok": true,
+   "ms": 1613,
+   "detail": {
+    "newSlideIds": [
+     "SLIDES_API2141056639_0",
+     "SLIDES_API2141056639_95"
+    ]
+   }
+  },
+  {
+   "step": "4 write text into one shape by objectId (deleteText + insertText)",
+   "ok": true,
+   "ms": 805,
+   "detail": {
+    "shape": "SLIDES_API2141056639_4",
+    "was": "Insight"
+   }
+  },
+  {
+   "step": "5 replaceAllText scoped to one slide (pageObjectIds)",
+   "ok": true,
+   "ms": 307,
+   "detail": {
+    "occurrencesChanged": 8
+   }
+  },
+  {
+   "step": "6 hyperlink on a text range",
+   "ok": true,
+   "ms": 791,
+   "detail": {
+    "shape": "SLIDES_API2141056639_4"
+   }
+  },
+  {
+   "step": "7 createImage from apple icon URL",
+   "ok": true,
+   "ms": 630,
+   "detail": {
+    "imageId": "SLIDES_API977529767_0"
+   }
+  },
+  {
+   "step": "7 createImage from play icon URL",
+   "ok": true,
+   "ms": 688,
+   "detail": {
+    "imageId": "SLIDES_API584782478_0"
+   }
+  },
+  {
+   "step": "8 createImage with a bad URL (error shape for E27 handling)",
+   "ok": true,
+   "ms": 282,
+   "detail": {
+    "expectedError": "Invalid requests[0].createImage: There was a problem retrieving the image. The provided image should be publicly accessible, within size limit, and in supported formats.",
+    "code": 400
+   }
+  },
+  {
+   "step": "9 whole-deck timing: duplicate 3 Insight + 21 Top Pick detail slides in ONE batch",
+   "ok": true,
+   "ms": 2471,
+   "detail": {
+    "requests": 24,
+    "ms": 1937
+   }
+  },
+  {
+   "step": "10 read-after-write consistency (final slide count)",
+   "ok": true,
+   "ms": 1347,
+   "detail": {
+    "slides": 35
+   }
+  },
+  {
+   "step": "11 trash the test copy",
+   "ok": true,
+   "ms": 878,
+   "detail": {}
+  }
+ ]
+}
