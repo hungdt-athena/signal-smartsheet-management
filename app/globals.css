@@ -877,6 +877,33 @@ input:checked + .slider:before {
   transform: translateX(20px);
   background-color: var(--bad);
 }
+/* Compact switch, for a toggle that sits inline next to a field label. */
+.switch.sm { width: 32px; height: 18px; }
+.switch.sm .slider:before { height: 12px; width: 12px; left: 2px; bottom: 2px; }
+.switch.sm input:checked + .slider:before { transform: translateX(14px); }
+
+/* Gameplay brief: the three gameplay parts of a List_Idea note, drawn as one
+   field split into rows. Each row is its own textarea and is required on its
+   own; a missing row says so on the right of its label. */
+.note-brief {
+  border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden;
+  background: var(--surface); transition: border-color .14s, box-shadow .14s;
+}
+.note-brief:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+.note-brief.disabled { background: var(--surface-2); }
+.note-brief-row { display: block; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: text; }
+.note-brief-row:last-child { border-bottom: 0; }
+.note-brief-head {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+}
+.note-brief-head .req { color: var(--warn); font-weight: 600; text-transform: none; letter-spacing: 0; }
+.note-brief-row textarea {
+  display: block; width: 100%; border: 0; background: transparent; resize: none; overflow: hidden;
+  font-family: var(--font); font-size: 13px; line-height: 1.5; color: var(--text); outline: none; padding: 2px 0 0;
+}
+.note-brief-row textarea::placeholder { color: var(--faint); }
+.note-brief-row textarea:disabled { color: var(--muted); }
 
 /* Screenshot Hover Effect */
 .screenshot-item {

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { StyledSelect } from '@/components/StyledSelect'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
 import { Lightbox } from '@/components/Lightbox'
@@ -15,7 +15,10 @@ import { TrendTagsField, type TrendTag, type ExistingTrendTag } from './TrendTag
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
 import { isManagerRole } from '@/lib/roles'
-import { NOTE_MIN_LEN, noteRequirementError } from '@/lib/eval-rules'
+import {
+  EMPTY_NOTE_PARTS, NOTE_MIN_LEN, isLegacyNote, missingNoteParts, notePartsFromRow, notePartsRequirementError,
+  type NoteParts,
+} from '@/lib/eval-rules'
 
 export interface EvalDetail {
   id: number
@@ -28,6 +31,10 @@ export interface EvalDetail {
   assigned_date: string | null
   evaluate_date: string | null
   initial_note: string | null
+  initial_gameplay?: string | null
+  initial_game_over?: string | null
+  initial_level_complete?: string | null
+  initial_self_note?: string | null
   final_note: string | null
   game_alike: GameAlikeGame[] | null
   initial_conclusion: string | null
@@ -228,6 +235,68 @@ function TitleCopyButton({ title }: { title: string }) {
 
 // Persistent save-state badge so it's always clear whether the form matches
 // what's stored. Orange dot = pending edits; green check = in sync with server.
+/** One row of the Gameplay brief: a borderless textarea that grows with its text. */
+function BriefRow({ label, value, onChange, placeholder, minRows, disabled, missing }: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+  minRows: number
+  disabled: boolean
+  /** Why the row blocks Save, shown on its right; undefined when it does not. */
+  missing?: string
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [value])
+  return (
+    <label className="note-brief-row">
+      <span className="note-brief-head">
+        {label}
+        {missing && <span className="req">{missing}</span>}
+      </span>
+      <textarea ref={ref} rows={minRows} value={value} placeholder={placeholder} disabled={disabled}
+        onChange={e => onChange(e.target.value)} />
+    </label>
+  )
+}
+
+/** One part of the initial note: label, optional faint hint, textarea, error line. */
+function NoteBox({ label, hint, value, onChange, placeholder, rows, disabled, warn, error }: {
+  label: string
+  hint?: string
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+  rows: number
+  disabled: boolean
+  warn?: boolean
+  error?: string
+}) {
+  return (
+    <div className="field" style={{ minWidth: 0 }}>
+      <span className="label">
+        {label}
+        {hint && <span style={{ marginLeft: 6, fontWeight: 500, color: 'var(--faint)' }}>{hint}</span>}
+      </span>
+      <textarea
+        className="input"
+        rows={rows}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        style={{ resize: 'vertical', fontSize: 13, ...(warn ? { borderColor: 'var(--warn)' } : {}) }}
+      />
+      {error && <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>{error}</div>}
+    </div>
+  )
+}
+
 function ClearBtn({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} title="Clear this field"
@@ -445,7 +514,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ msg: string; err?: boolean } | null>(null)
 
-  const [note, setNote] = useState('')
+  const [noteParts, setNoteParts] = useState<NoteParts>(EMPTY_NOTE_PARTS)
+  const setNotePart = (k: keyof NoteParts, v: string) => setNoteParts(p => ({ ...p, [k]: v }))
   const [finalNote, setFinalNote] = useState('')
   const [finalConclusion, setFinalConclusion] = useState('')
   const [gameAlike, setGameAlike] = useState<GameAlikeGame[]>([])
@@ -538,7 +608,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
 
   const applyData = useCallback((data: EvalDetail) => {
     setEv(data)
-    setNote(data.initial_note || '')
+    setNoteParts(notePartsFromRow(data))
     setFinalNote(data.final_note || '')
     setFinalConclusion(data.final_conclusion || '')
     setGameAlike(Array.isArray(data.game_alike) ? data.game_alike : [])
@@ -807,7 +877,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // A written note has to be a real note, on every save — reopening a game whose
   // stored note is short blocks Save until it is filled in, even when the edit is
   // to some other field. Link_dead is exempt.
-  const noteError = canEditEval ? noteRequirementError({ note, conclusion }) : null
+  // List_Idea needs the three gameplay parts, every other conclusion a Self Note;
+  // a List_Idea game noted before the four-part split keeps the whole-note rule.
+  const noteRule = { parts: noteParts, conclusion, legacy: !!ev && isLegacyNote(ev) }
+  const noteError = canEditEval ? notePartsRequirementError(noteRule) : null
+  const missingParts = canEditEval ? missingNoteParts(noteRule) : []
   const noteTooShort = !!noteError
 
   useEffect(() => {
@@ -865,7 +939,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       const body: Record<string, unknown> = { id: ev.id }
       if (canEditEval) {
         // Always send these so an emptied field clears the column (see PATCH handler).
-        body.initial_note = note
+        body.initial_note_parts = noteParts
         body.drive_link = driveLink
         // Initial Conclusion (+ batch) freezes once a final conclusion exists.
         if (canEditInitialConc) {
@@ -959,12 +1033,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 1500)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSave, needsSave, saving, canEdit, noteTooShort, currentGameId, note, conclusion, driveLink, deadLink, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots, trendTags])
+  }, [autoSave, needsSave, saving, canEdit, noteTooShort, currentGameId, noteParts, conclusion, driveLink, deadLink, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots, trendTags])
 
-  const clearField = (f: 'note' | 'conclusion' | 'drive') => {
+  const clearField = (f: 'conclusion' | 'drive') => {
     if (!canEditEval) return
-    if (f === 'note') setNote('')
-    else if (f === 'conclusion') { setConclusion(''); setDeadLink(false) }
+    if (f === 'conclusion') { setConclusion(''); setDeadLink(false) }
     else if (f === 'drive') setDriveLink('')
     setDirty(true)
   }
@@ -976,7 +1049,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       setTimeout(() => setConfirmClearAll(false), 3000)
       return
     }
-    setNote(''); setConclusion(''); setDeadLink(false); setDriveLink(''); setBatch('')
+    setNoteParts(EMPTY_NOTE_PARTS); setConclusion(''); setDeadLink(false); setDriveLink(''); setBatch('')
     setDirty(true); setConfirmClearAll(false)
   }
 
@@ -1061,7 +1134,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       <ProgressTracker ev={ev} yt5={yt5} yt20={yt20} uploadedAt={ytUploadedAt} />
 
       {/* Main layout: 2 columns */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 460px', gap: 16, alignItems: 'stretch' }}>
         {/* Left column — normal flow so the grid row is max(own content, right
             column). Right column tall → the Description card fills the leftover
             height and scrolls inside; right column short → the row grows so the
@@ -1133,9 +1206,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                     transition: 'all 0.2s'
                   }}>
                   {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="QR Link" width={180} height={180} style={{ borderRadius: 8 }} />
+                    <img src={qrDataUrl} alt="QR Link" width={140} height={140} style={{ borderRadius: 8 }} />
                   ) : (
-                    <div style={{ width: 180, height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: 140, height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <span className="spin" style={{ display: 'inline-block', width: 16, height: 16 }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" strokeWidth="2">
                           <path d="M21 12a9 9 0 1 1-6.219-8.56" />
@@ -1233,25 +1306,22 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {canEditInitialConc && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--border)', marginBottom: 4 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontWeight: 600, fontSize: 13, color: deadLink ? 'var(--bad)' : 'var(--text)' }}>
-                      Dead link status
-                    </span>
-                    <span style={{ fontSize: 11, color: 'var(--faint)' }}>Mark game store link as invalid</span>
-                  </div>
-                  <label className="switch">
-                    <input type="checkbox" checked={deadLink} onChange={e => toggleDeadLink(e.target.checked)} />
-                    <span className="slider"></span>
-                  </label>
-                </div>
-              )}
-
               <div className="field">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                   <span className="label">Initial Conclusion</span>
-                  {canEditInitialConc && conclusion && !deadLink && <ClearBtn onClick={() => clearField('conclusion')} />}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {canEditInitialConc && conclusion && !deadLink && <ClearBtn onClick={() => clearField('conclusion')} />}
+                    {canEditInitialConc && (
+                      <span title="Mark the store link as invalid"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 600, color: deadLink ? 'var(--bad)' : 'var(--muted)' }}>
+                        Dead link
+                        <label className="switch sm">
+                          <input type="checkbox" checked={deadLink} onChange={e => toggleDeadLink(e.target.checked)} aria-label="Dead link" />
+                          <span className="slider"></span>
+                        </label>
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <StyledSelect
                   value={conclusion}
@@ -1308,26 +1378,43 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 </div>
               )}
 
-              <div className="field">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span className="label">Initial Note</span>
-                  {canEditEval && note && <ClearBtn onClick={() => clearField('note')} />}
-                </div>
-                <textarea
-                  className="input"
-                  rows={3}
-                  value={note}
-                  onChange={e => { setNote(e.target.value); setDirty(true) }}
-                  placeholder="Evaluation note..."
-                  disabled={!canEditEval}
-                  style={{ resize: 'vertical', fontSize: 13, ...(noteTooShort ? { borderColor: 'var(--warn)' } : {}) }}
-                />
-                {noteTooShort && (
-                  <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
-                    Required — at least {NOTE_MIN_LEN} characters ({note.trim().length}/{NOTE_MIN_LEN})
+              {/* Initial note, in four parts (see NoteParts in lib/eval-rules). */}
+              <NoteBox label="Self Note" rows={2}
+                hint={conclusion === 'List_Idea' ? 'optional' : 'required'}
+                value={noteParts.self_note} onChange={v => { setNotePart('self_note', v); setDirty(true) }}
+                placeholder="Why this conclusion, what stood out"
+                disabled={!canEditEval} warn={missingParts.includes('self_note')}
+                error={missingParts.includes('self_note')
+                  ? `At least ${NOTE_MIN_LEN} characters (${noteParts.self_note.trim().length}/${NOTE_MIN_LEN})`
+                  : undefined} />
+              {/* Gameplay brief — List_Idea only. Hidden for other conclusions but
+                  never cleared, so switching away and back loses nothing. */}
+              {conclusion === 'List_Idea' && (() => {
+                const why = (k: keyof NoteParts, minLen?: number) => {
+                  if (!missingParts.includes(k)) return undefined
+                  const n = noteParts[k].trim().length
+                  return minLen && n > 0 ? `At least ${minLen} characters (${n}/${minLen})` : 'Required'
+                }
+                return (
+                  <div className="field">
+                    <span className="label">Gameplay brief</span>
+                    <div className={`note-brief${canEditEval ? '' : ' disabled'}`}>
+                      <BriefRow label="Gameplay" minRows={2} disabled={!canEditEval}
+                        value={noteParts.gameplay} onChange={v => { setNotePart('gameplay', v); setDirty(true) }}
+                        placeholder="Control + how objects react, e.g. tap to shoot, blocks drop into the queue"
+                        missing={why('gameplay', NOTE_MIN_LEN)} />
+                      <BriefRow label="The game is over when…" minRows={1} disabled={!canEditEval}
+                        value={noteParts.game_over} onChange={v => { setNotePart('game_over', v); setDirty(true) }}
+                        placeholder="something runs out of space or moves" missing={why('game_over')} />
+                      <BriefRow label="The level is complete when…" minRows={1} disabled={!canEditEval}
+                        value={noteParts.level_complete} onChange={v => { setNotePart('level_complete', v); setDirty(true) }}
+                        placeholder="something is cleared" missing={why('level_complete')} />
+                    </div>
                   </div>
-                )}
-              </div>
+                )
+              })()}
+
+              <div style={{ borderTop: '1px solid var(--border)' }} />
 
               <div className="field">
                 <span className="label">Game Alike</span>

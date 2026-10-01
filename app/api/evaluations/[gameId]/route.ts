@@ -45,6 +45,7 @@ export async function GET(
       SELECT ge.id, ge.game_id, ge.category_group, ge.genre_1, ge.genre_2,
         ge.initial_evaluator, ge.final_evaluator, ge.assigned_date,
         ge.evaluate_date, ge.initial_note, ge.final_note, ge.game_alike,
+        ge.initial_gameplay, ge.initial_game_over, ge.initial_level_complete, ge.initial_self_note,
         ge.initial_conclusion, ge.final_conclusion, ge.final_conclusion_date, ge.batch,
         ge.record_assignee, ge.record_assign_date,
         ge.record_5min_assignee, ge.record_5min_date,
