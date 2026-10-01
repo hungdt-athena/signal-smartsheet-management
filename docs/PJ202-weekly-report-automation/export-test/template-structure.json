@@ -1,0 +1,4429 @@
+{
+ "title": "[AT] Signal Report Template",
+ "size": {
+  "width": {
+   "magnitude": 9144000,
+   "unit": "EMU"
+  },
+  "height": {
+   "magnitude": 5143500,
+   "unit": "EMU"
+  }
+ },
+ "slides": [
+  {
+   "index": 1,
+   "id": "g3876fc6da32_0_810",
+   "elements": [
+    {
+     "id": "g3876fc6da32_2_17",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 281,
+      "y": 0,
+      "w": 161,
+      "h": 161
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_18",
+     "kind": "shape:TEXT_BOX",
+     "text": "December 2026 Monthly Report",
+     "box": {
+      "x": 112,
+      "y": 147,
+      "w": 496,
+      "h": 111
+     },
+     "depth": 0
+    }
+   ]
+  },
+  {
+   "index": 2,
+   "id": "g3876fc6da32_2_430",
+   "elements": [
+    {
+     "id": "g3876fc6da32_2_431",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 10,
+      "y": 2,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_432",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 60,
+      "y": 1,
+      "w": 58,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_433",
+     "kind": "line",
+     "text": "",
+     "box": {
+      "x": 19,
+      "y": 54,
+      "w": 682,
+      "h": 236
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_435",
+     "kind": "shape:TEXT_BOX",
+     "text": "Insight",
+     "box": {
+      "x": 136,
+      "y": 5,
+      "w": 417,
+      "h": 44
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2e837717_0_10",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_436",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 48,
+      "y": 63,
+      "w": 299,
+      "h": 55
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_437",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 52,
+      "y": 67,
+      "w": 46,
+      "h": 46
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_438",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 105,
+      "y": 94,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_439",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 98,
+      "y": 63,
+      "w": 118,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_440",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 282,
+      "y": 63,
+      "w": 65,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_441",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 63,
+      "w": 20,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_442",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 151,
+      "y": 94,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_443",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 196,
+      "y": 94,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_444",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 242,
+      "y": 94,
+      "w": 48,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_538",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The Game released by Company",
+     "box": {
+      "x": 59,
+      "y": 124,
+      "w": 276,
+      "h": 19
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2e837717_0_11",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_620",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 48,
+      "y": 147,
+      "w": 299,
+      "h": 55
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_621",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 52,
+      "y": 152,
+      "w": 46,
+      "h": 46
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_622",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 105,
+      "y": 179,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_623",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 98,
+      "y": 147,
+      "w": 118,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_624",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 282,
+      "y": 147,
+      "w": 65,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_625",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 147,
+      "w": 20,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_626",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 151,
+      "y": 179,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_627",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 196,
+      "y": 179,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_628",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 242,
+      "y": 179,
+      "w": 48,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_640",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The Game released by Company",
+     "box": {
+      "x": 59,
+      "y": 208,
+      "w": 276,
+      "h": 19
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2e837717_0_12",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_643",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 48,
+      "y": 232,
+      "w": 299,
+      "h": 55
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_644",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 52,
+      "y": 237,
+      "w": 46,
+      "h": 46
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_645",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 105,
+      "y": 263,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_646",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 98,
+      "y": 232,
+      "w": 118,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_647",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 282,
+      "y": 232,
+      "w": 65,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_648",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 232,
+      "w": 20,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_649",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 151,
+      "y": 263,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_650",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 196,
+      "y": 263,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_651",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 242,
+      "y": 263,
+      "w": 48,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_663",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The Game released by Company",
+     "box": {
+      "x": 59,
+      "y": 293,
+      "w": 276,
+      "h": 19
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2e837717_0_13",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_666",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 48,
+      "y": 317,
+      "w": 299,
+      "h": 55
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_667",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 52,
+      "y": 322,
+      "w": 46,
+      "h": 46
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_668",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 105,
+      "y": 348,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_669",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 98,
+      "y": 317,
+      "w": 118,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_670",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 282,
+      "y": 317,
+      "w": 65,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_671",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 317,
+      "w": 20,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_672",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 151,
+      "y": 348,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_673",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 196,
+      "y": 348,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_674",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 242,
+      "y": 348,
+      "w": 48,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_686",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The Game released by Company",
+     "box": {
+      "x": 59,
+      "y": 378,
+      "w": 276,
+      "h": 19
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2e837717_0_14",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_486",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 373,
+      "y": 63,
+      "w": 299,
+      "h": 55
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_487",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 378,
+      "y": 67,
+      "w": 46,
+      "h": 46
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_488",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 431,
+      "y": 94,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_489",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 424,
+      "y": 63,
+      "w": 118,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_490",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 607,
+      "y": 63,
+      "w": 65,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_491",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 594,
+      "y": 63,
+      "w": 20,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_492",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 477,
+      "y": 94,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_493",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 521,
+      "y": 94,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_494",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 568,
+      "y": 94,
+      "w": 48,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_539",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The Game released by Company",
+     "box": {
+      "x": 385,
+      "y": 124,
+      "w": 276,
+      "h": 19
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2e837717_0_15",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_630",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 373,
+      "y": 147,
+      "w": 299,
+      "h": 55
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_631",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 378,
+      "y": 152,
+      "w": 46,
+      "h": 46
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_632",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 431,
+      "y": 179,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_633",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 424,
+      "y": 147,
+      "w": 118,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_634",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 607,
+      "y": 147,
+      "w": 65,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_635",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 594,
+      "y": 147,
+      "w": 20,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_636",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 477,
+      "y": 179,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_637",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 521,
+      "y": 179,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_638",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 568,
+      "y": 179,
+      "w": 48,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_641",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The Game released by Company",
+     "box": {
+      "x": 385,
+      "y": 208,
+      "w": 276,
+      "h": 19
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2e837717_0_16",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_653",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 373,
+      "y": 232,
+      "w": 299,
+      "h": 55
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_654",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 378,
+      "y": 237,
+      "w": 46,
+      "h": 46
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_655",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 431,
+      "y": 263,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_656",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 424,
+      "y": 232,
+      "w": 118,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_657",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 607,
+      "y": 232,
+      "w": 65,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_658",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 594,
+      "y": 232,
+      "w": 20,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_659",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 477,
+      "y": 263,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_660",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 521,
+      "y": 263,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_661",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 568,
+      "y": 263,
+      "w": 48,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_664",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The Game released by Company",
+     "box": {
+      "x": 385,
+      "y": 293,
+      "w": 276,
+      "h": 19
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2e837717_0_17",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_676",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 373,
+      "y": 317,
+      "w": 299,
+      "h": 55
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_677",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 378,
+      "y": 322,
+      "w": 46,
+      "h": 46
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_678",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 431,
+      "y": 348,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_679",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 424,
+      "y": 317,
+      "w": 118,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_680",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 607,
+      "y": 317,
+      "w": 65,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_681",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 594,
+      "y": 317,
+      "w": 20,
+      "h": 29
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_682",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 477,
+      "y": 348,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_683",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 521,
+      "y": 348,
+      "w": 42,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_684",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 568,
+      "y": 348,
+      "w": 48,
+      "h": 19
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_687",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The Game released by Company",
+     "box": {
+      "x": 385,
+      "y": 378,
+      "w": 276,
+      "h": 19
+     },
+     "depth": 0
+    }
+   ]
+  },
+  {
+   "index": 3,
+   "id": "g3876fc6da32_2_0",
+   "elements": [
+    {
+     "id": "g3876fc6da32_2_22",
+     "kind": "shape:TEXT_BOX",
+     "text": "Trending!",
+     "box": {
+      "x": 93,
+      "y": 25,
+      "w": 156,
+      "h": 46
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_111",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_46",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 81,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_47",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 81,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_48",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 81,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_49",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 81,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_50",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 269,
+      "y": 81,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_53",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 142,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_54",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 142,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_55",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 142,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_56",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 142,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_57",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 269,
+      "y": 142,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_59",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 204,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_60",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 204,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_61",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 204,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_62",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 204,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_63",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 269,
+      "y": 204,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_65",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 266,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_66",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 266,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_67",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 266,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_68",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 266,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_69",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 269,
+      "y": 266,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_71",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 327,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_72",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 327,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_73",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 327,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_74",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 327,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_75",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 269,
+      "y": 327,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_98",
+     "kind": "shape:TEXT_BOX",
+     "text": "Top gameplay Top theme Word & Math Games",
+     "box": {
+      "x": 370,
+      "y": 75,
+      "w": 281,
+      "h": 256
+     },
+     "depth": 0
+    }
+   ]
+  },
+  {
+   "index": 4,
+   "id": "g38976c7624e_1_0",
+   "elements": [
+    {
+     "id": "g38976c7624e_1_1",
+     "kind": "shape:TEXT_BOX",
+     "text": "TOP PICKS!",
+     "box": {
+      "x": 49,
+      "y": 25,
+      "w": 183,
+      "h": 46
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38976c7624e_1_27",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g38976c7624e_1_2",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 81,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_3",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 81,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_4",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 81,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_5",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 81,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_7",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 142,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_8",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 142,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_9",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 142,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_10",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 142,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_12",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 204,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_13",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 204,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_14",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 204,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_15",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 204,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_17",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 266,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_18",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 266,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_19",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 266,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_20",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 266,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_22",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 24,
+      "y": 327,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_23",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 85,
+      "y": 327,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_24",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 146,
+      "y": 327,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_25",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 207,
+      "y": 327,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38976c7624e_1_39",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Game Game Game Game Game Game Game ",
+     "box": {
+      "x": 288,
+      "y": 25,
+      "w": 216,
+      "h": 355
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38976c7624e_1_40",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Game Game Game Game Game Game Game ",
+     "box": {
+      "x": 504,
+      "y": 25,
+      "w": 216,
+      "h": 355
+     },
+     "depth": 0
+    }
+   ]
+  },
+  {
+   "index": 5,
+   "id": "g38d2f5437e4_0_0",
+   "elements": [
+    {
+     "id": "g38d2f5437e4_0_1",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 10,
+      "y": 2,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_2",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 60,
+      "y": 1,
+      "w": 58,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_3",
+     "kind": "line",
+     "text": "",
+     "box": {
+      "x": 19,
+      "y": 54,
+      "w": 682,
+      "h": 236
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_5",
+     "kind": "shape:TEXT_BOX",
+     "text": "Top Game - Like Games",
+     "box": {
+      "x": 136,
+      "y": 5,
+      "w": 417,
+      "h": 44
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_15",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_6",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 63,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_7",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 68,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_8",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 97,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_9",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 63,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_10",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 63,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_11",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 63,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_12",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 97,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_13",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 97,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_14",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 97,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_25",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_16",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 336,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_17",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 341,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_18",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 370,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_19",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 336,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_20",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 336,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_21",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 336,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_22",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 370,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_23",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 370,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_24",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 370,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_35",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_26",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 268,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_27",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 273,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_28",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 302,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_29",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 268,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_30",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 268,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_31",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 268,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_32",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 302,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_33",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 302,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_34",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 302,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_45",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_36",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 200,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_37",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 205,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_38",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 233,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_39",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 200,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_40",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 200,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_41",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 200,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_42",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 233,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_43",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 233,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_44",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 233,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_55",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_46",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 132,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_47",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 137,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_48",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 165,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_49",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 132,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_50",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 132,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_51",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 132,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_52",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 165,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_53",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 165,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_54",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 165,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2f5437e4_0_108",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 369,
+      "y": 64,
+      "w": 153,
+      "h": 332
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2f5437e4_0_109",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 538,
+      "y": 64,
+      "w": 153,
+      "h": 332
+     },
+     "depth": 0
+    }
+   ]
+  },
+  {
+   "index": 6,
+   "id": "g3876fc6da32_0_798",
+   "elements": [
+    {
+     "id": "g3876fc6da32_2_24",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 10,
+      "y": 2,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_25",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 60,
+      "y": 1,
+      "w": 58,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_26",
+     "kind": "line",
+     "text": "",
+     "box": {
+      "x": 19,
+      "y": 54,
+      "w": 682,
+      "h": 236
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_113",
+     "kind": "shape:TEXT_BOX",
+     "text": "Other Jam Games",
+     "box": {
+      "x": 136,
+      "y": 5,
+      "w": 417,
+      "h": 44
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38d2e837717_0_0",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_31",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 63,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_32",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 68,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_114",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 97,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_115",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 63,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_116",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 63,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_117",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 63,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_119",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 97,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_120",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 97,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_121",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 97,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2e837717_0_4",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_126",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 336,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_127",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 341,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_128",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 370,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_129",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 336,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_130",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 336,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_131",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 336,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_132",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 370,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_133",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 370,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_134",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 370,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2e837717_0_3",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_136",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 268,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_137",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 273,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_138",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 302,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_139",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 268,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_140",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 268,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_141",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 268,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_142",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 302,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_143",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 302,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_144",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 302,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2e837717_0_2",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_146",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 200,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_147",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 205,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_148",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 233,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_149",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 200,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_150",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 200,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_151",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 200,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_152",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 233,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_153",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 233,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_154",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 233,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2e837717_0_1",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_156",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 31,
+      "y": 132,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_157",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 36,
+      "y": 137,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_158",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 93,
+      "y": 165,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_159",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 85,
+      "y": 132,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_160",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 283,
+      "y": 132,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_161",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 268,
+      "y": 132,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_162",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 143,
+      "y": 165,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_163",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 191,
+      "y": 165,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_164",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 240,
+      "y": 165,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2e837717_0_5",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_379",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 367,
+      "y": 63,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_380",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 372,
+      "y": 68,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_381",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 429,
+      "y": 97,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_382",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 421,
+      "y": 63,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_383",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 619,
+      "y": 63,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_384",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 605,
+      "y": 63,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_385",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 479,
+      "y": 97,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_386",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 527,
+      "y": 97,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_387",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 576,
+      "y": 97,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2e837717_0_9",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_389",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 367,
+      "y": 336,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_390",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 372,
+      "y": 341,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_391",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 429,
+      "y": 370,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_392",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 421,
+      "y": 336,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_393",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 619,
+      "y": 336,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_394",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 605,
+      "y": 336,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_395",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 479,
+      "y": 370,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_396",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 527,
+      "y": 370,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_397",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 576,
+      "y": 370,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2e837717_0_8",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_399",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 367,
+      "y": 268,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_400",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 372,
+      "y": 273,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_401",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 429,
+      "y": 302,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_402",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 421,
+      "y": 268,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_403",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 619,
+      "y": 268,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_404",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 605,
+      "y": 268,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_405",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 479,
+      "y": 302,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_406",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 527,
+      "y": 302,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_407",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 576,
+      "y": 302,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2e837717_0_7",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_409",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 367,
+      "y": 200,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_410",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 372,
+      "y": 205,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_411",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 429,
+      "y": 233,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_412",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 421,
+      "y": 200,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_413",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 619,
+      "y": 200,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_414",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 605,
+      "y": 200,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_415",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 479,
+      "y": 233,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_416",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 527,
+      "y": 233,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_417",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 576,
+      "y": 233,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g38d2e837717_0_6",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_419",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 367,
+      "y": 132,
+      "w": 322,
+      "h": 59
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_420",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 372,
+      "y": 137,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_421",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "- Like",
+     "box": {
+      "x": 429,
+      "y": 165,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_422",
+     "kind": "shape:TEXT_BOX",
+     "text": "The game name",
+     "box": {
+      "x": 421,
+      "y": 132,
+      "w": 127,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_423",
+     "kind": "shape:TEXT_BOX",
+     "text": "Gameplay",
+     "box": {
+      "x": 619,
+      "y": 132,
+      "w": 70,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_424",
+     "kind": "shape:TEXT_BOX",
+     "text": "-",
+     "box": {
+      "x": 605,
+      "y": 132,
+      "w": 21,
+      "h": 32
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_425",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Mech",
+     "box": {
+      "x": 479,
+      "y": 165,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_426",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Genre",
+     "box": {
+      "x": 527,
+      "y": 165,
+      "w": 45,
+      "h": 21
+     },
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_427",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Theme",
+     "box": {
+      "x": 576,
+      "y": 165,
+      "w": 52,
+      "h": 21
+     },
+     "depth": 1
+    }
+   ]
+  },
+  {
+   "index": 7,
+   "id": "g3876fc6da32_2_896",
+   "elements": [
+    {
+     "id": "g3876fc6da32_2_897",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 10,
+      "y": 2,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_898",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 60,
+      "y": 1,
+      "w": 58,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_899",
+     "kind": "line",
+     "text": "",
+     "box": {
+      "x": 19,
+      "y": 54,
+      "w": 682,
+      "h": 236
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_901",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Name",
+     "box": {
+      "x": 179,
+      "y": 5,
+      "w": 361,
+      "h": 44
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_902",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 135,
+      "y": 5,
+      "w": 44,
+      "h": 44
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_903",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "2026-12-31",
+     "box": {
+      "x": 548,
+      "y": 12,
+      "w": 135,
+      "h": 31
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_904",
+     "kind": "other",
+     "text": "",
+     "box": {
+      "x": 10,
+      "y": 66,
+      "w": 158,
+      "h": 324
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_905",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The game is controlled by a specific inp",
+     "box": {
+      "x": 203,
+      "y": 77,
+      "w": 504,
+      "h": 162
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_906",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Core Gameplay",
+     "box": {
+      "x": 366,
+      "y": 61,
+      "w": 177,
+      "h": 31
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_907",
+     "kind": "shape:TEXT_BOX",
+     "text": "=",
+     "box": {
+      "x": 165,
+      "y": 270,
+      "w": 58,
+      "h": 131
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_915",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_910",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_908",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 252,
+      "y": 272,
+      "w": 129,
+      "h": 116
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_909",
+     "kind": "shape:TEXT_BOX",
+     "text": "Control (tap/drag) Mechanic (sort, Jam) ",
+     "box": {
+      "x": 252,
+      "y": 301,
+      "w": 129,
+      "h": 87
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_914",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_911",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 251,
+      "y": 268,
+      "w": 136,
+      "h": 31
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_912",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 241,
+      "y": 261,
+      "w": 44,
+      "h": 44
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_913",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Name",
+     "box": {
+      "x": 285,
+      "y": 268,
+      "w": 96,
+      "h": 32
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_916",
+     "kind": "shape:TEXT_BOX",
+     "text": "+",
+     "box": {
+      "x": 349,
+      "y": 270,
+      "w": 46,
+      "h": 131
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_924",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_919",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_917",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 252,
+      "y": 272,
+      "w": 129,
+      "h": 116
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_918",
+     "kind": "shape:TEXT_BOX",
+     "text": "Control (tap/drag) Mechanic (sort, Jam) ",
+     "box": {
+      "x": 252,
+      "y": 301,
+      "w": 129,
+      "h": 87
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_923",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_920",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 251,
+      "y": 268,
+      "w": 136,
+      "h": 31
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_921",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 241,
+      "y": 261,
+      "w": 44,
+      "h": 44
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_922",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Name",
+     "box": {
+      "x": 285,
+      "y": 268,
+      "w": 96,
+      "h": 32
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_925",
+     "kind": "shape:TEXT_BOX",
+     "text": "+",
+     "box": {
+      "x": 521,
+      "y": 270,
+      "w": 46,
+      "h": 131
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_933",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_928",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_926",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 252,
+      "y": 272,
+      "w": 129,
+      "h": 116
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_927",
+     "kind": "shape:TEXT_BOX",
+     "text": "Control (tap/drag) Mechanic (sort, Jam) ",
+     "box": {
+      "x": 252,
+      "y": 301,
+      "w": 129,
+      "h": 87
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_932",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_929",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 251,
+      "y": 268,
+      "w": 136,
+      "h": 31
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_930",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 241,
+      "y": 261,
+      "w": 44,
+      "h": 44
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_931",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Name",
+     "box": {
+      "x": 285,
+      "y": 268,
+      "w": 96,
+      "h": 32
+     },
+     "depth": 2
+    }
+   ]
+  },
+  {
+   "index": 8,
+   "id": "g3876fc6da32_2_692",
+   "elements": [
+    {
+     "id": "g3876fc6da32_2_693",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 10,
+      "y": 2,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_694",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 60,
+      "y": 1,
+      "w": 58,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_695",
+     "kind": "line",
+     "text": "",
+     "box": {
+      "x": 19,
+      "y": 54,
+      "w": 682,
+      "h": 236
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_697",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Name",
+     "box": {
+      "x": 179,
+      "y": 5,
+      "w": 361,
+      "h": 44
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_800",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 135,
+      "y": 5,
+      "w": 44,
+      "h": 44
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_812",
+     "kind": "other",
+     "text": "",
+     "box": {
+      "x": 10,
+      "y": 66,
+      "w": 158,
+      "h": 324
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_813",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The game is controlled by a specific inp",
+     "box": {
+      "x": 203,
+      "y": 77,
+      "w": 504,
+      "h": 162
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_814",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Core Gameplay",
+     "box": {
+      "x": 366,
+      "y": 61,
+      "w": 177,
+      "h": 31
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_816",
+     "kind": "shape:TEXT_BOX",
+     "text": "=",
+     "box": {
+      "x": 165,
+      "y": 270,
+      "w": 58,
+      "h": 131
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_826",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_825",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_818",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 252,
+      "y": 272,
+      "w": 129,
+      "h": 116
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_820",
+     "kind": "shape:TEXT_BOX",
+     "text": "Control (tap/drag) Mechanic (sort, Jam) ",
+     "box": {
+      "x": 252,
+      "y": 301,
+      "w": 129,
+      "h": 87
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_824",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_819",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 251,
+      "y": 268,
+      "w": 136,
+      "h": 31
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_821",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 241,
+      "y": 261,
+      "w": 44,
+      "h": 44
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_822",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Name",
+     "box": {
+      "x": 285,
+      "y": 268,
+      "w": 96,
+      "h": 32
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_823",
+     "kind": "shape:TEXT_BOX",
+     "text": "+",
+     "box": {
+      "x": 437,
+      "y": 270,
+      "w": 46,
+      "h": 131
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_834",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_829",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_827",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 252,
+      "y": 272,
+      "w": 129,
+      "h": 116
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_828",
+     "kind": "shape:TEXT_BOX",
+     "text": "Control (tap/drag) Mechanic (sort, Jam) ",
+     "box": {
+      "x": 252,
+      "y": 301,
+      "w": 129,
+      "h": 87
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_833",
+     "kind": "group",
+     "text": "",
+     "box": null,
+     "depth": 1
+    },
+    {
+     "id": "g3876fc6da32_2_830",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "",
+     "box": {
+      "x": 251,
+      "y": 268,
+      "w": 136,
+      "h": 31
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_831",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 241,
+      "y": 261,
+      "w": 44,
+      "h": 44
+     },
+     "depth": 2
+    },
+    {
+     "id": "g3876fc6da32_2_832",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Name",
+     "box": {
+      "x": 285,
+      "y": 268,
+      "w": 96,
+      "h": 32
+     },
+     "depth": 2
+    },
+    {
+     "id": "g38977b77997_0_0",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "2026-12-31",
+     "box": {
+      "x": 548,
+      "y": 12,
+      "w": 135,
+      "h": 31
+     },
+     "depth": 0
+    }
+   ]
+  },
+  {
+   "index": 9,
+   "id": "g3876fc6da32_2_936",
+   "elements": [
+    {
+     "id": "g3876fc6da32_2_937",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 10,
+      "y": 2,
+      "w": 49,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_938",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 60,
+      "y": 1,
+      "w": 58,
+      "h": 49
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_939",
+     "kind": "line",
+     "text": "",
+     "box": {
+      "x": 19,
+      "y": 54,
+      "w": 682,
+      "h": 236
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_941",
+     "kind": "shape:TEXT_BOX",
+     "text": "Game Name",
+     "box": {
+      "x": 179,
+      "y": 5,
+      "w": 361,
+      "h": 44
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_942",
+     "kind": "image",
+     "text": "",
+     "box": {
+      "x": 135,
+      "y": 5,
+      "w": 44,
+      "h": 44
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_944",
+     "kind": "other",
+     "text": "",
+     "box": {
+      "x": 10,
+      "y": 66,
+      "w": 158,
+      "h": 324
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_945",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "The game is controlled by a specific inp",
+     "box": {
+      "x": 203,
+      "y": 77,
+      "w": 504,
+      "h": 162
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_946",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "Core Gameplay",
+     "box": {
+      "x": 366,
+      "y": 61,
+      "w": 177,
+      "h": 31
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_947",
+     "kind": "shape:TEXT_BOX",
+     "text": "=",
+     "box": {
+      "x": 165,
+      "y": 270,
+      "w": 58,
+      "h": 131
+     },
+     "depth": 0
+    },
+    {
+     "id": "g3876fc6da32_2_967",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "NEW GAMEPLAY",
+     "box": {
+      "x": 267,
+      "y": 280,
+      "w": 375,
+      "h": 82
+     },
+     "depth": 0
+    },
+    {
+     "id": "g38977b77997_0_1",
+     "kind": "shape:ROUND_RECTANGLE",
+     "text": "2026-12-31",
+     "box": {
+      "x": 548,
+      "y": 12,
+      "w": 135,
+      "h": 31
+     },
+     "depth": 0
+    }
+   ]
+  }
+ ]
+}
