@@ -60,7 +60,7 @@ export function PushWindowSection({ highlight = false }: { highlight?: boolean }
     <div className={`card cfg-highlightable${highlight ? ' cfg-highlight' : ''}`} id="push-window">
       <div className="card-head">
         <span className="card-label">Push window</span>
-        <span className="card-note">how far back each genre looks for new games</span>
+        <span className="card-note">how far back each category group looks for new games</span>
       </div>
 
       <p className="pw-note">{PUSH_WINDOW_NOTE}</p>
@@ -71,7 +71,7 @@ export function PushWindowSection({ highlight = false }: { highlight?: boolean }
         <table className="tbl pw-tbl">
           <thead>
             <tr>
-              <th style={{ width: 120 }}>Genre</th>
+              <th style={{ width: 120 }}>Category group</th>
               <th>Window</th>
             </tr>
           </thead>

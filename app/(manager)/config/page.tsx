@@ -199,7 +199,7 @@ function ConfigSection({
   )
 }
 
-// ── Genre → Sub-genre section ─────────────────────────────────────────────────────
+// ── Category group → Genre section ─────────────────────────────────────────────────────
 
 interface MappingRow { id: number; genre: string; category_group: string; active: boolean }
 
@@ -236,8 +236,8 @@ function CategorySection() {
   return (
     <div className="card">
       <div className="card-head">
-        <span className="card-label">Genre → Sub-genre</span>
-        <span className="card-note">Which game genres feed each evaluation bucket · order does not matter here, so no ▲▼</span>
+        <span className="card-label">Category group → Genre</span>
+        <span className="card-note">Which game genres feed each category group · order does not matter here, so no ▲▼</span>
       </div>
       <div className="cfg-grid cfg-grid-3">
         {BUCKETS.map(b => (
@@ -292,7 +292,7 @@ function BucketGroup({
       <OptionRows
         items={rows.map(r => ({ id: r.id, label: r.genre, active: r.active }))}
         loading={loading}
-        emptyText="No sub-genre yet"
+        emptyText="No genre yet"
         onToggle={(id, active) => { onToggle(id, active) }}
         onDelete={id => { onDelete(id) }}
       />

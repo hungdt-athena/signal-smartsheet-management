@@ -80,13 +80,13 @@ function openPanel(person: string, genre: string): HTMLElement {
 }
 
 describe('RosterTable', () => {
-  it('is one row per person, with a pill per genre', () => {
+  it('is one row per person, with a pill per category group', () => {
     setup()
     // Three (person, genre) pairs across two people.
     expect(screen.getAllByText('NhiLV')).toHaveLength(1)
     expect(screen.getAllByText('Puzzle')).toHaveLength(2)
     expect(screen.getAllByText('Arcade')).toHaveLength(1)
-    expect(screen.getByRole('columnheader', { name: /^genres$/i })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /^category groups$/i })).toBeInTheDocument()
   })
 
   it('there is one Available control per person, and it writes by name', () => {
@@ -115,13 +115,13 @@ describe('RosterTable', () => {
     expect(pill('NhiLV', /^Arcade, weight 50/)).toBeInTheDocument()
   })
 
-  it('only a restricted row gets a sub-genre badge, and it says "sub-genres"', () => {
+  it('only a restricted row gets a genre badge, and it says "genres"', () => {
     setup()
     // Arcade holds 1 of its 2 options; both Puzzle rows are stored 'All'.
-    expect(screen.getByText('1/2 sub-genres')).toBeInTheDocument()
-    expect(screen.queryByText(/3\/3 sub-genres/)).not.toBeInTheDocument()
-    expect(pill('NhiLV', /^Puzzle, weight 100, all sub-genres$/)).toBeInTheDocument()
-    expect(pill('NhiLV', /^Arcade, weight 50, 1 of 2 sub-genres$/)).toBeInTheDocument()
+    expect(screen.getByText('1/2 genres')).toBeInTheDocument()
+    expect(screen.queryByText(/3\/3 genres/)).not.toBeInTheDocument()
+    expect(pill('NhiLV', /^Puzzle, weight 100, all genres$/)).toBeInTheDocument()
+    expect(pill('NhiLV', /^Arcade, weight 50, 1 of 2 genres$/)).toBeInTheDocument()
   })
 
   it('every pill of an unavailable person is dimmed together', () => {
@@ -170,7 +170,7 @@ describe('RosterTable', () => {
     expect(onPatchRow).toHaveBeenCalledTimes(1)
   })
 
-  it("stored 'All' renders as every sub-genre ticked, not as an All box", () => {
+  it("stored 'All' renders as every genre ticked, not as an All box", () => {
     setup()
     const panel = openPanel('NhiLV', 'Puzzle')
     expect(within(panel).queryByLabelText('All')).not.toBeInTheDocument()
@@ -194,14 +194,14 @@ describe('RosterTable', () => {
     expect(onPatchRow).toHaveBeenCalledWith(2, 'game_category', 'All')
   })
 
-  it('the last remaining sub-genre is disabled, with a reason', () => {
+  it('the last remaining genre is disabled, with a reason', () => {
     const { onPatchRow } = setup()
     const panel = openPanel('NhiLV', 'Arcade')
     const last = within(panel).getByLabelText('action')
     // An empty list would normalize back to 'All' server-side — the opposite.
     // Saying so beats the old silent no-op.
     expect(last).toBeDisabled()
-    expect(last.closest('label')).toHaveAttribute('title', 'Keep at least one sub-genre')
+    expect(last.closest('label')).toHaveAttribute('title', 'Keep at least one genre')
     fireEvent.click(last)
     expect(onPatchRow).not.toHaveBeenCalled()
   })
@@ -217,14 +217,14 @@ describe('RosterTable', () => {
     expect(within(puzzle).getByRole('button', { name: 'Select all' })).toBeDisabled()
   })
 
-  it('Remove genre removes that row alone', () => {
+  it('Remove category group removes that row alone', () => {
     const { onRemoveRow } = setup()
     const panel = openPanel('NhiLV', 'Arcade')
-    fireEvent.click(within(panel).getByRole('button', { name: 'Remove genre' }))
+    fireEvent.click(within(panel).getByRole('button', { name: 'Remove category group' }))
     expect(onRemoveRow).toHaveBeenCalledWith(2)
   })
 
-  it('+ genre only offers the genres that person is missing', () => {
+  it('+ category group only offers the groups that person is missing', () => {
     const { onAddGenre } = setup()
     const menu = openMenu(screen.getByTestId('add-genre-NhiLV'))
     expect(within(menu).getByText('Simulation')).toBeInTheDocument()
@@ -233,7 +233,7 @@ describe('RosterTable', () => {
     expect(onAddGenre).toHaveBeenCalledWith('NhiLV', 'simulation')
   })
 
-  it('someone covering all three genres gets no + genre control', () => {
+  it('someone covering all three genres gets no + category group control', () => {
     setup({
       groups: [{
         name: 'Full', today_available: true, game_platform: 'all', missingGenres: [],
@@ -251,11 +251,11 @@ describe('RosterTable', () => {
     expect(screen.queryByTestId('add-genre-NhiLV')).not.toBeInTheDocument()
     expect(screen.queryByText(/add evaluator/i)).not.toBeInTheDocument()
 
-    // An evaluator has to be able to READ their own sub-genre restriction.
+    // An evaluator has to be able to READ their own genre restriction.
     const panel = openPanel('NhiLV', 'Arcade')
     expect(within(panel).getByLabelText('arcade')).toBeDisabled()
     expect(within(panel).getByRole('button', { name: '70' })).toBeDisabled()
-    expect(within(panel).queryByRole('button', { name: 'Remove genre' })).not.toBeInTheDocument()
+    expect(within(panel).queryByRole('button', { name: 'Remove category group' })).not.toBeInTheDocument()
     expect(within(panel).queryByRole('button', { name: 'Select all' })).not.toBeInTheDocument()
   })
 

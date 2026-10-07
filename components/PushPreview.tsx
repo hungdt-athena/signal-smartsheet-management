@@ -91,7 +91,7 @@ export function PushPreview({ preview, loading, canRun, onRan }: {
           {/* Only say something when there is something to do about it. */}
           {preview.blocked > 0 && (
             <p className="pp-warn" role="status">
-              {n(preview.blocked)} held back by a genre that will not run.
+              {n(preview.blocked)} held back by a category group that will not run.
             </p>
           )}
 
@@ -216,10 +216,10 @@ function BreakdownModal({ preview, canRun, onRan, onClose }: {
 
         <div className="modal-body pp-modal-body">
           {runnable.length === 0 ? (
-            <p className="pp-empty">No genre would run, so nothing would be handed out.</p>
+            <p className="pp-empty">No category group would run, so nothing would be handed out.</p>
           ) : (
             <>
-              <div className="pp-tabs" role="tablist" aria-label="Genre breakdown">
+              <div className="pp-tabs" role="tablist" aria-label="Category group breakdown">
                 {BUCKETS.filter(b => preview.genres.some(g => g.bucket === b)).map(b => {
                   const g = preview.genres.find(x => x.bucket === b)!
                   const ready = g.status === 'ready'
