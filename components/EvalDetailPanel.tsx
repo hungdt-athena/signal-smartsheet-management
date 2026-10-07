@@ -526,6 +526,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // replaces; these two must not be merged, or reviewing would dirty the form.
   const [pendingReview, setPendingReview] = useState<ReviewTag[]>([])
   const [trendOptions, setTrendOptions] = useState<string[]>([])
+  // Category groups each trend is defined for; with the game's own group they let
+  // the pickers open on that group's trends instead of all ~360.
+  const [trendCategoryGroups, setTrendCategoryGroups] = useState<Record<string, string[]> | undefined>(undefined)
   const [trendSubValues, setTrendSubValues] = useState<{ id: number; name: string }[]>([])
   const [trendOptionsError, setTrendOptionsError] = useState(false)
   const [trendTagsError, setTrendTagsError] = useState(false)
@@ -681,7 +684,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     setTrendOptionsError(false)
     fetch('/api/trends/options')
       .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
-      .then(d => { setTrendOptions(d.values || []); setTrendSubValues(d.subValues || []) })
+      .then(d => { setTrendOptions(d.values || []); setTrendCategoryGroups(d.categoryGroups); setTrendSubValues(d.subValues || []) })
       .catch(() => { setTrendOptionsError(true) })
   }, [])
 
@@ -1428,6 +1431,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   value={trendTags}
                   existing={existingTrends}
                   options={trendOptions}
+                  categoryGroups={trendCategoryGroups}
+                  categoryGroup={ev?.category_group}
                   subValues={trendSubValues}
                   onChange={next => { setTrendTags(next); setDirty(true) }}
                   disabled={!canEditGameAlike}

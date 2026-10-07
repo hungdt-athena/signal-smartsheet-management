@@ -14,6 +14,8 @@ interface TrendRow {
   last30: number
   lastTaggedAt: string | null
   hasInstruction: boolean
+  /** Category groups the trend is defined for, so the listing can filter by them. */
+  categoryGroups: string[]
 }
 
 // The counts move slowly (a handful of tags a day against ~351 trends) while the
@@ -38,7 +40,8 @@ export async function GET(_req: NextRequest) {
   // tagged still comes back, with zeroes.
   const rows = await sql`
     WITH defs AS (
-      SELECT field_value, bool_or(instruction IS NOT NULL) AS has_instruction
+      SELECT field_value, bool_or(instruction IS NOT NULL) AS has_instruction,
+             array_agg(DISTINCT genre ORDER BY genre) AS category_groups
       FROM custom_field_definitions
       WHERE field_name = ${TRENDS_FIELD} AND is_active
       GROUP BY field_value
@@ -55,7 +58,8 @@ export async function GET(_req: NextRequest) {
            COALESCE(u.total, 0) AS total,
            COALESCE(u.last30, 0) AS last30,
            u.last_tagged_at,
-           d.has_instruction
+           d.has_instruction,
+           d.category_groups
     FROM defs d
     LEFT JOIN used u ON u.field_value = d.field_value
     ORDER BY COALESCE(u.last30, 0) DESC, COALESCE(u.total, 0) DESC, d.field_value
@@ -67,6 +71,7 @@ export async function GET(_req: NextRequest) {
     last30: Number(r.last30 ?? 0),
     lastTaggedAt: (r.last_tagged_at as string | null) ?? null,
     hasInstruction: Boolean(r.has_instruction),
+    categoryGroups: (r.category_groups as string[] | null) ?? [],
   }))
   cache = { at: Date.now(), data }
   return NextResponse.json({ trends: data }, { headers: { 'Cache-Control': 'no-store' } })

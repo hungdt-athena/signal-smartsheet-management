@@ -17,6 +17,10 @@ interface Props {
   canEditExisting?: boolean
   onExistingChanged?: (change: ExistingTagChange) => void
   options: string[]
+  /** Category groups each trend is defined for, and this game's category group:
+   *  the picker opens on that group's trends. */
+  categoryGroups?: Record<string, string[]>
+  categoryGroup?: string | null
   subValues: { id: number; name: string }[]
   onSave: (next: TrendTag[]) => void
   onClose: () => void
@@ -32,7 +36,7 @@ interface Props {
 // Save commits to the evaluation form's state; the evaluation's own Save (or
 // auto-save) persists it, exactly like every other field in that modal.
 export function TrendTagsDialog({
-  gameId, value, existing, options, subValues, onSave, onClose, optionsError, onRetryOptions,
+  gameId, value, existing, options, categoryGroups, categoryGroup, subValues, onSave, onClose, optionsError, onRetryOptions,
   canEditExisting, onExistingChanged,
 }: Props) {
   const [draft, setDraft] = useState<Draft[]>(() =>
@@ -131,6 +135,8 @@ export function TrendTagsDialog({
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 168px 30px', gap: 8, alignItems: 'center' }}>
                         <TrendValuePicker
                           options={options}
+                          categoryGroups={categoryGroups}
+                          categoryGroup={categoryGroup}
                           exclude={takenBy(i)}
                           onPick={v => setRow(i, { field_value: v })}
                           label={r.field_value || 'Pick a trend'}
@@ -174,6 +180,7 @@ export function TrendTagsDialog({
 
               <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--faint)', lineHeight: 1.6 }}>
                 Pick from the {options.length} trends already in Signal Sense — an admin adds new ones there.
+                {categoryGroup && categoryGroups ? ` The list opens on ${categoryGroup} trends.` : ''}
                 Sub-value says how this game relates to the trend.
               </p>
             </>

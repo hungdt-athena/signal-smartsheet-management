@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic'
 
 interface Options {
   values: string[]
+  /** Category groups each value is defined for (Signal Sense's `genre` column). A
+   *  value can carry several: Signal Sense clones Puzzle's definitions into the others
+   *  with identical text. */
+  categoryGroups: Record<string, string[]>
   subValues: { id: number; name: string }[]
 }
 
@@ -25,18 +29,31 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json(cache.data, { headers: { 'Cache-Control': 'no-store' } })
   }
 
-  const [values, subValues] = await Promise.all([
+  const [defs, subValues] = await Promise.all([
     sql`
-      SELECT DISTINCT field_value
+      SELECT field_value, genre
       FROM custom_field_definitions
       WHERE field_name = ${TRENDS_FIELD} AND is_active
-      ORDER BY field_value
+      ORDER BY field_value, genre
     `,
     sql`SELECT id, name FROM sub_value_definitions WHERE is_active ORDER BY name`,
   ])
 
+  // `values` stays flat and unique -- a value defined under two category groups is still
+  // one value to the callers that do not filter (the admin review queue).
+  // Order comes from the query, not from object keys: a trend named "2048" is an
+  // integer-like key and would jump to the front of `Object.keys`.
+  const values: string[] = []
+  const categoryGroups: Record<string, string[]> = {}
+  for (const r of defs) {
+    const v = r.field_value as string
+    if (!categoryGroups[v]) { categoryGroups[v] = []; values.push(v) }
+    categoryGroups[v].push(r.genre as string)
+  }
+
   const data: Options = {
-    values: values.map(r => r.field_value as string),
+    values,
+    categoryGroups,
     subValues: subValues.map(r => ({ id: r.id as number, name: r.name as string })),
   }
   cache = { at: Date.now(), data }
