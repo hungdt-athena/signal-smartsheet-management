@@ -13,14 +13,18 @@
 // lowercase — compare with lower().
 export const SHORTCUT_EVALUATOR = 'Shortcut'
 
-export const SYSTEM_EVALUATOR_KEYS = ['shortcut', 'vinhtd'] as const
+// Attribution for rows created by scripts/backfill-gameplay-from-report.mjs: P-IV games
+// from the PJ202 weekly reports that were judged before this database existed.
+export const BACKFILL_EVALUATOR = 'pj202-backfill'
+
+export const SYSTEM_EVALUATOR_KEYS = ['shortcut', 'vinhtd', 'pj202-backfill'] as const
 
 // A narrower list: names with NOBODY behind them. `vinhtd` is on the list above
 // because his initial-evaluator rows are administrative, but he is a real user
 // with a real login; `Shortcut` is only a label. So these keys never get a user
 // account, never appear in Config > People, and never appear in an evaluator
 // dropdown — there is no person to manage. Lowercase, compare with lower().
-export const SYSTEM_LABEL_KEYS = ['shortcut'] as const
+export const SYSTEM_LABEL_KEYS = ['shortcut', 'pj202-backfill'] as const
 
 export const SYSTEM_LABEL_KEY_LIST = SYSTEM_LABEL_KEYS as readonly string[] as string[]
 
