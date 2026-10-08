@@ -25,6 +25,7 @@ import { GameAlikeChips, GameAlikeField } from '@/components/GameAlikeField'
 import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import { isManagerRole } from '@/lib/roles'
+import { saveDriveLink } from '@/lib/drive-link-client'
 
 interface Evaluation {
   id: number
@@ -316,14 +317,7 @@ function DemoVideoCell({ item, onSaved }: {
     const v = val.trim()
     if (v === (item.drive_link || '')) { setEditing(false); return }
     setSaving(true)
-    try {
-      const res = await fetch('/api/evaluations', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: item.id, drive_link: v || null }),
-      })
-      if (res.ok) onSaved(item.id, v || null)
-    } catch { /* ignore */ }
+    if (await saveDriveLink(item.id, v || null)) onSaved(item.id, v || null)
     setSaving(false)
     setEditing(false)
   }
