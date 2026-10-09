@@ -7,7 +7,7 @@ jest.mock('@/lib/db', () => ({ sql: jest.fn() }))
 jest.mock('next-auth', () => ({ getServerSession: jest.fn() }))
 jest.mock('@/lib/auth', () => ({ authOptions: {} }))
 
-import { POST, MAX_MOVE } from '@/app/api/evaluations/batch-move/route'
+import { POST } from '@/app/api/evaluations/batch-move/route'
 import { sql } from '@/lib/db'
 import { getServerSession } from 'next-auth'
 
@@ -79,8 +79,7 @@ describe('POST /api/evaluations/batch-move', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('accepts exactly MAX_MOVE ids and refuses one more', async () => {
-    expect(MAX_MOVE).toBe(500)
+  it('accepts exactly 500 ids and refuses one more', async () => {
     db([])
     const ids = (n: number) => Array.from({ length: n }, (_, i) => i + 1)
     expect((await post({ ids: ids(500), batch: 'W2 Oct, 2026' })).status).toBe(200)

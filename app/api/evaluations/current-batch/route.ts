@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 // Stored in app_config under key `current_batch`.
 
 // `_req` is unused on purpose: the value is global, so a legacy `?category=` is ignored.
-export async function GET(_req?: NextRequest) {
+export async function GET(_req: NextRequest) {
   const guard = await requireAuth()
   if (guard) return guard
 

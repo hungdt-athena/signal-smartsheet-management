@@ -6,7 +6,7 @@ import { getSession } from '@/lib/session'
 export const dynamic = 'force-dynamic'
 
 /** Same as the Short List page size, so "select all shown" always fits. */
-export const MAX_MOVE = 500
+const MAX_MOVE = 500
 
 // Move many games to another batch in one statement (manager tier only).
 //
