@@ -25,7 +25,7 @@ function game(over: Record<string, unknown>) {
   }
 }
 
-/** config rows for getCurrentBatches(); `games` for the missing-demo query. */
+/** config rows for getCurrentBatch(); `games` for the missing-demo query. */
 function db(config: { key: string; value: string | null }[], games: Record<string, unknown>[]) {
   gameQueries = []
   sqlMock.mockReset()
@@ -37,10 +37,7 @@ function db(config: { key: string; value: string | null }[], games: Record<strin
   })
 }
 
-const CFG = [
-  { key: 'current_batch:puzzle', value: 'W2 Oct, 2026' },
-  { key: 'current_batch:arcade', value: 'W1 Oct, 2026' },
-]
+const CFG = [{ key: 'current_batch', value: 'W2 Oct, 2026' }]
 
 function req(qs = '') {
   return new NextRequest(`http://localhost/api/evaluations/missing-demo${qs}`)
@@ -87,39 +84,33 @@ describe('GET /api/evaluations/missing-demo', () => {
     expect(gameQueries).toHaveLength(0)
   })
 
-  it('does not query games when no current batch is set anywhere', async () => {
-    db([{ key: 'current_batch:puzzle', value: null }], [game({})])
+  it('does not query games when no current batch is set', async () => {
+    db([{ key: 'current_batch', value: null }], [game({})])
     const res = await GET(req())
     expect(await res.json()).toEqual({ items: [] })
     expect(gameQueries).toHaveLength(0)
   })
 
-  it('keeps only the current batch of each game\'s own category', async () => {
-    db(CFG, [
-      game({ id: 1, category_group: 'puzzle', batch: 'W2 Oct, 2026' }),
-      game({ id: 2, category_group: 'puzzle', batch: 'W1 Oct, 2026' }), // previous puzzle batch
-      game({ id: 3, category_group: 'arcade', batch: 'W1 Oct, 2026' }),
-      game({ id: 4, category_group: 'arcade', batch: 'W2 Oct, 2026' }), // puzzle's batch, wrong category
-      game({ id: 5, category_group: 'simulation', batch: 'W2 Oct, 2026' }), // no batch set
-    ])
-    const body = await (await GET(req())).json()
-    expect(body.items.map((i: { id: number }) => i.id).sort()).toEqual([1, 3])
-  })
-
-  it('narrows the SQL to the current batch labels so it does not scan every List_Idea game', async () => {
+  it('asks the database for the one current batch', async () => {
     db(CFG, [])
     await GET(req())
-    const flat = gameQueries[0].binds.flat()
-    expect(flat).toEqual(expect.arrayContaining(['W2 Oct, 2026', 'W1 Oct, 2026']))
+    expect(gameQueries[0].text).toMatch(/ge\.batch\s*=/)
+    expect(gameQueries[0].binds).toContain('W2 Oct, 2026')
   })
 
-  it('returns the fields the panel renders, newest batch first', async () => {
+  it('applies the one batch to every category, with no per-category filtering', async () => {
     db(CFG, [
-      game({ id: 3, category_group: 'arcade', batch: 'W1 Oct, 2026', title: 'Stack Rush' }),
-      game({ id: 1, category_group: 'puzzle', batch: 'W2 Oct, 2026', title: 'ArcFlush', icon_url: 'https://x/i.png' }),
+      game({ id: 1, category_group: 'puzzle' }),
+      game({ id: 2, category_group: 'arcade' }),
+      game({ id: 3, category_group: 'simulation' }),
     ])
     const body = await (await GET(req())).json()
-    expect(body.items.map((i: { id: number }) => i.id)).toEqual([1, 3])
+    expect(body.items.map((i: { id: number }) => i.id)).toEqual([1, 2, 3])
+  })
+
+  it('returns the fields the panel renders', async () => {
+    db(CFG, [game({ id: 1, title: 'ArcFlush', icon_url: 'https://x/i.png' })])
+    const body = await (await GET(req())).json()
     expect(body.items[0]).toEqual({
       id: 1, game_id: 'g1', title: 'ArcFlush', icon_url: 'https://x/i.png',
       category: 'puzzle', genre: 'Casual', batch: 'W2 Oct, 2026',
