@@ -1815,7 +1815,7 @@ Dump the real component DOM and screenshot it with the app CSS, as done for `Mis
 
 - [ ] **Step 6: Hand off to the user. Do NOT push yet.**
 
-Tell the user: branch `feat/global-current-batch` is ready; the code works before the migration; list the 9 known failing suites. Then, only after the user says to push:
+Tell the user: branch `feat/global-current-batch` is ready; the code may be deployed before the migration (legacy fallback), but the migration must come only after the new build is live; list the 9 known failing suites. Then, only after the user says to push:
 
 ```bash
 git fetch origin && git rev-list --left-right --count origin/main...HEAD
@@ -1823,4 +1823,4 @@ git push origin HEAD:main
 ```
 (The first command must show `0 N`; if origin/main moved, `git rebase origin/main`, rerun Steps 2-4, then push.)
 
-Then the user, in this order: (1) applies `migrations/045_global_current_batch.sql` on prod by hand and checks `SELECT key, value FROM app_config WHERE key LIKE 'current_batch%'` shows exactly one row `current_batch = W2 Oct, 2026`; (2) Republishes on Replit; (3) sets the current batch once in Short List and uses Select to move any games stamped in the gap.
+Then the user, in this order: (1) Republishes on Replit and confirms the new build is live (the running code reads only the per-category keys that the migration deletes, so applying it earlier leaves evaluators on "No active batch" and saves List_Ideas with a NULL batch); (2) runs the migration's CTE as a plain SELECT to confirm it picks `W2 Oct, 2026`, then applies `migrations/045_global_current_batch.sql` on prod by hand and checks `SELECT key, value FROM app_config WHERE key LIKE 'current_batch%'` shows exactly one row `current_batch = W2 Oct, 2026`; (3) sets the current batch once in Short List and uses Select to move any games stamped in the gap.

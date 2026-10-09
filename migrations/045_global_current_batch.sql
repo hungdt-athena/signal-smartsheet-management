@@ -9,9 +9,11 @@
 -- deleted. If no old value parses as a batch label, nothing is inserted and the batch
 -- stays unset until a manager sets it.
 --
--- Safe to deploy the code first: lib/current-batch.ts falls back to the old rows while
--- no `current_batch` row exists. Idempotent: ON CONFLICT DO NOTHING keeps an
--- already-set global value, and the DELETE of already-deleted rows is a no-op.
+-- Order: the code may be deployed BEFORE this migration (lib/current-batch.ts falls back to
+-- the old rows while no `current_batch` row exists), but apply the migration only AFTER the
+-- new build is live. Until then the running code reads the per-category keys this migration
+-- deletes, so evaluators would see "No active batch" and save List_Ideas with a NULL batch.
+-- Idempotent: ON CONFLICT DO NOTHING keeps an already-set global value, and the DELETE of already-deleted rows is a no-op.
 --
 -- Rollback: INSERT INTO app_config (key, value, updated_at)
 --   SELECT 'current_batch:' || c, (SELECT value FROM app_config WHERE key = 'current_batch'), NOW()
@@ -32,7 +34,7 @@ WITH legacy AS (
 INSERT INTO app_config (key, value, updated_at)
 SELECT 'current_batch', value, NOW()
 FROM legacy
-ORDER BY ord DESC
+ORDER BY ord DESC NULLS LAST
 LIMIT 1
 ON CONFLICT (key) DO NOTHING;
 

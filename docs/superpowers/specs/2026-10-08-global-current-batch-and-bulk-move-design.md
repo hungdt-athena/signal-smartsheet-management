@@ -112,7 +112,8 @@ locked game means the manager wants it moved.
 Written first, watched failing:
 
 - `lib/current-batch`: global key wins; falls back to newest legacy key when absent; null when
-  nothing is set; `onlyCurrentBatch` keeps matching rows only and nothing for null.
+  nothing is set. The missing-demo route filters in SQL (`ge.batch = $current`), so no
+  row-filtering helper exists to test.
 - `POST /api/evaluations/current-batch`: writes the single key, ignores any `category`, 403 for
   non-managers.
 - Each reader in the table above: uses the global value (facets, list, `[gameId]`, missing-demo).
@@ -131,9 +132,16 @@ not part of this work and must be reported unchanged.
 
 ## Rollout
 
-1. Merge the code. It works before the migration thanks to the legacy fallback.
-2. Apply migration 045 on prod by hand.
-3. Republish on Replit.
+The order matters: the code now running on prod reads only the per-category keys
+`current_batch:<category>`, and migration 045 deletes them. Applying 045 before the new build
+is live leaves every evaluator on "No active batch", and `EvalDetailPanel` then sends no batch,
+so every List_Idea saved in that window keeps `batch` NULL and drops out of the batch-filtered
+Short List and the Record week.
+
+1. Merge and push the code. It works before the migration thanks to the legacy fallback.
+2. Republish on Replit and confirm the new build is live.
+3. Run the migration's CTE as a plain SELECT to confirm the value it will pick, then apply
+   migration 045 on prod by hand.
 4. A manager sets the global current batch once and uses Select to move games stamped in a gap.
 
 ## Risks
