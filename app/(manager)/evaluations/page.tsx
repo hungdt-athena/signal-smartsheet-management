@@ -689,6 +689,11 @@ function ShortListEvalTab() {
     if (currentBatch && !opts.includes(currentBatch)) opts.unshift(currentBatch)
     return opts
   })()
+  // Move targets: the batches near today PLUS every batch that already has games, newest
+  // first. Without the second part a wrong move across a month boundary (e.g. out of
+  // "W4 Sep" on Oct 1) could not be moved back.
+  const moveTargetOptions = Array.from(new Set([...currentBatchOptions, ...batchOptions]))
+    .sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a))
 
   return (
     <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -933,7 +938,7 @@ function ShortListEvalTab() {
       {isManager && selectMode && selectedIds.size > 0 && (
         <BatchMoveBar
           selected={data.filter(d => selectedIds.has(d.id)).map(d => ({ id: d.id, final_conclusion: d.final_conclusion }))}
-          batchOptions={currentBatchOptions}
+          batchOptions={moveTargetOptions}
           onCancel={exitSelectMode}
           onMoved={() => { exitSelectMode(); fetchData(); fetchFacets() }}
         />
