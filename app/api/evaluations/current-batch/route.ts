@@ -1,48 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { requireAuth, requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
-import { isManagerRole } from '@/lib/roles'
-import { getSession } from '@/lib/session'
+import { CURRENT_BATCH_KEY, getCurrentBatch } from '@/lib/current-batch'
 
 export const dynamic = 'force-dynamic'
 
-const CATEGORIES = ['puzzle', 'arcade', 'simulation']
+// The ONE active weekly batch, shared by every category group. Managers set it;
+// evaluators marking a game List_Idea get this batch forced (see EvalDetailPanel).
+// Stored in app_config under key `current_batch`.
 
-// The active weekly batch per category. Managers set it; evaluators marking a
-// game List_Idea get this batch forced (see EvalDetailPanel). Stored in
-// app_config under key `current_batch:<category>`.
-
-export async function GET(req: NextRequest) {
+// `_req` is unused on purpose: the value is global, so a legacy `?category=` is ignored.
+export async function GET(_req?: NextRequest) {
   const guard = await requireAuth()
   if (guard) return guard
 
-  const category = req.nextUrl.searchParams.get('category') || 'puzzle'
-  const rows = await sql`SELECT value FROM app_config WHERE key = ${`current_batch:${category}`}`
-  return NextResponse.json({ current_batch: rows[0]?.value ?? null })
+  return NextResponse.json({ current_batch: await getCurrentBatch() })
 }
 
 export async function POST(req: NextRequest) {
-  const guard = await requireAuth()
+  const guard = await requireManager()
   if (guard) return guard
 
-  // Manager-only (admin).
-  if (process.env.SKIP_AUTH !== 'true') {
-    const session = await getSession()
-    const role = session?.user?.role
-    if (!isManagerRole(role)) {
-      return NextResponse.json({ error: 'Forbidden: manager role required' }, { status: 403 })
-    }
-  }
-
   try {
-    const { category, batch } = await req.json()
-    if (!CATEGORIES.includes(category)) {
-      return NextResponse.json({ error: 'Invalid category' }, { status: 400 })
-    }
+    const { batch } = await req.json()
     const value = batch ? String(batch) : null
     await sql`
       INSERT INTO app_config (key, value, updated_at)
-      VALUES (${`current_batch:${category}`}, ${value}, NOW())
+      VALUES (${CURRENT_BATCH_KEY}, ${value}, NOW())
       ON CONFLICT (key) DO UPDATE SET value = ${value}, updated_at = NOW()
     `
     return NextResponse.json({ current_batch: value })

@@ -26,6 +26,7 @@ import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import { isManagerRole } from '@/lib/roles'
 import { saveDriveLink } from '@/lib/drive-link-client'
+import { saveCurrentBatch } from '@/lib/current-batch-client'
 
 interface Evaluation {
   id: number
@@ -659,15 +660,9 @@ function ShortListEvalTab() {
 
   // Manager control: set the team's current batch. Offer this + next calendar
   // month's weeks so W4→W1-next-month rollover (after the 28th) is one click.
-  const saveCurrentBatch = async (v: string) => {
+  const handleCurrentBatchChange = async (v: string) => {
     setCurrentBatch(v || null)
-    try {
-      await fetch('/api/evaluations/current-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: filterCategory, batch: v || null }),
-      })
-    } catch { /* ignore */ }
+    await saveCurrentBatch(v || null)
   }
   const currentBatchOptions = (() => {
     const now = new Date()
@@ -690,12 +685,12 @@ function ShortListEvalTab() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Current batch</span>
-              <span style={{ fontSize: 10.5, color: 'var(--faint)' }}>evaluators auto-fill this for List_Idea</span>
+              <span style={{ fontSize: 10.5, color: 'var(--faint)' }}>all categories · evaluators auto-fill this for List_Idea</span>
             </div>
             <div style={{ width: 170 }}>
               <StyledSelect
                 value={currentBatch || ''}
-                onChange={saveCurrentBatch}
+                onChange={handleCurrentBatchChange}
                 placeholder="Not set"
                 options={[{ value: '', label: '— none —' }, ...currentBatchOptions.map(b => ({ value: b, label: b }))]}
               />
