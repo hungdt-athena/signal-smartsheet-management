@@ -73,6 +73,19 @@ describe('POST /api/evaluations/batch-move', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('400 for a batch longer than the 40-character column, and never touches the database', async () => {
+    db()
+    const res = await post({ ids: [1], batch: 'W'.repeat(41) })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('batch is too long')
+    expect(calls).toHaveLength(0)
+  })
+
+  it('accepts a batch of exactly 40 characters', async () => {
+    db([{ id: 1 }])
+    expect((await post({ ids: [1], batch: 'W'.repeat(40) })).status).toBe(200)
+  })
+
   it('400 for a body that is not JSON', async () => {
     db()
     expect((await post('not json')).status).toBe(400)
