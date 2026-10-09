@@ -27,6 +27,7 @@ import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import { isManagerRole } from '@/lib/roles'
 import { saveDriveLink } from '@/lib/drive-link-client'
 import { saveCurrentBatch } from '@/lib/current-batch-client'
+import { BatchMoveBar } from '@/components/BatchMoveBar'
 
 interface Evaluation {
   id: number
@@ -547,6 +548,15 @@ function ShortListEvalTab() {
   // it — but only the first time, so a later manual "All batches" choice sticks.
   const batchDefaultedRef = useRef(false)
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
+  // Bulk batch move (managers). The checkbox column stays hidden until Select is pressed.
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()) }
+  const toggleSelected = (id: number) => setSelectedIds(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
 
   // The filter params both fetches share. Kept in one place so the rows request and
   // the facets request can never disagree about what is being looked at.
@@ -633,6 +643,12 @@ function ShortListEvalTab() {
     if (df.suppressFetchRef.current) { df.suppressFetchRef.current = false; return }
     fetchData()
   }, [fetchData])
+
+  // A move must only ever cover rows the manager can see. Any change to what is listed
+  // (category, any filter, the date range) drops the selection.
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, filterBatch, df.value])
 
   const handleFinalConclusionSaved = (id: number, value: string) => {
     setData(prev => prev.map(d => d.id === id ? { ...d, final_conclusion: value } : d))
@@ -774,6 +790,10 @@ function ShortListEvalTab() {
           {sortAsc ? 'Oldest first' : 'Newest first'}
         </button>
 
+        {isManager && (selectMode
+          ? <button className="btn btn-sm" onClick={exitSelectMode}>Cancel</button>
+          : <button className="btn btn-sm" onClick={() => setSelectMode(true)}>Select</button>)}
+
         <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>
           {loading ? 'Loading...' : `${data.length} results`}
         </span>
@@ -784,6 +804,13 @@ function ShortListEvalTab() {
           <table className="tbl">
             <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
               <tr>
+                {selectMode && (
+                  <th style={{ width: 34 }}>
+                    <input type="checkbox" aria-label="Select all shown"
+                      checked={data.length > 0 && data.every(d => selectedIds.has(d.id))}
+                      onChange={e => setSelectedIds(e.target.checked ? new Set(data.map(d => d.id)) : new Set())} />
+                  </th>
+                )}
                 <th style={{ width: 36 }}>#</th>
                 <th style={{ width: 280 }}>Game</th>
                 <th style={{ width: 110 }}>Link</th>
@@ -797,7 +824,7 @@ function ShortListEvalTab() {
             </thead>
             <tbody>
               {data.length === 0 && !loading && (
-                <tr><td colSpan={9} className="empty">No games found</td></tr>
+                <tr><td colSpan={selectMode ? 10 : 9} className="empty">No games found</td></tr>
               )}
               {loading && Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>{Array.from({ length: 9 }).map((__, c) => (
@@ -807,6 +834,13 @@ function ShortListEvalTab() {
               {data.map((item, idx) => (
                 <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
                   onClick={() => setDetailGameId(item.game_id)}>
+                  {selectMode && (
+                    <td onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" aria-label={`Select ${item.title}`}
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => toggleSelected(item.id)} />
+                    </td>
+                  )}
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 230 }}>
@@ -895,6 +929,15 @@ function ShortListEvalTab() {
           </table>
         </div>
       </div>
+
+      {isManager && selectMode && selectedIds.size > 0 && (
+        <BatchMoveBar
+          selected={data.filter(d => selectedIds.has(d.id)).map(d => ({ id: d.id, final_conclusion: d.final_conclusion }))}
+          batchOptions={currentBatchOptions}
+          onCancel={exitSelectMode}
+          onMoved={() => { exitSelectMode(); fetchData(); fetchFacets() }}
+        />
+      )}
 
       {detailGameId && (
         <div className="eval-modal-backdrop" onClick={() => setDetailGameId(null)}>
