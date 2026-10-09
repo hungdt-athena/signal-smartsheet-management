@@ -29,8 +29,7 @@ single game's batch is edited in `EvalDetailPanel`.
 - One `app_config` row, key `current_batch`. The three `current_batch:<category>` keys go away.
 - `lib/current-batch.ts` becomes the single reader:
   - `getCurrentBatch(): Promise<string | null>` — the global value.
-  - `onlyCurrentBatch(rows, current: string | null)` — keeps rows whose `batch === current`.
-    No category argument; a null `current` keeps nothing.
+  - The missing-demo route filters in SQL (`ge.batch = $current`), so no row-filtering helper is needed; `getCurrentBatches` and `onlyCurrentBatch` are removed.
 - **Deploy-order safety.** If `current_batch` is absent, `getCurrentBatch()` falls back to the
   newest value (by `weekLabelOrder`) among legacy `current_batch:%` keys. Code that ships
   before the migration therefore never reports "no active batch" for the whole system.
@@ -53,7 +52,7 @@ single game's batch is edited in `EvalDetailPanel`.
 | `app/api/evaluations/facets/route.ts` | reads `current_batch:${category}` | `getCurrentBatch()` |
 | `app/api/evaluations/route.ts` (`current_batch`, `default_batch`) | reads `current_batch:${category}` | `getCurrentBatch()` |
 | `app/api/evaluations/[gameId]/route.ts` | reads all `current_batch:%`, picks by category | `getCurrentBatch()` |
-| `app/api/evaluations/missing-demo/route.ts` | `getCurrentBatches()` + `onlyCurrentBatch` | `getCurrentBatch()` + `onlyCurrentBatch` |
+| `app/api/evaluations/missing-demo/route.ts` | `getCurrentBatches()` + `onlyCurrentBatch` | `getCurrentBatch()` and a SQL `ge.batch = $current` |
 | Short List, youtube page, `EvalDetailPanel` | consume `current_batch` from the above | unchanged apart from the setter payload |
 
 `category` stays a filter everywhere it already is; only the current batch stops depending on it.
@@ -67,8 +66,7 @@ single game's batch is edited in `EvalDetailPanel`.
    (today: `W2 Oct, 2026` from puzzle; arcade is `W1 Oct, 2026`).
 2. Delete the `current_batch:%` rows.
 
-Effect to expect: arcade moves from W1 to W2. Arcade `List_Idea` games already stamped W1
-keep it and become "previous batch" games.
+Prod on 2026-10-08 already had both `current_batch:puzzle` and `current_batch:arcade` at `W2 Oct, 2026`, so the migration changes no visible value.
 
 ## Part 2 — Bulk batch move
 
