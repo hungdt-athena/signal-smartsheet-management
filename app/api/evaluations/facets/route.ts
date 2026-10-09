@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth-guard'
 import { getSession } from '@/lib/session'
 import { sql } from '@/lib/db'
 import { getConfigValues } from '@/lib/config'
+import { getCurrentBatch } from '@/lib/current-batch'
 import { visibleEvaluators } from '@/lib/people-config'
 import { loadHiddenEvaluatorKeys } from '@/lib/people-config-db'
 import {
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
     const [
       availableMonths,
       conclusionOptions, hiddenEvaluatorKeys, distinctEvaluators,
-      distinctConclusions, batchRows, cfg, presentRows,
+      distinctConclusions, batchRows, currentBatchVal, presentRows,
     ] = await Promise.all([
       monthsPromise,
       getConfigValues('conclusion'),
@@ -102,7 +103,7 @@ export async function GET(req: NextRequest) {
           ${f.conclusionFilter}
           ${f.finalConclusionFilter}
       `,
-      sql`SELECT value FROM app_config WHERE key = ${`current_batch:${category}`}`,
+      getCurrentBatch(),
       sql<{ batch: string }[]>`
         SELECT DISTINCT ge.batch
         FROM game_evaluations ge
@@ -114,7 +115,6 @@ export async function GET(req: NextRequest) {
     ])
 
     const present: string[] = (distinctConclusions as unknown as { c: string }[]).map(r => r.c)
-    const currentBatchVal: string | null = (cfg[0]?.value as string | undefined) ?? null
 
     // default_batch: the batch the client should pre-select. Normally the team's
     // current batch, but if that batch has no games in this view yet (e.g. a fresh
