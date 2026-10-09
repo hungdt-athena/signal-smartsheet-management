@@ -118,4 +118,14 @@ describe('POST /api/evaluations/batch-move', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ moved: 1 })
   })
+
+  it('400 for a body that is null, array, or non-object primitive, and never touches the database', async () => {
+    db()
+    for (const body of ['null', '[1,2]', '7']) {
+      const res = await post(body)
+      expect(res.status).toBe(400)
+      expect(typeof (await res.json()).error).toBe('string')
+    }
+    expect(calls).toHaveLength(0)
+  })
 })

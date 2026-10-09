@@ -26,6 +26,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Body must be JSON' }, { status: 400 })
   }
 
+  if (body === null || typeof body !== 'object') {
+    return NextResponse.json({ error: 'Body must be a JSON object' }, { status: 400 })
+  }
+
   const batch = typeof body.batch === 'string' ? body.batch.trim() : ''
   if (!batch) return NextResponse.json({ error: 'batch is required' }, { status: 400 })
 
