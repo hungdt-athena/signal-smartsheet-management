@@ -72,7 +72,10 @@ export function MissingDemoPrompt() {
       .then(r => (r.ok ? r.json() : null))
       .then(body => {
         if (cancelled || !Array.isArray(body?.items)) return
-        const valid = (body.items as unknown[]).map(toItem).filter((i): i is Item => i !== null)
+        // One row per id: a repeated id would give two rows the same React key.
+        const seen = new Set<number>()
+        const valid = (body.items as unknown[]).map(toItem)
+          .filter((i): i is Item => i !== null && !seen.has(i.id) && !!seen.add(i.id))
         if (valid.length === 0) return
         setItems(valid)
         setTotal(valid.length)

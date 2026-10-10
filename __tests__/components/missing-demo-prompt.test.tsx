@@ -206,6 +206,19 @@ describe('MissingDemoPrompt', () => {
       expect(screen.getByText('Color Queue Shooter')).toBeInTheDocument()
     })
 
+    it('shows a game once when the list repeats its id (no duplicate React keys)', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        mockRaw({ items: [A, { ...A, title: 'Same id again' }, B] })
+        await screen.findByRole('dialog')
+        expect(screen.getByRole('dialog')).toHaveTextContent('2 List Idea games still need a demo link')
+        expect(screen.queryByText('Same id again')).toBeNull()
+        expect(spy).not.toHaveBeenCalled()
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
     it('renders nothing when no element is valid', async () => {
       mockRaw({ items: [null, { id: 'x' }, 7] })
       await waitFor(() => expect(global.fetch).toHaveBeenCalled())
