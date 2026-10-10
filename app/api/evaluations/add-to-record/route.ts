@@ -3,6 +3,8 @@ import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getConfigValues } from '@/lib/config'
 import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
+import { getSession } from '@/lib/session'
+import { logKindSql, isMissingLogTable, EVALUATION_LOG_MISSING } from '@/lib/evaluation-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -87,6 +89,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Who pulled the game in, for the evaluation_log row.
+    const session = await getSession()
+    const actor = session?.user?.name ?? null
+    const role = session?.user?.role ?? null
+
     // Set the bucket, and (when a batch is supplied) move the row into that week so
     // it surfaces in the batch-filtered record list. A NULL batchVal leaves the
     // existing batch untouched.
@@ -97,21 +104,37 @@ export async function POST(req: NextRequest) {
       // final_conclusion_date only advance when the value actually changed, so
       // confirming an unchanged real evaluation doesn't skew report timing.
       result = await sql`
-        UPDATE game_evaluations
-        SET record_bucket = ${bucket},
-            batch = COALESCE(${batchVal}, batch),
-            initial_evaluator = COALESCE(${initEval}, initial_evaluator),
-            initial_conclusion = COALESCE(${initConcl}, initial_conclusion),
-            evaluate_date = CASE
-              WHEN ${initConcl}::text IS NOT NULL AND initial_conclusion IS DISTINCT FROM ${initConcl}
-                THEN NOW() ELSE evaluate_date END,
-            final_conclusion = COALESCE(${finalConcl}, final_conclusion),
-            final_conclusion_date = CASE
-              WHEN ${finalConcl}::text IS NOT NULL AND final_conclusion IS DISTINCT FROM ${finalConcl}
-                THEN NOW() ELSE final_conclusion_date END,
-            final_evaluator = COALESCE(${finalEval}, final_evaluator)
-        WHERE game_id = ${game_id} AND category_group = ${category_group}
-        RETURNING id
+        WITH old AS (
+          SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
+          FROM game_evaluations
+          WHERE game_id = ${game_id} AND category_group = ${category_group}
+          FOR UPDATE
+        ), upd AS (
+          UPDATE game_evaluations ge
+          SET record_bucket = ${bucket},
+              batch = COALESCE(${batchVal}, ge.batch),
+              initial_evaluator = COALESCE(${initEval}, ge.initial_evaluator),
+              initial_conclusion = COALESCE(${initConcl}, ge.initial_conclusion),
+              evaluate_date = CASE
+                WHEN ${initConcl}::text IS NOT NULL AND ge.initial_conclusion IS DISTINCT FROM ${initConcl}
+                  THEN NOW() ELSE ge.evaluate_date END,
+              final_conclusion = COALESCE(${finalConcl}, ge.final_conclusion),
+              final_conclusion_date = CASE
+                WHEN ${finalConcl}::text IS NOT NULL AND ge.final_conclusion IS DISTINCT FROM ${finalConcl}
+                  THEN NOW() ELSE ge.final_conclusion_date END,
+              final_evaluator = COALESCE(${finalEval}, ge.final_evaluator)
+          FROM old WHERE ge.id = old.id
+          RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion
+        ), logged AS (
+          INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
+            kind, conclusion_before, conclusion_after, final_before, final_after, changed)
+          SELECT old.id, old.game_id, ${actor}::text, ${role}::text, old.initial_evaluator, 'add_to_record',
+            ${logKindSql(sql, { initialTouched: !!(initEval || initConcl), finalTouched: !!(finalConcl || finalEval) })},
+            old.initial_conclusion, upd.initial_conclusion, old.final_conclusion, upd.final_conclusion,
+            old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion
+          FROM old JOIN upd ON upd.id = old.id
+        )
+        SELECT id FROM upd
       `
     } else {
       // Legacy fallback (no overrides — e.g. an n8n caller): when the row has no
@@ -120,23 +143,42 @@ export async function POST(req: NextRequest) {
       // conclusion (5min → Insight, 20min → Priority IV). The CASE guard reads the
       // pre-update value so a real evaluation is never overwritten.
       const finalConclusion = FINAL_FOR_BUCKET[bucket as keyof typeof FINAL_FOR_BUCKET]
-      const autoFill = sql`(initial_conclusion IS NULL OR initial_conclusion ILIKE '%bypass%')`
+      const autoFill = sql`(ge.initial_conclusion IS NULL OR ge.initial_conclusion ILIKE '%bypass%')`
       result = await sql`
-        UPDATE game_evaluations
-        SET record_bucket = ${bucket},
-            batch = COALESCE(${batchVal}, batch),
-            initial_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE initial_evaluator END,
-            initial_conclusion = CASE WHEN ${autoFill} THEN 'List_Idea' ELSE initial_conclusion END,
-            evaluate_date = CASE WHEN ${autoFill} THEN NOW() ELSE evaluate_date END,
-            final_conclusion = CASE WHEN ${autoFill} THEN ${finalConclusion} ELSE final_conclusion END,
-            final_conclusion_date = CASE WHEN ${autoFill} THEN NOW() ELSE final_conclusion_date END,
-            final_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE final_evaluator END
-        WHERE game_id = ${game_id} AND category_group = ${category_group}
-        RETURNING id
+        WITH old AS (
+          SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
+          FROM game_evaluations
+          WHERE game_id = ${game_id} AND category_group = ${category_group}
+          FOR UPDATE
+        ), upd AS (
+          UPDATE game_evaluations ge
+          SET record_bucket = ${bucket},
+              batch = COALESCE(${batchVal}, ge.batch),
+              initial_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE ge.initial_evaluator END,
+              initial_conclusion = CASE WHEN ${autoFill} THEN 'List_Idea' ELSE ge.initial_conclusion END,
+              evaluate_date = CASE WHEN ${autoFill} THEN NOW() ELSE ge.evaluate_date END,
+              final_conclusion = CASE WHEN ${autoFill} THEN ${finalConclusion} ELSE ge.final_conclusion END,
+              final_conclusion_date = CASE WHEN ${autoFill} THEN NOW() ELSE ge.final_conclusion_date END,
+              final_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE ge.final_evaluator END
+          FROM old WHERE ge.id = old.id
+          RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion
+        ), logged AS (
+          INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
+            kind, conclusion_before, conclusion_after, final_before, final_after, changed)
+          SELECT old.id, old.game_id, ${actor}::text, ${role}::text, old.initial_evaluator, 'add_to_record',
+            ${logKindSql(sql, { initialTouched: true, finalTouched: true })},
+            old.initial_conclusion, upd.initial_conclusion, old.final_conclusion, upd.final_conclusion,
+            old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion
+          FROM old JOIN upd ON upd.id = old.id
+        )
+        SELECT id FROM upd
       `
     }
     return NextResponse.json({ ok: true, id: result[0]?.id })
   } catch (err) {
+    if (isMissingLogTable(err)) {
+      return NextResponse.json({ error: EVALUATION_LOG_MISSING }, { status: 500 })
+    }
     console.error('POST /api/evaluations/add-to-record error:', err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }

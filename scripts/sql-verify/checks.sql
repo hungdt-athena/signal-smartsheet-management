@@ -117,3 +117,37 @@ DO $$ BEGIN
     'expected no log row without the join (if this fails, Postgres changed; keep the join anyway)';
 END $$;
 DELETE FROM evaluation_log;
+
+-- ===== Task 4: add-to-record legacy branch logs and keeps auto-fill =====
+INSERT INTO game_info VALUES ('r1'), ('r2');
+INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion, evaluate_date) VALUES
+ (41, 'r1', 'HuyDD', 'Bypass', '2026-10-01 10:00+07'),
+ (42, 'r2', 'HuyDD', 'List_Idea', '2026-10-01 10:00+07');
+PREPARE atr(unknown, unknown) AS
+WITH old AS (
+  SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
+  FROM game_evaluations WHERE game_id = $1 AND category_group = 'puzzle' FOR UPDATE
+), upd AS (
+  UPDATE game_evaluations ge SET
+    initial_evaluator = CASE WHEN (ge.initial_conclusion IS NULL OR ge.initial_conclusion ILIKE '%bypass%') THEN 'Shortcut' ELSE ge.initial_evaluator END,
+    initial_conclusion = CASE WHEN (ge.initial_conclusion IS NULL OR ge.initial_conclusion ILIKE '%bypass%') THEN 'List_Idea' ELSE ge.initial_conclusion END
+  FROM old WHERE ge.id = old.id
+  RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion
+), logged AS (
+  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, source, kind,
+    conclusion_before, conclusion_after, changed)
+  SELECT old.id, old.game_id, $2::text, old.initial_evaluator, 'add_to_record', 'revise',
+    old.initial_conclusion, upd.initial_conclusion, old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion
+  FROM old JOIN upd ON upd.id = old.id
+)
+SELECT id FROM upd;
+EXECUTE atr('r1', 'VinhTD');
+EXECUTE atr('r2', 'VinhTD');
+DO $$ BEGIN
+  ASSERT (SELECT initial_evaluator FROM game_evaluations WHERE id = 41) = 'Shortcut', 'r1 auto-filled';
+  ASSERT (SELECT initial_evaluator FROM game_evaluations WHERE id = 42) = 'HuyDD', 'r2 kept';
+  ASSERT (SELECT owner || ':' || conclusion_before || '>' || conclusion_after FROM evaluation_log WHERE game_evaluation_id = 41)
+         = 'HuyDD:Bypass>List_Idea', 'r1 log shows what was overridden';
+  ASSERT (SELECT changed FROM evaluation_log WHERE game_evaluation_id = 42) = false, 'r2 logged, unchanged';
+END $$;
+DELETE FROM evaluation_log;
