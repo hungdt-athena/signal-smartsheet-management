@@ -195,15 +195,30 @@ describe('MissingDemoPrompt', () => {
       expect(screen.queryByRole('dialog')).toBeNull()
     })
 
-    it('ignores elements without a numeric id or string category, title or batch, and keeps the rest', async () => {
+    it('ignores elements without a numeric id or string category or batch, and keeps the rest', async () => {
       mockRaw({ items: [
         A, null, 5, 'x', [],
-        { ...B, id: '2' }, { ...B, id: 3, title: undefined }, { ...B, id: 4, title: 7 },
+        { ...B, id: '2' },
         { ...B, id: 5, category: null }, { ...B, id: 6, batch: undefined }, { ...B, id: Number.NaN },
       ] })
       await screen.findByRole('dialog')
       expect(screen.getByRole('dialog')).toHaveTextContent('1 List Idea game still needs a demo link')
       expect(screen.getByText('Color Queue Shooter')).toBeInTheDocument()
+    })
+
+    // game_info.title can be NULL: the game still needs its demo link, so it is listed.
+    it('lists a game whose title is missing, blank or not text, as "Untitled game"', async () => {
+      mockRaw({ items: [{ ...B, id: 3, title: null }, { ...B, id: 4, title: undefined }, { ...B, id: 5, title: 7 }, { ...B, id: 6, title: '  ' }, A] })
+      await screen.findByRole('dialog')
+      expect(screen.getByRole('dialog')).toHaveTextContent('5 List Idea games still need a demo link')
+      expect(screen.getAllByText('Untitled game')).toHaveLength(4)
+      expect(screen.getAllByLabelText('Demo link for Untitled game')).toHaveLength(4)
+    })
+
+    it('a lone game with no title still opens the prompt', async () => {
+      mockRaw({ items: [{ ...B, id: 3, title: null }] })
+      await screen.findByRole('dialog')
+      expect(screen.getByRole('dialog')).toHaveTextContent('1 List Idea game still needs a demo link')
     })
 
     it('shows a game once when the list repeats its id (no duplicate React keys)', async () => {

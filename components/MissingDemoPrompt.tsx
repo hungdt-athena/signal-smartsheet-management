@@ -31,15 +31,17 @@ function shortDate(iso: string | null): string | null {
 }
 
 /** The list comes from the network: anything that is not the shape below is dropped
- *  instead of crashing the layout this prompt is mounted in. Optional fields fall back to null. */
+ *  instead of crashing the layout this prompt is mounted in. Optional fields fall back to null.
+ *  A missing title is NOT a reason to drop: game_info.title can be NULL and that game still
+ *  needs its demo link, so it is shown as "Untitled game". */
 function toItem(raw: unknown): Item | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   if (typeof r.id !== 'number' || !Number.isFinite(r.id)) return null
-  if (typeof r.category !== 'string' || typeof r.title !== 'string' || typeof r.batch !== 'string') return null
+  if (typeof r.category !== 'string' || typeof r.batch !== 'string') return null
   const str = (v: unknown) => (typeof v === 'string' ? v : null)
   return {
-    id: r.id, game_id: str(r.game_id) ?? '', title: r.title, icon_url: str(r.icon_url),
+    id: r.id, game_id: str(r.game_id) ?? '', title: str(r.title)?.trim() ? (r.title as string) : 'Untitled game', icon_url: str(r.icon_url),
     category: r.category, genre: str(r.genre), batch: r.batch, evaluate_date: str(r.evaluate_date),
   }
 }
