@@ -31,7 +31,8 @@ single game's batch is edited in `EvalDetailPanel`.
   - `getCurrentBatch(): Promise<string | null>` — the global value.
   - The missing-demo route filters in SQL (`ge.batch = $current`), so no row-filtering helper is needed; `getCurrentBatches` and `onlyCurrentBatch` are removed.
 - **Deploy-order safety.** If `current_batch` is absent, `getCurrentBatch()` falls back to the
-  newest value (by `weekLabelOrder`) among legacy `current_batch:%` keys. Code that ships
+  newest value (by `weekLabelOrder`) among the legacy `current_batch:%` keys whose trimmed
+  value passes `isBatchLabel` (odd free-text values are ignored). Code that ships
   before the migration therefore never reports "no active batch" for the whole system.
   Once the migration has run, the fallback is dead code and can be deleted in a later commit.
 - Every value read is trimmed, and a whitespace-only value counts as empty (a blank global
@@ -75,14 +76,17 @@ single game's batch is edited in `EvalDetailPanel`.
 One transaction (`BEGIN` ... `COMMIT`), so a failing statement changes nothing.
 
 1. If `current_batch` does not exist, insert it with the newest legacy value by week order
-   (today: `W2 Oct, 2026` from puzzle; arcade is `W1 Oct, 2026`). Legacy values are matched
-   as tolerantly as `weekLabelOrder`: trimmed, case-insensitive, any whitespace, a week of
-   1 to 3 digits, the month by its first three letters (`Sept` and `October` work). Values
-   with an unknown month are skipped; ties are broken by the smaller text, so the result
-   does not depend on row order. The trimmed label is stored.
+   (today: `W2 Oct, 2026` from puzzle; arcade is `W1 Oct, 2026`). Each legacy value is first
+   normalised (every whitespace run, including tabs, newlines and no-break spaces, becomes one
+   space; ends trimmed) and then validated: case-insensitive `W1`-`W4`, a real English month
+   (`Jan`, `Sept`, `October`, ...; not `Mayday`), a comma, a 4-digit year. Anything else
+   (`W5`, `W0`, `W150`, junk, a 60-space label) is skipped. The stored value is the CANONICAL
+   label `W<n> <Mon>, <year>` (`w2 october, 2026` becomes `W2 Oct, 2026`), at most 12
+   characters and always accepted by `isBatchLabel`. The sort key is week order, then the
+   text with `COLLATE "C"`, so the result does not depend on row order or database collation.
 2. Delete the `current_batch:%` rows ONLY when a `current_batch` row exists afterwards. A
-   database whose legacy values are all unreadable keeps them, and the code keeps falling
-   back to them, instead of ending up with no batch.
+   database none of whose legacy values passes the check keeps them untouched and gets no
+   global row.
 
 Rollback: the upsert in the migration header (`ON CONFLICT (key) DO UPDATE`), which also
 works when a legacy key is still present.
@@ -113,8 +117,10 @@ disabled until a batch is chosen, and also when:
 - every selected game is already in the chosen batch: "They are already in this batch.".
 
 The bar shows only while a selected game is still in the loaded rows; the list sent is the
-selected ids that are still on screen. Select mode is gated by the manager role: if the role
-drops, the mode and selection reset.
+selected ids that are still on screen. Select mode is gated by the manager role: if an
+authenticated session shows a non-manager role, the mode and selection reset. A session that is
+briefly unknown (next-auth refetch on window focus failed) hides the controls but keeps the
+selection until the session returns.
 
 ### Confirmation
 
@@ -129,12 +135,16 @@ Two more notes appear only when they apply:
   batch than the target, the dialog says "K of them were evaluated more than 8 days ago.
   Moving them to a newer batch can change the date range the Report uses for that batch."
   (`lib/report-batches.ts` derives each batch's window from its earliest `evaluate_date`.)
-  Moving games judged in the new week out of last week's batch is the intended use and does
-  not trigger it.
-- A move that answers `moved: 0` (or an unreadable body) keeps the dialog open with "No games
-  were moved. Reload the list and try again."; `0 < moved < N` counts as success. Confirm is
-  disabled with nothing selected or above 500 games. The request gives up after 30 seconds
-  ("Timed out"). The reload after a move uses the filter that is current when the move ends.
+  A game with no batch yet counts as older than any target. Moving games judged in the new
+  week out of last week's batch is the intended use and does not trigger it. Known limitation:
+  the opposite effect (moving the earliest game OUT of a batch, which moves that batch's
+  start date later) is not detected.
+- A move that answers `moved: 0` keeps the dialog open with "No games were moved. Reload the
+  list and try again."; `0 < moved < N` counts as success. A 2xx whose body cannot be read
+  (or is cut short by the timer) is a success with an unknown count (`moved: null`): the
+  UPDATE committed, so the dialog closes and the list reloads. Confirm is disabled with
+  nothing selected or above 500 games. The request gives up after 30 seconds ("Timed out.
+  The move may have gone through. Reload the list to check."). The reload after a move uses the filter that is current when the move ends.
 
 ### API
 
