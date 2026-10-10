@@ -1,9 +1,23 @@
 'use client'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { StyledSelect } from '@/components/StyledSelect'
-import { moveBatch } from '@/lib/batch-move-client'
+import { moveBatch, MAX_MOVE } from '@/lib/batch-move-client'
+import { weekLabelOrder } from '@/lib/weekly-feedback'
 
-export interface SelectedGame { id: number; final_conclusion: string | null }
+export interface SelectedGame {
+  id: number
+  final_conclusion: string | null
+  batch: string | null
+  evaluate_date: string | null
+}
+
+/** The Report derives a batch's date window from its earliest evaluate_date, so a game
+ *  evaluated longer ago than this stretches the window of the batch it moves into. */
+const OLD_EVALUATION_DAYS = 8
+
+const MSG_TOO_MANY = `You can move at most ${MAX_MOVE} games at a time. Select fewer.`
+const MSG_NOTHING_MOVED = 'No games were moved. Reload the list and try again.'
+const MSG_ALREADY_THERE = 'They are already in this batch.'
 
 /** Bottom bar of Short List's select mode: pick a batch, Move, confirm.
  *  Moving a game that already has a final conclusion is allowed (ticking it means the
@@ -19,9 +33,20 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The list behind this bar can reload (category, sort) while a move is in flight; the
+  // reload must use the callback of the render that is current when the move ends, not
+  // the one captured when Confirm was clicked.
+  const onMovedRef = useRef(onMoved)
+  onMovedRef.current = onMoved
 
   const n = selected.length
   const locked = selected.filter(s => !!s.final_conclusion).length
+  const tooMany = n > MAX_MOVE
+  const alreadyThere = !!batch && n > 0 && selected.every(s => s.batch === batch)
+  const now = Date.now()
+  const oldForward = batch ? selected.filter(s =>
+    !!s.evaluate_date && now - Date.parse(s.evaluate_date) > OLD_EVALUATION_DAYS * 86_400_000 &&
+    !!s.batch && weekLabelOrder(s.batch) < weekLabelOrder(batch)).length : 0
 
   async function confirm() {
     setBusy(true)
@@ -29,8 +54,11 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
     const res = await moveBatch(selected.map(s => s.id), batch)
     setBusy(false)
     if (!res.ok) { setError(`Couldn't move: ${res.error}`); return }
+    // Nothing moved (the games are gone or the answer was unreadable): closing quietly
+    // would look like success.
+    if (res.moved === 0) { setError(MSG_NOTHING_MOVED); return }
     setConfirming(false)
-    onMoved(res.moved)
+    onMovedRef.current(res.moved)
   }
 
   return (
@@ -46,11 +74,14 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
             options={batchOptions.map(b => ({ value: b, label: b }))}
           />
         </div>
-        <button className="btn btn-primary btn-sm" disabled={!batch || n === 0}
+        <button className="btn btn-primary btn-sm" disabled={!batch || n === 0 || tooMany || alreadyThere}
           onClick={() => { setError(null); setConfirming(true) }}>
           Move
         </button>
         <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+        {/* While the dialog is open the same message is shown inside it, not twice. */}
+        {!confirming && tooMany && <span className="bmb-err">{MSG_TOO_MANY}</span>}
+        {!confirming && !tooMany && alreadyThere && <span className="bmb-note">{MSG_ALREADY_THERE}</span>}
       </div>
 
       {confirming && (
@@ -67,11 +98,18 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
                   {locked} of them already {locked === 1 ? 'has' : 'have'} a final conclusion and will move too.
                 </p>
               )}
+              {oldForward > 0 && (
+                <p className="bmb-note">
+                  {oldForward} of them {oldForward === 1 ? 'was' : 'were'} evaluated more than {OLD_EVALUATION_DAYS} days ago.
+                  {' '}Moving them to a newer batch can change the date range the Report uses for that batch.
+                </p>
+              )}
+              {tooMany && <p className="bmb-err">{MSG_TOO_MANY}</p>}
               {error && <p className="bmb-err">{error}</p>}
             </div>
             <div className="modal-foot">
               <button className="btn" onClick={() => setConfirming(false)} disabled={busy}>Back</button>
-              <button className="btn btn-primary" onClick={confirm} disabled={busy}>
+              <button className="btn btn-primary" onClick={confirm} disabled={busy || n === 0 || tooMany}>
                 {busy ? 'Moving…' : 'Confirm move'}
               </button>
             </div>

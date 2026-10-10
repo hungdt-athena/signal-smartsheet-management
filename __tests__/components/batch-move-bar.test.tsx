@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 jest.mock('@/components/StyledSelect', () => ({
   StyledSelect: ({ value, onChange, options, placeholder }: {
@@ -13,12 +13,13 @@ jest.mock('@/components/StyledSelect', () => ({
 }))
 
 import { BatchMoveBar } from '@/components/BatchMoveBar'
+import { MAX_MOVE } from '@/lib/batch-move-client'
 
 const OPTIONS = ['W3 Oct, 2026', 'W2 Oct, 2026']
-const plain = { id: 1, final_conclusion: null }
-const locked = { id: 2, final_conclusion: 'Good' }
+const plain = { id: 1, final_conclusion: null, batch: 'W1 Oct, 2026', evaluate_date: null }
+const locked = { id: 2, final_conclusion: 'Good', batch: 'W1 Oct, 2026', evaluate_date: null }
 
-function mount(selected = [plain, locked], over: Partial<React.ComponentProps<typeof BatchMoveBar>> = {}) {
+function mount(selected: React.ComponentProps<typeof BatchMoveBar>['selected'] = [plain, locked], over: Partial<React.ComponentProps<typeof BatchMoveBar>> = {}) {
   const onCancel = jest.fn()
   const onMoved = jest.fn()
   render(<BatchMoveBar selected={selected} batchOptions={OPTIONS} onCancel={onCancel} onMoved={onMoved} {...over} />)
@@ -52,7 +53,7 @@ describe('BatchMoveBar', () => {
   })
 
   it('says how many selected games already have a final conclusion', () => {
-    mount([plain, locked, { id: 3, final_conclusion: 'Priority I' }])
+    mount([plain, locked, { ...plain, id: 3, final_conclusion: 'Priority I' }])
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('2 of them already have a final conclusion and will move too')
@@ -66,7 +67,7 @@ describe('BatchMoveBar', () => {
   })
 
   it('has no final-conclusion line when nobody is locked', () => {
-    mount([plain, { id: 5, final_conclusion: null }])
+    mount([plain, { ...plain, id: 5 }])
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
     expect(screen.getByRole('dialog')).not.toHaveTextContent('final conclusion')
@@ -114,5 +115,150 @@ describe('BatchMoveBar', () => {
     const { onCancel } = mount()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onCancel).toHaveBeenCalled()
+  })
+
+  // --- fix wave ---------------------------------------------------------------------------
+
+  it('calls the LATEST onMoved: the filter may have changed while the request was in flight', async () => {
+    let finish!: () => void
+    global.fetch = jest.fn(() => new Promise<Response>(res => {
+      finish = () => res({ ok: true, json: async () => ({ moved: 2 }) } as Response)
+    })) as unknown as typeof fetch
+    const first = jest.fn()
+    const second = jest.fn()
+    const props = { selected: [plain, locked], batchOptions: OPTIONS, onCancel: jest.fn() }
+    const { rerender } = render(<BatchMoveBar {...props} onMoved={first} />)
+    pick('W2 Oct, 2026')
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    rerender(<BatchMoveBar {...props} onMoved={second} />)
+    await act(async () => { finish() })
+    await waitFor(() => expect(second).toHaveBeenCalledWith(2))
+    expect(first).not.toHaveBeenCalled()
+  })
+
+  it('keeps the dialog open and says so when no game was moved', async () => {
+    stubFetch({ ok: true, json: { moved: 0 } })
+    const { onMoved } = mount()
+    pick('W2 Oct, 2026')
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    await screen.findByText('No games were moved. Reload the list and try again.')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(onMoved).not.toHaveBeenCalled()
+  })
+
+  it('counts a partial move (0 < moved < selected) as success', async () => {
+    stubFetch({ ok: true, json: { moved: 1 } })
+    const { onMoved } = mount()
+    pick('W2 Oct, 2026')
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    await waitFor(() => expect(onMoved).toHaveBeenCalledWith(1))
+  })
+
+  describe('guard rails', () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => ({ ...plain, id: i + 1 }))
+
+    it('allows exactly MAX_MOVE games', () => {
+      mount(many(MAX_MOVE))
+      pick('W2 Oct, 2026')
+      expect(screen.getByRole('button', { name: 'Move' })).toBeEnabled()
+      expect(screen.queryByText(/at most 500/)).toBeNull()
+    })
+
+    it('disables Move above MAX_MOVE and says why', () => {
+      expect(MAX_MOVE).toBe(500)
+      mount(many(MAX_MOVE + 1))
+      pick('W2 Oct, 2026')
+      expect(screen.getByRole('button', { name: 'Move' })).toBeDisabled()
+      expect(screen.getByText('You can move at most 500 games at a time. Select fewer.')).toBeInTheDocument()
+    })
+
+    it('disables Confirm when the selection grows past MAX_MOVE while the dialog is open', () => {
+      const props = { batchOptions: OPTIONS, onCancel: jest.fn(), onMoved: jest.fn() }
+      const { rerender } = render(<BatchMoveBar {...props} selected={many(2)} />)
+      pick('W2 Oct, 2026')
+      fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+      rerender(<BatchMoveBar {...props} selected={many(MAX_MOVE + 1)} />)
+      expect(screen.getByRole('button', { name: 'Confirm move' })).toBeDisabled()
+      expect(screen.getByText('You can move at most 500 games at a time. Select fewer.')).toBeInTheDocument()
+    })
+
+    it('disables Confirm and never POSTs when the rows reload to nothing under an open dialog', () => {
+      stubFetch({ ok: true, json: { moved: 0 } })
+      const props = { batchOptions: OPTIONS, onCancel: jest.fn(), onMoved: jest.fn() }
+      const { rerender } = render(<BatchMoveBar {...props} selected={[plain]} />)
+      pick('W2 Oct, 2026')
+      fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+      rerender(<BatchMoveBar {...props} selected={[]} />)
+      const confirm = screen.getByRole('button', { name: 'Confirm move' })
+      expect(confirm).toBeDisabled()
+      fireEvent.click(confirm)
+      expect(global.fetch).not.toHaveBeenCalled()
+    })
+
+    it('disables Move when every selected game is already in the chosen batch', () => {
+      mount([{ ...plain, batch: 'W2 Oct, 2026' }, { ...locked, batch: 'W2 Oct, 2026' }])
+      pick('W2 Oct, 2026')
+      expect(screen.getByRole('button', { name: 'Move' })).toBeDisabled()
+      expect(screen.getByText('They are already in this batch.')).toBeInTheDocument()
+      pick('W3 Oct, 2026')
+      expect(screen.getByRole('button', { name: 'Move' })).toBeEnabled()
+      expect(screen.queryByText('They are already in this batch.')).toBeNull()
+    })
+
+    it('still allows Move when only some of the selected games are already there', () => {
+      mount([{ ...plain, batch: 'W2 Oct, 2026' }, { ...locked, batch: 'W3 Oct, 2026' }])
+      pick('W2 Oct, 2026')
+      expect(screen.getByRole('button', { name: 'Move' })).toBeEnabled()
+      expect(screen.queryByText('They are already in this batch.')).toBeNull()
+    })
+  })
+
+  describe('Report window note', () => {
+    const NOW = Date.parse('2026-10-10T00:00:00Z')
+    const day = 86400000
+    const at = (daysAgo: number) => new Date(NOW - daysAgo * day).toISOString()
+    let nowSpy: jest.SpyInstance
+    beforeEach(() => { nowSpy = jest.spyOn(Date, 'now').mockReturnValue(NOW) })
+    afterEach(() => nowSpy.mockRestore())
+
+    const open = (selected: React.ComponentProps<typeof BatchMoveBar>['selected'], target = 'W2 Oct, 2026') => {
+      mount(selected)
+      pick(target)
+      fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    }
+    const NOTE = /evaluated more than 8 days ago\. Moving them to a newer batch can change the date range the Report uses for that batch\./
+
+    it('names how many games were evaluated more than 8 days ago and move forward (plural)', () => {
+      open([
+        { ...plain, id: 1, batch: 'W4 Sep, 2026', evaluate_date: at(20) },
+        { ...plain, id: 2, batch: 'W4 Sep, 2026', evaluate_date: at(9) },
+        { ...plain, id: 3, batch: 'W4 Sep, 2026', evaluate_date: at(2) },
+      ])
+      expect(screen.getByRole('dialog')).toHaveTextContent(/2 of them were evaluated more than 8 days ago\./)
+      expect(screen.getByRole('dialog')).toHaveTextContent(NOTE)
+    })
+
+    it('uses the singular for one game', () => {
+      open([{ ...plain, batch: 'W4 Sep, 2026', evaluate_date: at(20) }, { ...plain, id: 2, batch: 'W4 Sep, 2026', evaluate_date: at(1) }])
+      expect(screen.getByRole('dialog')).toHaveTextContent(/1 of them was evaluated more than 8 days ago\./)
+    })
+
+    it('says nothing when the games were evaluated within 8 days', () => {
+      open([{ ...plain, batch: 'W4 Sep, 2026', evaluate_date: at(8) }, { ...plain, id: 2, batch: 'W4 Sep, 2026', evaluate_date: at(3) }])
+      expect(screen.getByRole('dialog')).not.toHaveTextContent(/8 days/)
+    })
+
+    it('says nothing when an old game moves to an OLDER batch', () => {
+      open([{ ...plain, batch: 'W3 Oct, 2026', evaluate_date: at(30) }], 'W2 Oct, 2026')
+      expect(screen.getByRole('dialog')).not.toHaveTextContent(/8 days/)
+    })
+
+    it('says nothing for a game with no evaluate_date or no batch', () => {
+      open([{ ...plain, batch: 'W4 Sep, 2026', evaluate_date: null }, { ...plain, id: 2, batch: null, evaluate_date: at(30) }])
+      expect(screen.getByRole('dialog')).not.toHaveTextContent(/8 days/)
+    })
   })
 })
