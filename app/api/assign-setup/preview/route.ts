@@ -170,6 +170,7 @@ export async function GET(req: NextRequest) {
         FROM game_evaluations ge
         JOIN game_info gi ON ge.game_id = gi.game_id
         WHERE ge.initial_evaluator IS NULL
+          AND ge.initial_conclusion IS NULL   -- same predicate as the cron
         GROUP BY 1, 2
       `,
       // Same filter and same order as the cron: assignGames walks the crew in

@@ -173,7 +173,7 @@ without changing it, is `revise` (so it is not counted as a new game on every sa
 WITH old AS (
   SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
   FROM game_evaluations WHERE id = ${id}
-  FOR UPDATE
+  FOR NO KEY UPDATE
 ), upd AS (
   UPDATE game_evaluations ge SET
     ... existing SET list, right-hand sides qualified with ge. (see below) ...
@@ -197,7 +197,7 @@ SELECT * FROM upd
 Verified on PG 14 (no version-sensitive features; prod is Neon 16/17):
 
 - **`UPDATE … FROM old` is required for the log to exist at all.** Without the join the UPDATE runs
-  first, then `old`'s `FOR UPDATE` meets a row this statement already modified and silently returns
+  first, then `old`'s `FOR NO KEY UPDATE` meets a row this statement already modified and silently returns
   nothing: zero log rows, even for a single uncontended save.
 - With the join, a second concurrent save waits on the lock and then reads the first save's result:
   session A `first | - | Bypass`, session B `revise | Bypass | List_Idea`.
@@ -257,7 +257,7 @@ Readers affected, and how:
 ### `POST /api/evaluations/add-to-record`
 
 The route is two statements (an INSERT of a missing row at `:59`, then the UPDATE). The log row joins
-to the UPDATE in the same CTE pattern as PATCH (`old … FOR UPDATE`, `UPDATE … FROM old`, `INSERT`).
+to the UPDATE in the same CTE pattern as PATCH (`old … FOR NO KEY UPDATE`, `UPDATE … FROM old`, `INSERT`).
 
 **Decision (user, 2026-10-10): add-to-record behaves exactly as today and, like a Short List inline
 edit, never counts as time.** It writes one log row with `source = 'add_to_record'` (its own label, so
@@ -428,7 +428,7 @@ record-only, clear, and NULL actor.
 | 7 | Laptop sleeps with game open | capped; `hidden_s` may miss sleep |
 | 8 | Open 23:50, save 00:10 | credited to the save's day; merged with any overlapping 23:5x save |
 | 9 | Two tabs, two games in parallel | union, wall time once |
-| 10 | Two tabs, same game, near-simultaneous save | `FOR UPDATE` + join: `first` + `revise` (verified) |
+| 10 | Two tabs, same game, near-simultaneous save | `FOR NO KEY UPDATE` + join: `first` + `revise` (verified) |
 | 11 | Response lost, user retries | near-identical intervals merge; second row is `revise` |
 | 12 | Admin changes an evaluator's verdict | time to admin, dropped by the title filter; `evaluate_date` unchanged |
 | 13 | Admin judges an unjudged game | `evaluate_date` moves; time to admin |

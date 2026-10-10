@@ -104,7 +104,7 @@ END $$;
 
 -- Without the join the log is empty: proves `UPDATE ... FROM old` is required.
 PREPARE nojoin(unknown) AS
-WITH old AS (SELECT id, game_id FROM game_evaluations WHERE id = $1 FOR UPDATE),
+WITH old AS (SELECT id, game_id FROM game_evaluations WHERE id = $1 FOR NO KEY UPDATE),
 upd AS (UPDATE game_evaluations ge SET updated_by = 'x' WHERE ge.id = $1 RETURNING ge.*),
 logged AS (INSERT INTO evaluation_log (game_evaluation_id, game_id, source, kind)
            SELECT old.id, old.game_id, 'other', 'other' FROM old)
@@ -126,7 +126,7 @@ INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion
 PREPARE atr(unknown, unknown) AS
 WITH old AS (
   SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
-  FROM game_evaluations WHERE game_id = $1 AND category_group = 'puzzle' FOR UPDATE
+  FROM game_evaluations WHERE game_id = $1 AND category_group = 'puzzle' FOR NO KEY UPDATE
 ), upd AS (
   UPDATE game_evaluations ge SET
     initial_evaluator = CASE WHEN (ge.initial_conclusion IS NULL OR ge.initial_conclusion ILIKE '%bypass%') THEN 'Shortcut' ELSE ge.initial_evaluator END,
@@ -228,4 +228,18 @@ DO $$ BEGIN
   ASSERT (SELECT abs(hours * 60 - 10) < 0.01 FROM got WHERE who = 'dave'), 'dave 10 (NULL view_s excluded)';
   -- admins, moderators, system accounts and NULL actors never appear
   ASSERT NOT EXISTS (SELECT 1 FROM got WHERE who IN ('hungdt', 'vinhtd', 'shortcut') OR who IS NULL), 'only titled people';
+END $$;
+
+-- Games per day (mirrors lib/evaluation-hours.ts): a 'first' row whose game_evaluations
+-- row was deleted (game_evaluation_id NULL) still counts as one game.
+INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, context, kind, view_s, created_at)
+  VALUES (NULL, 'gone1', 'Carol', 'panel', 'evaluate', 'first', 60, '2026-10-07 10:00+07'),
+         (NULL, 'gone2', 'Carol', 'panel', 'evaluate', 'first', 60, '2026-10-07 10:05+07'),
+         (NULL, 'gone2', 'Carol', 'panel', 'evaluate', 'first', 60, '2026-10-07 10:06+07');
+DO $$ BEGIN
+  ASSERT (SELECT count(DISTINCT COALESCE(l.game_evaluation_id::text, 'g:' || l.game_id))::int
+          FROM evaluation_log l
+          WHERE l.kind = 'first' AND lower(l.actor) = 'carol'
+            AND (l.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = '2026-10-07') = 2,
+    'NULL game_evaluation_id first rows still count: 2 distinct games';
 END $$;

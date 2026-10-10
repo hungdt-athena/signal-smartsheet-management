@@ -8,7 +8,7 @@ PREPARE save(unknown, boolean, unknown, unknown, unknown, unknown, unknown, unkn
 WITH old AS (
   SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
   FROM game_evaluations WHERE id = $1
-  FOR UPDATE
+  FOR NO KEY UPDATE
 ), upd AS (
   UPDATE game_evaluations ge SET
     -- every use of a reused parameter carries the same cast, or Postgres raises

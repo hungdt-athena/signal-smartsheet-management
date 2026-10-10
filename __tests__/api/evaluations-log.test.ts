@@ -47,7 +47,7 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     const res = await patch({ id: 1, initial_conclusion: 'Bypass', initial_note: 'a real note here', view_s: 42, context: 'evaluate' })
     expect(res.status).toBe(200)
     const w = writeCall()
-    expect(w.text).toMatch(/FOR UPDATE/)
+    expect(w.text).toMatch(/FOR NO KEY UPDATE/)
     expect(w.text).toMatch(/UPDATE game_evaluations ge SET/)
     expect(w.text).toMatch(/FROM old WHERE ge\.id = old\.id/)
     expect(w.binds).toEqual(expect.arrayContaining(['Alice', 'evaluator', 'panel', 'evaluate', 42]))

@@ -33,7 +33,7 @@ describe('add-to-record logs itself', () => {
       initial_evaluator: 'Shortcut', initial_conclusion: 'List_Idea', final_conclusion: 'Insight', final_evaluator: 'Shortcut' })
     expect(res.status).toBe(200)
     const c = logCall()!
-    expect(c.text).toMatch(/FOR UPDATE/)
+    expect(c.text).toMatch(/FOR NO KEY UPDATE/)
     expect(c.text).toMatch(/FROM old WHERE ge\.id = old\.id/)
     expect(c.binds).toEqual(expect.arrayContaining(['VinhTD', 'moderator']))
     expect(c.text).toMatch(/'add_to_record'/)

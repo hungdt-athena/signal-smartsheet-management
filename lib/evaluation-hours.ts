@@ -52,7 +52,7 @@ export async function loadPanelTime(opts: { from: string; to: string; titles?: s
     sql<GamesRow[]>`
       SELECT lower(l.actor) AS who,
              to_char((l.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date, 'YYYY-MM-DD') AS day,
-             count(DISTINCT l.game_evaluation_id)::int AS games
+             count(DISTINCT COALESCE(l.game_evaluation_id::text, 'g:' || l.game_id))::int AS games
       FROM evaluation_log l
       JOIN dashboard_users du ON lower(du.name) = lower(l.actor)
       WHERE l.kind = 'first'

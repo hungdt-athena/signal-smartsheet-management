@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
           SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
           FROM game_evaluations
           WHERE game_id = ${game_id} AND category_group = ${category_group}
-          FOR UPDATE
+          FOR NO KEY UPDATE
         ), upd AS (
           UPDATE game_evaluations ge
           SET record_bucket = ${bucket},
@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
           SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
           FROM game_evaluations
           WHERE game_id = ${game_id} AND category_group = ${category_group}
-          FOR UPDATE
+          FOR NO KEY UPDATE
         ), upd AS (
           UPDATE game_evaluations ge
           SET record_bucket = ${bucket},
