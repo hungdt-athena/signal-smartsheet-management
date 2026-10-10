@@ -15,7 +15,7 @@ export function weekLabelOrder(label: string): number {
 // EvalDetailPanel generates (W1-W4, English month abbreviation, 4-digit year).
 // Stricter than weekLabelOrder on purpose: this guards what gets WRITTEN as the
 // global current batch; weekLabelOrder stays tolerant so older stored values still sort.
-// Max length is 13, well inside the varchar(40) column. Pure -- safe on client and server.
+// Max length is 12, well inside the varchar(40) column. Pure -- safe on client and server.
 const BATCH_LABEL = /^W[1-4] (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec), [0-9]{4}$/
 export function isBatchLabel(s: string): boolean {
   return BATCH_LABEL.test(s)

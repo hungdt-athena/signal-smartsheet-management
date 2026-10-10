@@ -5,15 +5,22 @@
 -- becomes one row, `current_batch`, set once.
 --
 -- The new value is the NEWEST of the old per-category values by week order ("W2 Oct,
--- 2026" beats "W4 Sep, 2026"; labels are not sortable as text). The match is as tolerant as
--- lib/weekly-feedback weekLabelOrder: any case, any whitespace, surrounding whitespace
--- ignored, month by its first three letters ("Sept", "October" work), week of 1 to 3
--- digits. Rows whose month is not a month name are skipped. The value stored is the
--- trimmed label. Ties go to the smaller text, so the result never depends on row order.
+-- 2026" beats "W4 Sep, 2026"; labels are not sortable as text). Each old value is first
+-- NORMALISED, then VALIDATED, and the label stored is the CANONICAL one:
+--   1. every run of whitespace (spaces, tabs, newlines, no-break spaces) becomes one space
+--      and the ends are trimmed;
+--   2. the result must read, in any case, as week 1-4, a real English month (3-letter
+--      abbreviation, "Sept", or the full name), a comma and a 4-digit year. Anything else
+--      ("W5 Oct", "W0 Oct", "W150 Oct", "W1 Mayday", "foo", a 60-space label) is skipped;
+--   3. the stored value is rebuilt as 'W<week> <Mon>, <year>' (e.g. "W2 Oct, 2026"), the
+--      exact shape lib/weekly-feedback isBatchLabel accepts. It is never longer than 12
+--      characters, so it always fits the batch column and every List_Idea save.
+-- Ties cannot differ in text (same week order means same canonical label); the final sort
+-- key is still collation-independent so the result never depends on row order.
 --
--- Old rows are deleted ONLY when a `current_batch` row exists afterwards. A database whose
--- old values none of the above can read keeps them, and the code keeps falling back to them
--- (lib/current-batch.ts), instead of ending up with no batch at all.
+-- Old rows are deleted ONLY when a `current_batch` row exists afterwards. A database none of
+-- whose old values passes the check keeps them untouched (nothing is lost) and gets no global
+-- row. lib/current-batch.ts applies the same check to the old rows it falls back to.
 --
 -- Everything runs in ONE transaction: if any statement fails, nothing changes (psql -f
 -- would otherwise carry on and still run the DELETE).
@@ -34,15 +41,16 @@
 BEGIN;
 
 WITH parsed AS (
-  SELECT
-    regexp_replace(value, '^[[:space:]]+|[[:space:]]+$', '', 'g') AS value,
-    regexp_match(value,
-      '^[[:space:]]*W([0-9]{1,3})[[:space:]]+([A-Za-z]{3,9}),[[:space:]]*([0-9]{4})[[:space:]]*$', 'i') AS m
+  SELECT regexp_match(
+    btrim(regexp_replace(value, '[[:space:]\u00a0]+', ' ', 'g')),
+    '^W([1-4]) (jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december), ?([0-9]{4})$',
+    'i') AS m
   FROM app_config
-  WHERE starts_with(key, 'current_batch:')
+  WHERE starts_with(key, 'current_batch:') AND value IS NOT NULL
 ),
 legacy AS (
-  SELECT value,
+  SELECT
+    'W' || m[1] || ' ' || initcap(lower(substring(m[2] from 1 for 3))) || ', ' || m[3] AS value,
     m[3]::int * 10000
     + array_position(
         ARRAY['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'],
@@ -54,8 +62,7 @@ legacy AS (
 INSERT INTO app_config (key, value, updated_at)
 SELECT 'current_batch', value, NOW()
 FROM legacy
-WHERE ord IS NOT NULL
-ORDER BY ord DESC, value
+ORDER BY ord DESC, value COLLATE "C"
 LIMIT 1
 ON CONFLICT (key) DO NOTHING;
 

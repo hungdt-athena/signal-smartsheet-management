@@ -1,5 +1,5 @@
 import { sql } from '@/lib/db'
-import { weekLabelOrder } from '@/lib/weekly-feedback'
+import { isBatchLabel, weekLabelOrder } from '@/lib/weekly-feedback'
 
 /** app_config key holding the ONE current batch shared by every category group. */
 export const CURRENT_BATCH_KEY = 'current_batch'
@@ -21,7 +21,7 @@ export function pickCurrentBatch(rows: ConfigRow[]): string | null {
   let best: string | null = null
   for (const r of rows) {
     const value = r.value?.trim()
-    if (!r.key.startsWith(LEGACY_PREFIX) || !value) continue
+    if (!r.key.startsWith(LEGACY_PREFIX) || !value || !isBatchLabel(value)) continue
     if (best === null || weekLabelOrder(value) > weekLabelOrder(best)) best = value
   }
   return best

@@ -73,6 +73,29 @@ describe('pickCurrentBatch', () => {
     expect(pickCurrentBatch([{ key: 'current_batch:arcade', value: '  ' }])).toBeNull()
   })
 
+  // Legacy rows were free text; only a value that is a real batch label may stand in for
+  // the global row, the same check migration 045 applies when it folds them.
+  it.each([
+    ['foo'], ['W5 Oct, 2026'], ['W0 Oct, 2026'], ['W150 Oct, 2026'], ['W1 Mayday, 2026'],
+    ['w2 oct, 2026'], ['W2  Oct, 2026'], ['W2 Oct,2026'], ['W2 Oct, 20266'], ['W2 Xyz, 2026'],
+    ['W2' + ' '.repeat(60) + 'Oct, 2026'], ['W2\u00a0Oct, 2026'], ['W2\nOct, 2026'],
+  ])('ignores the odd legacy value %j', value => {
+    expect(pickCurrentBatch([{ key: 'current_batch:puzzle', value }])).toBeNull()
+  })
+
+  it('an odd legacy value never beats a valid older one', () => {
+    expect(pickCurrentBatch([
+      { key: 'current_batch:arcade', value: 'W4 Dec, 2030 and more' },
+      { key: 'current_batch:puzzle', value: 'W5 Dec, 2030' },
+      { key: 'current_batch:simulation', value: ' W1 Oct, 2026 ' },
+    ])).toBe('W1 Oct, 2026')
+  })
+
+  it('still returns the global row as trimmed text, whatever it says (only the validated route or the migration writes it)', () => {
+    expect(pickCurrentBatch([{ key: 'current_batch', value: ' W5 Oct, 2026 ' }])).toBe('W5 Oct, 2026')
+    expect(pickCurrentBatch([{ key: 'current_batch', value: 'Sprint 7' }])).toBe('Sprint 7')
+  })
+
   it('returns null when nothing is set', () => {
     expect(pickCurrentBatch([])).toBeNull()
   })
