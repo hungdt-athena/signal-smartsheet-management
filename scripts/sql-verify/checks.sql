@@ -151,3 +151,81 @@ DO $$ BEGIN
   ASSERT (SELECT changed FROM evaluation_log WHERE game_evaluation_id = 42) = false, 'r2 logged, unchanged';
 END $$;
 DELETE FROM evaluation_log;
+
+-- ===== Task 8: panel time query (keep identical to lib/evaluation-hours.ts) =====
+INSERT INTO game_info SELECT 'h'||i FROM generate_series(1,20) i;
+INSERT INTO game_evaluations (id, game_id) SELECT 100+i, 'h'||i FROM generate_series(1,20) i;
+INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, context, kind, view_s, idle_s, hidden_s, created_at) VALUES
+ (101,'h1','Carol','panel','evaluate','first', 600,0,0,'2026-10-05 09:10+07'),
+ (102,'h2','Carol','panel','evaluate','first', 600,0,0,'2026-10-05 09:15+07'),
+ (103,'h3','Carol','panel','evaluate','first',1800,0,0,'2026-10-05 09:50+07'),
+ (104,'h4','Carol','panel','evaluate','first', 300,0,0,'2026-10-05 09:30+07'),
+ (105,'h5','Carol','panel','evaluate','first', 900,0,0,'2026-10-05 10:00+07'),
+ (106,'h6','Carol','panel','evaluate','first', 300,0,0,'2026-10-05 10:30:00+07'),
+ (106,'h6','Carol','panel','evaluate','revise',302,0,0,'2026-10-05 10:30:02+07'),
+ (107,'h7','Carol','panel','evaluate','first',4800,4000,0,'2026-10-05 12:00+07'),
+ (108,'h8','Carol','panel','evaluate','first', 300,0,0,'2026-10-05 13:05:00+07'),
+ (108,'h8','Carol','panel','evaluate','revise',  2,0,0,'2026-10-05 13:05:02+07'),
+ (108,'h8','Carol','panel','evaluate','revise',  3,0,0,'2026-10-05 13:05:05+07'),
+ (113,'h13','Carol','panel','record','other',3000,0,0,'2026-10-05 16:00+07'),
+ (114,'h14','Carol','panel','evaluate','final',600,0,0,'2026-10-05 17:00+07'),
+ (115,'h15','Carol','other','evaluate','first',600,0,0,'2026-10-05 18:00+07'),
+ (109,'h9','Carol','panel','evaluate','first', 600,0,0,'2026-10-05 23:55+07'),
+ (110,'h10','Carol','panel','evaluate','first',1200,0,0,'2026-10-06 00:10+07'),
+ (111,'h11','Shortcut','panel','evaluate','first',600,0,0,'2026-10-05 09:10+07'),
+ (112,'h12','VinhTD','panel','evaluate','first',600,0,0,'2026-10-05 09:10+07'),
+ (116,'h16',NULL,'panel','evaluate','first',600,0,0,'2026-10-05 09:10+07'),
+ (117,'h17','Dave','panel','evaluate','first',600,0,0,'2026-10-05 09:10+07'),
+ (118,'h18','Dave','panel','evaluate','first',NULL,0,0,'2026-10-05 11:10+07'),
+ (119,'h19','HungDT','panel','evaluate','revise',600,0,0,'2026-10-05 09:10+07');
+
+PREPARE panel_time(unknown, unknown, text[]) AS
+WITH iv AS (
+  SELECT lower(l.actor) AS who,
+         l.created_at - make_interval(secs => LEAST(l.view_s, 1800)) AS s,
+         l.created_at AS e,
+         l.view_s > 1800 AS capped,
+         l.idle_s, l.hidden_s
+  FROM evaluation_log l
+  JOIN dashboard_users du ON lower(du.name) = lower(l.actor)
+  WHERE l.source = 'panel'
+    AND l.view_s IS NOT NULL
+    AND du.title = ANY($3)
+    AND l.created_at >= ($1::date)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+    AND l.created_at <  ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+), ord AS (
+  SELECT *, MAX(e) OVER (PARTITION BY who ORDER BY s, e
+              ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_e
+  FROM iv
+), grp AS (
+  SELECT *, SUM(CASE WHEN prev_e IS NULL OR s > prev_e THEN 1 ELSE 0 END)
+              OVER (PARTITION BY who ORDER BY s, e) AS g
+  FROM ord
+), blocks AS (
+  SELECT who, g, MIN(s) AS block_start, MAX(e) AS block_end,
+         COUNT(*) FILTER (WHERE capped) AS n_capped,
+         SUM(idle_s) AS idle_s, SUM(hidden_s) AS hidden_s
+  FROM grp GROUP BY who, g
+)
+SELECT who, to_char((block_end AT TIME ZONE 'Asia/Ho_Chi_Minh')::date, 'YYYY-MM-DD') AS day,
+       round(SUM(EXTRACT(EPOCH FROM (block_end - block_start))) / 3600.0, 4)::float8 AS hours,
+       SUM(n_capped)::int AS capped_saves,
+       COALESCE(SUM(idle_s), 0)::int AS idle_s, COALESCE(SUM(hidden_s), 0)::int AS hidden_s
+FROM blocks
+GROUP BY 1, 2
+ORDER BY 1, 2;
+
+CREATE TEMP TABLE got AS EXECUTE panel_time('2026-10-01', '2026-10-09', ARRAY['Fulltime','Freelancer']);
+DO $$ BEGIN
+  -- 15 + 40 + 5.033 + 30 (capped) + 5.083 + 30 (record, capped) + 10 (final) = 135.117 min
+  -- hours is rounded to 4 decimals, so compare minutes with a small tolerance
+  ASSERT (SELECT abs(hours * 60 - 135.1167) < 0.01 FROM got WHERE who = 'carol' AND day = '2026-10-05'), 'carol 10-05';
+  ASSERT (SELECT capped_saves FROM got WHERE who = 'carol' AND day = '2026-10-05') = 2, 'carol capped';
+  ASSERT (SELECT idle_s FROM got WHERE who = 'carol' AND day = '2026-10-05') = 4000, 'carol idle';
+  -- 23:45-23:55 and 23:50-00:10 merge into one 25-min block, credited to 10-06
+  ASSERT (SELECT abs(hours * 60 - 25) < 0.01 FROM got WHERE who = 'carol' AND day = '2026-10-06'), 'midnight merge';
+  -- NULL view_s is excluded (not a silent 30 min)
+  ASSERT (SELECT abs(hours * 60 - 10) < 0.01 FROM got WHERE who = 'dave'), 'dave 10 (NULL view_s excluded)';
+  -- admins, moderators, system accounts and NULL actors never appear
+  ASSERT NOT EXISTS (SELECT 1 FROM got WHERE who IN ('hungdt', 'vinhtd', 'shortcut') OR who IS NULL), 'only titled people';
+END $$;
