@@ -51,7 +51,9 @@ const row = (over: Record<string, unknown>) => ({
 const ROWS = [row({ id: 1, game_id: 'g1', title: 'Alpha' }), row({ id: 2, game_id: 'g2', title: 'Beta', final_conclusion: 'Good' })]
 // What the rows endpoint returns right now; a test can shrink it to simulate a reload.
 let rowsNow: ReturnType<typeof row>[] = ROWS
-beforeEach(() => { rowsNow = ROWS })
+// Whether POST /api/evaluations/current-batch succeeds.
+let currentBatchOk = true
+beforeEach(() => { rowsNow = ROWS; currentBatchOk = true; mockRole = 'admin' })
 
 function stubFetch() {
   const calls: { url: string; init?: RequestInit }[] = []
@@ -61,6 +63,8 @@ function stubFetch() {
     let body: unknown = {}
     if (url.startsWith('/api/evaluations/facets')) {
       body = { available_months: [], available_conclusions: ['List_Idea'], available_evaluators: ['PhuongNT1'], available_batches: ['W1 Oct, 2026', 'W4 Sep, 2026'], current_batch: 'W2 Oct, 2026', default_batch: 'W1 Oct, 2026' }
+    } else if (url.startsWith('/api/evaluations/current-batch')) {
+      return Promise.resolve({ ok: currentBatchOk, json: () => Promise.resolve({}) } as Response)
     } else if (url.startsWith('/api/evaluations/batch-move')) {
       body = { moved: 2 }
     } else if (url.startsWith('/api/evaluations?')) {
@@ -75,9 +79,9 @@ const rowsCalls = (calls: { url: string }[]) => calls.filter(c => c.url.startsWi
 async function open(role = 'admin') {
   mockRole = role
   const calls = stubFetch()
-  render(<EvaluationsPage />)
+  const view = render(<EvaluationsPage />)
   await screen.findByText('Alpha')
-  return calls
+  return Object.assign(calls, { view })
 }
 const checkboxes = () => screen.queryAllByRole('checkbox')
 
@@ -206,5 +210,98 @@ describe('Short List select mode', () => {
     expect(JSON.parse(String(move.init?.body))).toEqual({ ids: [1, 2], batch: 'W2 Oct, 2026' })
     await waitFor(() => expect(rowsCalls(calls).length).toBeGreaterThan(before))
     await waitFor(() => expect(checkboxes()).toHaveLength(0))
+  })
+
+  // --- fix wave ---------------------------------------------------------------------------
+
+  it('shows no bar when a reload leaves none of the selected games on screen', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }))
+    fireEvent.click(screen.getByLabelText('Select all shown'))
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    rowsNow = []
+    fireEvent.click(screen.getByTitle(/Sorted newest first/))
+    await waitFor(() => expect(screen.queryByText('Alpha')).toBeNull())
+    expect(screen.queryByText(/\d+ selected$/)).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Move games to another batch' })).toBeNull()
+  })
+
+  it('drops select mode when the role stops being a manager, and does not bring it back', async () => {
+    const calls = await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }))
+    fireEvent.click(screen.getByLabelText('Select Alpha'))
+    expect(screen.getByText('1 selected')).toBeInTheDocument()
+
+    mockRole = 'evaluator'
+    calls.view.rerender(<EvaluationsPage />)
+    expect(checkboxes()).toHaveLength(0)
+    expect(screen.queryByText('1 selected')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Select' })).toBeNull()
+
+    mockRole = 'admin'
+    calls.view.rerender(<EvaluationsPage />)
+    expect(checkboxes()).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'Select' })).toBeInTheDocument()
+    expect(screen.queryByText('1 selected')).toBeNull()
+  })
+
+  describe('current batch picker', () => {
+    const post = (calls: { url: string }[]) => calls.filter(c => c.url === '/api/evaluations/current-batch')
+    const picker = () => screen.getByLabelText('Not set') as HTMLSelectElement
+    const ALERT = "Couldn't save the batch. Try again."
+
+    it('puts the old value back and says so when the save fails', async () => {
+      const calls = await open()
+      await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+      currentBatchOk = false
+      await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
+      expect(post(calls)).toHaveLength(1)
+      await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+      expect(screen.getByRole('alert')).toHaveTextContent(ALERT)
+    })
+
+    it('clears the message after the next successful change', async () => {
+      const calls = await open()
+      await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+      currentBatchOk = false
+      await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
+      await screen.findByRole('alert')
+      currentBatchOk = true
+      await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
+      await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+      expect(picker().value).toBe('W3 Oct, 2026')
+      expect(post(calls)).toHaveLength(2)
+    })
+
+    it('shows no message when the save works', async () => {
+      await open()
+      await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+      await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
+      expect(picker().value).toBe('W3 Oct, 2026')
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
+  })
+
+  describe('what the bar is told about the selected games', () => {
+    const OLD = '2020-01-01T00:00:00Z'
+
+    it('disables Move when every selected game is already in the chosen batch', async () => {
+      await open()
+      fireEvent.click(screen.getByRole('button', { name: 'Select' }))
+      fireEvent.click(screen.getByLabelText('Select Alpha'))
+      fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: 'W1 Oct, 2026' } })
+      expect(screen.getByRole('button', { name: 'Move' })).toBeDisabled()
+      expect(screen.getByText('They are already in this batch.')).toBeInTheDocument()
+    })
+
+    it('warns about the Report window for a game evaluated long ago that moves to a newer batch', async () => {
+      rowsNow = [row({ id: 1, game_id: 'g1', title: 'Alpha', batch: 'W1 Oct, 2026', evaluate_date: OLD })]
+      await open()
+      fireEvent.click(screen.getByRole('button', { name: 'Select' }))
+      fireEvent.click(screen.getByLabelText('Select Alpha'))
+      fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: 'W3 Oct, 2026' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+      expect(screen.getByRole('dialog')).toHaveTextContent('1 of them was evaluated more than 8 days ago.')
+    })
   })
 })
