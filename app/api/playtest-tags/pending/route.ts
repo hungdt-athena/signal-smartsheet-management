@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
-import { countQueue, fetchQueue } from '@/lib/playtest-tags-queue'
+import { countQueue, fetchQueue, parseCategoryGroupParam } from '@/lib/playtest-tags-queue'
 import { isManagerRole } from '@/lib/roles'
 import { getSession } from '@/lib/session'
 
@@ -29,6 +29,8 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams
   const offset = Math.max(0, Number(q.get('offset')) || 0)
   const limit = Math.min(200, Math.max(1, Number(q.get('limit')) || 50))
+  const g = parseCategoryGroupParam(q.get('category_group'))
+  if (!g.ok) return NextResponse.json({ error: 'Unknown category group' }, { status: 400 })
 
   const session = process.env.SKIP_AUTH === 'true' ? null : await getSession()
   // A non-admin session with no email matches nothing rather than everything:
@@ -40,8 +42,8 @@ export async function GET(req: NextRequest) {
     : undefined
 
   const [tags, total] = await Promise.all([
-    fetchQueue({ limit, offset, taggedBy: mine }),
-    countQueue(mine),
+    fetchQueue({ limit, offset, taggedBy: mine, categoryGroup: g.categoryGroup }),
+    countQueue(mine, g.categoryGroup),
   ])
   return NextResponse.json({ tags, total }, { headers: { 'Cache-Control': 'no-store' } })
 }

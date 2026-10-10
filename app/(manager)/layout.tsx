@@ -3,6 +3,7 @@ import { Suspense } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { signOut, useSession } from 'next-auth/react'
+import { MissingDemoPrompt } from '@/components/MissingDemoPrompt'
 
 function SIcon({ d, size = 17 }: { d: string | string[]; size?: number }) {
   return (
@@ -195,6 +196,7 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
       <div className="content">
         {children}
       </div>
+      <MissingDemoPrompt />
     </div>
   )
 }

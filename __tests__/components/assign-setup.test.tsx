@@ -84,7 +84,7 @@ describe('AssignSetup next-run panel', () => {
     expect(screen.getByText(/10 still waiting/i)).toBeInTheDocument()
     // A genre that will not run says why instead of showing a zero.
     expect(screen.getAllByText(/turned off/i)).toHaveLength(2)
-    expect(screen.getByText(/3 held back by a genre that will not run/i)).toBeInTheDocument()
+    expect(screen.getByText(/3 held back by a category group that will not run/i)).toBeInTheDocument()
   })
 
   it('names each genre\'s push window, flagging the one that is not the default', async () => {

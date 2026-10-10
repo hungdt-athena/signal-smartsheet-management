@@ -7,6 +7,28 @@
 
 import { sql } from '@/lib/db'
 import { classifyTag, TRENDS_FIELD } from '@/lib/playtest-tags'
+import { isBucket, type Bucket } from '@/lib/buckets'
+
+/** Reads the Tagging tab's Category group filter from a query string. Absent or
+ *  "all" means no filter; anything else must be one of the three, so a typo
+ *  fails loudly instead of quietly returning every row. */
+export function parseCategoryGroupParam(raw: string | null): { ok: true; categoryGroup?: Bucket } | { ok: false } {
+  if (!raw || raw === 'all') return { ok: true }
+  return isBucket(raw) ? { ok: true, categoryGroup: raw } : { ok: false }
+}
+
+/** Narrows `playtest_tags pt` to games of one category group. It is the GAME's
+ *  (`game_evaluations.category_group`, what Signal Sense calls `genre`): the
+ *  `genre` column on a tag row defaults to puzzle and says nothing about the
+ *  game it sits on. EXISTS rather than a join so a game can never double a row. */
+export function gameCategoryGroupFilter(categoryGroup?: Bucket) {
+  return categoryGroup
+    ? sql`AND EXISTS (
+        SELECT 1 FROM game_evaluations gg
+        WHERE gg.game_id = pt.game_id AND gg.category_group = ${categoryGroup}
+      )`
+    : sql``
+}
 
 /** One pending proposal plus the game it belongs to and Signal Sense's current
  *  state for the same (game, value). */
@@ -30,6 +52,10 @@ export interface QueueTag {
   /** Signal Sense has this value with a different sub-value: confirming writes
    *  nothing unless the admin ticks overwrite. */
   conflict: boolean
+  /** The game's category group (puzzle / arcade / simulation), so the row's trend
+   *  picker can offer that group's trends first. Null when the game has no
+   *  evaluation row. */
+  game_category_group: string | null
 }
 
 interface Row extends Omit<QueueTag, 'conflict'> {
@@ -43,10 +69,11 @@ interface Row extends Omit<QueueTag, 'conflict'> {
 /** How many tags are waiting, for the queue's paging. `taggedBy` scopes the
  *  count the same way it scopes the rows -- an evaluator's "3 of 40" must count
  *  their own queue, not the whole team's. */
-export async function countQueue(taggedBy?: string): Promise<number> {
+export async function countQueue(taggedBy?: string, categoryGroup?: Bucket): Promise<number> {
   const mine = taggedBy ? sql`AND tagged_by = ${taggedBy}` : sql``
   const [row] = await sql`
-    SELECT count(*)::int AS n FROM playtest_tags WHERE status = 'pending' ${mine}
+    SELECT count(*)::int AS n FROM playtest_tags pt
+    WHERE status = 'pending' ${mine} ${gameCategoryGroupFilter(categoryGroup)}
   `
   return (row?.n as number) ?? 0
 }
@@ -60,7 +87,7 @@ export async function countQueue(taggedBy?: string): Promise<number> {
  *  evaluator sees. Applied here rather than in the route so the filter and the
  *  ordering cannot drift apart. */
 export async function fetchQueue(
-  opts: { ids?: number[]; gameId?: string; limit?: number; offset?: number; taggedBy?: string } = {},
+  opts: { ids?: number[]; gameId?: string; limit?: number; offset?: number; taggedBy?: string; categoryGroup?: Bucket } = {},
 ): Promise<QueueTag[]> {
   const idFilter = opts.ids ? sql`AND pt.id = ANY(${opts.ids})` : sql``
   const gameFilter = opts.gameId ? sql`AND pt.game_id = ${opts.gameId}` : sql``
@@ -73,7 +100,7 @@ export async function fetchQueue(
       pt.id, pt.game_id, pt.field_value, pt.sub_value_id, pt.tagged_at, pt.tagged_by,
       gi.title, gi.icon_url,
       COALESCE(dev.developer_name, dev.dev_company) AS publisher_name,
-      ge.initial_evaluator,
+      ge.initial_evaluator, ge.category_group AS game_category_group,
       du.name AS tagged_by_name,
       sv.name AS sub_value_name,
       (cfv.field_value IS NOT NULL) AS their_exists,
@@ -83,14 +110,14 @@ export async function fetchQueue(
     JOIN game_info gi ON gi.game_id = pt.game_id
     LEFT JOIN developer dev ON gi.publisher_id = dev.id
     LEFT JOIN LATERAL (
-      SELECT initial_evaluator FROM game_evaluations WHERE game_id = pt.game_id LIMIT 1
+      SELECT initial_evaluator, category_group FROM game_evaluations WHERE game_id = pt.game_id LIMIT 1
     ) ge ON true
     LEFT JOIN dashboard_users du ON du.email = pt.tagged_by
     LEFT JOIN sub_value_definitions sv ON sv.id = pt.sub_value_id
     LEFT JOIN custom_field_values cfv
       ON cfv.game_id = pt.game_id AND cfv.field_name = ${TRENDS_FIELD} AND cfv.field_value = pt.field_value
     LEFT JOIN sub_value_definitions their_sv ON their_sv.id = cfv.sub_value_id
-    WHERE pt.status = 'pending' ${idFilter} ${gameFilter} ${mine}
+    WHERE pt.status = 'pending' ${idFilter} ${gameFilter} ${mine} ${gameCategoryGroupFilter(opts.categoryGroup)}
     -- Newest game first, its own tags together and newest first inside. Ordering
     -- the grouping here rather than in the client is what lets the queue be
     -- paged: a game cannot be split across two pages by a later arrival, and id

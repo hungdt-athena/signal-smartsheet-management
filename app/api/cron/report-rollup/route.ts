@@ -140,6 +140,11 @@ export async function POST(req: NextRequest) {
       // 034); there is no assign-date for recording, so turnaround is left null
       // (0/0). bucket = the slot.
       const recAt = sql`COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at)`
+      // Only the game's own slot is credited (manual record_bucket, else P-IV = 20',
+      // else 5'), same as the Record tab. The other slot can hold a stray name.
+      const ownSlot = (slot: '5min' | '20min') => sql`AND (CASE
+        WHEN ge.record_bucket IN ('5min','20min') THEN ge.record_bucket
+        WHEN ge.final_conclusion = 'Priority IV' THEN '20min' ELSE '5min' END) = ${slot}`
       await tx`DELETE FROM report_rollup WHERE domain = 'recording' AND ${rowPred()}`
       const recRows = await tx`
         WITH base AS (
@@ -150,7 +155,7 @@ export async function POST(req: NextRequest) {
           FROM game_evaluations ge
           WHERE ${recAt} IS NOT NULL
             AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
-            AND lower(ge.record_5min_assignee) <> ALL(${EXCLUDED})
+            AND lower(ge.record_5min_assignee) <> ALL(${EXCLUDED}) ${ownSlot('5min')}
             AND ${sourcePred(recAt)}
           UNION ALL
           SELECT (${recAt} AT TIME ZONE ${VN})::date AS ev_date,
@@ -160,7 +165,7 @@ export async function POST(req: NextRequest) {
           FROM game_evaluations ge
           WHERE ${recAt} IS NOT NULL
             AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
-            AND lower(ge.record_20min_assignee) <> ALL(${EXCLUDED})
+            AND lower(ge.record_20min_assignee) <> ALL(${EXCLUDED}) ${ownSlot('20min')}
             AND ${sourcePred(recAt)}
         ),
         buck AS (

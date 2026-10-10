@@ -4,6 +4,12 @@ import { useSession } from 'next-auth/react'
 import EvalDetailPanel, { type EvalListItem } from './EvalDetailPanel'
 import { TrendValuePicker } from './TrendValuePicker'
 import { TrendsCatalog } from './TrendsCatalog'
+import { BUCKETS, type Bucket } from '@/lib/buckets'
+
+/** The tab-wide Category group filter: puzzle / arcade / simulation, or all. This
+ *  is the game's `category_group` (Signal Sense calls it `genre`); a game's own
+ *  genres are a different thing. */
+type CategoryGroupFilter = 'all' | Bucket
 
 /** One pending proposal, carrying its game with it — the queue is a flat list of
  *  tags, grouped only for display. Mirrors QueueTag in lib/playtest-tags-queue. */
@@ -22,6 +28,8 @@ interface PendingRow {
   their_sub_value_id: number | null
   their_sub_value_name: string | null
   conflict: boolean
+  /** The game's category group, so the row's trend picker opens on that group's trends. */
+  game_category_group: string | null
 }
 
 interface HistoryRow {
@@ -112,6 +120,9 @@ function GameButton({ title, gameId, onOpen, list }: {
 export function TaggingTab() {
   const [view, setView] = useState<'pending' | 'history' | 'trends'>('pending')
   const [detail, setDetail] = useState<{ gameId: string; list: EvalListItem[] } | null>(null)
+  // One filter for all three views, held here so it survives switching between
+  // them (each view remounts on switch and would otherwise forget it).
+  const [categoryGroup, setCategoryGroup] = useState<CategoryGroupFilter>('all')
   const { data: session } = useSession()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
@@ -139,9 +150,20 @@ export function TaggingTab() {
         </div>
       </div>
 
-      {view === 'pending' && <PendingView onOpenGame={openGame} isAdmin={isAdmin} />}
-      {view === 'history' && <HistoryView onOpenGame={openGame} isAdmin={isAdmin} />}
-      {view === 'trends' && <TrendsCatalog onOpenGame={openGame} />}
+      <div role="group" aria-label="Category group" style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 12px' }}>
+        <span className="label" aria-hidden>Category group</span>
+        <div className="seg">
+          {(['all', ...BUCKETS] as CategoryGroupFilter[]).map(g => (
+            <button key={g} type="button" aria-pressed={categoryGroup === g}
+              className={'seg-btn' + (categoryGroup === g ? ' active' : '')}
+              onClick={() => setCategoryGroup(g)}>{g === 'all' ? 'All' : g}</button>
+          ))}
+        </div>
+      </div>
+
+      {view === 'pending' && <PendingView onOpenGame={openGame} isAdmin={isAdmin} categoryGroup={categoryGroup} />}
+      {view === 'history' && <HistoryView onOpenGame={openGame} isAdmin={isAdmin} categoryGroup={categoryGroup} />}
+      {view === 'trends' && <TrendsCatalog onOpenGame={openGame} categoryGroup={categoryGroup} />}
 
       {detail && (
         <div className="eval-modal-backdrop" onClick={() => setDetail(null)}>
@@ -184,7 +206,7 @@ function TriCheckbox({ checked, indeterminate, onChange, title, disabled }: {
   )
 }
 
-function PendingView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: boolean }) {
+function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenGame; isAdmin: boolean; categoryGroup: CategoryGroupFilter }) {
   // One row per proposed tag. Every action edits this list in place — nothing in
   // this view refetches the queue on a change, so the admin keeps their scroll
   // position, their selection and their place in a long list of games.
@@ -205,6 +227,7 @@ function PendingView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
   // Catalog for the inline value/sub-value editors. A failed load leaves the
   // rows readable but not editable, rather than offering an empty picker.
   const [options, setOptions] = useState<string[]>([])
+  const [categoryGroups, setCategoryGroups] = useState<Record<string, string[]> | undefined>(undefined)
   const [subValues, setSubValues] = useState<{ id: number; name: string }[]>([])
   const [optionsError, setOptionsError] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
@@ -220,7 +243,8 @@ function PendingView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
   const load = useCallback(async (offset: number, append: boolean) => {
     setLoading(true)
     try {
-      const r = await fetch(`/api/playtest-tags/pending?offset=${offset}&limit=${limit}`)
+      const gq = categoryGroup === 'all' ? '' : `&category_group=${categoryGroup}`
+      const r = await fetch(`/api/playtest-tags/pending?offset=${offset}&limit=${limit}${gq}`)
       const d = r.ok ? await r.json() : { tags: [], total: 0 }
       const next = (d.tags || []) as PendingRow[]
       if (append && next.length === 0) {
@@ -241,17 +265,20 @@ function PendingView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
       if (!append) { setRows([]); setTotal(0) }
     }
     setLoading(false)
-  }, [])
+  }, [categoryGroup])
 
   const loadOptions = useCallback(() => {
     setOptionsError(false)
     fetch('/api/trends/options')
       .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
-      .then(d => { setOptions(d.values || []); setSubValues(d.subValues || []) })
+      .then(d => { setOptions(d.values || []); setCategoryGroups(d.categoryGroups); setSubValues(d.subValues || []) })
       .catch(() => { setOptionsError(true) })
   }, [])
 
   useEffect(() => { void load(0, false) }, [load])
+  // A new category group swaps the rows under the admin. Ticks and overwrite flags are by
+  // id, so any left over would still make Confirm act on rows no longer on screen.
+  useEffect(() => { setSelected(new Set()); setOverwrite(new Set()) }, [categoryGroup])
   // Only the admin edits, so only the admin needs the catalog. An evaluator
   // fetching it would be a request whose result nothing can ever use.
   useEffect(() => { if (isAdmin) loadOptions() }, [loadOptions, isAdmin])
@@ -610,6 +637,8 @@ function PendingView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
                   ) : (
                     <TrendValuePicker
                       options={options}
+                      categoryGroups={categoryGroups}
+                      categoryGroup={t.game_category_group}
                       exclude={usedByGame.get(t.game_id) ?? new Set()}
                       label={t.field_value}
                       title="Change the trend value"
@@ -708,7 +737,7 @@ function PendingView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
 // Everything that left the queue, for admins and evaluators alike. Deliberately
 // not scoped to the reader: an evaluator learns as much from how the same trend
 // was judged on someone else's game as from their own corrections.
-function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: boolean }) {
+function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenGame; isAdmin: boolean; categoryGroup: CategoryGroupFilter }) {
   const { data: session } = useSession()
   const myEmail = session?.user?.email || ''
   const [rows, setRows] = useState<HistoryRow[]>([])
@@ -740,6 +769,7 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
     if (from) qs.set('from', from)
     if (to) qs.set('to', to)
     if (tagger) qs.set('tagger', tagger)
+    if (categoryGroup !== 'all') qs.set('category_group', categoryGroup)
     setLoading(true)
     try {
       const r = await fetch(`/api/playtest-tags/history?${qs}`)
@@ -759,7 +789,7 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
       if (!append) { setRows([]); setTotal(0) }
     }
     setLoading(false)
-  }, [from, to, tagger])
+  }, [from, to, tagger, categoryGroup])
 
   // Sweep for tags deleted in Signal Sense, then read. Signal Sense keeps no
   // deletion log of its own, so this is the only chance to notice, and the sweep
@@ -792,7 +822,7 @@ function HistoryView({ onOpenGame, isAdmin }: { onOpenGame: OpenGame; isAdmin: b
     if (!mounted.current) { mounted.current = true; return }
     void fetchPage(1, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, tagger])
+  }, [from, to, tagger, categoryGroup])
 
   // Two-click confirm, the same shape as the evaluation panel's Clear all. This
   // deletes a row out of Signal Sense's table, so a stray click must not do it.

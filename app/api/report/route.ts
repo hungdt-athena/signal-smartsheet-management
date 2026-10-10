@@ -327,10 +327,21 @@ export async function GET(req: NextRequest) {
     // screen and Pending on the other. Both now resolve to the same moment: the
     // upload if we have one (migration 034), otherwise the Confirm click.
     const recAt = sql`COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at)`
+    // The slot a game is recorded in, same rule as the Record tab: a manual
+    // record_bucket wins, else Priority IV is 20', everything else 5'. Only this
+    // slot is credited. The other slot's column can hold a stray name (the
+    // recorder sync used to fill it from a same-title game on the other OS).
+    const ownSlot = (slot: '5min' | '20min') => sql`AND (CASE
+      WHEN ge.record_bucket IN ('5min','20min') THEN ge.record_bucket
+      WHEN ge.final_conclusion = 'Priority IV' THEN '20min' ELSE '5min' END) = ${slot}`
     // Only ever used as a FILTER, so it compares the raw column against VN-local
     // boundaries rather than casting the column to a VN date -- same reason as vnBound
     // above, plus it makes idx_game_evaluations_recorded_at (which indexes exactly this
     // COALESCE) usable instead of dead weight.
+    // The stored link is the game's DEMO video: shared by title across Android and
+    // iOS, 20' preferred. youtube_uploaded_at is set only when the game's own-slot
+    // record video exists, so the queue shows the link as "Recorded" only then.
+    const ownVideoLink = sql`CASE WHEN ge.youtube_uploaded_at IS NOT NULL THEN ge.youtube_link END`
     const recAtFrom = (d: string) => sql`AND ${recAt} >= ${vnBound(d)}`
     const recAtTo   = (d: string) => sql`AND ${recAt} < ${vnBound(d)}`
 
@@ -584,7 +595,49 @@ export async function GET(req: NextRequest) {
     const prevWin = prevWindow(view, win, prevBatch)
     const prevPromise = prevWin ? refQuery(prevWin.from, prevWin.to) : Promise.resolve(null)
 
-    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, pipelineRaw, baselineRaw, prevRaw, personClearedRaw, personAgedRaw, backlogByRaw, stockRaw, rescueStats] = await Promise.all([
+    // Each person's backlog at the END of every bucket, for the line on Individual's
+    // activity chart. The same in/out rule as the "got older" query below (in = the
+    // assign day, out = the evaluate day, a bulk-imported row with a conclusion and no
+    // evaluate date exits on arrival), run as a running total over ALL history so the
+    // number is the real pile and not just this window's net. A bucket with no event
+    // for that person has no row - the backlog did not move - so the reader carries the
+    // last value forward, starting from the opening row (`b` null) just before the
+    // window. Read off the CURRENT owner: a game reassigned away leaves their past too,
+    // which is the rule the backlog card and "Days waiting" already follow.
+    const personBacklogPromise = sql`
+      WITH r AS (
+        SELECT lower(ge.initial_evaluator) AS k, ge.assigned_date AS in_day,
+               CASE
+                 WHEN ge.evaluate_date IS NOT NULL
+                   THEN GREATEST(ge.assigned_date, (ge.evaluate_date AT TIME ZONE ${VN})::date)
+                 WHEN ge.initial_conclusion IS NOT NULL THEN ge.assigned_date
+                 ELSE NULL
+               END AS out_day
+        FROM game_evaluations ge
+        WHERE ge.assigned_date IS NOT NULL
+          AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+          ${notSystem} ${catF}
+      ), ev AS (
+        SELECT k, in_day AS day, 1 AS d FROM r
+        UNION ALL
+        SELECT k, out_day, -1 FROM r WHERE out_day IS NOT NULL
+      ), daily AS (
+        SELECT k, day, (SUM(SUM(d)) OVER (PARTITION BY k ORDER BY day))::int AS backlog
+        FROM ev GROUP BY k, day
+      )
+      SELECT k, date_trunc(${unit}, day)::date::text AS b,
+        (array_agg(backlog ORDER BY day DESC))[1]::int AS backlog
+      FROM daily
+      WHERE TRUE
+        ${win.from ? sql`AND day >= ${win.from}::date` : sql``}
+        ${win.to ? sql`AND day < ${win.to}::date` : sql``}
+      GROUP BY 1, 2
+      ${win.from ? sql`UNION ALL
+      (SELECT DISTINCT ON (k) k, NULL::text AS b, backlog
+       FROM daily WHERE day < ${win.from}::date
+       ORDER BY k, day DESC)` : sql``}`
+
+    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, pipelineRaw, baselineRaw, prevRaw, personClearedRaw, personAgedRaw, backlogByRaw, stockRaw, rescueStats, personBacklogRaw] = await Promise.all([
       // per-evaluator core + funnel. Shortlist = initial not bypassed (List_Idea);
       // Final Priority = moderator judged 'Priority IV' or 'Insight' (user-defined -
       // Priority V intentionally NOT counted).
@@ -710,7 +763,7 @@ export async function GET(req: NextRequest) {
           SELECT lower(ge.record_5min_assignee) AS k, ge.record_5min_assignee AS name, '5min' AS slot
           FROM game_evaluations ge
           WHERE ${recAt} IS NOT NULL AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
-            ${recOk('record_5min_assignee')}
+            ${recOk('record_5min_assignee')} ${ownSlot('5min')}
             ${catF}
             ${winOn(sql`
               ${win.from ? recAtFrom(win.from) : sql``}
@@ -719,7 +772,7 @@ export async function GET(req: NextRequest) {
           SELECT lower(ge.record_20min_assignee), ge.record_20min_assignee, '20min'
           FROM game_evaluations ge
           WHERE ${recAt} IS NOT NULL AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
-            ${recOk('record_20min_assignee')}
+            ${recOk('record_20min_assignee')} ${ownSlot('20min')}
             ${catF}
             ${winOn(sql`
               ${win.from ? recAtFrom(win.from) : sql``}
@@ -758,14 +811,14 @@ export async function GET(req: NextRequest) {
       sql`
         WITH rec AS (
           SELECT lower(ge.record_5min_assignee) AS k, '5min' AS slot, ge.game_id, gi.title, gi.os,
-                 ge.batch, ge.record_confirmed_at, ge.youtube_link, ${recAt} AS rec_at
+                 ge.batch, ge.record_confirmed_at, ${ownVideoLink} AS youtube_link, ${recAt} AS rec_at
           FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-          WHERE ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> '' ${recOk('record_5min_assignee')} ${catF}
+          WHERE ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> '' ${recOk('record_5min_assignee')} ${ownSlot('5min')} ${catF}
           UNION ALL
           SELECT lower(ge.record_20min_assignee), '20min', ge.game_id, gi.title, gi.os,
-                 ge.batch, ge.record_confirmed_at, ge.youtube_link, ${recAt}
+                 ge.batch, ge.record_confirmed_at, ${ownVideoLink}, ${recAt}
           FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-          WHERE ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> '' ${recOk('record_20min_assignee')} ${catF}
+          WHERE ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> '' ${recOk('record_20min_assignee')} ${ownSlot('20min')} ${catF}
         )
         SELECT k, slot, game_id, title, os, batch,
           (rec_at AT TIME ZONE ${VN})::date::text AS recorded_on,
@@ -872,6 +925,7 @@ export async function GET(req: NextRequest) {
       // The Rescue scan itself. Guarded so an evaluator never pays for a query whose
       // result is thrown away below (rescue is manager-only).
       !scoped ? scanRescueRoster(category, rescueCfg) : Promise.resolve([]),
+      personBacklogPromise,
     ])
 
     // fold conclusion maps
@@ -1009,7 +1063,7 @@ export async function GET(req: NextRequest) {
     // radar - EVERY axis normalized to the team's best (=100) so shapes are
     // comparable even when the raw metric lives in a narrow band (rates ~0–15%).
     const maxOf = (f: (e: typeof evaluators[number]) => number) => Math.max(1e-9, ...evaluators.map(f))
-    const mv = maxOf((e) => e.evaluated), mr = maxOf((e) => e.recorded)
+    const mv = maxOf((e) => e.evaluated)
     const msg = maxOf((e) => e.signalRate), msv = maxOf((e) => e.survivalRate)
     const mc = maxOf((e) => e.consistency)
     const radar = evaluators.map((e) => ({
@@ -1020,7 +1074,6 @@ export async function GET(req: NextRequest) {
         Consistency: Math.round((e.consistency / mc) * 100),
         Signal: Math.round((e.signalRate / msg) * 100),
         Survival: Math.round((e.survivalRate / msv) * 100),
-        Recording: Math.round((e.recorded / mr) * 100),
       },
     }))
 
@@ -1165,9 +1218,25 @@ export async function GET(req: NextRequest) {
     }
     for (const r of evalSeries) { const c = psCell(r.k, r.b); c.evaluated = r.evaluated; c.shortlisted = r.shortlisted; c.linkDead = r.link_dead }
     for (const r of evalAsgSeries) { psCell(r.k, r.b).assigned = r.n }
-    const personSeries: Record<string, Array<{ key: string; label: string } & PersonCell>> = {}
+    // Backlog at the end of each bucket, carried forward over buckets where nothing
+    // moved (see `personBacklogPromise`).
+    const pbOpen = new Map<string, number>()
+    const pbAt = new Map<string, Map<string, number>>()
+    for (const r of personBacklogRaw) {
+      if (r.b == null) { pbOpen.set(r.k, r.backlog); continue }
+      let m = pbAt.get(r.k)
+      if (!m) { m = new Map(); pbAt.set(r.k, m) }
+      m.set(r.b, r.backlog)
+    }
+    const personSeries: Record<string, Array<{ key: string; label: string; backlog: number } & PersonCell>> = {}
     for (const [k, m] of Array.from(psBy.entries())) {
-      personSeries[k] = Array.from(m.keys()).sort().map((b) => ({ key: b, label: bucketLabel(b), ...m.get(b)! }))
+      let run = pbOpen.get(k) ?? 0
+      const at = pbAt.get(k)
+      personSeries[k] = Array.from(m.keys()).sort().map((b) => {
+        const v = at?.get(b)
+        if (v != null) run = v
+        return { key: b, label: bucketLabel(b), ...m.get(b)!, backlog: Math.max(0, run) }
+      })
     }
 
     // options for adaptive dropdown

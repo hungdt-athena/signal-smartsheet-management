@@ -1,6 +1,7 @@
 'use client'
 import { signOut } from 'next-auth/react'
 import { useSession } from 'next-auth/react'
+import { MissingDemoPrompt } from '@/components/MissingDemoPrompt'
 
 export default function EvaluatorLayout({ children }: { children: React.ReactNode }) {
   const { data: session } = useSession()
@@ -29,6 +30,7 @@ export default function EvaluatorLayout({ children }: { children: React.ReactNod
         </div>
       </header>
       <main style={{ maxWidth: 540, margin: '0 auto', padding: '32px 24px' }}>{children}</main>
+      <MissingDemoPrompt />
     </div>
   )
 }

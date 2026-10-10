@@ -14,7 +14,7 @@ jest.mock('next-auth', () => ({ getServerSession: jest.fn(() => Promise.resolve(
 jest.mock('@/lib/auth-guard', () => ({ requireRole: jest.fn(() => Promise.resolve(null)) }))
 jest.mock('@/lib/report-config-db', () => ({
   loadReportConfig: jest.fn(() => Promise.resolve({
-    config: { excluded: [], weights: { Volume: 40, Consistency: 15, Signal: 15, Survival: 15, Recording: 15 }, credibility: false },
+    config: { excluded: [], weights: { Volume: 40, Consistency: 20, Signal: 20, Survival: 20 }, credibility: false },
     updatedAt: '2026-08-07T00:00:00Z',
   })),
 }))

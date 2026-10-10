@@ -10,7 +10,7 @@
 // puts games on real people's plates.
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
-import { isBucket, type Bucket } from '@/lib/buckets'
+import { BUCKETS, isBucket, type Bucket } from '@/lib/buckets'
 import { POST as pushEvaluations } from '@/app/api/cron/push-evaluations/route'
 import { POST as assignEvaluators } from '@/app/api/cron/assign-evaluators/route'
 
@@ -47,7 +47,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 })
   }
 
-  const genres: Bucket[] = Array.isArray(body.genres) ? body.genres.filter(isBucket) : []
+  // Walked in BUCKETS order whatever order they were sent in: a game goes to the
+  // first genre that pushes it (see push-evaluations), so the order is the split.
+  const asked: Bucket[] = Array.isArray(body.genres) ? body.genres.filter(isBucket) : []
+  const genres: Bucket[] = BUCKETS.filter(b => asked.includes(b))
   if (genres.length === 0) {
     return NextResponse.json({ error: 'genres is required' }, { status: 400 })
   }

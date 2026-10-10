@@ -113,7 +113,7 @@ function selfBundle(over: Partial<{
     series: [], metricSeries: [], heatmap: { periods: [], rows: [] },
     config: {
       excluded: [], included: true,
-      weights: { Volume: 40, Consistency: 15, Signal: 15, Survival: 15, Recording: 15 },
+      weights: { Volume: 40, Consistency: 20, Signal: 20, Survival: 20 },
       credibility: true,
     },
     personSeries: { k0: [] },
@@ -174,7 +174,7 @@ describe('Individual tab, read by a contractor', () => {
     // Their own rate has not moved (prevSurvival === survivalRate); it is the team
     // they are far from - `bar` never reads `d.prev` at all.
     await renderTab(selfBundle({ survivalRate: 0.03, prevSurvival: 0.03, benchSurvival: 0.09, evaluated: 420 }))
-    expect(screen.getByText(/send your last 5 bypasses/i)).toBeInTheDocument()
+    expect(screen.getByText(/review your last 5 bypassed games/i)).toBeInTheDocument()
   })
 
   // Adapted from the brief: the brief's assertion (`not.toMatch(/slower than the
@@ -200,7 +200,7 @@ describe('Individual tab, read by a contractor', () => {
      one tab a contractor ever sees. */
   it('prints the good-news line as good news, not as a warning', async () => {
     await renderTab(selfBundle({ throughput: 96, prevThroughput: 70 }))
-    const card = screen.getByText(/keep the change you made/i).closest('.rp-do')!
+    const card = screen.getByText(/keep doing what you did/i).closest('.rp-do')!
     expect(card.classList.contains('good')).toBe(true)
     expect(card.classList.contains('urgent')).toBe(false)
   })
@@ -239,7 +239,7 @@ describe('Individual tab, read by a contractor', () => {
     await renderTab(selfBundle({ selfStale: 120 }))
     const block = screen.getByText('Do this').closest('.rp-do-block')!
     expect(block.textContent).toContain('Start each day with your 5 oldest games')
-    expect(block.textContent).toContain('Your stale games gone in about 24 days')
+    expect(block.textContent).toContain('Your stale games cleared in about 24 days')
   })
 
   it('never fires rhythm without a real reference for their own last window', async () => {
@@ -256,22 +256,30 @@ describe('Individual tab, read by a contractor', () => {
   })
 
   it('caps `up` below every other severity so it can never displace a red line', async () => {
-    // Four acts qualify at once - stale, callow, rec and up - so the cap of three
+    // Four acts qualify at once - stale, callow, rhythm and up - so the cap of three
     // actually has something to exclude. `up` is `sev: 0`, the lowest of any act on
     // this tab, so it must be the one left out, never one of the three red/amber
     // lines. (An earlier version of this test only had two qualifying acts, so the
     // cap was never exercised and it could not have failed no matter what `up`'s
-    // severity was - this fixture adds `callow` and `rec` so it actually can.)
+    // severity was - this fixture adds `callow` and `rhythm` so it actually can.)
     await renderTab(selfBundle({
       selfStale: 40, survivalRate: 0.03, benchSurvival: 0.09, evaluated: 420,
-      stuckVideos: 2, throughput: 96, prevThroughput: 70,
+      activeDays: 4, prevActiveDays: 10, throughput: 96, prevThroughput: 70,
     }))
     const block = screen.getByText('Do this').closest('.rp-do-block')!
     expect(block.querySelectorAll('.rp-do')).toHaveLength(3)
     expect(block.textContent).toMatch(/start each day with your 5 oldest games/i)
-    expect(block.textContent).toMatch(/send your last 5 bypasses/i)
-    expect(block.textContent).toMatch(/check your 2 recordings/i)
-    expect(block.textContent).not.toMatch(/keep the change you made/i)
+    expect(block.textContent).toMatch(/review your last 5 bypassed games/i)
+    expect(block.textContent).toMatch(/spread the same work over more days/i)
+    expect(block.textContent).not.toMatch(/keep doing what you did/i)
+  })
+
+  it('never turns a recording with no matched upload into an action', async () => {
+    // The upload match is best-effort and the team tracks its recordings itself, so
+    // "confirmed but no video found" is not something to act on.
+    const { container } = await renderTab(selfBundle({ stuckVideos: 2 }))
+    expect(container.querySelector('.rp-do-block')?.textContent || '').not.toMatch(/recording/i)
+    expect(container.querySelector('.rp-vid-flag')).toBeNull()
   })
 
   // Task 1: the `net`/`wait` chips must read correctly in BOTH voices. The admin
@@ -288,14 +296,14 @@ describe('Individual tab, read by a contractor', () => {
     const b = selfBundle({ assigned: 636, evaluated: 600 }) as Record<string, unknown>
     b.personSeries = { k0: [{ key: 'b1', label: 'b1', assigned: 636, evaluated: 600, linkDead: 0 }] }
     const { container } = await renderTab(b)
-    expect(verdictChipText(container, 'net')).toBe('36 games joined your backlog this week')
+    expect(verdictChipText(container, 'net')).toBe('Your backlog grew by 36 games this week')
   })
 
   it('reads the net chip in the second-person voice when the backlog shrank', async () => {
     const b = selfBundle({ assigned: 600, evaluated: 636 }) as Record<string, unknown>
     b.personSeries = { k0: [{ key: 'b1', label: 'b1', assigned: 600, evaluated: 636, linkDead: 0 }] }
     const { container } = await renderTab(b)
-    expect(verdictChipText(container, 'net')).toBe('36 games cleared from your backlog this week')
+    expect(verdictChipText(container, 'net')).toBe('Your backlog shrank by 36 games this week')
   })
 
   it('reads the net chip in the second-person voice with its own wording for zero, not a signed zero', async () => {
@@ -303,21 +311,21 @@ describe('Individual tab, read by a contractor', () => {
     b.personSeries = { k0: [{ key: 'b1', label: 'b1', assigned: 600, evaluated: 600, linkDead: 0 }] }
     const { container } = await renderTab(b)
     const zeroNet = verdictChipText(container, 'net')
-    expect(zeroNet).toBe('No games joined or cleared from your backlog this week')
+    expect(zeroNet).toBe('Your backlog did not change this week')
     expect(zeroNet).not.toMatch(/[-+]0 games/)
   })
 
   it('reads the wait chip in the second-person voice', async () => {
     const { container } = await renderTab(selfBundle({}))
     // selfBundle()'s default backlogBy: n=200, oldest=40
-    expect(verdictChipText(container, 'wait')).toBe('200 games waiting, the oldest sat 40 days')
+    expect(verdictChipText(container, 'wait')).toBe('200 games in your backlog, the oldest waiting 40 days')
   })
 
   it('reads the wait chip in the second-person voice for an empty backlog', async () => {
     const b = selfBundle({}) as Record<string, unknown>
     b.backlogBy = [{ key: 'k0', name: 'Alpha', n: 0, a0: 0, a1: 0, a2: 0, a3: 0, oldest: 0, stale: 0 }]
     const { container } = await renderTab(b)
-    expect(verdictChipText(container, 'wait')).toBe('Nothing is waiting in your backlog')
+    expect(verdictChipText(container, 'wait')).toBe('Your backlog is empty')
   })
   // Both guide lines must stay true in the SECOND-person voice too. "Every card below
   // is your own work in this week" became false the moment the review table landed:
@@ -326,9 +334,9 @@ describe('Individual tab, read by a contractor', () => {
     const { container } = await renderTab(selfBundle({}))
     fireEvent.click(container.querySelector('.rp-guide button')!)
     const read = (container.querySelector('.rp-guide .read')?.textContent || '').replace(/\s+/g, ' ').trim()
-    expect(read).toContain('Every card below is your own work in this week, except the review table at the bottom.')
-    expect(read).toContain('Backlog is the only KPI here the week filter does not reach')
+    expect(read).toContain('Every card below is your own work this week, except the review table at the bottom.')
+    expect(read).toContain('Backlog is the only KPI the week filter does not affect')
     expect(read).not.toContain('the only number here')
-    expect(read).toContain('the review table at the bottom has its own filters too')
+    expect(read).toContain('The review table at the bottom has its own filters.')
   })
 })

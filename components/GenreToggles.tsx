@@ -29,7 +29,7 @@ export function GenreToggles({ genres, canEdit, onToggle }: {
         <table className="tbl genre-tbl">
           <thead>
             <tr>
-              <th>Genre</th>
+              <th>Category group</th>
               <th>Ready</th>
               <th style={{ textAlign: 'right' }}>Push</th>
             </tr>

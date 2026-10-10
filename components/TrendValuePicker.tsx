@@ -16,6 +16,14 @@ interface Props {
   disabled?: boolean
   /** Renders the trigger as a placeholder rather than a chosen value. */
   placeholder?: boolean
+  /** Category groups (puzzle / arcade / simulation) each value is defined for, from
+   *  `/api/trends/options`. Signal Sense stores this as `genre`; in this app a genre is
+   *  a game's own genre, so the puzzle/arcade/simulation split is a category group. */
+  categoryGroups?: Record<string, string[]>
+  /** The category group of the game being tagged. With `categoryGroups`, the list
+   *  opens on that group's trends only and "Show all category groups" widens it.
+   *  Left out (or null when the game's group is unknown) the list is unfiltered. */
+  categoryGroup?: string | null
 }
 
 interface MenuPos { top?: number; bottom?: number; left: number; width: number; maxHeight: number }
@@ -30,6 +38,7 @@ interface MenuPos { top?: number; bottom?: number; left: number; width: number; 
 // cut the list off.
 export function TrendValuePicker({
   options, exclude, onPick, label, title, triggerClassName, triggerStyle, disabled, placeholder,
+  categoryGroups, categoryGroup,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<MenuPos | null>(null)
@@ -38,14 +47,26 @@ export function TrendValuePicker({
   const btnRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const [showAll, setShowAll] = useState(false)
 
-  // Browsable by default: an empty query lists the whole catalog.
+  // Narrowing needs both the game's category group and the map; without either there is
+  // nothing to narrow by, and the list stays whole rather than guessing.
+  const canFilter = !!categoryGroup && !!categoryGroups
+  const filtering = canFilter && !showAll
+  const inCategoryGroup = useCallback(
+    (o: string) => !!categoryGroup && !!categoryGroups?.[o]?.includes(categoryGroup),
+    [categoryGroup, categoryGroups],
+  )
+
+  // Browsable by default: an empty query lists the whole catalog -- or, for a
+  // game with a known category group, that group's share of it.
+  const scope = useMemo(() => (filtering ? options.filter(inCategoryGroup) : options), [filtering, options, inCategoryGroup])
   const hits = useMemo(() => {
-    const pool = exclude?.size ? options.filter(o => !exclude.has(o)) : options
+    const pool = exclude?.size ? scope.filter(o => !exclude.has(o)) : scope
     const q = query.trim().toLowerCase()
     if (!q) return pool
     return pool.filter(o => o.toLowerCase().includes(q))
-  }, [query, options, exclude])
+  }, [query, scope, exclude])
 
   const updatePos = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect()
@@ -140,13 +161,27 @@ export function TrendValuePicker({
               placeholder="Search trends"
               style={{ width: '100%', fontSize: 13 }}
             />
+            {canFilter && (
+              <button
+                type="button"
+                onClick={() => { setShowAll(a => !a); setActive(0) }}
+                style={{
+                  marginTop: 6, padding: 0, border: 0, background: 'transparent',
+                  color: 'var(--accent)', fontSize: 11.5, fontWeight: 500, cursor: 'pointer',
+                }}
+              >{showAll ? `Show ${categoryGroup} only` : 'Show all category groups'}</button>
+            )}
           </div>
 
           {hits.length === 0 ? (
             <p style={{ margin: 0, padding: '12px 12px 14px', fontSize: 12, color: 'var(--faint)' }}>
-              {query.trim()
-                ? 'No trend matches that. New values are added in Signal Sense by an admin.'
-                : 'No trends available.'}
+              {filtering
+                ? (query.trim()
+                  ? `No ${categoryGroup} trend matches that. Try "Show all category groups".`
+                  : `No ${categoryGroup} trends yet. Show all category groups to tag from another one.`)
+                : (query.trim()
+                  ? 'No trend matches that. New values are added in Signal Sense by an admin.'
+                  : 'No trends available.')}
             </p>
           ) : (
             <>
@@ -166,7 +201,17 @@ export function TrendValuePicker({
                         background: i === active ? 'var(--accent-weak)' : 'transparent',
                         color: i === active ? 'var(--accent-strong)' : 'var(--text)',
                       }}
-                    >{h}</button>
+                    >
+                      <span>{h}</span>
+                      {/* Only where it matters: a trend that is not this game's
+                          category group, shown because the reader asked for everything. */}
+                      {canFilter && !inCategoryGroup(h) && (
+                        <span style={{
+                          marginLeft: 8, fontFamily: 'var(--font)', fontSize: 10.5,
+                          color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '0.04em',
+                        }}>{(categoryGroups?.[h] ?? []).join(' / ') || 'no category group'}</span>
+                      )}
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -174,7 +219,10 @@ export function TrendValuePicker({
                 padding: '6px 10px', borderTop: '1px solid var(--border)', flexShrink: 0,
                 fontSize: 11, color: 'var(--faint)', background: 'var(--surface-2)',
               }}>
-                {query.trim() ? `${hits.length} of ${options.length} trends` : `${hits.length} trends`}
+                {(() => {
+                  const noun = filtering ? `${categoryGroup} trend${hits.length === 1 && !query.trim() ? '' : 's'}` : 'trends'
+                  return query.trim() ? `${hits.length} of ${scope.length} ${noun}` : `${hits.length} ${noun}`
+                })()}
               </div>
             </>
           )}

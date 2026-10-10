@@ -88,7 +88,7 @@ export function RosterTable({
               <th style={{ width: 170 }}>Evaluator Name</th>
               <th style={{ width: 92 }}>Available</th>
               <th style={{ width: 96 }}>Platform</th>
-              <th className="col-split">Genres</th>
+              <th className="col-split">Category groups</th>
             </tr>
           </thead>
           <tbody>
@@ -146,7 +146,7 @@ function PersonRow({ group, alt, subGenres, readOnly, openIds, onToggleOpen, onP
             ))}
             {!readOnly && group.missingGenres.length > 0 && (
               <span className="gpill-add" data-testid={`add-genre-${group.name}`}>
-                <StyledSelect value="" placeholder="+ genre"
+                <StyledSelect value="" placeholder="+ category group"
                   options={group.missingGenres.map(b => ({ value: b, label: BUCKET_LABELS[b] }))}
                   onChange={v => onAddGenre(group.name, v as Bucket)} />
               </span>
@@ -184,9 +184,9 @@ function GenrePill({ row, available, options, expanded, onToggle }: {
   const restricted = picked.length < options.length
   const genre = BUCKET_LABELS[row.category_group]
   // The visible text is abbreviated for width; the label spells it out, since
-  // "2/3 sub-genres" read aloud character by character is not a sentence.
+  // "2/3 genres" read aloud character by character is not a sentence.
   const label = `${genre}, weight ${row.weight}`
-    + (restricted ? `, ${picked.length} of ${options.length} sub-genres` : ', all sub-genres')
+    + (restricted ? `, ${picked.length} of ${options.length} genres` : ', all genres')
 
   return (
     <button type="button" aria-expanded={expanded} aria-label={label} onClick={onToggle}
@@ -195,7 +195,7 @@ function GenrePill({ row, available, options, expanded, onToggle }: {
       <span className="gname">{genre}</span>
       <span className="gw">{row.weight}</span>
       {restricted && (
-        <span className="gsub" aria-hidden="true">{picked.length}/{options.length} sub-genres</span>
+        <span className="gsub" aria-hidden="true">{picked.length}/{options.length} genres</span>
       )}
     </button>
   )
@@ -242,14 +242,14 @@ function GenrePanel({ row, options, readOnly, onPatchRow, onRemove, onClose }: {
       </div>
 
       <div className="gpanel-field">
-        <span className="gpanel-label">Sub-genre</span>
+        <span className="gpanel-label">Genre</span>
         <div className="subg">
           {options.map(g => {
             const on = picked.includes(g)
             const last = on && picked.length === 1
             return (
               <label key={g} className={`subg-item${on ? ' on' : ''}`}
-                title={last ? 'Keep at least one sub-genre' : undefined}>
+                title={last ? 'Keep at least one genre' : undefined}>
                 <input type="checkbox" checked={on} disabled={readOnly || last}
                   onChange={() => toggle(g)} />
                 <span>{g}</span>
@@ -265,7 +265,7 @@ function GenrePanel({ row, options, readOnly, onPatchRow, onRemove, onClose }: {
             onClick={() => onPatchRow(row.id, 'game_category', 'All')}>Select all</button>
         )}
         {!readOnly && (
-          <button type="button" className="glink glink-danger" onClick={onRemove}>Remove genre</button>
+          <button type="button" className="glink glink-danger" onClick={onRemove}>Remove category group</button>
         )}
         <button type="button" className="glink glink-quiet" onClick={onClose}>Close</button>
       </div>
@@ -310,7 +310,7 @@ function AddEvalRow({ onAdd }: { onAdd: RosterTableProps['onAddEvaluator'] }) {
           onChange={e => setName(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') submit(!isKnown) }}
           placeholder="Type a name to search, or a new id (auto @athena.studio)…" />
-        <MultiSelect value={genres} placeholder="Genre" style={{ width: 190 }}
+        <MultiSelect value={genres} placeholder="Category group" style={{ width: 190 }}
           options={BUCKETS.map(b => ({ value: b, label: BUCKET_LABELS[b] }))}
           onChange={vals => setGenres(vals.filter((v): v is Bucket => (BUCKETS as readonly string[]).includes(v)))} />
         <button className="btn btn-primary btn-sm" disabled={!name.trim() || genres.length === 0}

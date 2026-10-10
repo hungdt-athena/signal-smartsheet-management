@@ -82,6 +82,34 @@ beforeEach(() => {
 })
 
 describe('ReviewTable', () => {
+  it('shows the note and the final conclusion on each row, and filters to rows that have one', async () => {
+    const fetchMock = mockApi({ list: [
+      row({ id: 1, initial_note: 'Merge loop is thin, but the art is strong', final_conclusion: 'Priority IV', final_note: 'Agree - push to playtest' }),
+      row({ id: 2, title: 'Stack Tower', initial_note: null, final_conclusion: null }),
+    ] })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam windowFrom="2026-09-21" windowTo="2026-09-24" />)
+    await waitFor(() => expect(screen.getAllByText('Merge Puzzle').length).toBeGreaterThan(0))
+
+    const [first, second] = Array.from(container.querySelectorAll('.rp-review-row'))
+    expect(first.querySelector('.rp-review-note')!.textContent).toBe('NoteMerge loop is thin, but the art is strong')
+    expect(first.querySelector('.rp-review-note.final')!.textContent).toBe('Final noteAgree - push to playtest')
+    expect(first.querySelector('.rp-review-final')!.textContent).toBe('FinalPriority IV')
+    // no final conclusion yet is said, not left blank; no note means no note box
+    expect(second.querySelector('.rp-review-final')!.textContent).toBe('Finalnot given yet')
+    expect(second.querySelector('.rp-review-note')).toBeNull()
+
+    // a click opens a clamped note in full
+    const note = first.querySelector('.rp-review-note') as HTMLElement
+    fireEvent.click(note)
+    expect(note.className).toContain('open')
+
+    // the checkbox is local to this table and travels as has_final=1
+    expect(parseCalls(fetchMock).filter(c => c.limit === '20').every(c => c.has_final === undefined)).toBe(true)
+    fireEvent.click(screen.getByLabelText('Has final conclusion'))
+    await waitFor(() => expect(parseCalls(fetchMock).some(c => c.limit === '20' && c.has_final === '1')).toBe(true))
+  })
+
   it('defaults to the newest 3 days with rows, puzzle, every real conclusion', async () => {
     const probeRows = [
       row({ id: 1, evaluate_date: '2026-09-22T09:00:00Z', updated_at: '2026-09-22T09:00:00Z' }),
@@ -327,23 +355,66 @@ describe('ReviewTable', () => {
     const main = container.querySelector('.rp-review-main') as HTMLElement
     expect(within(main).getByText('Merge Puzzle')).toBeInTheDocument()
     expect(within(main).getByText('Acme Studio')).toBeInTheDocument()
-    expect(within(main).getByText('IOS')).toBeInTheDocument()
+    expect(within(main).getByText('iOS')).toBeInTheDocument()
     // Both dates say WHICH date they are. Two bare dd/mm/yy on the same row -- one
     // the store's, one the team's -- is a guess the reader should not have to make.
-    expect(within(main).getByText(/^Release: 01\/08\/26$/)).toBeInTheDocument()
+    expect(within(main).getByText(/^Released 01\/08\/26$/)).toBeInTheDocument()
     expect(within(main).getByText('Merge')).toBeInTheDocument()
     // The verdict moved OUT of its own column and onto this side of the row, next
     // to the game it is a verdict on -- conclusion, when, and by whom.
     expect(within(main).getByText('List Idea')).toBeInTheDocument()
-    expect(within(main).getByText(/^Evaluated: 22\/09\/26$/)).toBeInTheDocument()
-    expect(within(main).getByText('NhiLV')).toBeInTheDocument()
-    // and all four of those facts are badges, not loose grey words
-    expect(within(main).getAllByText(/^(IOS|Release: .*|Evaluated: .*|NhiLV)$/)
-      .every(n => n.className.includes('rp-review-badge'))).toBe(true)
+    // who made the call and when, under the call itself
+    const initial = main.querySelector('.rp-review-verdict') as HTMLElement
+    expect(initial.querySelector('.rp-review-call-by')!.textContent).toBe('NhiLV · 22/09/26')
+    // Platform and release are plain text, not boxes: the only chips left on the
+    // row are the two conclusions and the trend tags.
+    expect(main.querySelectorAll('.rp-review-badge')).toHaveLength(0)
+    // The icon sits in a fixed square box, so a non-square source is cropped rather
+    // than squeezed (object-fit lives in the stylesheet).
+    expect(main.querySelector('.rp-review-head .rp-review-icon img')).not.toBeNull()
     // Two grid cells only: the call, and the screenshots that back it.
     const cells = container.querySelector('.rp-review-row')!.children
     expect(cells.length).toBe(2)
     expect(cells[1].className).toContain('rp-review-shots')
+  })
+
+  it('puts the developer country next to the developer as a flag chip, one name per country', async () => {
+    const fetchMock = mockApi({
+      list: [
+        row({ id: 1, game_id: 'g1', title: 'Coded', publisher_name: 'Acme Studio', publisher_country: 'US' }),
+        row({ id: 2, game_id: 'g2', title: 'Named', publisher_name: 'Calamanci', publisher_country: 'Montenegro' }),
+        row({ id: 3, game_id: 'g3', title: 'Aliased', publisher_name: 'Istanbul Games', publisher_country: 'Türkiye' }),
+        row({ id: 4, game_id: 'g4', title: 'Missing', publisher_name: 'Nowhere Ltd', publisher_country: null }),
+        row({ id: 5, game_id: 'g5', title: 'Postcode', publisher_name: 'Shhvjji', publisher_country: '邮政编码: 571900' }),
+        row({ id: 6, game_id: 'g6', title: 'Building', publisher_name: 'Seoul Soft', publisher_country: '서해아파트)' }),
+        row({ id: 7, game_id: 'g7', title: 'Local', publisher_name: 'Rio Games', publisher_country: 'Brasil' }),
+        row({ id: 8, game_id: 'g8', title: 'British', publisher_name: 'Tripledot', publisher_country: 'United Kingdom' }),
+        row({ id: 9, game_id: 'g9', title: 'Reserved', publisher_name: 'London Ltd', publisher_country: 'UK' }),
+        row({ id: 10, game_id: 'g10', title: 'Viet', publisher_name: 'Tenfun', publisher_country: 'Vietnam' }),
+      ],
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={true} />)
+    await waitFor(() => expect(screen.getByText('Coded')).toBeInTheDocument())
+
+    const chips = Array.from(container.querySelectorAll('.rp-review-row')).map(r => {
+      const chip = r.querySelector('.rp-review-pub .rp-review-country')
+      if (!chip) return null
+      return [chip.querySelector('.rp-review-flag')!.textContent, chip.lastChild!.textContent]
+    })
+    // A code is spelled out, a name stays, local and alternate spellings land on one
+    // name. A postcode or a building the importer mistook for a country, or no value
+    // at all, draws no chip -- never a placeholder.
+    expect(chips).toEqual([
+      ['🇺🇸', 'United States'], ['🇲🇪', 'Montenegro'], ['🇹🇷', 'Turkey'],
+      null, null, null, ['🇧🇷', 'Brazil'],
+      // The current code's flag, never a retired one's: ICU names 'UK' "United
+      // Kingdom" and 'VD' "Vietnam" too, and neither has a flag emoji.
+      ['🇬🇧', 'United Kingdom'], ['🇬🇧', 'United Kingdom'], ['🇻🇳', 'Vietnam'],
+    ])
+    // The developer name is still its own text, not glued to the chip.
+    expect(screen.getByText('Acme Studio')).toBeInTheDocument()
   })
 
   // ---- what belongs in the conclusion dropdown ----
@@ -606,8 +677,8 @@ describe('ReviewTable', () => {
     expect(screen.getByText('Untitled')).toBeInTheDocument()
     expect(screen.getByText('Unknown developer')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2) // platform, conclusion
-    expect(screen.getByText(/^Release: —$/)).toBeInTheDocument()
-    expect(screen.getByText(/^Evaluated: —$/)).toBeInTheDocument()
+    expect(screen.getByText(/^Released —$/)).toBeInTheDocument()
+    expect(container.querySelector('.rp-review-verdict .rp-review-call-by')!.textContent).toMatch(/· —$/)
   })
 
   it('offers the real, admin-editable conclusion list, not a hardcoded shortlist', async () => {

@@ -82,7 +82,7 @@ function teamBundle(people: P[] = [person('Alpha'), person('Beta')], patch: Bund
     heatmap: { periods: [], rows: [] },
     config: {
       excluded: [], included: true,
-      weights: { Volume: 40, Consistency: 15, Signal: 15, Survival: 15, Recording: 15 },
+      weights: { Volume: 40, Consistency: 20, Signal: 20, Survival: 20 },
       credibility: true,
     },
     personSeries: Object.fromEntries(people.map((p, i) => [`k${i}`, BUCKETS.map((b) => ({

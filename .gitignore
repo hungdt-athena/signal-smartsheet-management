@@ -62,3 +62,4 @@ sunflower-alert-21611001cc3c.json
 
 # local-only screenshot store (SCREENSHOT_STORE=local)
 /.screenshots/
+.superpowers/

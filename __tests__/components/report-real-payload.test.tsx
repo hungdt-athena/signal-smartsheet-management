@@ -277,7 +277,7 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       // "Age" chip - see report-11-report.md's hand-read notes - names the fixed
       // 8-14d/15d+ backlog age bands instead, a different, unconfigurable metric; that
       // is not this assertion's concern and is flagged separately, not asserted here.)
-      // Asserted only on Overview and Leaderboard, where a "past N days" why reliably
+      // Asserted only on Overview and Leaderboard, where a "more than N days" why reliably
       // fires on THIS fixture (see the dump in task-11-report.md: Overview's `age`
       // rebalance act and Leaderboard's `queue` reassign act both name it; Individual
       // shows a different person - Ev2 - whose only act this window is `rec`, with
@@ -285,9 +285,9 @@ describe('Report tabs read back as English on real (or real-derived) prod payloa
       // (ageWhy)`, keeps this from silently no-opping if either act stops rendering.
       if (tab === 'Overview' || tab === 'Leaderboard') {
         const ageWhy = Array.from(document.querySelectorAll('.rp-do-why'))
-          .map((n) => n.textContent || '').find((t) => /past \d+ days/.test(t))
+          .map((n) => n.textContent || '').find((t) => /backlog for more than \d+ days/.test(t))
         expect(ageWhy).toBeDefined()
-        expect(ageWhy).toMatch(/past 7 days/)
+        expect(ageWhy).toMatch(/for more than 7 days/)
       }
       // Task 7: the rewritten chips + KPI sub-lines, read back on this real payload.
       if (tab === 'Leaderboard' || tab === 'Individual') {

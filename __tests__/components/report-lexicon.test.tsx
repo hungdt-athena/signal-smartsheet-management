@@ -30,6 +30,23 @@ const BANNED: Array<[string, RegExp]> = [
   // and "judgement" is not matched: the noun is still the right word for a verdict.
   // What the MODERATOR does is "ruled on", which is a third step and stays distinct.
   ['judge/judged/judging', /(^|[^\w.])judg(e|ed|es|ing)([^\w(:]|$)/i],
+  // 2026-09-24: the reader asked for plain words that hit the point. An evaluator
+  // SHORTLISTS a game (never keeps it, sends it on, or makes a pick), a moderator
+  // gives a FINAL CONCLUSION (never rules on it), new games ARRIVE (never intake),
+  // the backlog is the BACKLOG (never stock or a desk), and there is no "bar" to
+  // evaluate by - the screen word is shortlist rate. Identifiers stay exempt
+  // (keepPair, restKeep, T.intakeGap) by the leading [^\w.].
+  ['keeps/kept', /(^|[^\w.])(keeps|kept)([^\w(:]|$)/i],
+  ['sent on / send on', /\bsen[dt]s? on\b/i],
+  ['ruled on', /\bruled? on\b/i],
+  ['held up / hold up', /\b(held|holds?) up\b/i],
+  ['intake', /(^|[^\w.])intake([^\w(:]|$)/i],
+  ['stock', /\b(the|a|of|not|same) stock\b/i],
+  ['desk', /(^|[^\w.])desks?([^\w(:]|$)/i],
+  ['pick / picks', /(^|[^\w.'])picks?([^\w(:']|$)/],
+  ['the bar / one bar / same bar', /\b(the|one|same|their|a) bar (is|sits|moving|lower|higher)\b|\bby (one|the same) bar\b|\bwhere the bar\b/i],
+  ['got through', /\bg(ot|et) through\b/i],
+  ['tempo / cadence', /\b(tempo|cadence)\b/i],
 ]
 
 describe('Report lexicon', () => {

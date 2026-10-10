@@ -29,8 +29,8 @@ function routeSql(handlers: { match: RegExp; rows: unknown[] }[]) {
 }
 
 const CATALOG_ROWS = [
-  { field_value: 'Block Puzzle', total: 730, last30: 12, last_tagged_at: '2026-08-19T20:15:08.564Z', has_instruction: true },
-  { field_value: 'Backpack', total: 0, last30: 0, last_tagged_at: null, has_instruction: false },
+  { field_value: 'Block Puzzle', total: 730, last30: 12, last_tagged_at: '2026-08-19T20:15:08.564Z', has_instruction: true, category_groups: ['puzzle'] },
+  { field_value: 'Backpack', total: 0, last30: 0, last_tagged_at: null, has_instruction: false, category_groups: ['arcade', 'puzzle'] },
 ]
 
 describe('/api/trends/catalog', () => {
@@ -55,8 +55,8 @@ describe('/api/trends/catalog', () => {
     // A trend nobody has tagged yet still belongs in the list — an evaluator
     // has to be able to find it before it can ever be used.
     expect(body.trends).toEqual([
-      { value: 'Block Puzzle', total: 730, last30: 12, lastTaggedAt: '2026-08-19T20:15:08.564Z', hasInstruction: true },
-      { value: 'Backpack', total: 0, last30: 0, lastTaggedAt: null, hasInstruction: false },
+      { value: 'Block Puzzle', total: 730, last30: 12, lastTaggedAt: '2026-08-19T20:15:08.564Z', hasInstruction: true, categoryGroups: ['puzzle'] },
+      { value: 'Backpack', total: 0, last30: 0, lastTaggedAt: null, hasInstruction: false, categoryGroups: ['arcade', 'puzzle'] },
     ])
     const text = calls.map(c => c.text).join(' ')
     expect(text).toMatch(/custom_field_values/)

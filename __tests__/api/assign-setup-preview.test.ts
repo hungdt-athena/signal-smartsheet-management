@@ -87,10 +87,24 @@ describe('the preview shares the cron\'s push eligibility', () => {
     expect(SOURCES).toContain("'appranking-scraper'")
   })
 
-  it('skips games already in game_evaluations for that bucket', () => {
-    // Both dedupe, so both count "new", not "eligible".
-    expect(CRON).toContain(squash('NOT EXISTS ( SELECT 1 FROM game_evaluations ge'))
-    expect(PREVIEW).toContain(squash('NOT EXISTS ( SELECT 1 FROM game_evaluations ge'))
+  it('skips games already in game_evaluations in ANY genre', () => {
+    // Both dedupe, so both count "new", not "eligible". And the dedupe is on the
+    // game, not on (game, genre): one game gets one row. See push-evaluations.
+    const dedupe = squash(`NOT EXISTS ( SELECT 1 FROM game_evaluations ge
+      WHERE ge.game_id = gi.game_id )`)
+    expect(CRON).toContain(dedupe)
+    expect(PREVIEW).toContain(dedupe)
+    expect(CRON).not.toContain('ge.category_group = ${category}')
+    expect(PREVIEW).not.toContain('ge.category_group = ${bucket}')
+  })
+
+  it('does not count a game under a later genre that an earlier one takes this run', () => {
+    // The run walks BUCKETS in order and the first genre to push a game keeps it.
+    expect(PREVIEW).toContain('BUCKETS.slice(0, i)')
+    expect(PREVIEW).toContain('AND NOT ${claimedBy(b)}')
+    // Never an array of fragments: an empty one renders as broken SQL.
+    expect(PREVIEW).not.toContain('${earlier.map(')
+    expect(squash(read('app/api/assign-setup/run/route.ts'))).toContain('BUCKETS.filter(b => asked.includes(b))')
   })
 
   it('orders the crew the way the assign cron does, since the split follows it', () => {

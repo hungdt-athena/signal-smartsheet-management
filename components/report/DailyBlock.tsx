@@ -51,6 +51,21 @@ function dayLabel(iso: string): string {
   if (!y || !m || !d) return iso
   return `${WD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} ${MON[m - 1]} ${y}`
 }
+// The same label split into four fixed-width columns (weekday, day, month, year),
+// for a table where the dates stack: "Sun 20" over "Mon 7" used to jag in and out.
+// The spaces are real text nodes, so the row still reads "Sun 20 Sep 2026".
+function DayCell({ iso }: { iso: string }) {
+  const [y, m, d] = parts(iso)
+  if (!y || !m || !d) return <>{iso}</>
+  return (
+    <span className="rp-dd">
+      <span className="rp-dd-wd">{WD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}</span>{' '}
+      <span className="rp-dd-d">{d}</span>{' '}
+      <span className="rp-dd-m">{MON[m - 1]}</span>{' '}
+      <span className="rp-dd-y">{y}</span>
+    </span>
+  )
+}
 function shortLabel(iso: string): string {
   const [, m, d] = parts(iso)
   return m && d ? `${d}/${m}` : iso
@@ -357,7 +372,7 @@ export function DayBreakdown({ evaluator, windowFrom, windowTo, category }: {
             // table that the reader has to notice is missing.
             return (
               <tr key={d} className={r ? undefined : 'rp-daily-quiet-row'}>
-                <th scope="row">{dayLabel(d)}</th>
+                <th scope="row"><DayCell iso={d} /></th>
                 <td className="num strong">{int(r?.total ?? 0)}</td>
                 <td className="num">{int(r?.idea ?? 0)}</td>
                 <td className="num">{int(r?.pbp ?? 0)}</td>

@@ -35,7 +35,7 @@ export async function PUT(req: NextRequest) {
     const weights = {} as Record<AxisName, number>
     for (const a of ALL_ROUNDER_AXES) weights[a] = Number(body?.weights?.[a])
     const cfg: ReportConfig = parseReportConfig(JSON.stringify({
-      excluded: body?.excluded, weights, credibility: body?.credibility,
+      excluded: body?.excluded, weights, credibility: body?.credibility, rules: body?.rules, palette: body?.palette,
     }))
     await saveReportConfig(cfg)
     return NextResponse.json({ ok: true, config: cfg })

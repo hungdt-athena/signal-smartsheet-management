@@ -21,6 +21,10 @@ interface Props {
   existing: ExistingTrendTag[]
   /** Active Trends values; the only values that may be picked. */
   options: string[]
+  /** Category groups each trend is defined for (`/api/trends/options`) and this
+   *  game's category group: pickers open on that group's trends. */
+  categoryGroups?: Record<string, string[]>
+  categoryGroup?: string | null
   subValues: { id: number; name: string }[]
   onChange: (next: TrendTag[]) => void
   disabled?: boolean
@@ -65,7 +69,7 @@ const CHIP_SUB: React.CSSProperties = { fontSize: 10.5, color: 'var(--faint)', f
 // opens the editor. Proposals only — nothing here reaches Signal Sense until an
 // admin confirms in Evaluations > Tagging.
 export function TrendTagsField({
-  gameId, value, existing, options, subValues, onChange, disabled,
+  gameId, value, existing, options, categoryGroups, categoryGroup, subValues, onChange, disabled,
   optionsError, onRetryOptions, loadError, onRetryLoad,
   review, canReview, onReviewed, onExistingChanged,
 }: Props) {
@@ -101,6 +105,8 @@ export function TrendTagsField({
           <TrendTagReview
             tags={review ?? []}
             options={options}
+            categoryGroups={categoryGroups}
+            categoryGroup={categoryGroup}
             subValues={subValues}
             optionsError={optionsError}
             onReviewed={c => onReviewed?.(c)}
@@ -155,6 +161,8 @@ export function TrendTagsField({
           canEditExisting={!!canReview}
           onExistingChanged={onExistingChanged}
           options={options}
+          categoryGroups={categoryGroups}
+          categoryGroup={categoryGroup}
           subValues={subValues}
           optionsError={optionsError}
           onRetryOptions={onRetryOptions}

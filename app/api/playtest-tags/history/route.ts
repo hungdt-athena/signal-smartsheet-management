@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { TRENDS_FIELD, SYNC_USER } from '@/lib/playtest-tags'
+import { gameCategoryGroupFilter, parseCategoryGroupParam } from '@/lib/playtest-tags-queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +28,12 @@ export async function GET(req: NextRequest) {
   const tagger = (sp.get('tagger') || '').trim()
   const from = (sp.get('from') || '').trim()
   const to = (sp.get('to') || '').trim()
+  const g = parseCategoryGroupParam(sp.get('category_group'))
+  if (!g.ok) return NextResponse.json({ error: 'Unknown category group' }, { status: 400 })
 
+  // The game's category group, as on the Pending queue -- one fragment for rows
+  // and total.
+  const categoryGroupFilter = gameCategoryGroupFilter(g.categoryGroup)
   const taggerFilter = tagger ? sql`AND pt.tagged_by = ${tagger}` : sql``
   // tagged_at is timestamptz and the picker means UTC+7 dates, so each bound is
   // anchored in that zone. A bare `::date` bound is read in the session's
@@ -93,7 +99,7 @@ export async function GET(req: NextRequest) {
         LIMIT 1
       ) subchg ON true
       WHERE pt.status <> 'pending'
-        ${taggerFilter} ${fromFilter} ${toFilter}
+        ${taggerFilter} ${fromFilter} ${toFilter} ${categoryGroupFilter}
       ORDER BY pt.confirmed_at DESC NULLS LAST, pt.id DESC
       LIMIT ${limit} OFFSET ${(page - 1) * limit}
     `,
@@ -101,7 +107,7 @@ export async function GET(req: NextRequest) {
       SELECT count(*)::int AS total
       FROM playtest_tags pt
       WHERE pt.status <> 'pending'
-        ${taggerFilter} ${fromFilter} ${toFilter}
+        ${taggerFilter} ${fromFilter} ${toFilter} ${categoryGroupFilter}
     `,
     // Who the "Proposed by" filter can offer. Deliberately unfiltered: options
     // built from the current range would vanish as the reader narrows the dates,

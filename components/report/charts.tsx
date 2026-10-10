@@ -3,11 +3,20 @@
 // the bundle small and matches the app's existing inline-SVG style. Palette is the
 // dataviz-validated categorical set; conclusion hues reuse the app's badge intent.
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { PALETTES, resolvePalette, type Palette } from '@/lib/report-palette'
 
-// Validated categorical palette (see scripts/validate_palette.js). Assigned in fixed
-// order, never cycled past 8 - a 9th series folds into "Other" upstream.
-export const CAT = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834']
+// The categorical slots of the DEFAULT preset, for code outside the Report (Team Ops
+// panels) that has no palette context. Inside the Report every chart reads the
+// admin's chosen preset through `usePalette()` - see lib/report-palette.ts, where each
+// preset's order was validated. Assigned in fixed order, never cycled past its length.
+export const CAT = PALETTES.standard.slots
+
+// The chosen preset, provided once at the top of the Report. A chart that is given no
+// colour falls back to the preset's slots in order; a tab asks for colours by ROLE
+// (`usePalette().role.evaluated`), so one metric is one colour on every tab.
+export const PaletteContext = createContext<Palette>(resolvePalette('standard'))
+export const usePalette = () => useContext(PaletteContext)
 
 // Semantic colors per conclusion / record bucket. Falls back to the categorical
 // ramp for anything unmapped so new config values still render distinctly.
@@ -20,8 +29,22 @@ const CONCLUSION_COLORS: Record<string, string> = {
   'Stale_release': '#9ca3af',
   '5min': '#2a78d6', '20min': '#eb6834', 'none': '#9ca3af',
 }
-export function conclusionColor(name: string, i = 0): string {
-  return CONCLUSION_COLORS[name] || CAT[i % CAT.length]
+export function conclusionColor(name: string, i = 0, slots: string[] = CAT): string {
+  return CONCLUSION_COLORS[name] || slots[i % slots.length]
+}
+
+// White or ink for a label set INSIDE a coloured fill, by the fill's luminance (the one
+// place text may sit on a data colour - dataviz marks rule). WCAG relative luminance;
+// above 0.4 white falls under 3:1, so the label goes dark.
+export function inkOn(fill: string): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(fill.trim())
+  if (!m) return '#ffffff'
+  const lin = [0, 2, 4].map((i) => {
+    const c = parseInt(m[1].slice(i, i + 2), 16) / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  const L = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+  return L > 0.4 ? '#1a1c22' : '#ffffff'
 }
 
 export const fmt = {
@@ -40,6 +63,22 @@ export const fmt = {
 // Axis scale with round gridline values: pick a 1/2/2.5/5 x 10^k step so ticks land
 // on numbers a human reads at a glance (0 · 250 · 500 …) instead of fractions of the
 // raw maximum (0 · 6.7% · 13.3% …).
+// The tightest round axis that still holds `rawMax`, trying 3 to 6 ticks. `niceScale`
+// at a fixed four ticks rounds 12.3% up to 20%, so a quarter of the plot was empty
+// space above the highest point. A step with a 2.5 in it is skipped: its ticks print
+// as "2.5%, 7.5%", which a rounded tick formatter turns into "3%, 8%".
+export function fitScale(rawMax: number, headroom = 1.06): { max: number; ticks: number[] } {
+  let best: { max: number; ticks: number[] } | null = null
+  for (let n = 3; n <= 6; n++) {
+    const s = niceScale(rawMax * headroom, n)
+    const step = s.ticks[1] - s.ticks[0]
+    const lead = step / Math.pow(10, Math.floor(Math.log10(step)))
+    if (Math.abs(lead - Math.round(lead)) > 1e-9) continue
+    if (!best || s.max < best.max - 1e-9) best = s
+  }
+  return best || niceScale(rawMax, 4)
+}
+
 export function niceScale(rawMax: number, tickCount = 4): { max: number; ticks: number[] } {
   if (!isFinite(rawMax) || rawMax <= 0) return { max: 1, ticks: [0, 1] }
   const raw = rawMax / tickCount
@@ -129,16 +168,24 @@ export function Kpi({ label, value, sub, trend, trendLabel, hi, spark, sparkNote
       <div className="rp-kpi-label">{label}{tip && <InfoTip title={label}>{tip}</InfoTip>}</div>
       <div className="rp-kpi-main">
         <div className="rp-kpi-value">{value}</div>
-        {spark && spark.length >= 2 && <Sparkline data={spark} color={col} title={sparkNote} />}
+        {/* The unit sits directly under its line, not on a row of its own where it
+            floated between the sub-line and the team line. */}
+        {spark && spark.length >= 2 && (
+          <div className="rp-kpi-spark">
+            <Sparkline data={spark} color={col} title={sparkNote} />
+            {sparkNote && <span className="rp-kpi-sparknote">{sparkNote}</span>}
+          </div>
+        )}
       </div>
       <div className="rp-kpi-sub">
         {sub}
-        {sparkNote && spark && spark.length >= 2 && <span className="rp-kpi-sparknote">{sparkNote}</span>}
         {/* No label, no badge - see `trendLabel` above. */}
         {trendLabel && (trend != null
           ? <span className={'rp-trend ' + tclass}>{fmt.signed(trend)} <i>{trendLabel}</i></span>
           : autoTrend != null && at ? <span className={'rp-trend ' + at}>{fmt.signed(autoTrend)} <i>{trendLabel}</i></span> : null)}
       </div>
+      {/* Pinned to the bottom of the tile (margin-top: auto), so across a row of tiles
+          with one- and two-line sub-lines the team lines still sit on one level. */}
       {bench && (
         <div className="rp-kpi-bench">
           <span>{bench.text}</span>
@@ -150,12 +197,14 @@ export function Kpi({ label, value, sub, trend, trendLabel, hi, spark, sparkNote
 }
 
 // ---------- sparkline (tiny inline trend, area-filled) ----------
-export function Sparkline({ data, color = CAT[0], w = 76, h = 30, title }: {
+export function Sparkline({ data, color: colorIn, w = 76, h = 30, title }: {
   data: number[]; color?: string; w?: number; h?: number
   // What the line plots. Rendered as <title>, so it is both the hover text and what a
   // screen reader gets instead of an unnamed shape.
   title?: string
 }) {
+  const P = usePalette()
+  const color = colorIn ?? P.slots[0]
   const uid = useId().replace(/:/g, '')
   if (data.length < 2) return null
   const max = Math.max(...data), min = Math.min(...data)
@@ -190,13 +239,28 @@ export function LineChart({ series, area = false, format }: {
   series: Array<{ name: string; color?: string; dashed?: boolean; area?: boolean; points: Array<{ label: string; value: number }> }>
   area?: boolean; format?: (v: number) => string
 }) {
+  const P = usePalette()
   const [hover, setHover] = useState<number | null>(null)
   const uid = useId().replace(/:/g, '')
+  // Drawn in real pixels once the box is measured, so an 11px axis label is 11px in a
+  // half-width card too - a fixed 1000-unit viewBox shrank it to about 5px there. jsdom
+  // reports 0 and keeps the 1000-unit box the tests read.
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [boxW, setBoxW] = useState(0)
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setBoxW(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   const n = series[0]?.points.length || 0
   if (n === 0) return <Empty />
   const f = format || fmt.int
-  const left = niceScale(Math.max(1, ...series.flatMap((s) => s.points.map((p) => p.value))))
-  const VW = 1000, padL = 48, padR = 16, padT = 18, xLabH = 26, mainH = 214
+  // Fitted, not just rounded up: a rate that peaks at 10% gets a 12% top, not 20%, so
+  // half the plot is not empty air above the lines.
+  const left = fitScale(Math.max(1, ...series.flatMap((s) => s.points.map((p) => p.value))))
+  const VW = boxW > 0 ? Math.max(260, boxW) : 1000, padL = 48, padR = 16, padT = 18, xLabH = 26, mainH = 214
   const innerW = VW - padL - padR
   const mainTop = padT, mainBot = padT + mainH
   const VH = mainBot + xLabH
@@ -226,7 +290,7 @@ export function LineChart({ series, area = false, format }: {
   const anchorAt = (i: number): 'start' | 'end' | 'middle' => (i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle')
 
   return (
-    <div className="rp-chart-wrap">
+    <div className="rp-chart-wrap" ref={wrapRef}>
       <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg" preserveAspectRatio="xMidYMid meet"
         onMouseLeave={() => setHover(null)}>
         {left.ticks.map((tv) => (
@@ -237,7 +301,7 @@ export function LineChart({ series, area = false, format }: {
         ))}
         {series.map((s, si) => {
           if (!(s.area ?? area)) return null
-          const color = s.color || CAT[si % CAT.length]
+          const color = s.color || P.slots[si % P.slots.length]
           const gid = `lg-${uid}-${si}`
           const path = s.points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ')
           const fill = `${path} L${x(n - 1).toFixed(1)} ${mainBot} L${x(0).toFixed(1)} ${mainBot} Z`
@@ -254,7 +318,7 @@ export function LineChart({ series, area = false, format }: {
           )
         })}
         {series.map((s, si) => {
-          const color = s.color || CAT[si % CAT.length]
+          const color = s.color || P.slots[si % P.slots.length]
           const path = s.points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ')
           return (
             <g key={s.name}>
@@ -284,13 +348,13 @@ export function LineChart({ series, area = false, format }: {
       </svg>
       {hover != null && (
         <ChartTip label={labels[hover]} left={(x(hover) / VW) * 100}
-          rows={series.map((s, si) => ({ name: s.name, color: s.color || CAT[si % CAT.length], value: f(s.points[hover].value), raw: s.points[hover].value }))} />
+          rows={series.map((s, si) => ({ name: s.name, color: s.color || P.slots[si % P.slots.length], value: f(s.points[hover].value), raw: s.points[hover].value }))} />
       )}
       {series.length > 1 && (
         <div className="rp-legend rp-legend-horiz" style={{ marginTop: 6, marginBottom: 0 }}>
           {series.map((s, si) => (
             <div className="rp-legend-row" key={s.name}>
-              <span className="rp-dot" style={{ background: s.color || CAT[si % CAT.length] }} />
+              <span className="rp-dot" style={{ background: s.color || P.slots[si % P.slots.length] }} />
               <span className="rp-legend-name">{s.name}</span>
             </div>
           ))}
@@ -356,6 +420,7 @@ export function Scatter({ points, xLabel, yLabel, xFormat, yFormat, sizeLabel, a
   // Names to draw heavier - the points the caller's own threshold picked out.
   emphasis?: Array<{ name: string; tone: 'high' | 'low' }>
 }) {
+  const P = usePalette()
   const [hover, setHover] = useState<number | null>(null)
   // the hovered bubble's own viewport rect, so the tooltip can be placed beside it
   const [at, setAt] = useState<DOMRect | null>(null)
@@ -363,7 +428,7 @@ export function Scatter({ points, xLabel, yLabel, xFormat, yFormat, sizeLabel, a
   const xf = xFormat || fmt.dec, yf = yFormat || fmt.int
   const VW = 680, VH = 432, padL = 64, padB = 46, padT = 22, padR = 20
   const innerW = VW - padL - padR, innerH = VH - padB - padT
-  const sx = niceScale(Math.max(...points.map((p) => p.x)), 4)
+  const sx = fitScale(Math.max(...points.map((p) => p.x)))
 
   // ---- y scale, with a break through an empty middle ----
   // One person at 88% and four under 17% makes three-quarters of the plot a blank
@@ -375,7 +440,7 @@ export function Scatter({ points, xLabel, yLabel, xFormat, yFormat, sizeLabel, a
   // rule broke a perfectly ordinary week between 5% and 12%, where the gap is just how
   // the team is spread out - which is the reading, not something to cut away.
   const ysAll = [...points.map((p) => p.y), ...(avgY != null ? [avgY] : [])].sort((a, b) => a - b)
-  const sTop = niceScale(ysAll[ysAll.length - 1], 4)
+  const sTop = fitScale(ysAll[ysAll.length - 1])
   const step = sTop.ticks.length > 1 ? sTop.ticks[1] - sTop.ticks[0] : sTop.max / 4
   const brk = (() => {
     if (ysAll.length < 4) return null
@@ -498,7 +563,7 @@ export function Scatter({ points, xLabel, yLabel, xFormat, yFormat, sizeLabel, a
         <text x={px(meanX) + 5} y={padT + 9} className="rp-quad-lbl">{avgXLabel || `team avg ${xLabel.toLowerCase()}`}</text>
         <text x={VW - padR} y={py(meanY) - 5} className="rp-quad-lbl" textAnchor="end">{avgYLabel || `team avg ${yLabel.toLowerCase()}`}</text>
         {bySize.map((i) => {
-          const p = points[i], c = p.color || CAT[i % CAT.length], on = hover === i, dim = hover != null && !on
+          const p = points[i], c = p.color || P.slots[i % P.slots.length], on = hover === i, dim = hover != null && !on
           return (
             <g key={p.name} onMouseEnter={(e) => { setHover(i); setAt(e.currentTarget.getBoundingClientRect()) }}
               onMouseLeave={() => { setHover(null); setAt(null) }}>
@@ -534,8 +599,8 @@ export function Scatter({ points, xLabel, yLabel, xFormat, yFormat, sizeLabel, a
           when someone is hovering it. */}
       {hp && at && (
         <FixedTip rect={at} label={hp.name} rows={[
-          { name: xLabel, color: hp.color || CAT[hover! % CAT.length], value: xf(hp.x) },
-          { name: yLabel, color: hp.color || CAT[hover! % CAT.length], value: yf(hp.y) },
+          { name: xLabel, color: hp.color || P.slots[hover! % P.slots.length], value: xf(hp.x) },
+          { name: yLabel, color: hp.color || P.slots[hover! % P.slots.length], value: yf(hp.y) },
           ...(hp.size != null && sizeLabel ? [{ name: sizeLabel, color: 'var(--faint)', value: fmt.dec(hp.size) }] : []),
         ]} />
       )}
@@ -576,6 +641,7 @@ export function BumpChart({ periods, rows, topN = 8 }: {
   rows: Array<{ name: string; cells: Record<string, number> }>
   topN?: number
 }) {
+  const P = usePalette()
   const [hi, setHi] = useState<string | null>(null)
   if (periods.length < 2 || rows.length === 0) return <Empty text="Need at least two periods to rank" />
   // per period, rank people by value (desc). rank 1 = best. missing = no rank that period.
@@ -608,7 +674,7 @@ export function BumpChart({ periods, rows, topN = 8 }: {
           <text key={p.key} x={x(i)} y={VH - 8} className="rp-xlabel">{p.label}</text>
         ))}
         {keep.map((r, ci) => {
-          const color = CAT[ci % CAT.length]
+          const color = P.slots[ci % P.slots.length]
           const dim = hi != null && hi !== r.name
           const seg: string[] = []
           const dots: Array<[number, number]> = []
@@ -643,8 +709,10 @@ export function BumpChart({ periods, rows, topN = 8 }: {
 
 // ---------- vertical column chart over time (volume) ----------
 // Fixed viewBox so labels/bars stay a sensible size regardless of point count.
-export function ColumnChart({ data, color = CAT[0], line, name = 'Games', fill }: {
-  data: Array<{ label: string; value: number; sub?: string }>; color?: string
+export function ColumnChart({ data, color: colorIn, line, name = 'Games', fill }: {
+  // `partial` marks a bucket that is still running (today): drawn faded with a dashed
+  // outline, so a morning's count reads as "so far" and not as a day the team was out.
+  data: Array<{ label: string; value: number; sub?: string; partial?: boolean }>; color?: string
   // optional overlay on its own right-hand axis (e.g. active headcount vs volume)
   line?: { name: string; color?: string; values: number[]; format?: (v: number) => string }
   // What one bar counts, for the tooltip. It said "Games" for every chart, which on a
@@ -655,30 +723,36 @@ export function ColumnChart({ data, color = CAT[0], line, name = 'Games', fill }
   // the chart stranded at the top with dead space under it.
   fill?: boolean
 }) {
+  const P = usePalette()
+  const color = colorIn ?? P.slots[0]
   const [hover, setHover] = useState<number | null>(null)
   // Measured, not assumed: an SVG cannot stretch one axis without distorting its text,
   // so the viewBox height is recomputed from the box the browser actually gave us.
   // jsdom reports 0 and falls through to the default, which is what the tests read.
+  // Width is measured too: this chart usually sits in a narrow card, and a fixed
+  // 700-unit viewBox scaled into 280px shrank every label to about 5px.
   const boxRef = useRef<HTMLDivElement>(null)
   const [boxH, setBoxH] = useState(0)
+  const [boxW, setBoxW] = useState(0)
   useEffect(() => {
     const el = boxRef.current
-    if (!fill || !el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => setBoxH(el.clientHeight))
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => { setBoxW(el.clientWidth); if (fill) setBoxH(el.clientHeight) })
     ro.observe(el)
     return () => ro.disconnect()
   }, [fill])
   if (data.length === 0) return <Empty />
-  const { max, ticks } = niceScale(Math.max(1, ...data.map((d) => d.value)))
-  const lineCol = line?.color || CAT[3]
+  // fitted: 0 / 2 / 4 / ... / 10, never 0 / 3 / 5 / 8 / 10 for a headcount
+  const { max, ticks } = fitScale(Math.max(1, ...data.map((d) => d.value)))
+  const lineCol = line?.color || P.slots[3]
   const lf = line?.format || fmt.int
   const rs = niceScale(Math.max(1, ...(line?.values || [1])))
   // Narrower viewBox than the wide line charts: this one usually sits in a half-width
   // card, and a 1000-unit box shrinks every label past legibility there.
-  const VW = 700, padL = 40, padR = line ? 38 : 10, padB = 28, padT = 22
-  // Scale the measured pixel height into viewBox units so the bars grow but the labels
-  // keep their size relative to the width.
-  const VH = fill && boxH > 0 ? Math.max(200, Math.min(900, (boxH / (boxRef.current?.clientWidth || VW)) * VW)) : 240
+  // Real pixels once the box is measured (1 unit = 1px, so labels keep their CSS size);
+  // 700 units before that and in jsdom, which reports 0.
+  const VW = boxW > 0 ? Math.max(240, boxW) : 700, padL = 40, padR = line ? 38 : 10, padB = 28, padT = 22
+  const VH = fill && boxH > 0 ? Math.max(200, Math.min(900, boxW > 0 ? boxH : (boxH / (boxRef.current?.clientWidth || VW)) * VW)) : 240
   const innerW = VW - padL - padR, innerH = VH - padB - padT
   const slot = innerW / data.length
   const barW = Math.min(44, slot * 0.6)
@@ -708,7 +782,10 @@ export function ColumnChart({ data, color = CAT[0], line, name = 'Games', fill }
             <g key={i} onMouseEnter={() => setHover(i)}>
               <rect x={padL + i * slot} y={padT} width={slot} height={innerH} fill="transparent" />
               <rect x={x} y={y} width={barW} height={Math.max(h, 1)} rx={4}
-                fill={color} opacity={hover == null || hover === i ? 1 : 0.45} />
+                fill={color} fillOpacity={d.partial ? 0.32 : 1}
+                stroke={d.partial ? color : undefined} strokeWidth={d.partial ? 1.4 : undefined}
+                strokeDasharray={d.partial ? '4 3' : undefined}
+                opacity={hover == null || hover === i ? 1 : 0.45} />
               {showVals && <text x={cx} y={y - 6} className="rp-barval">{fmt.int(d.value)}</text>}
               {i % step === 0 && <text x={cx} y={VH - 10} className="rp-xlabel">{d.label}</text>}
             </g>
@@ -760,12 +837,14 @@ export function ColumnChart({ data, color = CAT[0], line, name = 'Games', fill }
 }
 
 // ---------- horizontal ranked bars ----------
-export function RankBars({ rows, unit, color = CAT[0], format }: {
+export function RankBars({ rows, unit, color: colorIn, format }: {
   // `sub` prints the raw numbers behind a derived value (a score or a rate means
   // nothing without the volume it was computed from)
   rows: Array<{ name: string; value: number; sub?: string }>; unit?: string; color?: string
   format?: (v: number) => string
 }) {
+  const P = usePalette()
+  const color = colorIn ?? P.slots[0]
   if (rows.length === 0) return <Empty />
   // Scale to the board's OWN peak so the leader always fills the capsule. The old
   // Math.max(1, …) floor silently broke every rate board: with values like 0.011
@@ -1046,13 +1125,14 @@ export function Heatmap({ periods, rows }: {
   periods: Array<{ key: string; label: string }>
   rows: Array<{ name: string; cells: Record<string, number> }>
 }) {
+  const P = usePalette()
   const [hover, setHover] = useState<{ r: number; c: number } | null>(null)
   if (rows.length === 0 || periods.length === 0) return <Empty />
   const max = Math.max(1, ...rows.flatMap((r) => Object.values(r.cells)))
   const shade = (v: number) => {
     if (!v) return 'var(--surface-2)'
     const t = 0.18 + 0.82 * (v / max)
-    return `color-mix(in srgb, ${CAT[0]} ${Math.round(t * 100)}%, var(--surface))`
+    return `color-mix(in srgb, ${P.role.evaluated} ${Math.round(t * 100)}%, var(--surface))`
   }
   return (
     <div className="rp-heat-scroll">
@@ -1102,7 +1182,19 @@ export function Funnel({ stages }: {
     parts?: Array<{ label: string; value: number; color: string }>
   }>
 }) {
+  const P = usePalette()
   const uid = useId().replace(/:/g, '')
+  // Real pixels once measured, like the line charts: a 660-unit box in a half-width
+  // card printed its stage captions at about 7px.
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [boxW, setBoxW] = useState(0)
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setBoxW(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   if (stages.length === 0 || stages.every((s) => s.value === 0)) return <Empty />
   // width driver = running minimum, so the shape only ever narrows
   const runMin: number[] = []
@@ -1110,7 +1202,7 @@ export function Funnel({ stages }: {
   const peak = Math.max(1, runMin[0])
   // Narrow viewBox: the funnel shares a row with other cards, so a 1000-unit box
   // would shrink its captions to noise in the half-width slot.
-  const VW = 660, bandH = 58, gapH = 30, padT = 6
+  const VW = boxW > 0 ? Math.max(360, boxW) : 660, bandH = 50, gapH = 30, padT = 6
   const VH = padT + stages.length * bandH + (stages.length - 1) * gapH + 6
   // captions are SVG text (no wrapping), so the right gutter is sized for the longest
   // sub-line the component can emit and those lines are kept deliberately short
@@ -1119,10 +1211,12 @@ export function Funnel({ stages }: {
   const halfW = (VW - labelW - valW) / 2
   const wOf = (v: number) => Math.max(3, (v / peak) * halfW * 2) / 2 // half-width, min 3px sliver
   const topY = (i: number) => padT + i * (bandH + gapH)
-  // sequential blue ramp, dark at the wide top → light at the narrow tip
-  const shade = (i: number) => `color-mix(in srgb, ${CAT[0]} ${Math.round(100 - i * 14)}%, #ffffff)`
+  // Each stage in its own metric's colour, the one it has on every other chart:
+  // Evaluated, then Shortlist; a split stage (Final Priority) carries its parts'
+  // conclusion colours. Anything past those falls back to the neutral.
+  const stageColor = (i: number) => [P.role.evaluated, P.role.shortlist][i] || P.role.neutral
   return (
-    <div className="rp-chart-wrap">
+    <div className="rp-chart-wrap" ref={wrapRef}>
       <svg viewBox={`0 0 ${VW} ${VH}`} className="rp-svg rp-funnel-svg" preserveAspectRatio="xMidYMid meet">
         {stages.map((s, i) => {
           const y0 = topY(i), y1 = y0 + bandH
@@ -1150,7 +1244,7 @@ export function Funnel({ stages }: {
                   <path d={path} fill="none" stroke="var(--surface)" strokeWidth={1} />
                 </>
               ) : (
-                <path d={path} fill={shade(i)} />
+                <path d={path} fill={stageColor(i)} />
               )}
               <text x={labelW - 16} y={y0 + bandH / 2 + 5} className="rp-fn-label" textAnchor="end">{s.label}</text>
               <text x={VW - valW + 16} y={y0 + bandH / 2 - 3} className="rp-fn-val" textAnchor="start">{fmt.int(s.value)}</text>
@@ -1158,7 +1252,7 @@ export function Funnel({ stages }: {
                 {parts.length
                   ? parts.map((p) => `${fmt.int(p.value)} ${p.label.replace('Priority ', 'P-')}`).join(' + ')
                   : overflow ? 'incl. older backlog'
-                  : conv != null ? `${Math.round(conv)}% of ${stages[i - 1].label.toLowerCase()}` : 'new intake'}
+                  : conv != null ? `${Math.round(conv)}% of ${stages[i - 1].label.toLowerCase()}` : 'in this window'}
               </text>
               {conv != null && (
                 <text x={cx} y={y0 - gapH / 2 + 5} className="rp-fn-conv" textAnchor="middle">
@@ -1249,7 +1343,8 @@ export function DivergingBars({ rows, leftKeys, rightKeys, colors, leftLabel, ri
   colors?: Record<string, string>
   leftLabel: string; rightLabel: string
 }) {
-  const colorOf = (k: string, i: number) => colors?.[k] || conclusionColor(k, i)
+  const P = usePalette()
+  const colorOf = (k: string, i: number) => colors?.[k] || conclusionColor(k, i, P.slots)
   const [hover, setHover] = useState<string | null>(null)
   const [seg, setSeg] = useState<{ name: string; k: string; v: number; side: string } | null>(null)
   if (rows.length === 0) return <Empty />
@@ -1306,7 +1401,8 @@ export function StackedBars({ rows, keys, colors, unit }: {
   colors?: Record<string, string> // override the conclusion palette (e.g. age bands)
   unit?: string // noun for the hover line, default "their"
 }) {
-  const colorOf = (k: string, i: number) => colors?.[k] || conclusionColor(k, i)
+  const P = usePalette()
+  const colorOf = (k: string, i: number) => colors?.[k] || conclusionColor(k, i, P.slots)
   const [hover, setHover] = useState<string | null>(null)
   const [seg, setSeg] = useState<{ name: string; k: string; v: number; total: number } | null>(null)
   if (rows.length === 0) return <Empty />

@@ -33,6 +33,10 @@ export type ReviewChange =
 interface Props {
   tags: ReviewTag[]
   options: string[]
+  /** Category groups each trend is defined for, and the category group of the game
+   *  these tags belong to: the edit picker opens on that group's trends. */
+  categoryGroups?: Record<string, string[]>
+  categoryGroup?: string | null
   subValues: { id: number; name: string }[]
   /** True when the Trends catalog failed to load: a tag can still be confirmed
    *  or rejected, it just cannot be corrected first. */
@@ -79,7 +83,7 @@ type Open = 'confirm' | 'options' | 'edit'
 // form's save. So the record stays split the way the History view reads it:
 // proposed by the evaluator, reviewed by whoever pressed these buttons, with the
 // original snapshotted the first time an edit moves the tag.
-export function TrendTagReview({ tags, options, subValues, optionsError, onReviewed }: Props) {
+export function TrendTagReview({ tags, options, categoryGroups, categoryGroup, subValues, optionsError, onReviewed }: Props) {
   const [busy, setBusy] = useState<Set<number>>(new Set())
   const [open, setOpen] = useState<Record<number, Open>>({})
   const [notes, setNotes] = useState<Record<number, string>>({})
@@ -223,6 +227,8 @@ export function TrendTagReview({ tags, options, subValues, optionsError, onRevie
                     pending: correcting a tag is not the same as approving it. */}
                 <TrendValuePicker
                   options={options}
+                  categoryGroups={categoryGroups}
+                  categoryGroup={categoryGroup}
                   exclude={new Set(used.filter(v => v !== t.field_value))}
                   label={t.field_value}
                   title="Change the trend value"

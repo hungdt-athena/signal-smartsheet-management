@@ -10,6 +10,8 @@ interface TrendRow {
   last30: number
   lastTaggedAt: string | null
   hasInstruction: boolean
+  /** Category groups the trend is defined for. */
+  categoryGroups: string[]
 }
 
 /** A game carrying the trend, newest tag first. */
@@ -176,8 +178,10 @@ function TrendPanel({ trend, onClose, onOpenGame }: {
 // Every Trends value an evaluator may pick, with how much it is being used.
 // Read-only: definitions belong to Signal Sense, this view only makes them
 // findable — and shows which of them the team is actually tagging.
-export function TrendsCatalog({ onOpenGame }: {
+export function TrendsCatalog({ onOpenGame, categoryGroup = 'all' }: {
   onOpenGame: (gameId: string, list: EvalListItem[]) => void
+  /** The tab's Category group filter: 'all', or one group to narrow the listing to. */
+  categoryGroup?: string
 }) {
   const [trends, setTrends] = useState<TrendRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -199,9 +203,14 @@ export function TrendsCatalog({ onOpenGame }: {
 
   // All ~351 trends arrive at once, so searching and re-sorting stay local —
   // no request between typing a letter and seeing the list narrow.
+  // The category-group filter is local too: each row already says which groups define it.
+  const inCategoryGroup = useMemo(
+    () => (categoryGroup === 'all' ? trends : trends.filter(t => (t.categoryGroups ?? []).includes(categoryGroup))),
+    [trends, categoryGroup],
+  )
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    const rows = needle ? trends.filter(t => t.value.toLowerCase().includes(needle)) : trends.slice()
+    const rows = needle ? inCategoryGroup.filter(t => t.value.toLowerCase().includes(needle)) : inCategoryGroup.slice()
     const byName = (a: TrendRow, b: TrendRow) => a.value.localeCompare(b.value)
     rows.sort((a, b) => {
       switch (sort) {
@@ -212,7 +221,7 @@ export function TrendsCatalog({ onOpenGame }: {
       }
     })
     return rows
-  }, [trends, q, sort])
+  }, [inCategoryGroup, q, sort])
 
   return (
     <div className="card">
@@ -220,7 +229,7 @@ export function TrendsCatalog({ onOpenGame }: {
         <span className="card-label">
           Trends
           <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>
-            {q ? `${shown.length} of ${trends.length}` : trends.length}
+            {q ? `${shown.length} of ${inCategoryGroup.length}` : inCategoryGroup.length}
           </span>
         </span>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
@@ -259,7 +268,7 @@ export function TrendsCatalog({ onOpenGame }: {
           <tbody>
             {!loading && shown.length === 0 && (
               <tr><td colSpan={4} className="empty">
-                {q ? `No trend matches “${q}”.` : 'No trends defined.'}
+                {q ? `No trend matches “${q}”.` : categoryGroup === 'all' ? 'No trends defined.' : `No ${categoryGroup} trends defined yet.`}
               </td></tr>
             )}
             {shown.map(t => (

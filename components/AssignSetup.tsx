@@ -116,7 +116,7 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
       body: JSON.stringify({ bucket, enabled }),
     })
     if (res.ok) { const json = await res.json(); setGenres(json.genres ?? []) }
-    else setError('Could not change that genre.')
+    else setError('Could not change that category group.')
   }, [])
   const addGenre = (list_type: ListType) => (name: string, g: Bucket) =>
     send('POST', { list_type, name, category_groups: [g] }, 'Add failed.')
