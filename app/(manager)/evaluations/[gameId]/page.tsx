@@ -28,6 +28,7 @@ export default function EvalTestView() {
   return (
     <div className="page">
       <EvalDetailPanel
+        logContext="evaluate"
         initialGameId={gameId}
         gameList={gameList}
         role={role}

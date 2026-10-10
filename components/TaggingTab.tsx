@@ -170,6 +170,7 @@ export function TaggingTab() {
           <div className="eval-modal-container" onClick={e => e.stopPropagation()}
             style={{ padding: '20px 24px 24px' }}>
             <EvalDetailPanel
+              logContext="tagging"
               initialGameId={detail.gameId}
               gameList={detail.list}
               role={role}

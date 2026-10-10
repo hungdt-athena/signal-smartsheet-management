@@ -15,6 +15,8 @@ import { TrendTagsField, type TrendTag, type ExistingTrendTag } from './TrendTag
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import QRCode from 'qrcode'
 import { isManagerRole } from '@/lib/roles'
+import { startView, onVisibility, onInput, snapshot, restartAfterSave, type ViewTimer } from '@/lib/view-timer'
+import type { LogContext } from '@/lib/evaluation-log'
 import {
   EMPTY_NOTE_PARTS, NOTE_MIN_LEN, isLegacyNote, missingNoteParts, notePartsFromRow, notePartsRequirementError,
   type NoteParts,
@@ -481,6 +483,9 @@ interface Props {
   /** Show the Final Conclusion card. Only the Short List (moderator triage)
    *  surfaces it; the Evaluate panel and other views hide it. */
   showFinalConclusion?: boolean
+  /** Which screen hosts the panel; stored on each evaluation_log row so panel time can
+   *  be split by screen. Required so a new mount cannot forget it. */
+  logContext: LogContext
   onNavigate?: (gameId: string) => void
   onSaved?: (ev: EvalDetail) => void
   onClose?: () => void
@@ -506,9 +511,38 @@ function useYtbUploads(): Map<string, YtMatch> {
   return map
 }
 
-export default function EvalDetailPanel({ initialGameId, gameList, category, role, userName, readOnly, canAssignRecords, hideRecordSections, showFinalConclusion, onNavigate, onSaved, onClose }: Props) {
+export default function EvalDetailPanel({ initialGameId, gameList, category, role, userName, readOnly, canAssignRecords, hideRecordSections, showFinalConclusion, logContext, onNavigate, onSaved, onClose }: Props) {
   const ytMap = useYtbUploads()
   const [currentGameId, setCurrentGameId] = useState(initialGameId)
+  // How long the current game has been on screen (evaluation_log.view_s). A ref, not
+  // state: it changes on every input and must never re-render the panel.
+  const viewRef = useRef<ViewTimer>(startView(initialGameId, Date.now(), false))
+  const currentGameIdRef = useRef(currentGameId)
+  currentGameIdRef.current = currentGameId
+  // The game whose data the form currently shows (set in applyData). Differs from
+  // currentGameId while the next game is still loading.
+  const shownGameRef = useRef<string | null>(null)
+  useEffect(() => {
+    viewRef.current = startView(currentGameId, Date.now(), document.hidden)
+  }, [currentGameId])
+  useEffect(() => {
+    const onVis = () => { viewRef.current = onVisibility(viewRef.current, document.hidden, Date.now()) }
+    const onAny = () => { viewRef.current = onInput(viewRef.current, Date.now()) }
+    let lastMove = 0
+    const onMove = () => { const n = Date.now(); if (n - lastMove < 1000) return; lastMove = n; onAny() }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pointerdown', onAny)
+    window.addEventListener('keydown', onAny)
+    window.addEventListener('wheel', onAny, { passive: true })
+    window.addEventListener('pointermove', onMove, { passive: true })
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pointerdown', onAny)
+      window.removeEventListener('keydown', onAny)
+      window.removeEventListener('wheel', onAny)
+      window.removeEventListener('pointermove', onMove)
+    }
+  }, [])
   const [ev, setEv] = useState<EvalDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -610,6 +644,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   }, [])
 
   const applyData = useCallback((data: EvalDetail) => {
+    shownGameRef.current = data.game_id
     setEv(data)
     setNoteParts(notePartsFromRow(data))
     setFinalNote(data.final_note || '')
@@ -903,6 +938,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
 
   const save = async () => {
     if (!ev || !canEdit) return
+    // Taken now, before any await: Prev/Next stay enabled while the screenshot flush
+    // and tag PUT run, so by PATCH time the timer may belong to the next game.
+    const snap = snapshot(viewRef.current, ev.game_id, Date.now())
     if (noteError) {
       showToast(noteError, true)
       return
@@ -963,6 +1001,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       if (canEdit20 && drive20 && drive20 !== ev.record_20min_drive) body.record_20min_drive = drive20
       if (canEditAssignee && rec5Assignee && rec5Assignee !== (ev.record_5min_assignee || '')) body.record_5min_assignee = rec5Assignee
       if (canEditAssignee && rec20Assignee && rec20Assignee !== (ev.record_20min_assignee || '')) body.record_20min_assignee = rec20Assignee
+      if (snap) Object.assign(body, { view_s: snap.view_s, hidden_s: snap.hidden_s, idle_s: snap.idle_s, context: logContext })
       const res = await fetch('/api/evaluations', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -976,10 +1015,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
         // a screenshot outage can never make an evaluator think their note was lost.
         if (shotsOk) showToast('Saved')
         else showToast('Evaluation saved — screenshots failed to upload', true)
+        if (snap) viewRef.current = restartAfterSave(viewRef.current, snap, document.hidden)
         const fresh = await fetchEvalByGameId(ev.game_id, category)
         if (fresh) {
           cacheRef.current.set(ev.game_id, fresh)
-          applyData(fresh)
+          // The user may have pressed Next while this save was in flight; painting the
+          // saved game now would put its data under the new game's id.
+          if (currentGameIdRef.current === ev.game_id) applyData(fresh)
+          // Old game still on screen and already saved: clear dirty so auto-save does not fire again.
+          else if (shownGameRef.current === ev.game_id) setDirty(false)
           onSaved?.(fresh)
         }
       }
@@ -1001,13 +1045,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       const fresh = await fetchEvalByGameId(ev.game_id, category)
       if (fresh) {
         cacheRef.current.set(ev.game_id, fresh)
-        applyData(fresh)
+        if (currentGameIdRef.current === ev.game_id) applyData(fresh)
         onSaved?.(fresh)
       }
     } catch { showToast('Network error', true) }
   }
 
-  // Auto-save: when enabled, persist edits ~800ms after the user stops changing
+  // Auto-save: when enabled, persist edits ~1.5s after the user stops changing
   // fields. A ref keeps the effect pointed at the latest save() closure without
   // re-arming the timer on every render. Switching games / unmounting clears the
   // pending timer (applyData resets dirty=false, so a stale save can't fire).

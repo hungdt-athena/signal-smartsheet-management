@@ -906,6 +906,7 @@ function ShortListEvalTab() {
           <div className="eval-modal-container" onClick={e => e.stopPropagation()}
             style={{ padding: '20px 24px 24px' }}>
             <EvalDetailPanel
+              logContext="shortlist"
               initialGameId={detailGameId}
               gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
               category={filterCategory}
@@ -1540,6 +1541,7 @@ function EvaluationsPageInner() {
           <div className="eval-modal-container" onClick={e => e.stopPropagation()}
             style={{ padding: '20px 24px 24px' }}>
             <EvalDetailPanel
+              logContext="evaluate"
               initialGameId={detailGameId}
               gameList={detailList}
               category={category}

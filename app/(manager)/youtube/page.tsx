@@ -1895,6 +1895,7 @@ function RecordTab() {
           <div className="eval-modal-container" onClick={e => e.stopPropagation()}
             style={{ padding: '20px 24px 24px' }}>
             <EvalDetailPanel
+              logContext="record"
               initialGameId={detailGameId}
               gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
               category={filterCategory}
