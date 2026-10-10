@@ -46,7 +46,7 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
   const now = Date.now()
   const oldForward = batch ? selected.filter(s =>
     !!s.evaluate_date && now - Date.parse(s.evaluate_date) > OLD_EVALUATION_DAYS * 86_400_000 &&
-    !!s.batch && weekLabelOrder(s.batch) < weekLabelOrder(batch)).length : 0
+    (!s.batch || weekLabelOrder(s.batch) < weekLabelOrder(batch))).length : 0
 
   async function confirm() {
     setBusy(true)
@@ -54,11 +54,11 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
     const res = await moveBatch(selected.map(s => s.id), batch)
     setBusy(false)
     if (!res.ok) { setError(`Couldn't move: ${res.error}`); return }
-    // Nothing moved (the games are gone or the answer was unreadable): closing quietly
-    // would look like success.
+    // Nothing moved (the games are gone): closing quietly would look like success. A null
+    // count is a 2xx whose body could not be read: the move happened, only the number is unknown.
     if (res.moved === 0) { setError(MSG_NOTHING_MOVED); return }
     setConfirming(false)
-    onMovedRef.current(res.moved)
+    onMovedRef.current(res.moved ?? 0)
   }
 
   return (

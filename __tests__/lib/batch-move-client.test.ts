@@ -1,5 +1,7 @@
 import { moveBatch, MAX_MOVE } from '@/lib/batch-move-client'
 
+const TIMED_OUT = 'Timed out. The move may have gone through. Reload the list to check.'
+
 const respond = (over: Partial<Response> & { json?: () => Promise<unknown> }) =>
   (global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({}), ...over }) as Response) as unknown as typeof fetch)
 
@@ -21,14 +23,32 @@ describe('moveBatch', () => {
       expect(await moveBatch([1], 'W2 Oct, 2026')).toEqual({ ok: true, moved: 0 })
     })
 
-  it('an ok response whose body does not parse is a move of 0, not a network error', async () => {
+  // A 2xx means the UPDATE committed. A body that cannot be read says nothing about HOW MANY
+  // moved, so the count is unknown (null), never 0: 0 would read as "nothing was moved".
+  it('a 2xx whose body does not parse is a success with an unknown count, not 0 and not a network error', async () => {
     respond({ json: async () => { throw new SyntaxError('bad json') } })
-    expect(await moveBatch([1], 'W2 Oct, 2026')).toEqual({ ok: true, moved: 0 })
+    expect(await moveBatch([1], 'W2 Oct, 2026')).toEqual({ ok: true, moved: null })
   })
 
-  it('a body that is JSON null is also a move of 0', async () => {
+  it('a 2xx whose body is JSON null or not an object has an unknown count too', async () => {
     respond({ json: async () => null })
-    expect(await moveBatch([1], 'W2 Oct, 2026')).toEqual({ ok: true, moved: 0 })
+    expect(await moveBatch([1], 'W2 Oct, 2026')).toEqual({ ok: true, moved: null })
+    respond({ json: async () => 'moved' })
+    expect(await moveBatch([1], 'W2 Oct, 2026')).toEqual({ ok: true, moved: null })
+  })
+
+  it('a 2xx whose body read is cut short by the 30 s timer has an unknown count, and the timer is cleared', async () => {
+    jest.useFakeTimers()
+    global.fetch = jest.fn(async (_u: RequestInfo | URL, init?: RequestInit) => ({
+      ok: true,
+      json: () => new Promise((_res, rej) => {
+        init?.signal?.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError')))
+      }),
+    }) as Response) as unknown as typeof fetch
+    const p = moveBatch([1], 'W2 Oct, 2026')
+    await jest.advanceTimersByTimeAsync(30_001)
+    expect(await p).toEqual({ ok: true, moved: null })
+    expect(jest.getTimerCount()).toBe(0)
   })
 
   it('returns the server error text, or a generic one when the body is unreadable', async () => {
@@ -55,7 +75,7 @@ describe('moveBatch', () => {
     await Promise.resolve()
     expect(settled).toBe(false)
     await jest.advanceTimersByTimeAsync(2)
-    expect(await p).toEqual({ ok: false, error: 'Timed out' })
+    expect(await p).toEqual({ ok: false, error: TIMED_OUT })
   })
 
   it('does not leave a timer behind after a normal answer', async () => {

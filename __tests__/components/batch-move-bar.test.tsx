@@ -157,6 +157,36 @@ describe('BatchMoveBar', () => {
     await waitFor(() => expect(onMoved).toHaveBeenCalledWith(1))
   })
 
+  it('treats a 2xx with an unreadable count as success: the UPDATE committed, so no "No games were moved"', async () => {
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => { throw new SyntaxError('bad json') } }) as unknown as Response) as unknown as typeof fetch
+    const { onMoved } = mount()
+    pick('W2 Oct, 2026')
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    await waitFor(() => expect(onMoved).toHaveBeenCalledWith(0))
+    expect(screen.queryByText(/No games were moved/)).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('a timeout tells the manager the move may have gone through and to reload', async () => {
+    jest.useFakeTimers()
+    try {
+      global.fetch = jest.fn((_u: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_res, rej) => {
+        init?.signal?.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError')))
+      })) as unknown as typeof fetch
+      const { onMoved } = mount()
+      pick('W2 Oct, 2026')
+      fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+      await act(async () => { await jest.advanceTimersByTimeAsync(30_001) })
+      expect(screen.getByRole('dialog')).toHaveTextContent(
+        "Couldn't move: Timed out. The move may have gone through. Reload the list to check.")
+      expect(onMoved).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   describe('guard rails', () => {
     const many = (n: number) => Array.from({ length: n }, (_, i) => ({ ...plain, id: i + 1 }))
 
@@ -256,9 +286,25 @@ describe('BatchMoveBar', () => {
       expect(screen.getByRole('dialog')).not.toHaveTextContent(/8 days/)
     })
 
-    it('says nothing for a game with no evaluate_date or no batch', () => {
-      open([{ ...plain, batch: 'W4 Sep, 2026', evaluate_date: null }, { ...plain, id: 2, batch: null, evaluate_date: at(30) }])
+    it('says nothing for a game with no evaluate_date, or an unreadable one', () => {
+      open([{ ...plain, batch: 'W4 Sep, 2026', evaluate_date: null }, { ...plain, id: 2, batch: null, evaluate_date: null },
+        { ...plain, id: 3, batch: 'W4 Sep, 2026', evaluate_date: 'not a date' }])
       expect(screen.getByRole('dialog')).not.toHaveTextContent(/8 days/)
+    })
+
+    // A game with no batch also stretches the target batch's start date once it joins it.
+    it('counts an old game that has no batch yet', () => {
+      open([{ ...plain, batch: null, evaluate_date: at(30) }, { ...plain, id: 2, batch: null, evaluate_date: at(1) }])
+      expect(screen.getByRole('dialog')).toHaveTextContent(/1 of them was evaluated more than 8 days ago\./)
+    })
+
+    it('counts old games with no batch together with old games from an earlier batch', () => {
+      open([
+        { ...plain, id: 1, batch: null, evaluate_date: at(30) },
+        { ...plain, id: 2, batch: 'W4 Sep, 2026', evaluate_date: at(20) },
+        { ...plain, id: 3, batch: 'W3 Oct, 2026', evaluate_date: at(20) },
+      ])
+      expect(screen.getByRole('dialog')).toHaveTextContent(/2 of them were evaluated more than 8 days ago\./)
     })
   })
 })
