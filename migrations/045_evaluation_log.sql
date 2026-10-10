@@ -7,7 +7,8 @@
 
 CREATE TABLE IF NOT EXISTS evaluation_log (
   id                 BIGSERIAL PRIMARY KEY,
-  game_evaluation_id INT NOT NULL REFERENCES game_evaluations(id) ON DELETE CASCADE,
+  -- SET NULL, not CASCADE: an append-only time log must survive row cleanups; game_id still names the game
+  game_evaluation_id INT REFERENCES game_evaluations(id) ON DELETE SET NULL,
   game_id            TEXT NOT NULL,
   actor              TEXT,          -- session user name; NULL for seed rows and SKIP_AUTH
   actor_role         TEXT,          -- admin | moderator | evaluator (audit only)

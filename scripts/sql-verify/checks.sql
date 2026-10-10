@@ -47,4 +47,15 @@ DO $$ BEGIN
   ASSERT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 20 AND source = 'seed'), 'c1 seeded (before cutover)';
   ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 21 AND source = 'seed'), 'c2 skipped (after cutover)';
 END $$;
+-- Deleting a game_evaluations row (duplicate-row cleanups do this) keeps its log row.
+INSERT INTO game_info VALUES ('d1');
+INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion, evaluate_date) VALUES
+  (22, 'd1', 'Alice', 'Bypass', '2026-10-09 09:00+07');
+INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, context, kind, view_s)
+  VALUES (22, 'd1', 'Alice', 'panel', 'evaluate', 'first', 30);
+DELETE FROM game_evaluations WHERE id = 22;
+DO $$ BEGIN
+  ASSERT EXISTS (SELECT 1 FROM evaluation_log WHERE game_id = 'd1' AND game_evaluation_id IS NULL),
+    'log row survives deleting its game_evaluations row, with NULL id and game_id intact';
+END $$;
 DELETE FROM evaluation_log;   -- clean slate for later sections
