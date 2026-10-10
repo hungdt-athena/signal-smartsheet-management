@@ -34,11 +34,21 @@ single game's batch is edited in `EvalDetailPanel`.
   newest value (by `weekLabelOrder`) among legacy `current_batch:%` keys. Code that ships
   before the migration therefore never reports "no active batch" for the whole system.
   Once the migration has run, the fallback is dead code and can be deleted in a later commit.
+- Every value read is trimmed, and a whitespace-only value counts as empty (a blank global
+  row is "none"; a blank legacy row is ignored).
 
 ### Setting it
 
 - `POST /api/evaluations/current-batch` takes `{ batch }` only (manager-only, as today).
   `GET` takes no `category`. Both read/write the single `current_batch` key.
+  - The body must be a JSON object with a `batch` key, else 400 (so `{}`, `[]`, `null`,
+    `{ category: 'arcade' }` or invalid JSON can never clear the batch for everyone).
+  - `batch` is `null` or an empty/whitespace string (clear: stored NULL), or a string whose
+    trimmed value is a canonical label: `W1`-`W4`, three-letter English month, 4-digit year,
+    e.g. `W2 Oct, 2026` (`isBatchLabel` in `lib/weekly-feedback.ts`, the shape `weekBatches`
+    generates). Anything else is 400 with `{ error }`. The trimmed value is stored. This also
+    keeps the value inside the `varchar(40)` column that every List_Idea save stamps it into.
+  - Response stays `{ current_batch: string | null }`.
 - The "Current batch" select in the Short List header (`app/(manager)/evaluations/page.tsx`)
   now sets the global value. Its options stay: this month's and next month's weeks via
   `weekBatches` (`components/EvalDetailPanel.tsx`), plus the current value if outside them.
@@ -62,9 +72,20 @@ single game's batch is edited in `EvalDetailPanel`.
 
 `migrations/045_global_current_batch.sql`, applied by hand like earlier migrations:
 
+One transaction (`BEGIN` ... `COMMIT`), so a failing statement changes nothing.
+
 1. If `current_batch` does not exist, insert it with the newest legacy value by week order
-   (today: `W2 Oct, 2026` from puzzle; arcade is `W1 Oct, 2026`).
-2. Delete the `current_batch:%` rows.
+   (today: `W2 Oct, 2026` from puzzle; arcade is `W1 Oct, 2026`). Legacy values are matched
+   as tolerantly as `weekLabelOrder`: trimmed, case-insensitive, any whitespace, a week of
+   1 to 3 digits, the month by its first three letters (`Sept` and `October` work). Values
+   with an unknown month are skipped; ties are broken by the smaller text, so the result
+   does not depend on row order. The trimmed label is stored.
+2. Delete the `current_batch:%` rows ONLY when a `current_batch` row exists afterwards. A
+   database whose legacy values are all unreadable keeps them, and the code keeps falling
+   back to them, instead of ending up with no batch.
+
+Rollback: the upsert in the migration header (`ON CONFLICT (key) DO UPDATE`), which also
+works when a legacy key is still present.
 
 Prod on 2026-10-08 already had both `current_batch:puzzle` and `current_batch:arcade` at `W2 Oct, 2026`, so the migration changes no visible value.
 
@@ -84,7 +105,16 @@ Prod on 2026-10-08 already had both `current_batch:puzzle` and `current_batch:ar
 
 Shown only while at least one game is selected, fixed to the bottom of the table area:
 `N selected · Move to [batch select] · Move · Cancel`. The batch select offers the same
-options as the Current batch select. Move stays disabled until a batch is chosen.
+options as the Current batch select, plus every batch that already has games. Move stays
+disabled until a batch is chosen, and also when:
+
+- more than 500 games are selected (`MAX_MOVE` in `lib/batch-move-client.ts`): the bar says
+  "You can move at most 500 games at a time. Select fewer.";
+- every selected game is already in the chosen batch: "They are already in this batch.".
+
+The bar shows only while a selected game is still in the loaded rows; the list sent is the
+selected ids that are still on screen. Select mode is gated by the manager role: if the role
+drops, the mode and selection reset.
 
 ### Confirmation
 
@@ -93,13 +123,30 @@ final conclusion the dialog adds "K of them already have a final conclusion and 
 too", because batch is also the week shown in the Record tab. No skip option: ticking a
 locked game means the manager wants it moved.
 
+Two more notes appear only when they apply:
+
+- Report window: if K selected games were evaluated more than 8 days ago AND sit in an older
+  batch than the target, the dialog says "K of them were evaluated more than 8 days ago.
+  Moving them to a newer batch can change the date range the Report uses for that batch."
+  (`lib/report-batches.ts` derives each batch's window from its earliest `evaluate_date`.)
+  Moving games judged in the new week out of last week's batch is the intended use and does
+  not trigger it.
+- A move that answers `moved: 0` (or an unreadable body) keeps the dialog open with "No games
+  were moved. Reload the list and try again."; `0 < moved < N` counts as success. Confirm is
+  disabled with nothing selected or above 500 games. The request gives up after 30 seconds
+  ("Timed out"). The reload after a move uses the filter that is current when the move ends.
+
 ### API
 
 `POST /api/evaluations/batch-move` with `{ ids: number[], batch: string }`.
 
 - Auth: admin or moderator only (`requireManager`). Others get 403.
-- Validation: `ids` is a non-empty array of integers, de-duplicated, at most 500 (the Short
-  List page size); `batch` is a non-empty string. Violations return 400 with a plain message.
+- Validation: `ids` is a non-empty array of integers from 1 to 2147483647 (`game_evaluations.id`
+  is int4), de-duplicated, at most 500 (the Short List page size; the route keeps its own
+  constant, the UI uses `MAX_MOVE`). `batch`, after trimming, is non-empty, at most 40 characters
+  and free of control characters (`U+0000`-`U+001F`, `U+007F`). The label shape is NOT required
+  here: stored data may use older shapes. Violations return 400 with a plain message and never
+  reach the database.
 - Effect: one statement,
   `UPDATE game_evaluations SET batch = $batch, updated_by = $actor, updated_at = NOW() WHERE id = ANY($ids)`.
   No filter on conclusion or final conclusion. Only the listed ids can change.
@@ -115,10 +162,11 @@ Written first, watched failing:
   nothing is set. The missing-demo route filters in SQL (`ge.batch = $current`), so no
   row-filtering helper exists to test.
 - `POST /api/evaluations/current-batch`: writes the single key, ignores any `category`, 403 for
-  non-managers.
+  non-managers; a table of bad bodies is 400 with no write; null / empty / whitespace clear it;
+  a padded label is stored trimmed.
 - Each reader in the table above: uses the global value (facets, list, `[gameId]`, missing-demo).
 - `POST /api/evaluations/batch-move`: 403 for evaluator, 400 for empty/oversized/non-integer
-  ids and blank batch, updates a game that has a final conclusion, never touches an id that was
+  ids, ids above int4, blank or control-character batch, updates a game that has a final conclusion, never touches an id that was
   not sent, returns the moved count, stamps `updated_by`.
 - Short List component: Select toggles the checkbox column; action bar appears only with a
   selection; filter change clears the selection; confirm dialog counts locked games; a checkbox
@@ -131,6 +179,9 @@ isolated dist dir (lint errors block Replit publish). The 9 suites already faili
 not part of this work and must be reported unchanged.
 
 ## Rollout
+
+Known and accepted: demo links are stored as typed (any string), so a `javascript:` or `data:`
+link is kept verbatim. That is a product decision, not part of this work.
 
 The order matters: the code now running on prod reads only the per-category keys
 `current_batch:<category>`, and migration 045 deletes them. Applying 045 before the new build
