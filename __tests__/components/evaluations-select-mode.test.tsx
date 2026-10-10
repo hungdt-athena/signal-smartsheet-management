@@ -8,10 +8,15 @@ class NoopObserver {
 global.IntersectionObserver = NoopObserver as unknown as typeof IntersectionObserver
 
 let mockRole = 'admin'
+// next-auth refetches the session on window focus; when that fails `data` is null. These
+// let a test play that blip: 'authenticated' + user, or any other status with no data.
+let mockStatus: 'authenticated' | 'loading' | 'unauthenticated' = 'authenticated'
 jest.mock('next-auth/react', () => ({
   useSession: () => ({
-    data: { user: { id: 1, role: mockRole, name: 'HungDT', email: 'hungdt@athena.studio' } },
-    status: 'authenticated',
+    data: mockStatus === 'authenticated'
+      ? { user: { id: 1, role: mockRole, name: 'HungDT', email: 'hungdt@athena.studio' } }
+      : null,
+    status: mockStatus,
   }),
 }))
 jest.mock('next/navigation', () => ({
@@ -53,7 +58,14 @@ const ROWS = [row({ id: 1, game_id: 'g1', title: 'Alpha' }), row({ id: 2, game_i
 let rowsNow: ReturnType<typeof row>[] = ROWS
 // Whether POST /api/evaluations/current-batch succeeds.
 let currentBatchOk = true
-beforeEach(() => { rowsNow = ROWS; currentBatchOk = true; mockRole = 'admin' })
+// When set, POST /api/evaluations/current-batch waits until the test answers it, so two saves
+// can be in flight at once and settle in any order.
+let holdCurrentBatch = false
+let pendingPosts: ((ok: boolean) => void)[] = []
+beforeEach(() => {
+  rowsNow = ROWS; currentBatchOk = true; mockRole = 'admin'; mockStatus = 'authenticated'
+  holdCurrentBatch = false; pendingPosts = []
+})
 
 function stubFetch() {
   const calls: { url: string; init?: RequestInit }[] = []
@@ -64,6 +76,9 @@ function stubFetch() {
     if (url.startsWith('/api/evaluations/facets')) {
       body = { available_months: [], available_conclusions: ['List_Idea'], available_evaluators: ['PhuongNT1'], available_batches: ['W1 Oct, 2026', 'W4 Sep, 2026'], current_batch: 'W2 Oct, 2026', default_batch: 'W1 Oct, 2026' }
     } else if (url.startsWith('/api/evaluations/current-batch')) {
+      if (holdCurrentBatch) {
+        return new Promise<Response>(r => { pendingPosts.push(ok => r({ ok, json: () => Promise.resolve({}) } as Response)) })
+      }
       return Promise.resolve({ ok: currentBatchOk, json: () => Promise.resolve({}) } as Response)
     } else if (url.startsWith('/api/evaluations/batch-move')) {
       body = { moved: 2 }
@@ -245,6 +260,40 @@ describe('Short List select mode', () => {
     expect(screen.queryByText('1 selected')).toBeNull()
   })
 
+  describe('a session that blinks out is not a role drop', () => {
+    it.each([['loading'], ['unauthenticated']] as const)(
+      'keeps select mode and the selection when the session is briefly %s with no data', async status => {
+        const calls = await open()
+        fireEvent.click(screen.getByRole('button', { name: 'Select' }))
+        fireEvent.click(screen.getByLabelText('Select all shown'))
+        expect(screen.getByText('2 selected')).toBeInTheDocument()
+
+        mockStatus = status
+        calls.view.rerender(<EvaluationsPage />)
+        // Nothing is shown to a viewer whose role is unknown...
+        expect(screen.queryByRole('button', { name: 'Select' })).toBeNull()
+        expect(checkboxes()).toHaveLength(0)
+
+        // ...but the state survives and comes back with the session.
+        mockStatus = 'authenticated'
+        calls.view.rerender(<EvaluationsPage />)
+        expect(screen.getByText('2 selected')).toBeInTheDocument()
+        expect(checkboxes()).toHaveLength(3)
+      })
+
+    it('still resets when an authenticated session shows a non-manager role', async () => {
+      const calls = await open()
+      fireEvent.click(screen.getByRole('button', { name: 'Select' }))
+      fireEvent.click(screen.getByLabelText('Select Alpha'))
+      mockRole = 'evaluator'
+      calls.view.rerender(<EvaluationsPage />)
+      mockRole = 'admin'
+      calls.view.rerender(<EvaluationsPage />)
+      expect(screen.queryByText('1 selected')).toBeNull()
+      expect(checkboxes()).toHaveLength(0)
+    })
+  })
+
   describe('current batch picker', () => {
     const post = (calls: { url: string }[]) => calls.filter(c => c.url === '/api/evaluations/current-batch')
     const picker = () => screen.getByLabelText('Not set') as HTMLSelectElement
@@ -271,6 +320,46 @@ describe('Short List select mode', () => {
       await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
       expect(picker().value).toBe('W3 Oct, 2026')
       expect(post(calls)).toHaveLength(2)
+    })
+
+    describe('two quick changes', () => {
+      const change = (v: string) => act(async () => { fireEvent.change(picker(), { target: { value: v } }) })
+      const answer = (i: number, ok: boolean) => act(async () => { pendingPosts[i](ok) })
+
+      it('first save fails after the second succeeded: the picker keeps the second pick, no message', async () => {
+        await open()
+        await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+        holdCurrentBatch = true
+        await change('W3 Oct, 2026')
+        await change('')
+        expect(pendingPosts).toHaveLength(2)
+        await answer(1, true)
+        await answer(0, false)
+        expect(picker().value).toBe('')
+        expect(screen.queryByRole('alert')).toBeNull()
+      })
+
+      it('second save fails after the first succeeded: the picker goes back to the first pick, with the message', async () => {
+        await open()
+        await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+        holdCurrentBatch = true
+        await change('W3 Oct, 2026')
+        await change('')
+        await answer(0, true)
+        await answer(1, false)
+        expect(picker().value).toBe('W3 Oct, 2026')
+        expect(screen.getByRole('alert')).toHaveTextContent(ALERT)
+      })
+
+      it('a single failed save still goes back to the value the server confirmed on load', async () => {
+        await open()
+        await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+        holdCurrentBatch = true
+        await change('W3 Oct, 2026')
+        await answer(0, false)
+        expect(picker().value).toBe('W2 Oct, 2026')
+        expect(screen.getByRole('alert')).toHaveTextContent(ALERT)
+      })
     })
 
     it('shows no message when the save works', async () => {

@@ -519,7 +519,7 @@ function GameAlikeCell({ item, canEdit, onSaved }: {
 }
 
 function ShortListEvalTab() {
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
   const isManager = isManagerRole(role)
@@ -537,6 +537,11 @@ function ShortListEvalTab() {
   const [filterBatch, setFilterBatch] = useState('')
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
   const [currentBatchSaveFailed, setCurrentBatchSaveFailed] = useState(false)
+  // Last value the server confirmed (loaded, or a save that succeeded), and a counter of
+  // current-batch saves. Two quick changes can settle out of order: a failure restores the
+  // confirmed value (not the one before THIS change) and only the newest request may complain.
+  const confirmedBatchRef = useRef<string | null>(null)
+  const batchSaveSeqRef = useRef(0)
   const [availableBatches, setAvailableBatches] = useState<string[]>([])
   // Short List is organised by batch, so the date filter defaults to all-time
   // (evaluated basis) rather than the current month — the month would fight the
@@ -555,10 +560,14 @@ function ShortListEvalTab() {
   const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()) }
   // Select mode is a manager tool. If the role drops mid-session the checkboxes, toolbar
   // and bar go with it, and the mode is reset so it does not come back by itself.
+  // A role is only known to have dropped when the session is authenticated and says so:
+  // next-auth refetches the session on window focus and `data` is null for a moment when
+  // that fails. While the role is unknown the controls hide, but the selection is kept.
   const selecting = isManager && selectMode
+  const roleDropped = status === 'authenticated' && !!session?.user && !isManager
   useEffect(() => {
-    if (!isManager) { setSelectMode(false); setSelectedIds(new Set()) }
-  }, [isManager])
+    if (roleDropped) { setSelectMode(false); setSelectedIds(new Set()) }
+  }, [roleDropped])
   const toggleSelected = (id: number) => setSelectedIds(prev => {
     const next = new Set(prev)
     if (next.has(id)) next.delete(id); else next.add(id)
@@ -593,6 +602,7 @@ function ShortListEvalTab() {
       if (json.available_batches) setAvailableBatches(json.available_batches)
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
+        confirmedBatchRef.current = json.current_batch
         if (!batchDefaultedRef.current) {
           batchDefaultedRef.current = true
           // Pre-select the team's current batch, but fall back to the most recent
@@ -686,11 +696,18 @@ function ShortListEvalTab() {
   // The batch is global: a failed save must not leave this manager believing the whole
   // system changed, so the picker goes back to what it was and says so.
   const handleCurrentBatchChange = async (v: string) => {
-    const previous = currentBatch
+    const seq = ++batchSaveSeqRef.current
     setCurrentBatch(v || null)
     const ok = await saveCurrentBatch(v || null)
-    if (ok) { setCurrentBatchSaveFailed(false); return }
-    setCurrentBatch(previous)
+    const latest = seq === batchSaveSeqRef.current
+    if (ok) {
+      confirmedBatchRef.current = v || null
+      if (latest) setCurrentBatchSaveFailed(false)
+      return
+    }
+    // An older request failing after a newer one was sent says nothing about the picker.
+    if (!latest) return
+    setCurrentBatch(confirmedBatchRef.current)
     setCurrentBatchSaveFailed(true)
   }
   const currentBatchOptions = (() => {
