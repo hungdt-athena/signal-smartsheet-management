@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
 
     // --- commit (the approval step) ---
     const idToGameId = new Map(allCandidates.map(c => [c.id, c.game_id]))
-    await commitAssignment(assignment, idToGameId)
+    const { movedIds } = await commitAssignment(assignment, idToGameId)
 
     const session = await getSession()
     const createdBy = session?.user?.email ?? 'manual'
@@ -188,10 +188,12 @@ export async function POST(req: NextRequest) {
       // IS a reassign as far as game accounting goes.
       const gameIdsByReceiver = new Map<string, string[]>()
       s.sub.forEach((name, id) => {
+        if (!movedIds.has(id)) return // judged meanwhile: stays where it is
         const arr = gameIdsByReceiver.get(name) || []
         arr.push(idToGameId.get(id)!)
         gameIdsByReceiver.set(name, arr)
       })
+      if (gameIdsByReceiver.size === 0) continue
       await writeAssignmentHistory({
         category,
         action: 'reassign',
@@ -204,12 +206,12 @@ export async function POST(req: NextRequest) {
       // reads like the Reassign one (from → targets → games) and Details re-renders that
       // source's own slice of the run.
       const stats = rows.find(r => r.name === s.from)
-      const moved = s.sub.size
+      const moved = Array.from(s.sub.keys()).filter(id => movedIds.has(id)).length
       const snapshot = {
         candidate_count: s.pulled,
         assigned: moved,
         unassignable: s.pulled - moved,
-        per_evaluator: s.per_evaluator,
+        per_evaluator: Object.fromEntries(Array.from(gameIdsByReceiver, ([name, ids]) => [name, ids.length])),
         per_evaluator_platform: perEvaluatorPlatform(s.candidates, s.sub),
         ...sourceBreakdowns(s.candidates),
         dryRun: false,
@@ -238,7 +240,24 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    return NextResponse.json({ ...payload, dryRun: false, assigned: assignment.size })
+    // The payload above is the plan; what actually moved can be less (a game judged
+    // between selection and the UPDATE stays put), so report that instead.
+    const perEvaluatorMoved: Record<string, number> = {}
+    assignment.forEach((name, id) => { if (movedIds.has(id)) perEvaluatorMoved[name] = (perEvaluatorMoved[name] || 0) + 1 })
+    return NextResponse.json({
+      ...payload,
+      dryRun: false,
+      assigned: movedIds.size,
+      unassignable: allCandidates.length - movedIds.size,
+      per_evaluator: perEvaluatorMoved,
+      per_source: perSourceView
+        .map(s => {
+          const split: Record<string, number> = {}
+          s.sub.forEach((name, id) => { if (movedIds.has(id)) split[name] = (split[name] || 0) + 1 })
+          return { from: s.from, pulled: s.pulled, per_evaluator: split }
+        })
+        .filter(s => Object.keys(s.per_evaluator).length > 0), // same skip as the history loop
+    })
   } catch (err) {
     if (err instanceof Error && err.message === 'evaluator list empty') {
       return NextResponse.json({ error: 'no valid target evaluators' }, { status: 409 })

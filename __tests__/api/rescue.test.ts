@@ -30,7 +30,7 @@ interface ScanRow {
 
 // Routes the mock by query shape: the roster scan, then each source's stale-game pull
 // (keyed by the evaluator name bound into the query), then writes.
-function setupSql(opts: { scan: ScanRow[]; stale?: Record<string, Record<string, unknown>[]> }) {
+function setupSql(opts: { scan: ScanRow[]; stale?: Record<string, Record<string, unknown>[]>; drop?: number[] }) {
   const scan = opts.scan.map(r => ({
     name: r.name,
     game_platform: r.game_platform ?? 'all',
@@ -43,8 +43,12 @@ function setupSql(opts: { scan: ScanRow[]; stale?: Record<string, Record<string,
   }))
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
-    if (!Array.isArray(strings)) return Promise.resolve([]) // sql(ids) IN-clause fragment
+    if (!(Array.isArray(strings) && 'raw' in strings)) return { __ids: strings } // sql(ids)
     const q = (strings as string[]).join(' ')
+    if (q.includes('UPDATE game_evaluations')) {
+      const ids = (binds.find(b => (b as { __ids?: number[] })?.__ids) as { __ids: number[] } | undefined)?.__ids ?? []
+      return Promise.resolve(ids.filter(id => !(opts.drop ?? []).includes(id)).map(id => ({ id })))
+    }
     if (q.includes('FROM evaluator_roster')) return Promise.resolve(scan)
     if (q.includes('JOIN game_info')) {
       // The pull query binds category, then the source name.
@@ -183,5 +187,16 @@ describe('POST /api/operations/rescue', () => {
     expect(kinds.length).toBeGreaterThan(0)
     const actions = sqlMock.mock.calls.flatMap(c => c.slice(1)).filter(v => v === 'reassign')
     expect(actions.length).toBeGreaterThan(0)
+  })
+
+  it('commit counts only games the UPDATE moved', async () => {
+    setupSql({ scan: ROSTER, stale: { Hung: HUNG_GAMES }, drop: [2] })
+    const json = await (await post({ action: 'commit', category: 'puzzle', sources: ['Hung'], receivers: ['Minh'] })).json()
+    expect(json.assigned).toBe(1)
+    const histBinds = sqlMock.mock.calls
+      .filter(c => Array.isArray(c[0]) && (c[0] as string[]).join(' ').includes('INSERT INTO assignment_history'))
+      .flatMap(c => c.slice(1))
+    expect(JSON.stringify(histBinds)).toContain('g1')
+    expect(JSON.stringify(histBinds)).not.toContain('g2')
   })
 })

@@ -21,11 +21,16 @@ function setupSql({
   // assertions read the same as before the gate was added.
   config = '{"puzzle":true,"arcade":true,"simulation":true}' as string | null,
   available = null as number | null,
+  drop = [] as number[],
 }) {
   sqlMock.mockReset()
-  sqlMock.mockImplementation((strings: unknown) => {
-    if (!Array.isArray(strings)) return Promise.resolve([])
+  sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
+    if (!(Array.isArray(strings) && 'raw' in strings)) return { __ids: strings } // sql(ids)
     const q = (strings as string[]).join(' ')
+    if (q.includes('UPDATE game_evaluations')) {
+      const ids = (binds.find(b => (b as { __ids?: number[] })?.__ids) as { __ids: number[] } | undefined)?.__ids ?? []
+      return Promise.resolve(ids.filter(id => !drop.includes(id)).map(id => ({ id })))
+    }
     if (q.includes('FROM app_config')) return Promise.resolve(config === null ? [] : [{ value: config }])
     // The gate counts the roster; the assignment reads the rows themselves.
     if (q.includes('count(*) FILTER')) {
@@ -120,6 +125,17 @@ describe('POST /api/cron/assign-evaluators', () => {
     expect(q).toContain('UPDATE game_evaluations')
     expect(q).toContain('assigned_date')
     expect(q).toContain('INSERT INTO assignment_history')
+  })
+
+  it('reports only games the UPDATE moved', async () => {
+    setupSql({
+      roster: [{ name: 'A', game_platform: 'all', weight: 100 }],
+      games: [{ id: 1, game_id: 'g1', os: 'ios' }, { id: 2, game_id: 'g2', os: 'ios' }],
+      drop: [2],
+    })
+    const json = await (await post({ category: 'puzzle' })).json()
+    expect(json.assigned).toBe(1)
+    expect(json.per_evaluator).toEqual({ A: 1 })
   })
 
   it('rejects a null body with 400', async () => {

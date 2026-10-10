@@ -72,32 +72,43 @@ export async function loadRoster(opts: {
 // assigned_date = today (VN). first_assigned_date is stamped only the first time
 // a game is ever assigned (COALESCE) — reassign/handover restamp assigned_date but
 // must not inflate team intake, which is counted on first_assigned_date
-// (migration 033). Returns the per-evaluator game_id lists for history.
+// (migration 033).
+//
+// Only games still unjudged move: a game judged between selection and this UPDATE
+// (seconds — one round trip per evaluator) stays with whoever judged it. Callers
+// must take history and counts from the result, not from `assignment`.
+export interface CommitResult {
+  byEvaluator: Map<string, string[]> // evaluator -> game_info.game_id values actually moved
+  movedIds: Set<number>              // game_evaluations.id values actually moved
+}
+
 export async function commitAssignment(
   assignment: Map<number, string>,
   idToGameId: Map<number, string>,
-): Promise<Map<string, string[]>> {
+): Promise<CommitResult> {
   const byEvaluatorIds = new Map<string, number[]>()
   assignment.forEach((name, id) => {
     const arr = byEvaluatorIds.get(name) || []
     arr.push(id)
     byEvaluatorIds.set(name, arr)
   })
+  const byEvaluator = new Map<string, string[]>()
+  const movedIds = new Set<number>()
   for (const [name, ids] of Array.from(byEvaluatorIds.entries())) {
-    await sql`
+    const rows = (await sql`
       UPDATE game_evaluations
       SET initial_evaluator = ${name},
           assigned_date = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
           first_assigned_date = COALESCE(first_assigned_date, (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date),
           updated_at = NOW()
-      WHERE id IN ${sql(ids)}
-    `
+      WHERE id IN ${sql(ids)} AND initial_conclusion IS NULL
+      RETURNING id
+    `) as unknown as { id: number }[]
+    const moved = rows.map(r => r.id)
+    moved.forEach(id => movedIds.add(id))
+    if (moved.length) byEvaluator.set(name, moved.map(id => idToGameId.get(id)!).filter(Boolean))
   }
-  const byEvaluatorGameIds = new Map<string, string[]>()
-  byEvaluatorIds.forEach((ids, name) => {
-    byEvaluatorGameIds.set(name, ids.map(id => idToGameId.get(id)!).filter(Boolean))
-  })
-  return byEvaluatorGameIds
+  return { byEvaluator, movedIds }
 }
 
 // Distribute candidates among the roster, excluding the source evaluator.

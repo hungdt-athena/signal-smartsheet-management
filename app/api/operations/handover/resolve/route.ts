@@ -94,16 +94,20 @@ export async function POST(req: NextRequest) {
     const candidates = await selectPendingGames({ category, from, startDate, endDate })
     const { by_platform, by_date } = sourceBreakdowns(candidates)
     const roster = await loadRoster({ category, onlyAvailable: true })
-    const { assignment, perEvaluator } = candidates.length
+    const { assignment } = candidates.length
       ? distribute(candidates, roster, from)
-      : { assignment: new Map<number, string>(), perEvaluator: {} as Record<string, number> }
+      : { assignment: new Map<number, string>() }
     const per_evaluator_platform = perEvaluatorPlatform(candidates, assignment)
 
+    let moved = 0
+    let perEvaluatorMoved: Record<string, number> = {}
     if (assignment.size > 0) {
       const idToGameId = new Map(candidates.map(c => [c.id, c.game_id]))
-      const perEvaluatorGameIds = await commitAssignment(assignment, idToGameId)
+      const { byEvaluator, movedIds } = await commitAssignment(assignment, idToGameId)
+      moved = movedIds.size
+      perEvaluatorMoved = Object.fromEntries(Array.from(byEvaluator, ([name, ids]) => [name, ids.length]))
       await writeAssignmentHistory({
-        category, action: 'handover', perEvaluator: perEvaluatorGameIds,
+        category, action: 'handover', perEvaluator: byEvaluator,
         fromEvaluator: from, createdBy: reviewer,
       })
     }
@@ -117,9 +121,9 @@ export async function POST(req: NextRequest) {
 
     const result: DistSnapshot = {
       candidate_count: candidates.length,
-      assigned: assignment.size,
-      unassignable: candidates.length - assignment.size,
-      per_evaluator: perEvaluator,
+      assigned: moved,
+      unassignable: candidates.length - moved,
+      per_evaluator: perEvaluatorMoved,
       per_evaluator_platform,
       by_platform, by_date,
       dryRun: false,
@@ -127,7 +131,7 @@ export async function POST(req: NextRequest) {
     await sql`
       UPDATE operation_runs
       SET status = 'approved', result = ${sql.json(result as unknown as import('postgres').JSONValue)},
-          game_count = ${assignment.size}, reviewed_by = ${reviewer}, reviewed_at = NOW(),
+          game_count = ${moved}, reviewed_by = ${reviewer}, reviewed_at = NOW(),
           review_note = ${body.note ?? null}
       WHERE id = ${id}
     `

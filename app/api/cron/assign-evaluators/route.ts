@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { assignGames } from '@/lib/assign-evaluators'
 import { writeAssignmentHistory } from '@/lib/assignment-history'
+import { commitAssignment } from '@/lib/reassign-core'
 import { loadGenreTargets } from '@/lib/genre-config-db'
 
 export const dynamic = 'force-dynamic'
@@ -74,6 +75,7 @@ export async function POST(req: NextRequest) {
       JOIN game_info gi ON ge.game_id = gi.game_id
       WHERE ge.category_group = ${category}
         AND ge.initial_evaluator IS NULL
+        AND ge.initial_conclusion IS NULL   -- same predicate as commitAssignment's guard
       ORDER BY ge.imported_at
     `,
     ])
@@ -118,44 +120,24 @@ export async function POST(req: NextRequest) {
       throw e
     }
 
-    if (!body.dryRun) {
-      // One UPDATE per evaluator (grouped), assigned_date = today VN.
-      const idToGameId = new Map<number, string>(games.map(g => [g.id, g.game_id]))
-      const byEvaluator = new Map<string, number[]>()
-      assignment.forEach((name, id) => {
-        const ids = byEvaluator.get(name) || []
-        ids.push(id)
-        byEvaluator.set(name, ids)
-      })
-      const perEvaluatorGameIds = new Map<string, string[]>()
-      for (const [name, ids] of Array.from(byEvaluator.entries())) {
-        await sql`
-          UPDATE game_evaluations
-          SET initial_evaluator = ${name},
-              assigned_date = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
-              first_assigned_date = COALESCE(first_assigned_date, (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)
-          WHERE id IN ${sql(ids)}
-        `
-        perEvaluatorGameIds.set(name, ids.map(id => idToGameId.get(id)!).filter(Boolean))
-      }
-      // Daily trace: one assignment_history row per evaluator (action = 'assign').
-      await writeAssignmentHistory({
-        category,
-        action: 'assign',
-        perEvaluator: perEvaluatorGameIds,
-        createdBy: 'cron',
-      })
-    }
-
-    const perEvaluator: Record<string, number> = {}
+    let moved = assignment.size
+    let perEvaluator: Record<string, number> = {}
     assignment.forEach((name) => { perEvaluator[name] = (perEvaluator[name] || 0) + 1 })
+    if (!body.dryRun) {
+      const idToGameId = new Map<number, string>(games.map(g => [g.id, g.game_id]))
+      const { byEvaluator, movedIds } = await commitAssignment(assignment, idToGameId)
+      moved = movedIds.size
+      perEvaluator = Object.fromEntries(Array.from(byEvaluator, ([name, ids]) => [name, ids.length]))
+      // Daily trace: one assignment_history row per evaluator (action = 'assign').
+      await writeAssignmentHistory({ category, action: 'assign', perEvaluator: byEvaluator, createdBy: 'cron' })
+    }
 
     return NextResponse.json({
       ok: true,
       dryRun: !!body.dryRun,
       category,
-      assigned: assignment.size,
-      unassigned: games.length - assignment.size,
+      assigned: moved,
+      unassigned: games.length - moved,
       per_evaluator: perEvaluator,
     })
   } catch (err) {

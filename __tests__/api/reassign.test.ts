@@ -3,7 +3,11 @@
  */
 import { NextRequest } from 'next/server'
 
-jest.mock('@/lib/db', () => ({ sql: jest.fn() }))
+jest.mock('@/lib/db', () => {
+  const fn = jest.fn() as jest.Mock & { json: jest.Mock }
+  fn.json = jest.fn((v: unknown) => v)
+  return { sql: fn }
+})
 jest.mock('next-auth', () => ({ getServerSession: jest.fn(() => Promise.resolve(null)) }))
 
 import { POST } from '@/app/api/operations/reassign/route'
@@ -11,14 +15,18 @@ import { sql } from '@/lib/db'
 
 const sqlMock = sql as unknown as jest.Mock
 
-function setupSql({ candidates = [] as Record<string, unknown>[], roster = [] as Record<string, unknown>[] }) {
+function setupSql({ candidates = [] as Record<string, unknown>[], roster = [] as Record<string, unknown>[], drop = [] as number[] }) {
   sqlMock.mockReset()
-  sqlMock.mockImplementation((strings: unknown) => {
-    if (!Array.isArray(strings)) return Promise.resolve([]) // sql(ids) IN-clause
+  sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
+    if (!(Array.isArray(strings) && 'raw' in strings)) return { __ids: strings } // sql(ids)
     const q = (strings as string[]).join(' ')
+    if (q.includes('UPDATE game_evaluations')) {
+      const ids = (binds.find(b => (b as { __ids?: number[] })?.__ids) as { __ids: number[] } | undefined)?.__ids ?? []
+      return Promise.resolve(ids.filter(id => !drop.includes(id)).map(id => ({ id })))
+    }
     if (q.includes('initial_conclusion IS NULL')) return Promise.resolve(candidates)
     if (q.includes('FROM evaluator_roster')) return Promise.resolve(roster)
-    return Promise.resolve([]) // UPDATE / INSERT / fragments
+    return Promise.resolve([{ id: 1 }]) // INSERT ... RETURNING id (operation_runs) / fragments
   })
 }
 
@@ -98,6 +106,17 @@ describe('POST /api/operations/reassign', () => {
     const q = joinedSql()
     expect(q).toContain('UPDATE game_evaluations')
     expect(q).toContain('INSERT INTO assignment_history')
+  })
+
+  it('counts only games the UPDATE moved (one was judged meanwhile)', async () => {
+    setupSql({
+      candidates: [{ id: 1, game_id: 'g1', os: 'ios' }, { id: 2, game_id: 'g2', os: 'android' }],
+      roster: [{ name: 'A', game_platform: 'all', weight: 100 }, { name: 'B', game_platform: 'all', weight: 100 }],
+      drop: [2],
+    })
+    const json = await (await post({ evaluator_name: 'Nam', category: 'puzzle', count: 5, selected_evaluators: ['A', 'B'] })).json()
+    expect(json.assigned).toBe(1)
+    expect(Object.values(json.per_evaluator as Record<string, number>).reduce((a, b) => a + b, 0)).toBe(1)
   })
 
   it('excludes the source evaluator from the target set', async () => {

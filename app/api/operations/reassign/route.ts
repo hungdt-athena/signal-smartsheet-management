@@ -119,7 +119,10 @@ export async function POST(req: NextRequest) {
     }
 
     const idToGameId = new Map(candidates.map(c => [c.id, c.game_id]))
-    const perEvaluatorGameIds = await commitAssignment(assignment, idToGameId)
+    const { byEvaluator: perEvaluatorGameIds, movedIds } = await commitAssignment(assignment, idToGameId)
+    const perEvaluatorMoved: Record<string, number> = Object.fromEntries(
+      Array.from(perEvaluatorGameIds, ([name, ids]) => [name, ids.length]),
+    )
 
     const session = await getSession()
     const createdBy = session?.user?.email ?? 'manual'
@@ -134,9 +137,9 @@ export async function POST(req: NextRequest) {
     // Record the operation as one committed run (with its full snapshot for Details).
     const snapshot = {
       candidate_count: candidates.length,
-      assigned: assignment.size,
-      unassignable: candidates.length - assignment.size,
-      per_evaluator: perEvaluator,
+      assigned: movedIds.size,
+      unassignable: candidates.length - movedIds.size,
+      per_evaluator: perEvaluatorMoved,
       per_evaluator_platform: perEvalPlatform,
       by_platform: byPlatform, by_date: byDate,
       dryRun: false,
@@ -151,15 +154,15 @@ export async function POST(req: NextRequest) {
         selected_evaluators: selected,
         evaluator_weights: body.evaluator_weights ?? {},
       },
-      snapshot, gameCount: assignment.size, submittedBy: createdBy,
+      snapshot, gameCount: movedIds.size, submittedBy: createdBy,
     })
 
     return NextResponse.json({
       ok: true, dryRun: false, category, from,
       candidate_count: candidates.length,
-      assigned: assignment.size,
-      unassignable: candidates.length - assignment.size,
-      per_evaluator: perEvaluator,
+      assigned: movedIds.size,
+      unassignable: candidates.length - movedIds.size,
+      per_evaluator: perEvaluatorMoved,
       per_evaluator_platform: perEvalPlatform,
       by_platform: byPlatform, by_date: byDate,
     })
