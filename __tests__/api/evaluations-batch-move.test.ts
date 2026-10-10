@@ -140,4 +140,31 @@ describe('POST /api/evaluations/batch-move', () => {
     }
     expect(calls).toHaveLength(0)
   })
+
+  // game_evaluations.id is int4: a larger id passes JSON validation but Postgres refuses it (a 500).
+  it('accepts the largest int4 id', async () => {
+    db([{ id: 2147483647 }])
+    expect((await post({ ids: [2147483647], batch: 'W2 Oct, 2026' })).status).toBe(200)
+  })
+
+  it.each([
+    ['int4 max + 1', 2147483648], ['1e10', 1e10], ['MAX_SAFE_INTEGER', Number.MAX_SAFE_INTEGER], ['1e21', 1e21],
+  ])('400 for an id above int4 (%s), and never touches the database', async (_name, id) => {
+    db()
+    const res = await post({ ids: [1, id], batch: 'W2 Oct, 2026' })
+    expect(res.status).toBe(400)
+    expect(typeof (await res.json()).error).toBe('string')
+    expect(calls).toHaveLength(0)
+  })
+
+  // Postgres rejects NUL in text; other control characters would only make a garbage label.
+  it.each([
+    ['NUL', 'W2\u0000Oct'], ['newline', 'a\nb'], ['tab', 'a\tb'], ['DEL', 'a\u007fb'],
+  ])('400 for a batch with a control character (%s), and never touches the database', async (_name, batch) => {
+    db()
+    const res = await post({ ids: [1], batch })
+    expect(res.status).toBe(400)
+    expect(typeof (await res.json()).error).toBe('string')
+    expect(calls).toHaveLength(0)
+  })
 })

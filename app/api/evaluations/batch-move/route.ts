@@ -11,6 +11,12 @@ const MAX_MOVE = 500
 /** game_evaluations.batch is VARCHAR(40) (migration 013); longer would be a 500. */
 const MAX_BATCH_LENGTH = 40
 
+/** game_evaluations.id is int4: a larger id is valid JSON but Postgres would answer 500. */
+const MAX_ID = 2147483647
+
+/** Postgres refuses NUL in text (a 500); other control characters make an unreadable label. */
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+
 // Move many games to another batch in one statement (manager tier only).
 //
 // There is deliberately NO filter on initial/final conclusion: ticking a game that
@@ -38,12 +44,15 @@ export async function POST(req: NextRequest) {
   if (batch.length > MAX_BATCH_LENGTH) {
     return NextResponse.json({ error: 'batch is too long' }, { status: 400 })
   }
+  if (CONTROL_CHARS.test(batch)) {
+    return NextResponse.json({ error: 'batch must not contain control characters' }, { status: 400 })
+  }
 
   if (!Array.isArray(body.ids) || body.ids.length === 0) {
     return NextResponse.json({ error: 'ids must be a non-empty array' }, { status: 400 })
   }
-  if (!body.ids.every(n => Number.isInteger(n) && (n as number) > 0)) {
-    return NextResponse.json({ error: 'ids must be positive integers' }, { status: 400 })
+  if (!body.ids.every(n => Number.isInteger(n) && (n as number) > 0 && (n as number) <= MAX_ID)) {
+    return NextResponse.json({ error: `ids must be integers from 1 to ${MAX_ID}` }, { status: 400 })
   }
   const ids = Array.from(new Set(body.ids as number[]))
   if (ids.length > MAX_MOVE) {

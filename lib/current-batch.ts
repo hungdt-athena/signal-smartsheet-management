@@ -16,11 +16,13 @@ interface ConfigRow { key: string; value: string | null }
  *  before the migration never reports "no active batch" for the whole system. */
 export function pickCurrentBatch(rows: ConfigRow[]): string | null {
   const global = rows.find(r => r.key === CURRENT_BATCH_KEY)
-  if (global) return global.value || null
+  // Values are trimmed and a whitespace-only one is empty: a stored "  " must not read as a batch.
+  if (global) return global.value?.trim() || null
   let best: string | null = null
   for (const r of rows) {
-    if (!r.key.startsWith(LEGACY_PREFIX) || !r.value) continue
-    if (best === null || weekLabelOrder(r.value) > weekLabelOrder(best)) best = r.value
+    const value = r.value?.trim()
+    if (!r.key.startsWith(LEGACY_PREFIX) || !value) continue
+    if (best === null || weekLabelOrder(value) > weekLabelOrder(best)) best = value
   }
   return best
 }

@@ -58,6 +58,21 @@ describe('pickCurrentBatch', () => {
     ])).toBeNull()
   })
 
+  it('trims every value, and a whitespace-only value counts as empty', () => {
+    expect(pickCurrentBatch([{ key: 'current_batch', value: '  W2 Oct, 2026\n' }])).toBe('W2 Oct, 2026')
+    // A blank global row is "none", not a batch called "   " and not a fallback to legacy rows.
+    expect(pickCurrentBatch([
+      { key: 'current_batch:puzzle', value: 'W2 Oct, 2026' },
+      { key: 'current_batch', value: '   ' },
+    ])).toBeNull()
+    // Legacy rows: trimmed, and blank ones are ignored.
+    expect(pickCurrentBatch([
+      { key: 'current_batch:arcade', value: ' \t ' },
+      { key: 'current_batch:puzzle', value: ' W1 Oct, 2026 ' },
+    ])).toBe('W1 Oct, 2026')
+    expect(pickCurrentBatch([{ key: 'current_batch:arcade', value: '  ' }])).toBeNull()
+  })
+
   it('returns null when nothing is set', () => {
     expect(pickCurrentBatch([])).toBeNull()
   })

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { CURRENT_BATCH_KEY, getCurrentBatch } from '@/lib/current-batch'
+import { isBatchLabel } from '@/lib/weekly-feedback'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,9 +22,30 @@ export async function POST(req: NextRequest) {
   const guard = await requireManager()
   if (guard) return guard
 
+  // Setting this changes the batch for every evaluator, so anything that is not clearly
+  // "set this label" or "clear it" is refused instead of being read as "clear".
+  let body: unknown
   try {
-    const { batch } = await req.json()
-    const value = batch ? String(batch) : null
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'Body must be JSON' }, { status: 400 })
+  }
+  if (body === null || typeof body !== 'object' || Array.isArray(body) || !('batch' in body)) {
+    return NextResponse.json({ error: 'Body must be a JSON object with a "batch" key' }, { status: 400 })
+  }
+  const raw = (body as { batch: unknown }).batch
+  if (raw !== null && typeof raw !== 'string') {
+    return NextResponse.json({ error: 'batch must be a text value or null' }, { status: 400 })
+  }
+  const trimmed = raw === null ? '' : raw.trim()
+  // Empty means "clear". Anything else must be a real label: a free-form value (or one
+  // over 40 characters) would later make every List_Idea save fail.
+  if (trimmed !== '' && !isBatchLabel(trimmed)) {
+    return NextResponse.json({ error: 'batch must look like "W2 Oct, 2026"' }, { status: 400 })
+  }
+  const value = trimmed || null
+
+  try {
     await sql`
       INSERT INTO app_config (key, value, updated_at)
       VALUES (${CURRENT_BATCH_KEY}, ${value}, NOW())
