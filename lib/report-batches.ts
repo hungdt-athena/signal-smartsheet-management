@@ -1,8 +1,8 @@
 import { sql } from '@/lib/db'
 
 /* A batch is the team's own name for a week of work - "W3 Sep, 2026". It is not a date
-   range in the schema: `game_evaluations.batch` is a label, written in exactly one place
-   (`/api/evaluations/add-to-record`) and therefore carried by only ~5% of rows, almost
+   range in the schema: `game_evaluations.batch` is a label, written by add-to-record and by
+   a manager's List_Idea promotion in the PATCH handler, and therefore carried by only ~5% of rows, almost
    all of them shortlisted games. Filtering the Performance tab by that label showed a
    cohort, not a week: 415 games for W3 Sep against the 4,903 the team actually judged
    that week, a Shortlist rate near 85% instead of 5.7%, and - because the all-history
