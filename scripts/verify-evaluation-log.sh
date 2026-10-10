@@ -18,4 +18,19 @@ P=(psql -h 127.0.0.1 -p "$PORT" -U postgres -X -q -v ON_ERROR_STOP=1)
 "${P[@]}" -d verify -f scripts/sql-verify/seed-fixtures.sql
 "${P[@]}" -d verify -f migrations/045_evaluation_log.sql
 "${P[@]}" -d verify -f scripts/sql-verify/checks.sql
+# Two sessions on one fresh row: B waits on A's row lock, then logs 'revise' over A's verdict.
+"${P[@]}" -d verify -c "INSERT INTO game_info VALUES ('cc1'); INSERT INTO game_evaluations (id, game_id, initial_evaluator) VALUES (90, 'cc1', 'Alice');"
+"${P[@]}" -d verify -f scripts/sql-verify/prepare-save.sql \
+  -c "BEGIN" \
+  -c "EXECUTE save(90, true, 'Bypass', NULL, NULL, 'Alice', 'evaluator', 'panel', 'evaluate', 5, 0, 0, true, false)" \
+  -c "SELECT pg_sleep(2)" -c "COMMIT" >/dev/null &
+A=$!
+sleep 0.5
+"${P[@]}" -d verify -f scripts/sql-verify/prepare-save.sql \
+  -c "EXECUTE save(90, true, 'List_Idea', NULL, NULL, 'Alice', 'evaluator', 'panel', 'evaluate', 5, 0, 0, true, false)" >/dev/null
+wait $A
+"${P[@]}" -d verify -c "DO \$\$ BEGIN
+  ASSERT (SELECT array_agg(kind ORDER BY id) FROM evaluation_log WHERE game_evaluation_id = 90) = ARRAY['first','revise'], 'concurrent kinds';
+  ASSERT (SELECT conclusion_before FROM evaluation_log WHERE game_evaluation_id = 90 ORDER BY id DESC LIMIT 1) = 'Bypass', 'B read A''s verdict';
+END \$\$;"
 echo "evaluation_log SQL checks: OK"

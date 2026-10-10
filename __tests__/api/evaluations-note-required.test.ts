@@ -111,7 +111,7 @@ describe('/api/evaluations PATCH — initial note is required', () => {
     const res = await PATCH(patchReq({ id: 1, initial_conclusion: 'List_Idea', initial_note: 'a real note here' }))
     expect(res.status).toBe(200)
     const upd = calls.find(c => /UPDATE game_evaluations/.test(c.text))!
-    expect(upd.text).toMatch(/initial_conclusion IS DISTINCT FROM\s+\$?\s*::text THEN NOW\(\)/)
+    expect(upd.text).toMatch(/ge\.initial_conclusion IS DISTINCT FROM\s+\$?\s*::text\s+AND \(/)
   })
 })
 
