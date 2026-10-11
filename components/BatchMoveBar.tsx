@@ -43,6 +43,14 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
   const locked = selected.filter(s => !!s.final_conclusion).length
   const tooMany = n > MAX_MOVE
   const alreadyThere = !!batch && n > 0 && selected.every(s => s.batch === batch)
+  // Where the games are now, newest batch first, so the dialog always says something even
+  // when no warning below applies.
+  const counts = new Map<string, number>()
+  for (const s of selected) if (s.batch) counts.set(s.batch, (counts.get(s.batch) ?? 0) + 1)
+  const nowIn = Array.from(counts).sort((a, b) => weekLabelOrder(b[0]) - weekLabelOrder(a[0]))
+    .map(([b, c]) => `${b} (${c})`)
+  const noBatch = selected.filter(s => !s.batch).length
+  if (noBatch > 0) nowIn.push(`no batch (${noBatch})`)
   const now = Date.now()
   const oldForward = batch ? selected.filter(s =>
     !!s.evaluate_date && now - Date.parse(s.evaluate_date) > OLD_EVALUATION_DAYS * 86_400_000 &&
@@ -93,6 +101,7 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
               </div>
             </div>
             <div className="modal-body">
+              <p className="bmb-from">Now in: {nowIn.join(', ')}</p>
               {locked > 0 && (
                 <p className="bmb-note">
                   {locked} of them already {locked === 1 ? 'has' : 'have'} a final conclusion and will move too.

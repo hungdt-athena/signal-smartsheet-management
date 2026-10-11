@@ -52,6 +52,15 @@ describe('BatchMoveBar', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Move 2 games to W2 Oct, 2026?')
   })
 
+  it('always says which batches the games are in now, so the dialog is never blank', () => {
+    mount([plain, { ...plain, id: 3 }, { ...plain, id: 4, batch: 'W4 Sep, 2026' }, { ...plain, id: 5, batch: null }])
+    pick('W2 Oct, 2026')
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    const d = screen.getByRole('dialog')
+    expect(d).toHaveTextContent('Now in: W1 Oct, 2026 (2), W4 Sep, 2026 (1), no batch (1)')
+    expect(d.querySelector('.modal-body')).not.toBeEmptyDOMElement()
+  })
+
   it('says how many selected games already have a final conclusion', () => {
     mount([plain, locked, { ...plain, id: 3, final_conclusion: 'Priority I' }])
     pick('W2 Oct, 2026')
