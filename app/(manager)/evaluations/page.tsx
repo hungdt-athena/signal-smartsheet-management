@@ -1316,52 +1316,23 @@ function EvaluationsPageInner() {
             {!isManagerRole(role) && userName ? ` · ${userName}` : ''}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button className="btn btn-sm" onClick={() => setShowQuickStats(true)}
+            title="Per-evaluator breakdown"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', marginRight: 6 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
+            </svg>
+            Quick stats
+          </button>
           {BUCKETS.map(b => (
             <button key={b} className={`seg-btn-premium${category === b ? ' active' : ''}`}
               onClick={() => setCategory(b)}>
               {b.charAt(0).toUpperCase() + b.slice(1)}
             </button>
           ))}
-        </div>
-      </div>
-
-      {/* Summary Stats Widgets */}
-      <div className="stats-grid" style={{ display: tableExpanded ? 'none' : undefined }}>
-        <div className="stat-card">
-          <span className="stat-label">Total Games</span>
-          <div className="stat-val">{stats.totalCount}</div>
-          <span className="stat-subtext">Listed in database</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Evaluated</span>
-          <div className="stat-val">
-            {stats.evaluatedCount}
-            <span className="pill success" style={{ fontSize: 10, padding: '2px 6px', marginLeft: 8 }}>{stats.percent}%</span>
-          </div>
-          <span className="stat-subtext">Completed reviews</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Pending</span>
-          <div className="stat-val" style={{ color: stats.pendingCount > 0 ? 'var(--warn)' : 'var(--text)' }}>
-            {stats.pendingCount}
-          </div>
-          <span className="stat-subtext">Awaiting evaluation</span>
-        </div>
-        <div className="stat-card" role="button" tabIndex={0}
-          onClick={() => setShowQuickStats(true)}
-          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setShowQuickStats(true) }}
-          style={{ cursor: 'pointer' }}>
-          <span className="stat-label">Quick Stats</span>
-          <div className="stat-val" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent)' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="20" x2="18" y2="10" />
-              <line x1="12" y1="20" x2="12" y2="4" />
-              <line x1="6" y1="20" x2="6" y2="14" />
-            </svg>
-            View
-          </div>
-          <span className="stat-subtext">Per-evaluator breakdown</span>
         </div>
       </div>
 
@@ -1398,14 +1369,16 @@ function EvaluationsPageInner() {
 
         <div className="seg-wrapper" style={inertWhileSearching}>
           {[
-            { value: '', label: 'All' },
-            { value: 'pending', label: 'Pending' },
-            { value: 'done', label: 'Done' },
+            { value: '', label: 'All', count: stats.totalCount, warn: false },
+            { value: 'pending', label: 'Pending', count: stats.pendingCount, warn: stats.pendingCount > 0 },
+            { value: 'done', label: 'Done', count: stats.evaluatedCount, warn: false },
           ].map(s => (
             <button key={s.value} className={`seg-btn-premium${filterStatus === s.value ? ' active' : ''}`}
               disabled={searching}
+              title={s.value === 'done' ? `${stats.percent}% of the month's games are evaluated` : undefined}
               onClick={() => setFilterStatus(s.value)}>
               {s.label}
+              <span className={`seg-count${s.warn ? ' warn' : ''}`}>{s.count}</span>
             </button>
           ))}
         </div>

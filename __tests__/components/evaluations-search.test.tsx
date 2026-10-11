@@ -204,14 +204,14 @@ describe('what the filter row says while searching', () => {
   })
 })
 
-describe('the stat cards during a search', () => {
+describe('the status counts during a search', () => {
   beforeEach(() => { jest.useFakeTimers() })
   afterEach(() => { jest.useRealTimers() })
 
   it('keeps describing the month, not the search', async () => {
-    // The cards above the table are the month's workload -- how much of it is done.
-    // A search is a lookup, and its total is capped at 500 anyway, so letting it
-    // rewrite those cards would put a made-up number under "Total Games".
+    // The counts on the All / Pending / Done buttons are the month's workload -- how much
+    // of it is done. A search is a lookup, and its total is capped at 500 anyway, so
+    // letting it rewrite them would put a made-up number on the All button.
     const calls = stubFetch(
       url => url.includes('q=merge') ? [{ id: 1, game_id: 'g1', title: 'Merge Whale' }] : [],
       undefined,
@@ -220,7 +220,7 @@ describe('the stat cards during a search', () => {
         : { total: 320, evaluated: 200, pending: 120 },
     )
     await open(calls)
-    const totalCard = () => document.querySelectorAll('.stat-val')[0]?.textContent
+    const totalCard = () => document.querySelectorAll('.seg-count')[0]?.textContent
     await waitFor(() => expect(totalCard()).toBe('320'))
 
     await typeSearch('merge')
@@ -302,7 +302,7 @@ describe('the controls a search overrides', () => {
 
     await typeSearch('merge')
     await waitFor(() => expect(rowCalls(calls).length).toBe(2))
-    fireEvent.click(screen.getByRole('button', { name: 'Pending' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Pending/ }))
     await act(async () => { jest.advanceTimersByTime(500) })
     expect(rowCalls(calls).length).toBe(2)
   })
