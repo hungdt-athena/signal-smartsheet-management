@@ -11,6 +11,7 @@ import EvalDetailPanel from '@/components/EvalDetailPanel'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
 import { isManagerRole } from '@/lib/roles'
+import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
 
 interface YtbRow {
   row_index: number
@@ -1891,7 +1892,7 @@ function RecordTab() {
       )}
 
       {detailGameId && (
-        <div className="eval-modal-backdrop" onClick={() => setDetailGameId(null)}>
+        <div className="eval-modal-backdrop" onClick={() => requestLeaveUnsaved(() => setDetailGameId(null))}>
           <div className="eval-modal-container" onClick={e => e.stopPropagation()}
             style={{ padding: '20px 24px 24px' }}>
             <EvalDetailPanel

@@ -9,6 +9,9 @@ export interface UnsavedGuard {
   isDirty: () => boolean
   /** Persist the pending changes. Resolves once the save has completed. */
   flush: () => Promise<unknown>
+  /** Optional: ask the user before leaving, then call `proceed` if they go ahead. Used
+   *  by whatever closes the editor from outside (a click on the backdrop). */
+  requestLeave?: (proceed: () => void) => void
 }
 
 const guards = new Set<UnsavedGuard>()
@@ -35,4 +38,17 @@ export async function flushUnsavedWork(): Promise<void> {
     try { if (g.isDirty()) pending.push(Promise.resolve(g.flush())) } catch { /* a faulty guard must not block */ }
   })
   await Promise.all(pending)
+}
+
+/** Run `proceed` (e.g. close the panel) — but if an editor holds unsaved changes and can
+ *  ask about them, let it ask first. With nothing unsaved it just runs. */
+export function requestLeaveUnsaved(proceed: () => void): void {
+  let asked = false
+  guards.forEach(g => {
+    if (asked) return
+    try {
+      if (g.isDirty() && g.requestLeave) { g.requestLeave(proceed); asked = true }
+    } catch { /* a faulty guard must not block */ }
+  })
+  if (!asked) proceed()
 }

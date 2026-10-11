@@ -26,6 +26,7 @@ import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import { isManagerRole } from '@/lib/roles'
 import { saveDriveLink } from '@/lib/drive-link-client'
+import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
 
 interface Evaluation {
   id: number
@@ -902,7 +903,7 @@ function ShortListEvalTab() {
       </div>
 
       {detailGameId && (
-        <div className="eval-modal-backdrop" onClick={() => setDetailGameId(null)}>
+        <div className="eval-modal-backdrop" onClick={() => requestLeaveUnsaved(() => setDetailGameId(null))}>
           <div className="eval-modal-container" onClick={e => e.stopPropagation()}
             style={{ padding: '20px 24px 24px' }}>
             <EvalDetailPanel
@@ -1510,7 +1511,7 @@ function EvaluationsPageInner() {
 
       {/* Detail Modal */}
       {detailGameId && (
-        <div className="eval-modal-backdrop" onClick={handleClose}>
+        <div className="eval-modal-backdrop" onClick={() => requestLeaveUnsaved(handleClose)}>
           <div className="eval-modal-container" onClick={e => e.stopPropagation()}
             style={{ padding: '20px 24px 24px' }}>
             <EvalDetailPanel

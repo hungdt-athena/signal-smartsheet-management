@@ -5,7 +5,7 @@ const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8')
 
 describe('Eval panel timing wiring', () => {
   const src = read('components/EvalDetailPanel.tsx')
-  const save = src.slice(src.indexOf('const save = async () => {'), src.indexOf('// Auto-save:'))
+  const save = src.slice(src.indexOf('const save = async (): Promise<boolean> => {'), src.indexOf('// Auto-save:'))
 
   it('snapshots the timer before the first await in save()', () => {
     const snap = save.indexOf('snapshot(viewRef.current')

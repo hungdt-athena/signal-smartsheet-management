@@ -6,6 +6,9 @@ import { Lightbox } from '@/components/Lightbox'
 import { EvalHistoryModal } from '@/components/EvalHistoryModal'
 import type { HistoryEvent } from '@/lib/evaluation-history'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
+import { UnsavedChangesDialog } from '@/components/UnsavedChangesDialog'
+import { leaveDecision, type LeaveAction } from '@/lib/leave-decision'
+import { unsavedFields } from '@/lib/unsaved-fields'
 import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { useConfig } from '@/hooks/useConfig'
 import { prettyConclusion } from '@/lib/buckets'
@@ -616,6 +619,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // current value rather than the one captured when it started.
   useEffect(() => { dirtyRef.current = dirty }, [dirty])
 
+  // Leaving the game on screen (Next, Prev, the picker, ✕, Esc, a click outside) with
+  // edits nobody saved. `requestLeaveRef` is assigned every render, after save() exists,
+  // so the navigation callbacks above it never close over a stale form.
+  const [leave, setLeave] = useState<{ action: LeaveAction; fields: string[]; proceed: () => void } | null>(null)
+  const [leaveSaving, setLeaveSaving] = useState(false)
+  const requestLeaveRef = useRef<(action: LeaveAction, proceed: () => void) => void>((_, proceed) => proceed())
+  // Set by the Trends field, cleared with the form: that field has no loaded baseline to diff.
+  const trendsTouchedRef = useRef(false)
+
   useEffect(() => {
     setCurrentGameId(initialGameId)
   }, [initialGameId])
@@ -654,6 +666,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     setRec5Assignee(data.record_5min_assignee || '')
     setRec20Assignee(data.record_20min_assignee || '')
     setDirty(false)
+    trendsTouchedRef.current = false
     generateQR(data.app_link)
   }, [generateQR])
 
@@ -694,13 +707,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   const goPrev = useCallback(() => {
     if (!hasNav) return
     const idx = currentIdx === 0 ? gameList.length - 1 : currentIdx - 1
-    goTo(gameList[idx].game_id)
+    requestLeaveRef.current('prev', () => goTo(gameList[idx].game_id))
   }, [hasNav, currentIdx, gameList, goTo])
 
   const goNext = useCallback(() => {
     if (!hasNav) return
     const idx = currentIdx === gameList.length - 1 ? 0 : currentIdx + 1
-    goTo(gameList[idx].game_id)
+    requestLeaveRef.current('next', () => goTo(gameList[idx].game_id))
   }, [hasNav, currentIdx, gameList, goTo])
 
   useEffect(() => { loadGame(currentGameId) }, [currentGameId, loadGame])
@@ -833,19 +846,20 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return
-      // History open: Esc closes it, arrows do not move to another game underneath.
+      // A popup open: Esc closes it, arrows do not move to another game underneath.
+      if (leave) { if (e.key === 'Escape' && !leaveSaving) setLeave(null); return }
       if (history) { if (e.key === 'Escape') setHistory(null); return }
       if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev() }
       if (e.key === 'ArrowRight') { e.preventDefault(); goNext() }
       if (e.key === 'Escape') {
         if (expandedImg) setExpandedImg(null)
         else if (fullscreen) setFullscreen(false)
-        else onClose?.()
+        else requestLeaveRef.current('close', () => onClose?.())
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [goPrev, goNext, expandedImg, history, fullscreen, onClose])
+  }, [goPrev, goNext, expandedImg, history, leave, leaveSaving, fullscreen, onClose])
 
   // Fetched on open only; opening a game never pays for it.
   const openHistory = (gameId: string) => {
@@ -942,15 +956,18 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     setDirty(true)
   }
 
-  const save = async () => {
-    if (!ev || !canEdit) return
+  // Resolves true only when everything this click meant to persist is persisted (the
+  // evaluation and any staged screenshots), so a caller can tell if it may move on.
+  const save = async (): Promise<boolean> => {
+    if (!ev || !canEdit) return false
     // Taken now, before any await: Prev/Next stay enabled while the screenshot flush
     // and tag PUT run, so by PATCH time the timer may belong to the next game.
     const snap = snapshot(viewRef.current, ev.game_id, Date.now())
     if (noteError) {
       showToast(noteError, true)
-      return
+      return false
     }
+    let saved = false
     setSaving(true)
     try {
       // Flush staged screenshots first so one Save persists both. Silent success —
@@ -978,7 +995,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           const err = await tagRes.json().catch(() => ({}))
           showToast(err.error || 'Failed to save trend tags', true)
           setSaving(false)
-          return
+          return false
         }
         // The pending set just changed; the cached copy is the pre-save one.
         trendTagsCacheRef.current.delete(ev.game_id)
@@ -1021,6 +1038,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
         // a screenshot outage can never make an evaluator think their note was lost.
         if (shotsOk) showToast('Saved')
         else showToast('Evaluation saved — screenshots failed to upload', true)
+        saved = shotsOk
+        trendsTouchedRef.current = false
         if (snap) viewRef.current = restartAfterSave(viewRef.current, snap, document.hidden)
         const fresh = await fetchEvalByGameId(ev.game_id, category)
         if (fresh) {
@@ -1035,6 +1054,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       }
     } catch { showToast('Network error', true) }
     setSaving(false)
+    return saved
   }
 
   // Reset (recording → draft): un-confirm so a manager can pick a different
@@ -1072,7 +1092,45 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   useEffect(() => registerUnsavedGuard({
     isDirty: () => needsSaveRef.current,
     flush: () => saveRef.current(),
+    // A click on the backdrop closes the panel from outside; it asks through here.
+    requestLeave: proceed => requestLeaveRef.current('close', proceed),
   }), [])
+
+  // What leaving does with unsaved edits (see lib/leave-decision.ts). With auto-save on
+  // the edit is saved first, because moving off the game clears the 1.5s timer and would
+  // lose it; with auto-save off the user is asked.
+  requestLeaveRef.current = (action, proceed) => {
+    const decision = leaveDecision({ dirty: canEdit && needsSave, autoSave, saving })
+    if (decision === 'go' || !ev) { proceed(); return }
+    if (decision === 'save-then-go') { void saveRef.current().then(ok => { if (ok) proceed() }); return }
+    const fields = unsavedFields(
+      { noteParts, conclusion, batch, driveLink, gameAlike, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee },
+      {
+        noteParts: notePartsFromRow(ev), initial_conclusion: ev.initial_conclusion, batch: ev.batch, drive_link: ev.drive_link,
+        game_alike: ev.game_alike, final_note: ev.final_note, final_conclusion: ev.final_conclusion,
+        record_5min_drive: ev.record_5min_drive, record_20min_drive: ev.record_20min_drive,
+        record_5min_assignee: ev.record_5min_assignee, record_20min_assignee: ev.record_20min_assignee,
+      },
+      { trendsTouched: trendsTouchedRef.current, stagedShots },
+    )
+    setLeave({ action, proceed, fields: fields.length > 0 ? fields : ['Other changes'] })
+  }
+
+  const leaveSave = async () => {
+    if (!leave) return
+    const pending = leave
+    setLeaveSaving(true)
+    const ok = await saveRef.current()
+    setLeaveSaving(false)
+    setLeave(null)
+    // Not saved (validation, network): stay on the game; save() already toasted why.
+    if (ok) pending.proceed()
+  }
+  const leaveDiscard = () => {
+    const pending = leave
+    setLeave(null)
+    pending?.proceed()
+  }
 
   // Declared before the auto-save effect so a changed staging set clears the latch
   // in the same commit, letting the next edit try the upload again.
@@ -1123,7 +1181,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
         {onClose && (
-          <button className="btn btn-sm btn-ghost" onClick={onClose}>
+          <button className="btn btn-sm btn-ghost" onClick={() => requestLeaveRef.current('close', onClose)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
@@ -1140,7 +1198,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             <div style={{ width: 240, flexShrink: 0 }}>
               <StyledSelect
                 value={currentGameId}
-                onChange={v => goTo(v)}
+                onChange={v => requestLeaveRef.current('jump', () => goTo(v))}
                 options={gameList.map(g => ({ value: g.game_id, label: g.title }))}
               />
             </div>
@@ -1486,7 +1544,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   categoryGroups={trendCategoryGroups}
                   categoryGroup={ev?.category_group}
                   subValues={trendSubValues}
-                  onChange={next => { setTrendTags(next); setDirty(true) }}
+                  onChange={next => { setTrendTags(next); trendsTouchedRef.current = true; setDirty(true) }}
                   disabled={!canEditGameAlike}
                   optionsError={trendOptionsError}
                   onRetryOptions={loadTrendOptions}
@@ -1769,6 +1827,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       {history && ev && history.gameId === ev.game_id && (
         <EvalHistoryModal events={history.events} logReady={history.logReady} error={history.error}
           onClose={() => setHistory(null)} onRetry={() => openHistory(history.gameId)} />
+      )}
+
+      {leave && ev && (
+        <UnsavedChangesDialog action={leave.action} fields={leave.fields} saving={leaveSaving}
+          saveBlockedReason={noteTooShort ? noteError : null}
+          onSave={leaveSave} onDiscard={leaveDiscard} onStay={() => setLeave(null)} />
       )}
 
       {/* Toast */}
