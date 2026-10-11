@@ -18,6 +18,18 @@ export interface SelectedGame {
  *  evaluated longer ago than this stretches the window of the batch it moves into. */
 const OLD_EVALUATION_DAYS = 8
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** "07 Oct, 13:40" in Vietnam time, like the rest of the app; null for a missing or bad date. */
+function evaluatedAt(iso: string | null): string | null {
+  if (!iso) return null
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return null
+  const d = new Date(t + 7 * 3600 * 1000)
+  const p2 = (n: number) => String(n).padStart(2, '0')
+  return `${p2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]}, ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`
+}
+
 const MSG_TOO_MANY = `You can move at most ${MAX_MOVE} games at a time. Select fewer.`
 const MSG_NOTHING_MOVED = 'No games were moved. Reload the list and try again.'
 const MSG_ALREADY_THERE = 'They are already in this batch.'
@@ -103,7 +115,7 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
                     <div className="bmb-info">
                       <div className="bmb-t" title={g.title?.trim() || undefined}>{g.title?.trim() || 'Untitled game'}</div>
                       <div className="bmb-m">
-                        {g.batch || 'No batch'} → {batch}
+                        {evaluatedAt(g.evaluate_date) ? `Evaluated ${evaluatedAt(g.evaluate_date)}` : 'Not evaluated yet'}
                         {g.final_conclusion && <span className="badge success">{g.final_conclusion}</span>}
                       </div>
                     </div>

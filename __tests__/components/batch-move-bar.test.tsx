@@ -52,23 +52,25 @@ describe('BatchMoveBar', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Move 2 games to W2 Oct, 2026?')
   })
 
-  it('lists every game that will move, with its title, where it is now and where it goes', () => {
+  it('lists every game that will move, with its title and when it was initially evaluated', () => {
     mount([
-      { ...plain, title: 'Alpha Quest', icon_url: 'https://x/a.png' },
-      { ...plain, id: 3, title: 'Beta Saga', batch: 'W4 Sep, 2026', final_conclusion: 'Priority IV' },
-      { ...plain, id: 4, title: '  ', batch: null },
+      { ...plain, title: 'Alpha Quest', icon_url: 'https://x/a.png', evaluate_date: '2026-10-07T06:40:00.000Z' },
+      { ...plain, id: 3, title: 'Beta Saga', final_conclusion: 'Priority IV', evaluate_date: '2026-10-08T20:05:00.000Z' },
+      { ...plain, id: 4, title: '  ', evaluate_date: null },
+      { ...plain, id: 5, title: 'Gamma', evaluate_date: 'not a date' },
     ])
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
     const rows = Array.from(screen.getByRole('dialog').querySelectorAll('[data-move-row]'))
-    expect(rows).toHaveLength(3)
+    expect(rows).toHaveLength(4)
     expect(rows[0]).toHaveTextContent('Alpha Quest')
-    expect(rows[0]).toHaveTextContent('W1 Oct, 2026 → W2 Oct, 2026')
-    expect(rows[1]).toHaveTextContent('Beta Saga')
-    expect(rows[1]).toHaveTextContent('W4 Sep, 2026 → W2 Oct, 2026')
+    expect(rows[0]).toHaveTextContent('Evaluated 07 Oct, 13:40')       // Vietnam time, UTC+7
+    expect(rows[0]).not.toHaveTextContent('→')
+    expect(rows[1]).toHaveTextContent('Evaluated 09 Oct, 03:05')       // crosses midnight in UTC+7
     expect(rows[1]).toHaveTextContent('Priority IV')
     expect(rows[2]).toHaveTextContent('Untitled game')
-    expect(rows[2]).toHaveTextContent('No batch → W2 Oct, 2026')
+    expect(rows[2]).toHaveTextContent('Not evaluated yet')
+    expect(rows[3]).toHaveTextContent('Not evaluated yet')
   })
 
   it('still lists games when the caller gives no title', () => {
