@@ -1,5 +1,5 @@
 -- Minimal copies of the prod tables evaluation_log touches. Columns and types follow
--- migrations 001/002/005/008/012/020-025/032/035/038/041/044. game_info is owned by the
+-- migrations 001/002/005/006/008/012/020-025/032/035/038/041/044. game_info is owned by the
 -- Signal Sense repo, so only its key is copied.
 SET TIME ZONE 'UTC';
 CREATE TABLE game_info (game_id VARCHAR(255) PRIMARY KEY);
@@ -15,6 +15,9 @@ CREATE TABLE game_evaluations (
   evaluate_date TIMESTAMPTZ, initial_note TEXT, initial_conclusion VARCHAR(50),
   final_conclusion VARCHAR(50), final_conclusion_date TIMESTAMPTZ, batch VARCHAR(40),
   record_bucket TEXT, updated_at TIMESTAMPTZ DEFAULT NOW(), updated_by TEXT,
+  record_5min_assignee VARCHAR(100), record_5min_date TIMESTAMPTZ,
+  record_20min_assignee VARCHAR(100), record_20min_date TIMESTAMPTZ,
+  record_confirmed_at TIMESTAMPTZ,
   UNIQUE (game_id, category_group));
 CREATE TABLE playtest_tags (
   id serial PRIMARY KEY,

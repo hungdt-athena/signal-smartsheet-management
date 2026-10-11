@@ -37,8 +37,9 @@ function Chip({ value, kind }: { value: string | null; kind: Change['kind'] }) {
 function ChangeLine({ c }: { c: Change }) {
   return (
     <div className="hx-chg">
-      {c.kind === 'final' && <span className="lbl">Final</span>}
-      {c.kind === 'batch' && <span className="lbl">Batch</span>}
+      {(c.label ?? (c.kind === 'final' ? 'Final' : c.kind === 'batch' ? 'Batch' : null)) && (
+        <span className="lbl">{c.label ?? (c.kind === 'final' ? 'Final' : 'Batch')}</span>
+      )}
       {c.from != null && <><Chip value={c.from} kind={c.kind} /><Arrow /></>}
       <Chip value={c.to} kind={c.kind} />
     </div>

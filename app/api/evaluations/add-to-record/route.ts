@@ -4,7 +4,7 @@ import { sql } from '@/lib/db'
 import { getConfigValues } from '@/lib/config'
 import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
 import { getSession } from '@/lib/session'
-import { logKindSql, isMissingLogTable, EVALUATION_LOG_MISSING } from '@/lib/evaluation-log'
+import { isMissingLogTable, EVALUATION_LOG_MISSING } from '@/lib/evaluation-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,7 +89,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Who pulled the game in, for the evaluation_log row.
+    // Who pulled the game in, for the evaluation_log row (kind record_add: the bucket
+    // it went into, and the owner before/after — Shortcut when auto-attributed).
     const session = await getSession()
     const actor = session?.user?.name ?? null
     const role = session?.user?.role ?? null
@@ -124,16 +125,16 @@ export async function POST(req: NextRequest) {
                   THEN NOW() ELSE ge.final_conclusion_date END,
               final_evaluator = COALESCE(${finalEval}, ge.final_evaluator)
           FROM old WHERE ge.id = old.id
-          RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion, ge.batch
+          RETURNING ge.id, ge.initial_evaluator, ge.initial_conclusion, ge.final_conclusion, ge.batch
         ), logged AS (
           INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
             kind, conclusion_before, conclusion_after, final_before, final_after, changed,
-            batch_before, batch_after)
+            batch_before, batch_after, bucket_after, owner_after)
           SELECT old.id, old.game_id, ${actor}::text, ${role}::text, old.initial_evaluator, 'add_to_record',
-            ${logKindSql(sql, { initialTouched: !!(initEval || initConcl), finalTouched: !!(finalConcl || finalEval) })},
+            'record_add',
             old.initial_conclusion, upd.initial_conclusion, old.final_conclusion, upd.final_conclusion,
             old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion,
-            old.batch, upd.batch
+            old.batch, upd.batch, ${bucket}::text, upd.initial_evaluator
           FROM old JOIN upd ON upd.id = old.id
         )
         SELECT id FROM upd
@@ -163,16 +164,16 @@ export async function POST(req: NextRequest) {
               final_conclusion_date = CASE WHEN ${autoFill} THEN NOW() ELSE ge.final_conclusion_date END,
               final_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE ge.final_evaluator END
           FROM old WHERE ge.id = old.id
-          RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion, ge.batch
+          RETURNING ge.id, ge.initial_evaluator, ge.initial_conclusion, ge.final_conclusion, ge.batch
         ), logged AS (
           INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
             kind, conclusion_before, conclusion_after, final_before, final_after, changed,
-            batch_before, batch_after)
+            batch_before, batch_after, bucket_after, owner_after)
           SELECT old.id, old.game_id, ${actor}::text, ${role}::text, old.initial_evaluator, 'add_to_record',
-            ${logKindSql(sql, { initialTouched: true, finalTouched: true })},
+            'record_add',
             old.initial_conclusion, upd.initial_conclusion, old.final_conclusion, upd.final_conclusion,
             old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion,
-            old.batch, upd.batch
+            old.batch, upd.batch, ${bucket}::text, upd.initial_evaluator
           FROM old JOIN upd ON upd.id = old.id
         )
         SELECT id FROM upd

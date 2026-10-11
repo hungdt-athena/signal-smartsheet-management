@@ -65,6 +65,35 @@ describe('EvalHistoryModal', () => {
     row = screen.getAllByTestId('history-row')[0]
     expect(Array.from(row.querySelectorAll('.badge')).map(b => b.textContent)).toEqual(['W1 Oct, 2026', '—'])
   })
+  it('writes a person change that has a label as the label, then from → to names; one without stays a bare hand-over', () => {
+    const rec: HistoryEvent = {
+      key: 'log-9', at: '2026-10-11T07:32:00.000Z', who: 'VinhTD', type: 'record', verb: 'added to Record · 5 min',
+      changes: [{ kind: 'person', label: 'Evaluator', from: 'Alice', to: 'Shortcut' }, { kind: 'initial', from: 'Bypass', to: 'List_Idea' }, { kind: 'final', from: null, to: 'Insight' }],
+      time: null, seconds: null, note: 'Batch W2 Oct, 2026',
+    }
+    view({ events: [rec, EVENTS[1]] })
+    const [r0, r1] = screen.getAllByTestId('history-row')
+    expect(r0.textContent).toContain('VinhTD added to Record · 5 min')
+    expect(Array.from(r0.querySelectorAll('.lbl')).map(l => l.textContent)).toEqual(['Evaluator', 'Final'])
+    const person = r0.querySelector('.hx-chg')!
+    expect(person.querySelector('.lbl')?.textContent).toBe('Evaluator')
+    expect(Array.from(person.querySelectorAll('.name')).map(n => n.textContent)).toEqual(['Alice', 'Shortcut'])
+    expect(person.querySelectorAll('svg')).toHaveLength(1)
+    expect(r0.querySelector('.hx-note')?.textContent).toBe('Batch W2 Oct, 2026')
+    expect(r0.querySelector('.hx-dur')).toBeNull()
+    // the hand-over line has no label
+    expect(r1.querySelector('.lbl')).toBeNull()
+    expect(Array.from(r1.querySelectorAll('.name')).map(n => n.textContent)).toEqual(['Bob', 'Alice'])
+  })
+  it('shows a Record event that has no change lines as the sentence and the note only', () => {
+    const ev: HistoryEvent = { key: 'log-8', at: '2026-10-11T07:32:00.000Z', who: 'VinhTD', type: 'record',
+      verb: 'reassigned Record · 20 min from MyTL to Bob', changes: [], time: null, seconds: null, note: 'Batch W2 Oct, 2026' }
+    view({ events: [ev] })
+    const row = screen.getByTestId('history-row')
+    expect(row.querySelector('.hx-chg')).toBeNull()
+    expect(row.textContent).toContain('VinhTD reassigned Record · 20 min from MyTL to Bob')
+    expect(row.querySelector('.hx-ico.record')).not.toBeNull()
+  })
   it('summarises events, panel time and people under the title', () => {
     view()
     const sum = document.querySelector('.hx-sum')!

@@ -6,7 +6,8 @@ import {
 const log = (o: Partial<LogRow>): LogRow => ({
   id: '1', at: '2026-10-11T07:32:00.000Z', actor: 'Alice', owner: 'Alice', source: 'panel', context: 'evaluate',
   kind: 'first', conclusion_before: null, conclusion_after: 'Bypass', final_before: null, final_after: null,
-  batch_before: null, batch_after: null, changed: true, view_s: 480, confidence: null, ...o,
+  batch_before: null, batch_after: null, bucket_before: null, bucket_after: null, recorder_before: null, recorder_after: null, owner_after: null,
+  changed: true, view_s: 480, confidence: null, ...o,
 })
 const asg = (o: Partial<AssignRow>): AssignRow => ({
   id: 7, at: '2026-10-10T02:00:00.000Z', action: 'reassign', evaluator_name: 'Alice', from_evaluator: 'Bob', by: 'cron', ...o,
@@ -112,19 +113,102 @@ describe('fromLog', () => {
     expect(e.time).toBeNull()
     expect(e.seconds).toBeNull()
   })
-  it('an add-to-record pull is its own type and never timed', () => {
+  it('an add-to-record pull is its own type, never timed, with the bucket in the verb and the batch in the note', () => {
+    const e = fromLog(log({ kind: 'record_add', source: 'add_to_record', view_s: null, context: null, owner: 'Alice', owner_after: 'Shortcut',
+      conclusion_before: 'Bypass', conclusion_after: 'List_Idea', final_before: null, final_after: 'Insight',
+      bucket_after: '5min', batch_before: 'W2 Oct, 2026', batch_after: 'W2 Oct, 2026' }))
+    expect(e).toMatchObject({ who: 'Alice', type: 'record', verb: 'added to Record · 5 min', time: null, seconds: null, note: 'Batch W2 Oct, 2026' })
+    expect(e.changes).toEqual([
+      { kind: 'person', label: 'Evaluator', from: 'Alice', to: 'Shortcut' },
+      { kind: 'initial', from: 'Bypass', to: 'List_Idea' },
+      { kind: 'final', from: null, to: 'Insight' },
+    ])
+  })
+  it('an add-to-record pull lists only what moved, and says when the batch moved too', () => {
+    const e = fromLog(log({ kind: 'record_add', source: 'add_to_record', view_s: null, owner: 'Shortcut', owner_after: 'Shortcut',
+      conclusion_before: 'List_Idea', conclusion_after: 'List_Idea', final_before: 'Priority IV', final_after: 'Priority IV',
+      bucket_after: '20min', batch_before: 'W1 Oct, 2026', batch_after: 'W2 Oct, 2026' }))
+    expect(e.verb).toBe('added to Record · 20 min')
+    expect(e.changes).toEqual([])
+    expect(e.note).toBe('Batch W2 Oct, 2026 · was W1 Oct, 2026')
+    // an unfilled owner_after (old row) shows no person line
+    expect(fromLog(log({ kind: 'record_add', source: 'add_to_record', view_s: null, owner: 'Alice', owner_after: null, bucket_after: '5min' })).changes.map(c => c.kind)).toEqual(['initial'])
+  })
+  it('an add-to-record row from before the Record kinds existed still reads as an add', () => {
     const e = fromLog(log({ source: 'add_to_record', view_s: null, context: null, conclusion_before: 'Bypass', conclusion_after: 'List_Idea' }))
-    expect(e).toMatchObject({ type: 'record', verb: 'added to record', time: null, seconds: null })
+    expect(e).toMatchObject({ type: 'record', verb: 'added to Record', time: null, seconds: null, note: null })
     expect(e.changes).toEqual([{ kind: 'initial', from: 'Bypass', to: 'List_Idea' }])
   })
-  it('an add-to-record pull that moved the batch shows it after the verdict', () => {
-    const e = fromLog(log({ source: 'add_to_record', view_s: null, context: null, conclusion_before: 'List_Idea', conclusion_after: 'List_Idea', changed: false,
-      batch_before: 'W1 Oct, 2026', batch_after: 'W2 Oct, 2026' }))
-    expect(e.verb).toBe('added to record')
-    expect(e.changes).toEqual([
-      { kind: 'initial', from: null, to: 'List_Idea' },
-      { kind: 'batch', from: 'W1 Oct, 2026', to: 'W2 Oct, 2026' },
-    ])
+  it('the first confirmed recorder is "assigned", with the batch as the note and no change lines', () => {
+    const e = fromLog(log({ kind: 'record_assign', source: 'record_tab', view_s: null, context: null, actor: 'VinhTD', bucket_after: '20min',
+      recorder_after: 'MyTL', batch_before: 'W2 Oct, 2026', batch_after: 'W2 Oct, 2026', conclusion_before: 'List_Idea', conclusion_after: 'List_Idea' }))
+    expect(e).toMatchObject({ who: 'VinhTD', type: 'record', verb: 'assigned MyTL to Record · 20 min', changes: [], note: 'Batch W2 Oct, 2026', time: null, seconds: null })
+  })
+  it('a later confirm with someone else is "reassigned ... from A to B"', () => {
+    const e = fromLog(log({ kind: 'record_assign', source: 'record_tab', view_s: null, actor: 'VinhTD', bucket_after: '20min',
+      recorder_before: 'MyTL', recorder_after: 'Bob', batch_before: 'W2 Oct, 2026', batch_after: 'W2 Oct, 2026' }))
+    expect(e.verb).toBe('reassigned Record · 20 min from MyTL to Bob')
+    expect(e.changes).toEqual([])
+  })
+  it('an assign without a batch has no note', () => {
+    expect(fromLog(log({ kind: 'record_assign', source: 'record_tab', view_s: null, bucket_after: '5min', recorder_after: 'Bob' })).note).toBeNull()
+  })
+  it('a Record row from the save route (panel / other) keeps its Record wording and is not timed', () => {
+    const e = fromLog(log({ kind: 'record_assign', source: 'panel', context: 'record', view_s: 90, bucket_after: '5min', recorder_after: 'Bob', batch_after: 'W2' }))
+    expect(e).toMatchObject({ type: 'record', verb: 'assigned Bob to Record · 5 min', time: null, seconds: null, note: 'Batch W2' })
+  })
+  it('a move shows the buckets in the verb, and the recorder and batch in the note', () => {
+    const e = fromLog(log({ kind: 'record_move', source: 'record_tab', view_s: null, actor: 'VinhTD', bucket_before: '5min', bucket_after: '20min',
+      recorder_before: 'MyTL', recorder_after: 'MyTL', batch_before: 'W2 Oct, 2026', batch_after: 'W2 Oct, 2026' }))
+    expect(e).toMatchObject({ type: 'record', verb: 'moved the game in Record · 5 min → 20 min', changes: [], note: 'Recorder MyTL · Batch W2 Oct, 2026' })
+    // no recorder: only the batch
+    expect(fromLog(log({ kind: 'record_move', source: 'record_tab', bucket_before: '20min', bucket_after: '5min', batch_after: 'W2' })).note).toBe('Batch W2')
+  })
+  it('a remove says which bucket it was in and who was recording', () => {
+    const e = fromLog(log({ kind: 'record_remove', source: 'record_tab', view_s: null, actor: 'VinhTD', bucket_before: '20min', recorder_before: 'MyTL', batch_before: 'W2 Oct, 2026', batch_after: 'W2 Oct, 2026' }))
+    expect(e).toMatchObject({ type: 'record', verb: 'removed the game from Record · was 20 min', changes: [], note: 'Recorder was MyTL · Batch W2 Oct, 2026' })
+    expect(fromLog(log({ kind: 'record_remove', source: 'record_tab', bucket_before: '5min' })).note).toBeNull()
+  })
+  it('Record events never get the generic batch change line, even when the batch moved', () => {
+    for (const kind of ['record_assign', 'record_move', 'record_remove']) {
+      const e = fromLog(log({ kind, source: 'record_tab', bucket_before: '5min', bucket_after: '20min', batch_before: 'W1', batch_after: 'W2' }))
+      expect(e.changes.map(c => c.kind)).not.toContain('batch')
+    }
+  })
+  it('a Record row with missing or unknown fields still reads sensibly', () => {
+    expect(fromLog(log({ kind: 'record_assign', source: 'record_tab', recorder_after: null, bucket_after: null }))).toMatchObject({ verb: 'assigned a recorder to Record' })
+    expect(fromLog(log({ kind: 'record_assign', source: 'record_tab', recorder_before: 'A', recorder_after: null, bucket_after: 'weird' })).verb).toBe('reassigned Record from A to —')
+    expect(fromLog(log({ kind: 'record_move', source: 'record_tab', bucket_before: null, bucket_after: '20min' })).verb).toBe('moved the game in Record · to 20 min')
+    expect(fromLog(log({ kind: 'record_move', source: 'record_tab', bucket_before: null, bucket_after: null })).verb).toBe('moved the game in Record')
+    expect(fromLog(log({ kind: 'record_remove', source: 'record_tab', bucket_before: null })).verb).toBe('removed the game from Record')
+    expect(fromLog(log({ kind: 'record_add', source: 'add_to_record', bucket_after: null, owner_after: null, conclusion_before: null, conclusion_after: null })))
+      .toMatchObject({ verb: 'added to Record', changes: [] })
+    // fields absent altogether (an API that predates the new columns)
+    const bare = { id: '9', at: '2026-10-11T07:32:00Z', actor: 'VinhTD', owner: null, source: 'record_tab', context: null, kind: 'record_move',
+      conclusion_before: null, conclusion_after: null, final_before: null, final_after: null, batch_before: null, batch_after: null,
+      changed: false, view_s: null, confidence: null } as unknown as LogRow
+    expect(fromLog(bare)).toMatchObject({ type: 'record', verb: 'moved the game in Record', note: null })
+  })
+  it('a seeded Record assignment is credited to nobody and says it was copied', () => {
+    const e = fromLog(log({ kind: 'record_assign', source: 'seed', actor: null, owner: 'Carol', view_s: null, context: null, confidence: 'ok', bucket_after: '20min', recorder_after: 'MyTL', batch_before: 'W2', batch_after: 'W2' }))
+    expect(e).toMatchObject({ who: '—', type: 'record', verb: 'assigned MyTL to Record · 20 min', changes: [], note: 'Copied from the old record', time: null })
+  })
+  it('a final conclusion that puts a game in Record says so in the note', () => {
+    const base = { kind: 'final', changed: false, conclusion_before: 'List_Idea', conclusion_after: 'List_Idea' }
+    expect(fromLog(log({ ...base, final_before: null, final_after: 'Priority IV', context: 'shortlist' })).note).toBe('From Short List · Enters Record · 20 min')
+    expect(fromLog(log({ ...base, final_before: null, final_after: 'Priority IV' })).note).toBe('Enters Record · 20 min')
+    expect(fromLog(log({ ...base, final_before: null, final_after: 'Insight' })).note).toBe('Enters Record · 5 min')
+    // it moved to the other bucket
+    expect(fromLog(log({ ...base, final_before: 'Insight', final_after: 'Priority IV' })).note).toBe('Enters Record · 20 min')
+    // a verdict save that also moved the final counts too
+    expect(fromLog(log({ kind: 'revise', conclusion_before: 'Bypass', conclusion_after: 'List_Idea', final_before: null, final_after: 'Insight' })).note).toBe('Enters Record · 5 min')
+  })
+  it('a final conclusion does not say "Enters Record" when the game was already in that bucket or the final has no bucket', () => {
+    expect(fromLog(log({ kind: 'final', changed: false, final_before: 'Priority IV', final_after: 'Priority IV' })).note).toBeNull() // unchanged
+    expect(fromLog(log({ kind: 'final', changed: false, final_before: 'Priority II', final_after: 'Priority I' })).note).toBeNull()
+    expect(fromLog(log({ kind: 'final', changed: false, final_before: 'Priority IV', final_after: 'Priority II' })).note).toBeNull() // leaving Record
+    expect(fromLog(log({ kind: 'final', changed: false, final_before: 'Priority IV', final_after: null })).note).toBeNull()
+    expect(fromLog(log({ kind: 'first', final_before: 'Insight', final_after: 'Insight' })).note).toBeNull()
   })
   it('a seed row is an old verdict credited to the owner, with a warning when its time is unsure', () => {
     const ok = fromLog(log({ source: 'seed', actor: null, owner: 'Carol', view_s: null, context: null, confidence: 'ok' }))
@@ -140,6 +224,17 @@ describe('fromLog', () => {
   })
   it('accepts a Date for at (postgres.js returns timestamptz as Date)', () => {
     expect(fromLog(log({ at: new Date('2026-10-11T07:32:00Z') })).at).toBe('2026-10-11T07:32:00.000Z')
+  })
+})
+
+describe('Record events in the summary and the day list', () => {
+  it('count as events, and the actor counts as a person', () => {
+    const events = mergeHistory([
+      log({ id: '1', kind: 'record_move', source: 'record_tab', actor: 'VinhTD', view_s: null, bucket_before: '5min', bucket_after: '20min' }),
+      log({ id: '2', kind: 'record_assign', source: 'seed', actor: null, view_s: null, bucket_after: '5min', recorder_after: 'Bob' }),
+    ], [])
+    expect(summarize(events)).toEqual({ events: 2, seconds: 0, people: 1 })
+    expect(groupByDay(events, new Date('2026-10-11T08:00:00Z'))[0].events).toHaveLength(2)
   })
 })
 

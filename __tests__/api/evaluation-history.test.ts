@@ -32,7 +32,8 @@ const get = (gameId: string) =>
 const LOG = {
   id: '5', at: new Date('2026-10-11T07:32:00Z'), actor: 'Alice', owner: 'Alice', source: 'panel', context: 'evaluate',
   kind: 'first', conclusion_before: null, conclusion_after: 'Bypass', final_before: null, final_after: null,
-  batch_before: null, batch_after: null, changed: true, view_s: 480, confidence: null,
+  batch_before: null, batch_after: null, bucket_before: null, bucket_after: null,
+  recorder_before: null, recorder_after: null, owner_after: null, changed: true, view_s: 480, confidence: null,
 }
 const ASG = { id: 9, at: new Date('2026-10-10T02:00:00Z'), action: 'assign', evaluator_name: 'Alice', from_evaluator: null, by: 'cron' }
 
@@ -64,6 +65,7 @@ describe('GET /api/evaluations/[gameId]/history', () => {
     expect(logCall.binds).toContain('com.foo')
     expect(logCall.text).toMatch(/LIMIT 200/)
     expect(logCall.text).toMatch(/l\.batch_before, l\.batch_after/)
+    expect(logCall.text).toMatch(/l\.bucket_before, l\.bucket_after, l\.recorder_before, l\.recorder_after, l\.owner_after/)
     expect(asgCall.text).toMatch(/= ANY\(ah\.game_ids\)/)
     expect(asgCall.binds).toContain('com.foo')
     expect(asgCall.text).toMatch(/LIMIT 100/)

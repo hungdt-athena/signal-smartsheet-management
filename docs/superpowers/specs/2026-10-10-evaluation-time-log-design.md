@@ -74,8 +74,9 @@ CREATE TABLE IF NOT EXISTS evaluation_log (
 CREATE INDEX IF NOT EXISTS idx_evaluation_log_actor_time ON evaluation_log (actor, created_at);
 CREATE INDEX IF NOT EXISTS idx_evaluation_log_game ON evaluation_log (game_evaluation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_evaluation_log_game_id ON evaluation_log (game_id, created_at); -- panel History modal
-CREATE UNIQUE INDEX IF NOT EXISTS uq_evaluation_log_seed
-  ON evaluation_log (game_evaluation_id) WHERE source = 'seed';
+-- one verdict seed AND one Record seed per game
+CREATE UNIQUE INDEX IF NOT EXISTS uq_evaluation_log_seed_kind
+  ON evaluation_log (game_evaluation_id, kind, (COALESCE(bucket_after, ''))) WHERE source = 'seed';
 ```
 
 `actor_role`, `final_before/after` and `confidence` have no reader in v1; they are kept because an
@@ -275,6 +276,30 @@ no timing. Today's behaviour is unchanged: an initial conclusion that is empty o
 | `evaluate_date` | **unchanged from today** (moves when the conclusion changes) | **unchanged from today** (auto-fill stamps NOW()) |
 
 Keeping today's `evaluate_date` here also keeps batch windows stable: this route stamps the batch.
+
+### Record events (decided 2026-10-11)
+
+How a game reaches Record, and what is logged. Columns added to `evaluation_log`: `bucket_before`,
+`bucket_after` (`5min` / `20min`), `recorder_before`, `recorder_after`, `owner_after`; new kinds
+`record_add`, `record_assign`, `record_move`, `record_remove`; new `source` `record_tab`. None carries
+`view_s`, so the hours query never counts them.
+
+- A List_Idea game whose Final is Insight (5 min) or Priority IV (20 min) enters Record by itself. Nothing is
+  logged for that; the History note on the Final event says "Enters Record · 20 min".
+- **Add to Record** is only for games that were not evaluated or were evaluated as something other than
+  List_Idea. Its row is `record_add`: bucket, `owner` → `owner_after` (e.g. Alice → Shortcut), verdict and final
+  before/after, batch. (It replaces the `kind` CASE this section used before.)
+- **Assigning a recorder** is logged once, at **confirm** (`confirm-records`), as `record_assign`:
+  "VinhTD assigned MyTL to Record · 20 min". The draft dropdown (`assign-records`) and a reset to draft log
+  nothing. Confirming again after a reset logs `reassigned … from A to B` when the recorder changed, and nothing
+  when it is the same person. "Previous recorder" = `recorder_after` of the game's latest `record_assign` /
+  `record_move` / `record_remove` row. A panel PATCH that changes a recorder on an already confirmed row writes
+  the same `record_assign` row.
+- **Move between buckets** and **remove from Record** (`record-bucket`) log `record_move` / `record_remove`
+  immediately, whether or not the game was confirmed. Re-picking the same bucket logs nothing.
+- **Not logged:** the YouTube auto-sync of recorders (`reconcile-recorders`).
+- **Seed:** a game already confirmed gets one `record_assign` seed row at `record_confirmed_at`, unless it already
+  has a live Record row.
 
 ### Not logged
 

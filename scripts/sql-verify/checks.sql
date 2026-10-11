@@ -7,8 +7,8 @@ SET TIME ZONE 'UTC';
 DO $$
 DECLARE n int;
 BEGIN
-  SELECT count(*) INTO n FROM evaluation_log WHERE source = 'seed';
-  ASSERT n = 7, format('seed rows: expected 7, got %s', n);
+  SELECT count(*) INTO n FROM evaluation_log WHERE source = 'seed' AND kind = 'first';
+  ASSERT n = 7, format('verdict seed rows: expected 7, got %s', n);
 
   -- corrected: owner tagged 09:00, evaluate_date 10:00 -> created_at = tag time
   ASSERT (SELECT confidence FROM evaluation_log WHERE game_evaluation_id = 1) = 'corrected', 'g1 corrected';
@@ -24,28 +24,62 @@ BEGIN
   -- a tag by someone other than the owner is ignored
   ASSERT (SELECT confidence FROM evaluation_log WHERE game_evaluation_id = 6) = 'ok', 'g6 other-person tag ignored';
   -- earliest owner tag wins
-  ASSERT (SELECT created_at FROM evaluation_log WHERE game_evaluation_id = 7) = '2026-10-02 08:00+07', 'g7 MIN tag';
+  ASSERT (SELECT created_at FROM evaluation_log WHERE game_evaluation_id = 7 AND kind = 'first') = '2026-10-02 08:00+07', 'g7 MIN tag';
   -- not seeded: no conclusion / no date
   ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id IN (8, 9)), 'g8/g9 not seeded';
 END $$;
 
+-- Record seed: one record_assign per confirmed game with a recorder in its effective bucket.
+DO $$
+DECLARE r record;
+BEGIN
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE source = 'seed' AND kind = 'record_assign') = 2, 'record seed rows: 2';
+  -- g7 has both seeds (the unique seed index allows one per kind)
+  ASSERT (SELECT array_agg(kind ORDER BY kind) FROM evaluation_log WHERE game_evaluation_id = 7) = ARRAY['first','record_assign'], 'g7 verdict + record seed';
+  SELECT * INTO r FROM evaluation_log WHERE game_evaluation_id = 7 AND kind = 'record_assign';
+  ASSERT r.actor IS NULL AND r.owner = 'Alice' AND r.bucket_after = '20min' AND r.recorder_after = 'MyTL'
+     AND r.recorder_before IS NULL AND r.bucket_before IS NULL, 'g7 record seed shape';
+  ASSERT r.batch_before = 'W1 Oct, 2026' AND r.batch_after = 'W1 Oct, 2026' AND r.confidence = 'ok'
+     AND r.created_at = '2026-10-03 10:00+07' AND r.view_s IS NULL, 'g7 record seed batch/confidence/time';
+  -- manual bucket wins over the final conclusion
+  SELECT * INTO r FROM evaluation_log WHERE game_evaluation_id = 10;
+  ASSERT r.kind = 'record_assign' AND r.bucket_after = '5min' AND r.recorder_after = 'Bob' AND r.owner = 'Shortcut', 'g10 5min Bob';
+  -- recorder outside the effective bucket / draft / no bucket: not seeded
+  ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id IN (11, 12, 13)), 'g11/g12/g13 not seeded';
+END $$;
+
 -- Re-running 045 inserts nothing.
+CREATE TEMP TABLE seed_n AS SELECT count(*) AS n FROM evaluation_log;
 \i migrations/045_evaluation_log.sql
 DO $$ BEGIN
-  ASSERT (SELECT count(*) FROM evaluation_log WHERE source = 'seed') = 7, 'seed is idempotent';
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE source = 'seed') = 9, 'seed is idempotent (7 verdict + 2 record)';
+  ASSERT (SELECT count(*) FROM evaluation_log) = (SELECT n FROM seed_n), 'second run adds 0 rows';
+  -- the old one-seed-per-game index is gone, the per-kind one is there
+  ASSERT NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'uq_evaluation_log_seed'), 'old seed index dropped';
+  ASSERT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'uq_evaluation_log_seed_kind'), 'per-kind seed index';
 END $$;
 
 -- After a live panel row exists, only games judged before it are seeded.
-INSERT INTO game_info VALUES ('c1'), ('c2');
+INSERT INTO game_info VALUES ('c1'), ('c2'), ('c3'), ('c4'), ('c5');
 INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion, evaluate_date) VALUES
   (20, 'c1', 'Alice', 'Bypass', '2026-10-09 11:59+07'),
   (21, 'c2', 'Alice', 'Bypass', '2026-10-09 12:05+07');
+INSERT INTO game_evaluations (id, game_id, initial_evaluator, final_conclusion, record_20min_assignee, record_confirmed_at) VALUES
+  (23, 'c3', 'Alice', 'Priority IV', 'MyTL', '2026-10-09 11:59+07'),
+  (24, 'c4', 'Alice', 'Priority IV', 'MyTL', '2026-10-09 12:05+07'),
+  (25, 'c5', 'Alice', 'Priority IV', 'Bob',  '2026-10-09 11:00+07');
 INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, context, kind, view_s, created_at)
   VALUES (2, 'g2', 'Alice', 'panel', 'evaluate', 'revise', 30, '2026-10-09 12:00+07');
+-- c5 already has a live Record row: a seed added after it would become the "latest" one
+INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, kind, bucket_after, recorder_after, created_at)
+  VALUES (25, 'c5', 'VinhTD', 'record_tab', 'record_assign', '20min', 'Bob', '2026-10-09 11:00+07');
 \i migrations/045_evaluation_log.sql
 DO $$ BEGIN
   ASSERT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 20 AND source = 'seed'), 'c1 seeded (before cutover)';
   ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 21 AND source = 'seed'), 'c2 skipped (after cutover)';
+  ASSERT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 23 AND source = 'seed' AND kind = 'record_assign'), 'c3 record seeded (before cutover)';
+  ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 24 AND source = 'seed'), 'c4 record skipped (after cutover)';
+  ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 25 AND source = 'seed'), 'c5 skipped (has a live Record row)';
 END $$;
 -- Deleting a game_evaluations row (duplicate-row cleanups do this) keeps its log row.
 INSERT INTO game_info VALUES ('d1');
@@ -146,7 +180,7 @@ INSERT INTO game_info VALUES ('r1'), ('r2');
 INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion, evaluate_date) VALUES
  (41, 'r1', 'HuyDD', 'Bypass', '2026-10-01 10:00+07'),
  (42, 'r2', 'HuyDD', 'List_Idea', '2026-10-01 10:00+07');
-PREPARE atr(unknown, unknown) AS
+PREPARE atr(unknown, unknown, unknown) AS
 WITH old AS (
   SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date, batch
   FROM game_evaluations WHERE game_id = $1 AND category_group = 'puzzle' FOR NO KEY UPDATE
@@ -155,18 +189,18 @@ WITH old AS (
     initial_evaluator = CASE WHEN (ge.initial_conclusion IS NULL OR ge.initial_conclusion ILIKE '%bypass%') THEN 'Shortcut' ELSE ge.initial_evaluator END,
     initial_conclusion = CASE WHEN (ge.initial_conclusion IS NULL OR ge.initial_conclusion ILIKE '%bypass%') THEN 'List_Idea' ELSE ge.initial_conclusion END
   FROM old WHERE ge.id = old.id
-  RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion, ge.batch
+  RETURNING ge.id, ge.initial_evaluator, ge.initial_conclusion, ge.final_conclusion, ge.batch
 ), logged AS (
   INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, source, kind,
-    conclusion_before, conclusion_after, changed, batch_before, batch_after)
-  SELECT old.id, old.game_id, $2::text, old.initial_evaluator, 'add_to_record', 'revise',
+    conclusion_before, conclusion_after, changed, batch_before, batch_after, bucket_after, owner_after)
+  SELECT old.id, old.game_id, $2::text, old.initial_evaluator, 'add_to_record', 'record_add',
     old.initial_conclusion, upd.initial_conclusion, old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion,
-    old.batch, upd.batch
+    old.batch, upd.batch, $3::text, upd.initial_evaluator
   FROM old JOIN upd ON upd.id = old.id
 )
 SELECT id FROM upd;
-EXECUTE atr('r1', 'VinhTD');
-EXECUTE atr('r2', 'VinhTD');
+EXECUTE atr('r1', 'VinhTD', '20min');
+EXECUTE atr('r2', 'VinhTD', '5min');
 DO $$ BEGIN
   ASSERT (SELECT initial_evaluator FROM game_evaluations WHERE id = 41) = 'Shortcut', 'r1 auto-filled';
   ASSERT (SELECT initial_evaluator FROM game_evaluations WHERE id = 42) = 'HuyDD', 'r2 kept';
@@ -174,6 +208,272 @@ DO $$ BEGIN
          = 'HuyDD:Bypass>List_Idea', 'r1 log shows what was overridden';
   ASSERT (SELECT changed FROM evaluation_log WHERE game_evaluation_id = 42) = false, 'r2 logged, unchanged';
   ASSERT (SELECT batch_before IS NOT DISTINCT FROM batch_after FROM evaluation_log WHERE game_evaluation_id = 41), 'r1 batch equal';
+  ASSERT (SELECT kind || ':' || bucket_after || ':' || owner || '>' || owner_after FROM evaluation_log WHERE game_evaluation_id = 41)
+         = 'record_add:20min:HuyDD>Shortcut', 'r1 record_add with bucket and owner change';
+  ASSERT (SELECT kind || ':' || bucket_after || ':' || owner || '>' || owner_after FROM evaluation_log WHERE game_evaluation_id = 42)
+         = 'record_add:5min:HuyDD>HuyDD', 'r2 record_add, owner kept';
+  ASSERT (SELECT bool_and(bucket_before IS NULL AND recorder_before IS NULL AND recorder_after IS NULL AND view_s IS NULL)
+          FROM evaluation_log WHERE game_evaluation_id IN (41, 42)), 'record_add carries no recorder and no time';
+END $$;
+DELETE FROM evaluation_log;
+
+-- ===== Record events: confirm, move, remove, PATCH side rows =====
+-- Hand copies of the statements in confirm-records/route.ts, record-bucket/route.ts and
+-- the PATCH's logged_rec CTE. Parameters stay untyped, as postgres.js sends them.
+
+-- EXECUTE of a data-modifying statement cannot feed CREATE TABLE AS, so the confirm
+-- count comes back through \gset and is checked here.
+CREATE FUNCTION pg_temp.check_eq(got int, want int, msg text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  ASSERT got = want, format('%s: expected %s, got %s', msg, want, got);
+END $$;
+
+-- confirm-records (set branch). $1..$3 the ids (sql(list) expands to a list), $4 actor, $5 role.
+PREPARE confirm(unknown, unknown, unknown, unknown, unknown) AS
+WITH old AS (
+  SELECT id, game_id, initial_evaluator, batch, record_bucket, final_conclusion,
+    record_5min_assignee, record_20min_assignee
+  FROM game_evaluations
+  WHERE id IN ($1, $2, $3) AND record_confirmed_at IS NULL
+  FOR NO KEY UPDATE
+), upd AS (
+  UPDATE game_evaluations ge
+  SET record_confirmed_at = NOW()
+  FROM old WHERE ge.id = old.id
+  RETURNING ge.id
+), cur AS (
+  SELECT old.id, old.game_id, old.initial_evaluator, old.batch, eb.bucket,
+    CASE eb.bucket WHEN '5min' THEN old.record_5min_assignee
+                   WHEN '20min' THEN old.record_20min_assignee END AS recorder,
+    (SELECT l.recorder_after FROM evaluation_log l
+     WHERE l.game_evaluation_id = old.id
+       AND l.kind IN ('record_assign', 'record_move', 'record_remove')
+     ORDER BY l.id DESC LIMIT 1) AS prev_recorder
+  FROM old JOIN upd ON upd.id = old.id
+  CROSS JOIN LATERAL (SELECT CASE
+    WHEN old.record_bucket IN ('5min', '20min') THEN old.record_bucket
+    WHEN old.final_conclusion = 'Priority IV' THEN '20min'
+    WHEN old.final_conclusion = 'Insight' THEN '5min'
+  END AS bucket) eb
+), logged AS (
+  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
+    kind, bucket_after, recorder_before, recorder_after, batch_before, batch_after)
+  SELECT cur.id, cur.game_id, $4::text, $5::text, cur.initial_evaluator, 'record_tab',
+    'record_assign', cur.bucket, cur.prev_recorder, cur.recorder, cur.batch, cur.batch
+  FROM cur
+  WHERE cur.recorder IS NOT NULL AND cur.recorder IS DISTINCT FROM cur.prev_recorder
+)
+SELECT count(*)::int AS confirmed FROM upd;
+
+-- confirm-records (unset branch): unchanged, logs nothing.
+PREPARE reset_rec(unknown) AS
+UPDATE game_evaluations SET record_confirmed_at = NULL WHERE id IN ($1) AND record_confirmed_at IS NOT NULL;
+
+-- assign-records (draft): not logged; a plain write of the recorder column is enough here.
+-- record-bucket move. The route computes cur / curAssignee in JS; the harness passes them.
+-- $1 id, $2 bucket, $3 5min col, $4 20min col, $5 actor, $6 role, $7 kind, $8 cur,
+-- $9 bucketAfter, $10 curAssignee, $11 recorderAfter
+PREPARE rb_move(unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown) AS
+WITH upd AS (
+  UPDATE game_evaluations SET
+    record_bucket = $2,
+    record_5min_assignee = $3,
+    record_20min_assignee = $4
+  WHERE id = $1
+  RETURNING *
+), logged AS (
+  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
+    kind, bucket_before, bucket_after, recorder_before, recorder_after, batch_before, batch_after)
+  SELECT upd.id, upd.game_id, $5::text, $6::text, upd.initial_evaluator, 'record_tab',
+    $7::text, $8::text, $9::text, $10::text, $11::text,
+    upd.batch, upd.batch
+  FROM upd
+)
+SELECT * FROM upd;
+-- record-bucket remove. $1 id, $2 actor, $3 role, $4 kind, $5 cur, $6 bucketAfter, $7 curAssignee, $8 recorderAfter
+PREPARE rb_remove(unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown) AS
+WITH upd AS (
+  UPDATE game_evaluations SET
+    record_bucket = 'none',
+    record_5min_assignee = NULL,
+    record_20min_assignee = NULL,
+    record_confirmed_at = NULL
+  WHERE id = $1
+  RETURNING *
+), logged AS (
+  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
+    kind, bucket_before, bucket_after, recorder_before, recorder_after, batch_before, batch_after)
+  SELECT upd.id, upd.game_id, $2::text, $3::text, upd.initial_evaluator, 'record_tab',
+    $4::text, $5::text, $6::text, $7::text, $8::text,
+    upd.batch, upd.batch
+  FROM upd
+)
+SELECT * FROM upd;
+-- record-bucket no-op: the plain UPDATE path (same bucket picked again).
+PREPARE rb_plain(unknown, unknown, unknown, unknown) AS
+UPDATE game_evaluations SET record_bucket = $2, record_5min_assignee = $3, record_20min_assignee = $4
+WHERE id = $1 RETURNING *;
+
+INSERT INTO game_info VALUES ('k1'), ('k2'), ('k3'), ('k4'), ('k5'), ('k6');
+INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion, final_conclusion, batch,
+  record_bucket, record_5min_assignee, record_20min_assignee, record_confirmed_at) VALUES
+ (61, 'k1', 'Alice', 'List_Idea', 'Priority IV', 'W2 Oct, 2026', NULL, NULL, 'MyTL', NULL),
+ (62, 'k2', 'Alice', 'List_Idea', 'Insight', 'W2 Oct, 2026', NULL, NULL, NULL, NULL),   -- no recorder
+ (63, 'k3', 'Bob', 'List_Idea', 'Insight', NULL, NULL, 'Carol', NULL, NULL),
+ (64, 'k4', 'Bob', 'List_Idea', 'Priority IV', NULL, NULL, NULL, 'Dave', NULL),
+ (65, 'k5', 'Bob', 'List_Idea', NULL, NULL, '5min', 'Carol', NULL, NULL);
+
+-- 1. First confirm logs the assignment once.
+EXECUTE confirm(61, 61, 61, 'VinhTD', 'moderator') \gset cf1_
+SELECT pg_temp.check_eq(:cf1_confirmed, 1, 'confirm returns rows updated') \g /dev/null
+DO $$
+DECLARE r record;
+BEGIN
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE game_evaluation_id = 61) = 1, 'assign logged once at confirm';
+  SELECT * INTO r FROM evaluation_log WHERE game_evaluation_id = 61;
+  ASSERT r.kind = 'record_assign' AND r.source = 'record_tab' AND r.actor = 'VinhTD' AND r.actor_role = 'moderator'
+     AND r.owner = 'Alice', 'confirm row: kind/source/actor/owner';
+  ASSERT r.bucket_before IS NULL AND r.bucket_after = '20min' AND r.recorder_before IS NULL AND r.recorder_after = 'MyTL',
+    'confirm row: bucket + recorder';
+  ASSERT r.batch_before = 'W2 Oct, 2026' AND r.batch_after = 'W2 Oct, 2026' AND r.view_s IS NULL AND r.context IS NULL,
+    'confirm row: batch, no time';
+END $$;
+-- 2. Confirming a row that is already confirmed updates nothing and logs nothing.
+EXECUTE confirm(61, 61, 61, 'VinhTD', 'moderator') \gset cf2_
+SELECT pg_temp.check_eq(:cf2_confirmed, 0, 'already confirmed: 0 updated') \g /dev/null
+DO $$ BEGIN
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE game_evaluation_id = 61) = 1, 'already confirmed: no new row';
+END $$;
+-- 3. Reset (not logged), confirm again with the same recorder: confirmed, nothing logged.
+EXECUTE reset_rec(61);
+EXECUTE confirm(61, 61, 61, 'VinhTD', 'moderator') \gset cf3_
+SELECT pg_temp.check_eq(:cf3_confirmed, 1, 're-confirm after reset updates the row') \g /dev/null
+DO $$ BEGIN
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE game_evaluation_id = 61) = 1, 'second confirm of the same recorder logs nothing';
+  ASSERT (SELECT record_confirmed_at FROM game_evaluations WHERE id = 61) IS NOT NULL, 'confirmed again';
+END $$;
+-- 4. Reset, draft-assign someone else (assign-records: not logged), confirm: reassign MyTL -> Bob.
+EXECUTE reset_rec(61);
+UPDATE game_evaluations SET record_20min_assignee = 'Bob' WHERE id = 61;
+EXECUTE confirm(61, 61, 61, 'HungDT', 'admin') \gset cf4_
+DO $$
+DECLARE r record;
+BEGIN
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE game_evaluation_id = 61) = 2, 'reassign logged';
+  SELECT * INTO r FROM evaluation_log WHERE game_evaluation_id = 61 ORDER BY id DESC LIMIT 1;
+  ASSERT r.recorder_before = 'MyTL' AND r.recorder_after = 'Bob' AND r.actor = 'HungDT' AND r.bucket_after = '20min',
+    'reassign after reset logs before -> after';
+END $$;
+-- 5. Bulk confirm of 3: all 3 confirmed; 62 has no recorder (no row), 63 (5min Carol) and 64 (20min Dave) log.
+EXECUTE confirm(62, 63, 64, 'VinhTD', 'moderator') \gset cf5_
+SELECT pg_temp.check_eq(:cf5_confirmed, 3, 'bulk: 3 confirmed') \g /dev/null
+DO $$ BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 62), 'no recorder: no row';
+  ASSERT (SELECT bucket_after || ':' || recorder_after FROM evaluation_log WHERE game_evaluation_id = 63) = '5min:Carol', '63 logged';
+  ASSERT (SELECT bucket_after || ':' || recorder_after FROM evaluation_log WHERE game_evaluation_id = 64) = '20min:Dave', '64 logged';
+END $$;
+-- manual bucket (record_bucket '5min', no final) is the effective bucket
+EXECUTE confirm(65, 65, 65, 'VinhTD', 'moderator') \gset cf6_
+DO $$ BEGIN
+  ASSERT (SELECT bucket_after || ':' || recorder_after FROM evaluation_log WHERE game_evaluation_id = 65) = '5min:Carol', 'manual bucket wins';
+END $$;
+
+-- 6. Move 61 from 20min to 5min, recorder Bob carried.
+EXECUTE rb_move(61, '5min', 'Bob', NULL, 'VinhTD', 'moderator', 'record_move', '20min', '5min', 'Bob', 'Bob') \g /dev/null
+DO $$
+DECLARE r record;
+BEGIN
+  SELECT * INTO r FROM evaluation_log WHERE game_evaluation_id = 61 ORDER BY id DESC LIMIT 1;
+  ASSERT r.kind = 'record_move' AND r.source = 'record_tab' AND r.bucket_before = '20min' AND r.bucket_after = '5min'
+     AND r.recorder_before = 'Bob' AND r.recorder_after = 'Bob' AND r.owner = 'Alice' AND r.batch_after = 'W2 Oct, 2026',
+    'move row';
+  ASSERT (SELECT record_bucket || ':' || record_5min_assignee FROM game_evaluations WHERE id = 61) = '5min:Bob', 'moved';
+  ASSERT (SELECT record_20min_assignee FROM game_evaluations WHERE id = 61) IS NULL, 'old column cleared';
+  ASSERT (SELECT record_confirmed_at FROM game_evaluations WHERE id = 61) IS NOT NULL, 'move keeps confirmation';
+END $$;
+-- after a move, reset + confirm Bob again: the previous recorder is read from the move row, so nothing is logged
+EXECUTE reset_rec(61);
+EXECUTE confirm(61, 61, 61, 'VinhTD', 'moderator') \gset cf7_
+DO $$ BEGIN
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE game_evaluation_id = 61) = 3, 'previous recorder comes from the move row';
+END $$;
+-- 7. No-op: picking the same bucket again is the plain UPDATE, no row.
+CREATE TEMP TABLE c_noop AS SELECT count(*) AS n FROM evaluation_log;
+EXECUTE rb_plain(61, '5min', 'Bob', NULL) \g /dev/null
+DO $$ BEGIN
+  ASSERT (SELECT count(*) FROM evaluation_log) = (SELECT n FROM c_noop), 'no-op logs nothing';
+END $$;
+-- 8. Remove 61 from Record.
+EXECUTE rb_remove(61, 'VinhTD', 'moderator', 'record_remove', '5min', NULL, 'Bob', NULL) \g /dev/null
+DO $$
+DECLARE r record;
+BEGIN
+  SELECT * INTO r FROM evaluation_log WHERE game_evaluation_id = 61 ORDER BY id DESC LIMIT 1;
+  ASSERT r.kind = 'record_remove' AND r.bucket_before = '5min' AND r.bucket_after IS NULL
+     AND r.recorder_before = 'Bob' AND r.recorder_after IS NULL AND r.view_s IS NULL, 'remove row';
+  ASSERT (SELECT record_bucket FROM game_evaluations WHERE id = 61) = 'none', 'removed';
+  ASSERT (SELECT record_confirmed_at IS NULL AND record_5min_assignee IS NULL FROM game_evaluations WHERE id = 61), 'remove clears';
+END $$;
+
+-- 9. PATCH side rows (logged_rec). Minimal PATCH copy: recorder columns + the main log row + logged_rec.
+-- $1 id, $2 record_5min_assignee, $3 record_20min_assignee, $4 actor, $5 role, $6 source, $7 context
+PREPARE save_rec(unknown, unknown, unknown, unknown, unknown, unknown, unknown) AS
+WITH old AS (
+  SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date, batch,
+    record_5min_assignee, record_20min_assignee, record_confirmed_at
+  FROM game_evaluations WHERE id = $1
+  FOR NO KEY UPDATE
+), upd AS (
+  UPDATE game_evaluations ge SET
+    record_5min_assignee = COALESCE($2::text, ge.record_5min_assignee),
+    record_5min_date = CASE WHEN $2::text IS NOT NULL AND ge.record_5min_assignee IS NULL THEN NOW() ELSE ge.record_5min_date END,
+    record_20min_assignee = COALESCE($3::text, ge.record_20min_assignee),
+    record_20min_date = CASE WHEN $3::text IS NOT NULL AND ge.record_20min_assignee IS NULL THEN NOW() ELSE ge.record_20min_date END,
+    updated_by = $4::text
+  FROM old WHERE ge.id = old.id
+  RETURNING ge.*
+), logged AS (
+  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
+    context, kind, conclusion_before, conclusion_after, final_before, final_after, changed,
+    view_s, hidden_s, idle_s, batch_before, batch_after)
+  SELECT old.id, old.game_id, $4::text, $5::text, old.initial_evaluator, $6::text, $7::text,
+    'other', old.initial_conclusion, upd.initial_conclusion, old.final_conclusion, upd.final_conclusion,
+    old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion,
+    NULL::int, NULL::int, NULL::int, old.batch, upd.batch
+  FROM old JOIN upd ON upd.id = old.id
+), logged_rec AS (
+  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
+    context, kind, bucket_after, recorder_before, recorder_after,
+    view_s, hidden_s, idle_s, batch_before, batch_after)
+  SELECT old.id, old.game_id, $4::text, $5::text, old.initial_evaluator, $6::text, $7::text,
+    'record_assign', v.bucket, v.before, v.after,
+    NULL::int, NULL::int, NULL::int, old.batch, upd.batch
+  FROM old JOIN upd ON upd.id = old.id
+  CROSS JOIN LATERAL (VALUES ('5min', old.record_5min_assignee, upd.record_5min_assignee),
+                             ('20min', old.record_20min_assignee, upd.record_20min_assignee)) AS v(bucket, before, after)
+  WHERE old.record_confirmed_at IS NOT NULL
+    AND v.after IS NOT NULL
+    AND v.before IS DISTINCT FROM v.after
+)
+SELECT id FROM upd;
+
+INSERT INTO game_info VALUES ('k7'), ('k8');
+INSERT INTO game_evaluations (id, game_id, initial_evaluator, final_conclusion, batch, record_20min_assignee, record_confirmed_at) VALUES
+ (67, 'k7', 'Alice', 'Priority IV', 'W2 Oct, 2026', 'MyTL', NULL),                      -- draft
+ (68, 'k8', 'Alice', 'Priority IV', 'W2 Oct, 2026', 'MyTL', '2026-10-10 10:00+07');    -- confirmed
+EXECUTE save_rec(67, NULL, 'Bob', 'VinhTD', 'moderator', 'other', NULL);
+EXECUTE save_rec(68, NULL, 'Bob', 'VinhTD', 'moderator', 'other', NULL);
+EXECUTE save_rec(68, NULL, 'Bob', 'VinhTD', 'moderator', 'panel', 'record');   -- same recorder again
+DO $$
+DECLARE r record;
+BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 67 AND kind = 'record_assign'), 'PATCH on a draft logs no record row';
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE game_evaluation_id = 67) = 1, 'draft: only the save row';
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE game_evaluation_id = 68 AND kind = 'record_assign') = 1, 'PATCH on a confirmed row logs one';
+  SELECT * INTO r FROM evaluation_log WHERE game_evaluation_id = 68 AND kind = 'record_assign';
+  ASSERT r.bucket_after = '20min' AND r.recorder_before = 'MyTL' AND r.recorder_after = 'Bob' AND r.source = 'other'
+     AND r.context IS NULL AND r.actor = 'VinhTD' AND r.view_s IS NULL AND r.hidden_s IS NULL AND r.idle_s IS NULL
+     AND r.batch_after = 'W2 Oct, 2026', 'PATCH record row shape';
 END $$;
 DELETE FROM evaluation_log;
 
@@ -276,6 +576,10 @@ INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, source, c
   (NULL, 'hist1', NULL, 'Alice', 'seed', NULL, 'first', NULL, 'Bypass', TRUE, NULL, '2026-10-01 10:00+07', NULL, NULL),
   (NULL, 'hist1', 'Alice', 'Alice', 'panel', 'evaluate', 'revise', 'Bypass', 'List_Idea', TRUE, 300, '2026-10-03 10:00+07', 'W1 Oct, 2026', 'W2 Oct, 2026'),
   (NULL, 'hist2', 'Bob', 'Bob', 'panel', 'evaluate', 'first', NULL, 'Bypass', TRUE, 60, '2026-10-03 11:00+07', NULL, NULL);
+INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, source, kind, bucket_before, bucket_after,
+  recorder_before, recorder_after, owner_after, created_at) VALUES
+  (NULL, 'hist1', 'VinhTD', 'Alice', 'record_tab', 'record_move', '20min', '5min', 'MyTL', 'MyTL', NULL, '2026-10-04 10:00+07'),
+  (NULL, 'hist1', 'VinhTD', 'Alice', 'add_to_record', 'record_add', NULL, '20min', NULL, NULL, 'Shortcut', '2026-10-03 12:00+07');
 INSERT INTO assignment_history (run_date, run_at, category_group, action, evaluator_name, from_evaluator, game_count, game_ids, created_by) VALUES
   ('2026-09-30', '2026-09-30 09:00+07', 'puzzle', 'assign', 'Bob', NULL, 2, ARRAY['hist1','hist2'], 'cron'),
   ('2026-10-02', '2026-10-02 09:00+07', 'puzzle', 'reassign', 'Alice', 'Bob', 1, ARRAY['hist1'], 'hung@x'),
@@ -283,7 +587,8 @@ INSERT INTO assignment_history (run_date, run_at, category_group, action, evalua
 PREPARE hist_log AS
   SELECT l.id::text AS id, l.created_at AS at, l.actor, l.owner, l.source, l.context, l.kind,
          l.conclusion_before, l.conclusion_after, l.final_before, l.final_after,
-         l.changed, l.view_s, l.confidence, l.batch_before, l.batch_after
+         l.changed, l.view_s, l.confidence, l.batch_before, l.batch_after,
+         l.bucket_before, l.bucket_after, l.recorder_before, l.recorder_after, l.owner_after
   FROM evaluation_log l
   WHERE l.game_id = $1
   ORDER BY l.created_at DESC, l.id DESC
@@ -299,7 +604,10 @@ PREPARE hist_asg AS
 CREATE TEMP TABLE hl AS EXECUTE hist_log('hist1');
 CREATE TEMP TABLE ha AS EXECUTE hist_asg('hist1');
 DO $$ BEGIN
-  ASSERT (SELECT array_agg(source ORDER BY at DESC) FROM hl) = ARRAY['panel','seed'], 'hist1 log rows only, newest first';
+  ASSERT (SELECT array_agg(source ORDER BY at DESC) FROM hl) = ARRAY['record_tab','add_to_record','panel','seed'], 'hist1 log rows only, newest first';
+  ASSERT (SELECT bucket_before || '>' || bucket_after || ':' || recorder_before || '>' || recorder_after FROM hl WHERE kind = 'record_move')
+         = '20min>5min:MyTL>MyTL', 'history query returns the bucket/recorder columns';
+  ASSERT (SELECT owner || '>' || owner_after FROM hl WHERE kind = 'record_add') = 'Alice>Shortcut', 'history query returns owner_after';
   ASSERT (SELECT array_agg(action ORDER BY at DESC) FROM ha) = ARRAY['reassign','assign'], 'hist1 assignment rows only';
   ASSERT (SELECT batch_before || '>' || batch_after FROM hl WHERE source = 'panel') = 'W1 Oct, 2026>W2 Oct, 2026', 'history query returns the batch columns';
   ASSERT (SELECT by FROM ha WHERE action = 'reassign') = 'HungDT', 'created_by email resolves to the user name';

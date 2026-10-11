@@ -67,7 +67,7 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     const t = writeCall().text
     expect(t).toMatch(/INSERT INTO evaluation_log \([^)]*batch_before, batch_after\)/)
     expect(t).toMatch(/old\.batch, upd\.batch/)
-    expect(t).toMatch(/evaluate_date, batch\s+FROM game_evaluations WHERE id = \$/) // old CTE selects batch
+    expect(t).toMatch(/evaluate_date, batch,\s+record_5min_assignee/) // old CTE selects batch
   })
 
   it('logs a save without view_s as source "other" with no timing', async () => {
@@ -76,7 +76,9 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     const b = writeCall().binds
     expect(b).toContain('other')
     expect(b[b.indexOf('other') + 1]).toBeNull()   // context
-    expect(b.slice(-3)).toEqual([null, null, null]) // view_s, hidden_s, idle_s
+    // view_s, hidden_s, idle_s of the save row; logged_rec's actor/role/source/context follow
+    expect(b.slice(-7, -4)).toEqual([null, null, null])
+    expect(b.slice(-2)).toEqual(['other', null])
   })
 
   it('moves evaluate_date only for the owner, an unjudged game, no actor, or a List_Idea batch stamp', async () => {
@@ -89,6 +91,34 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     // every right-hand side is ge.-qualified (an unqualified one is ambiguous under FROM old)
     expect(t).not.toMatch(/ELSE (?!ge\.)[a-z_]+\s+END/)
     expect(t).not.toMatch(/COALESCE\(\$, (?!ge\.)[a-z_]+\)/)
+  })
+
+  it('logs a recorder change on a confirmed row as record_assign (logged_rec), in the same statement', async () => {
+    routeSql()
+    sessionMock.mockResolvedValue({ user: { role: 'moderator', name: 'VinhTD' } })
+    const res = await patch({ id: 1, record_20min_assignee: 'Bob' })
+    expect(res.status).toBe(200)
+    const w = writeCall()
+    // the old CTE reads the recorder columns and the confirmation
+    expect(w.text).toMatch(/evaluate_date, batch,\s+record_5min_assignee, record_20min_assignee, record_confirmed_at\s+FROM game_evaluations WHERE id = \$/)
+    expect(w.text).toMatch(/\), logged_rec AS \(/)
+    expect(w.text).toMatch(/'record_assign', v\.bucket, v\.before, v\.after,\s+NULL::int, NULL::int, NULL::int, old\.batch, upd\.batch/)
+    expect(w.text).toMatch(/CROSS JOIN LATERAL \(VALUES \('5min', old\.record_5min_assignee, upd\.record_5min_assignee\),\s+\('20min', old\.record_20min_assignee, upd\.record_20min_assignee\)\) AS v\(bucket, before, after\)/)
+    // draft rows log nothing; only a change to a non-NULL recorder logs
+    expect(w.text).toMatch(/WHERE old\.record_confirmed_at IS NOT NULL\s+AND v\.after IS NOT NULL\s+AND v\.before IS DISTINCT FROM v\.after/)
+    // both INSERTs join the UPDATE's RETURNING
+    expect(w.text.match(/FROM old JOIN upd ON upd\.id = old\.id/g)).toHaveLength(2)
+  })
+
+  it('logged_rec uses the same actor/source/context binds as the save row', async () => {
+    routeSql()
+    sessionMock.mockResolvedValue({ user: { role: 'moderator', name: 'VinhTD' } })
+    await patch({ id: 1, record_5min_assignee: 'Bob', view_s: 12, context: 'record' })
+    const w = writeCall()
+    const rec = w.text.slice(w.text.indexOf('logged_rec AS'))
+    expect(rec).toMatch(/SELECT old\.id, old\.game_id, \$::text, \$::text, old\.initial_evaluator, \$::text, \$::text,/)
+    // last four binds belong to logged_rec: actor, role, source, context
+    expect(w.binds.slice(-4)).toEqual(['VinhTD', 'moderator', 'panel', 'record'])
   })
 
   it('returns a readable error when migration 045 is missing', async () => {

@@ -7,15 +7,20 @@ export interface LogRow {
   at: string | Date
   actor: string | null
   owner: string | null
-  source: string // panel | other | add_to_record | seed
+  source: string // panel | other | add_to_record | record_tab | seed
   context: string | null
-  kind: string // first | revise | clear | final | other
+  kind: string // first | revise | clear | final | other | record_add | record_assign | record_move | record_remove
   conclusion_before: string | null
   conclusion_after: string | null
   final_before: string | null
   final_after: string | null
   batch_before: string | null
   batch_after: string | null
+  bucket_before: string | null // Record bucket ('5min' | '20min') before / after
+  bucket_after: string | null
+  recorder_before: string | null
+  recorder_after: string | null
+  owner_after: string | null // initial_evaluator after the write (add to Record only)
   changed: boolean
   view_s: number | null
   confidence: string | null
@@ -38,6 +43,7 @@ export interface Change {
   kind: 'initial' | 'final' | 'batch' | 'person'
   from: string | null
   to: string | null
+  label?: string // names the line when the kind alone does not ("Evaluator")
 }
 
 export interface HistoryEvent {
@@ -68,6 +74,66 @@ export function fmtDuration(s: number): string {
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
 }
 
+/** '5min' -> '5 min'. Anything else is not a Record bucket. */
+function bucketLabel(b: string | null): string | null {
+  return b === '5min' ? '5 min' : b === '20min' ? '20 min' : null
+}
+
+/** The Record bucket a final conclusion puts a game in by itself. */
+function finalBucket(final: string | null): string | null {
+  return final === 'Priority IV' ? '20min' : final === 'Insight' ? '5min' : null
+}
+
+const withBucket = (text: string, b: string | null) => (bucketLabel(b) ? `${text} · ${bucketLabel(b)}` : text)
+
+/** "Batch W2 Oct, 2026", or "Batch W2 Oct, 2026 · was W1 Oct, 2026" when the write moved it. */
+function batchNote(r: LogRow, showWas: boolean): string | null {
+  const now = r.batch_after ?? r.batch_before
+  if (now == null) return null
+  const was = showWas && r.batch_before != null && r.batch_after != null && r.batch_before !== r.batch_after
+  return was ? `Batch ${now} · was ${r.batch_before}` : `Batch ${now}`
+}
+
+const joinNote = (...parts: Array<string | null>) => parts.filter(Boolean).join(' · ') || null
+
+/** The four Record events: add, assign (confirm), move, remove. */
+function fromRecordLog(r: LogRow, base: Omit<HistoryEvent, 'who' | 'type' | 'verb' | 'changes'>): HistoryEvent {
+  const who = dash(r.actor)
+  const type: EventType = 'record'
+
+  if (r.kind === 'record_add') {
+    const changes: Change[] = []
+    if (r.owner_after != null && r.owner !== r.owner_after) changes.push({ kind: 'person', label: 'Evaluator', from: r.owner, to: r.owner_after })
+    if (r.conclusion_before !== r.conclusion_after) changes.push({ kind: 'initial', from: r.conclusion_before, to: r.conclusion_after })
+    if (r.final_before !== r.final_after) changes.push({ kind: 'final', from: r.final_before, to: r.final_after })
+    return { ...base, who, type, verb: withBucket('added to Record', r.bucket_after), changes, note: batchNote(r, true) }
+  }
+
+  if (r.kind === 'record_move') {
+    const from = bucketLabel(r.bucket_before)
+    const to = bucketLabel(r.bucket_after)
+    const recorder = r.recorder_after ?? r.recorder_before
+    const verb = from && to ? `moved the game in Record · ${from} → ${to}` : to ? `moved the game in Record · to ${to}` : 'moved the game in Record'
+    return { ...base, who, type, verb, changes: [], note: joinNote(recorder ? `Recorder ${recorder}` : null, batchNote(r, false)) }
+  }
+
+  if (r.kind === 'record_remove') {
+    const was = bucketLabel(r.bucket_before)
+    return {
+      ...base, who, type, verb: was ? `removed the game from Record · was ${was}` : 'removed the game from Record', changes: [],
+      note: joinNote(r.recorder_before ? `Recorder was ${r.recorder_before}` : null, batchNote(r, false)),
+    }
+  }
+
+  // record_assign
+  const where = withBucket('Record', r.bucket_after ?? r.bucket_before)
+  const verb = r.recorder_before == null
+    ? `assigned ${r.recorder_after ?? 'a recorder'} to ${where}`
+    : `reassigned ${where} from ${r.recorder_before} to ${r.recorder_after ?? '—'}`
+  if (r.source === 'seed') return { ...base, who: '—', type, verb, changes: [], note: SEED_NOTE }
+  return { ...base, who, type, verb, changes: [], note: batchNote(r, false) }
+}
+
 /** The verdict chip(s): before → after when it moved from something, else just the verdict. */
 function verdictChange(r: LogRow): Change {
   const arrow = r.changed && r.conclusion_before != null
@@ -76,6 +142,12 @@ function verdictChange(r: LogRow): Change {
 
 export function fromLog(r: LogRow): HistoryEvent {
   const base = { key: `log-${r.id}`, at: iso(r.at), time: null as string | null, seconds: null as number | null, note: null as string | null }
+
+  if (r.kind === 'record_add' || r.kind === 'record_assign' || r.kind === 'record_move' || r.kind === 'record_remove') {
+    return fromRecordLog(r, base)
+  }
+  // Rows written before the Record kinds existed: an add-to-record pull was a plain save with this source.
+  if (r.source === 'add_to_record') return fromRecordLog({ ...r, kind: 'record_add' }, base)
 
   if (r.source === 'seed') {
     const note = r.confidence === 'low' ? `${SEED_NOTE} · time may be off`
@@ -90,12 +162,12 @@ export function fromLog(r: LogRow): HistoryEvent {
   const finalChange: Change = { kind: 'final', from: r.final_before, to: r.final_after }
   const timed = r.source === 'panel' && r.view_s != null
   const timing = timed ? { time: fmtDuration(r.view_s as number), seconds: r.view_s as number } : {}
-  const note = r.source === 'panel' && r.context && CONTEXT_LABEL[r.context] ? `From ${CONTEXT_LABEL[r.context]}` : null
+  const fromTab = r.source === 'panel' && r.context && CONTEXT_LABEL[r.context] ? `From ${CONTEXT_LABEL[r.context]}` : null
+  // A final conclusion of Insight / Priority IV puts a List_Idea game in Record on its own; say so on that event.
+  const enters = finalMoved && finalBucket(r.final_after) && finalBucket(r.final_after) !== finalBucket(r.final_before)
+    ? `Enters Record · ${bucketLabel(finalBucket(r.final_after))}` : null
+  const note = joinNote(fromTab, enters)
   const who = dash(r.actor)
-
-  if (r.source === 'add_to_record') {
-    return { ...base, who, type: 'record', verb: 'added to record', changes: batchMoved ? [verdictChange(r), batchChange] : [verdictChange(r)], note }
-  }
 
   let type: EventType = 'save'
   let verb: string
