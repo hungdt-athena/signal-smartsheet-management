@@ -9,6 +9,7 @@ import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { useConfig } from '@/hooks/useConfig'
 import { prettyConclusion } from '@/lib/buckets'
+import { CONCLUSION_COLORS } from '@/lib/conclusion-badge'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
 import { type ReviewChange, type ReviewTag } from './TrendTagReview'
@@ -86,17 +87,6 @@ export interface EvalListItem { game_id: string; title: string }
 // values still display (merged in below).
 const INITIAL_CONCLUSION_OPTIONS = ['Bypass', 'List_Idea', 'Playtest & Bypass']
 
-const CONCLUSION_COLORS: Record<string, string> = {
-  'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
-  'Stale_release': 'error',
-  'Playtest & Bypass': 'error',
-  'Good': 'success', 'Conclusion': 'success',
-  'List_Idea': 'success', 'Priority I': 'success', 'Priority II': 'success',
-  'Priority III: Watchlist for next phase': 'running',
-  'Priority IV: Idea': 'running', 'Watchlist for next milestone': 'running',
-  'Need deeper testing': 'running', 'Wait for PlayTest': 'running',
-  'Check Market Data': 'running', 'Need Direction': 'running',
-}
 
 function fmtDate(d: string | null) {
   if (!d) return '—'
@@ -1778,7 +1768,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
 
       {history && ev && history.gameId === ev.game_id && (
         <EvalHistoryModal events={history.events} logReady={history.logReady} error={history.error}
-          onClose={() => setHistory(null)} />
+          onClose={() => setHistory(null)} onRetry={() => openHistory(history.gameId)} />
       )}
 
       {/* Toast */}

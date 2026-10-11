@@ -51,8 +51,12 @@ describe('GET /api/evaluations/[gameId]/history', () => {
     const body = await res.json()
     expect(body.log_ready).toBe(true)
     expect(body.events.map((e: { key: string }) => e.key)).toEqual(['log-5', 'asg-9'])
-    expect(body.events[0]).toMatchObject({ who: 'Alice', action: 'Save', detail: '— → Bypass', time: '8m' })
-    expect(body.events[1]).toMatchObject({ who: 'Auto-assign', action: 'Assign', detail: '→ Alice' })
+    expect(body.events[0]).toMatchObject({
+      who: 'Alice', type: 'save', verb: 'evaluated', time: '8m', changes: [{ kind: 'initial', from: null, to: 'Bypass' }],
+    })
+    expect(body.events[1]).toMatchObject({
+      who: 'Auto-assign', type: 'assign', verb: 'assigned to', changes: [{ kind: 'person', from: null, to: 'Alice' }],
+    })
 
     const logCall = calls.find(c => /FROM evaluation_log/.test(c.text))!
     const asgCall = calls.find(c => /FROM assignment_history/.test(c.text))!

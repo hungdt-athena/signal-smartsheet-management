@@ -744,6 +744,30 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 .modal-body  { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .modal-foot  { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
 
+/* History modal (EvalHistoryModal): a day-grouped timeline of one game. */
+.hx-sum { display: flex; gap: 14px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.hx-sum b { color: var(--text); font-variant-numeric: tabular-nums; }
+.hx-day { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 14px 0 6px; }
+.hx-row { display: grid; grid-template-columns: 28px 1fr auto; gap: 12px; align-items: start; position: relative; padding: 8px 0; }
+.hx-ico { position: relative; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+.hx-ico.save   { background: var(--accent-weak); border-color: var(--accent-border); color: var(--accent); }
+.hx-ico.final  { background: var(--good-weak); border-color: transparent; color: var(--good); }
+.hx-rail { position: absolute; left: 13px; top: 36px; bottom: -8px; width: 2px; background: var(--border); }
+.hx-line { font-size: 13px; color: var(--text); line-height: 1.45; }
+.hx-line .who { font-weight: 600; }
+.hx-line .verb { color: var(--muted); }
+.hx-chg { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.hx-chg .lbl { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
+.hx-chg .name { color: var(--text); font-weight: 500; }
+.hx-note { margin-top: 3px; font-size: 11.5px; color: var(--faint); }
+.hx-time { text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.45; }
+.hx-dur { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; padding: 1px 7px; border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.hx-skel { height: 12px; border-radius: 6px; background: var(--track); }
+.hx-empty { display: grid; justify-items: center; gap: 6px; padding: 36px 0; color: var(--muted); text-align: center; }
+.hx-empty b { color: var(--text); font-weight: 600; }
+
 .x-btn {
   width: 28px; height: 28px; border-radius: 7px; border: none; background: none;
   color: var(--faint); cursor: pointer; display: grid; place-items: center;
@@ -930,51 +954,6 @@ input:checked + .slider:before {
 
 /* ===== Evaluations List View Premium Styling ===== */
 
-/* Summary Widgets */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 20px;
-  margin-top: 10px;
-}
-.stat-card {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.2s ease;
-}
-.stat-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
-}
-.stat-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--muted);
-}
-.stat-val {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1.1;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.stat-subtext {
-  font-size: 11px;
-  color: var(--faint);
-}
-
 /* Glassmorphic Filter styling */
 .filter-row {
   display: flex;
@@ -1014,6 +993,14 @@ input:checked + .slider:before {
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
+/* The month's count on a status button: the number and the filter are one control. */
+.seg-count {
+  display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px;
+  background: var(--surface-3); color: var(--muted);
+  font-size: 11.5px; font-weight: 700; line-height: 18px; font-variant-numeric: tabular-nums;
+}
+.seg-btn-premium.active .seg-count { background: var(--accent-weak); color: var(--accent-strong); }
+.seg-count.warn { background: var(--warn-weak); color: var(--warn); }
 
 /* Table Enhancements */
 .tbl-row-premium {
