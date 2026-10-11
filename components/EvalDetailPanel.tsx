@@ -1211,8 +1211,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
 
             <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
               {ev.icon_url ? (
+                // Explicit size + alignSelf: in this flex row the default `stretch` plus the
+                // global `img { height: auto }` stretched the icon to the text column's height.
                 <img src={ev.icon_url} alt="" width={56} height={56}
-                  style={{ borderRadius: 12, flexShrink: 0, border: '1px solid var(--border)' }} />
+                  style={{ width: 56, height: 56, alignSelf: 'flex-start', objectFit: 'cover', borderRadius: 12, flexShrink: 0, border: '1px solid var(--border)' }} />
               ) : (
                 <div style={{ width: 56, height: 56, borderRadius: 12, background: 'var(--surface-3)', flexShrink: 0 }} />
               )}
