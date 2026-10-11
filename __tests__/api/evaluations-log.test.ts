@@ -105,7 +105,7 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     expect(w.text).toMatch(/'record_assign', v\.bucket, v\.before, v\.after,\s+NULL::int, NULL::int, NULL::int, old\.batch, upd\.batch/)
     expect(w.text).toMatch(/CROSS JOIN LATERAL \(VALUES \('5min', old\.record_5min_assignee, upd\.record_5min_assignee\),\s+\('20min', old\.record_20min_assignee, upd\.record_20min_assignee\)\) AS v\(bucket, before, after\)/)
     // draft rows log nothing; only a change to a non-NULL recorder logs
-    expect(w.text).toMatch(/WHERE old\.record_confirmed_at IS NOT NULL\s+AND v\.after IS NOT NULL\s+AND v\.before IS DISTINCT FROM v\.after/)
+    expect(w.text).toMatch(/WHERE old\.record_confirmed_at IS NOT NULL\s+AND v\.after IS NOT NULL\s+AND lower\(v\.before\) IS DISTINCT FROM lower\(v\.after\)/)
     // both INSERTs join the UPDATE's RETURNING
     expect(w.text.match(/FROM old JOIN upd ON upd\.id = old\.id/g)).toHaveLength(2)
   })

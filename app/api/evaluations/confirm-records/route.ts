@@ -71,7 +71,8 @@ export async function POST(req: NextRequest) {
         SELECT cur.id, cur.game_id, ${actor}::text, ${role}::text, cur.initial_evaluator, 'record_tab',
           'record_assign', cur.bucket, cur.prev_recorder, cur.recorder, cur.batch, cur.batch
         FROM cur
-        WHERE cur.recorder IS NOT NULL AND cur.recorder IS DISTINCT FROM cur.prev_recorder
+        -- Same person is the same person whatever the casing (MyTL / mytl).
+        WHERE cur.recorder IS NOT NULL AND lower(cur.recorder) IS DISTINCT FROM lower(cur.prev_recorder)
       )
       SELECT count(*)::int AS confirmed FROM upd
     `

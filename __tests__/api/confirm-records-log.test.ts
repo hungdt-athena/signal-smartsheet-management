@@ -65,7 +65,7 @@ describe('POST /api/evaluations/confirm-records — evaluation_log', () => {
     expect(t).toMatch(/l\.kind IN \('record_assign', 'record_move', 'record_remove'\)/)
     expect(t).toMatch(/ORDER BY l\.id DESC LIMIT 1\) AS prev_recorder/)
     expect(t).toMatch(/cur\.prev_recorder, cur\.recorder/)
-    expect(t).toMatch(/WHERE cur\.recorder IS NOT NULL AND cur\.recorder IS DISTINCT FROM cur\.prev_recorder/)
+    expect(t).toMatch(/WHERE cur\.recorder IS NOT NULL AND lower\(cur\.recorder\) IS DISTINCT FROM lower\(cur\.prev_recorder\)/)
   })
 
   it('binds the session actor and role with explicit casts', async () => {

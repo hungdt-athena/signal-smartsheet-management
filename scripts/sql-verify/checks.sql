@@ -261,7 +261,7 @@ WITH old AS (
   SELECT cur.id, cur.game_id, $4::text, $5::text, cur.initial_evaluator, 'record_tab',
     'record_assign', cur.bucket, cur.prev_recorder, cur.recorder, cur.batch, cur.batch
   FROM cur
-  WHERE cur.recorder IS NOT NULL AND cur.recorder IS DISTINCT FROM cur.prev_recorder
+  WHERE cur.recorder IS NOT NULL AND lower(cur.recorder) IS DISTINCT FROM lower(cur.prev_recorder)
 )
 SELECT count(*)::int AS confirmed FROM upd;
 
@@ -351,6 +351,14 @@ SELECT pg_temp.check_eq(:cf3_confirmed, 1, 're-confirm after reset updates the r
 DO $$ BEGIN
   ASSERT (SELECT count(*) FROM evaluation_log WHERE game_evaluation_id = 61) = 1, 'second confirm of the same recorder logs nothing';
   ASSERT (SELECT record_confirmed_at FROM game_evaluations WHERE id = 61) IS NOT NULL, 'confirmed again';
+END $$;
+-- 3b. Same person typed with other casing (MyTL / mytl) is still the same person: nothing logged.
+EXECUTE reset_rec(61);
+UPDATE game_evaluations SET record_20min_assignee = 'mytl' WHERE id = 61;
+EXECUTE confirm(61, 61, 61, 'VinhTD', 'moderator') \gset cf3b_
+SELECT pg_temp.check_eq(:cf3b_confirmed, 1, 'recasing: confirmed again') \g /dev/null
+DO $$ BEGIN
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE game_evaluation_id = 61) = 1, 'MyTL vs mytl logs nothing';
 END $$;
 -- 4. Reset, draft-assign someone else (assign-records: not logged), confirm: reassign MyTL -> Bob.
 EXECUTE reset_rec(61);
@@ -453,7 +461,7 @@ WITH old AS (
                              ('20min', old.record_20min_assignee, upd.record_20min_assignee)) AS v(bucket, before, after)
   WHERE old.record_confirmed_at IS NOT NULL
     AND v.after IS NOT NULL
-    AND v.before IS DISTINCT FROM v.after
+    AND lower(v.before) IS DISTINCT FROM lower(v.after)
 )
 SELECT id FROM upd;
 
@@ -474,6 +482,14 @@ BEGIN
   ASSERT r.bucket_after = '20min' AND r.recorder_before = 'MyTL' AND r.recorder_after = 'Bob' AND r.source = 'other'
      AND r.context IS NULL AND r.actor = 'VinhTD' AND r.view_s IS NULL AND r.hidden_s IS NULL AND r.idle_s IS NULL
      AND r.batch_after = 'W2 Oct, 2026', 'PATCH record row shape';
+END $$;
+-- PATCH that only re-cases the recorder on a confirmed row logs no record row.
+INSERT INTO game_info VALUES ('k9');
+INSERT INTO game_evaluations (id, game_id, initial_evaluator, final_conclusion, batch, record_20min_assignee, record_confirmed_at)
+  VALUES (69, 'k9', 'Alice', 'Priority IV', 'W2 Oct, 2026', 'MyTL', '2026-10-10 10:00+07');
+EXECUTE save_rec(69, NULL, 'mytl', 'VinhTD', 'moderator', 'other', NULL);
+DO $$ BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 69 AND kind = 'record_assign'), 'PATCH re-casing a recorder logs nothing';
 END $$;
 DELETE FROM evaluation_log;
 
