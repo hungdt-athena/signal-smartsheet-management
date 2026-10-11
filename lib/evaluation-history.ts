@@ -14,6 +14,8 @@ export interface LogRow {
   conclusion_after: string | null
   final_before: string | null
   final_after: string | null
+  batch_before: string | null
+  batch_after: string | null
   changed: boolean
   view_s: number | null
   confidence: string | null
@@ -30,10 +32,10 @@ export interface AssignRow {
 
 export type EventType = 'save' | 'final' | 'record' | 'assign' | 'seed'
 
-/** One thing that moved: a verdict, the final conclusion, or a person. `from` null means
+/** One thing that moved: a verdict, the final conclusion, the batch, or a person. `from` null means
  *  there is no "before" to show (a first verdict, a first assignment). */
 export interface Change {
-  kind: 'initial' | 'final' | 'person'
+  kind: 'initial' | 'final' | 'batch' | 'person'
   from: string | null
   to: string | null
 }
@@ -83,6 +85,8 @@ export function fromLog(r: LogRow): HistoryEvent {
   }
 
   const finalMoved = r.final_before !== r.final_after
+  const batchMoved = r.batch_before !== r.batch_after
+  const batchChange: Change = { kind: 'batch', from: r.batch_before, to: r.batch_after }
   const finalChange: Change = { kind: 'final', from: r.final_before, to: r.final_after }
   const timed = r.source === 'panel' && r.view_s != null
   const timing = timed ? { time: fmtDuration(r.view_s as number), seconds: r.view_s as number } : {}
@@ -90,7 +94,7 @@ export function fromLog(r: LogRow): HistoryEvent {
   const who = dash(r.actor)
 
   if (r.source === 'add_to_record') {
-    return { ...base, who, type: 'record', verb: 'added to record', changes: [verdictChange(r)], note }
+    return { ...base, who, type: 'record', verb: 'added to record', changes: batchMoved ? [verdictChange(r), batchChange] : [verdictChange(r)], note }
   }
 
   let type: EventType = 'save'
@@ -111,13 +115,20 @@ export function fromLog(r: LogRow): HistoryEvent {
       changes = [{ kind: 'initial', from: r.conclusion_before, to: null }]
       break
     case 'revise':
-      verb = r.changed ? 'changed the verdict' : 'edited the evaluation'
-      changes = [verdictChange(r)]
+      if (!r.changed && batchMoved && !finalMoved) {
+        // Only the batch moved: no verdict chip, the batch line says it all.
+        verb = 'changed the batch'
+        changes = []
+      } else {
+        verb = r.changed ? 'changed the verdict' : 'edited the evaluation'
+        changes = [verdictChange(r)]
+      }
       break
     default:
       verb = 'updated the game'
   }
   if (r.kind !== 'final' && finalMoved) changes.push(finalChange)
+  if (batchMoved) changes.push(batchChange)
 
   return { ...base, ...timing, who, type, verb, changes, note }
 }

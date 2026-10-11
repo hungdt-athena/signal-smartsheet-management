@@ -26,7 +26,7 @@ export async function GET(
       sql<LogRow[]>`
         SELECT l.id::text AS id, l.created_at AS at, l.actor, l.owner, l.source, l.context, l.kind,
                l.conclusion_before, l.conclusion_after, l.final_before, l.final_after,
-               l.changed, l.view_s, l.confidence
+               l.changed, l.view_s, l.confidence, l.batch_before, l.batch_after
         FROM evaluation_log l
         WHERE l.game_id = ${gameId}
         ORDER BY l.created_at DESC, l.id DESC

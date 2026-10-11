@@ -30,6 +30,7 @@ const Arrow = () => (
 function Chip({ value, kind }: { value: string | null; kind: Change['kind'] }) {
   if (kind === 'person') return <span className="name">{value ?? '—'}</span>
   if (value == null) return <span className="badge neutral">—</span>
+  if (kind === 'batch') return <span className="badge neutral">{value}</span>
   return <span className={`badge ${kind === 'final' ? 'neutral' : conclusionBadgeClass(value)}`}>{prettyConclusion(value)}</span>
 }
 
@@ -37,6 +38,7 @@ function ChangeLine({ c }: { c: Change }) {
   return (
     <div className="hx-chg">
       {c.kind === 'final' && <span className="lbl">Final</span>}
+      {c.kind === 'batch' && <span className="lbl">Batch</span>}
       {c.from != null && <><Chip value={c.from} kind={c.kind} /><Arrow /></>}
       <Chip value={c.to} kind={c.kind} />
     </div>

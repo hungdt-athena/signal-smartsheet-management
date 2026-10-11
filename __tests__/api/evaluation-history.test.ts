@@ -32,7 +32,7 @@ const get = (gameId: string) =>
 const LOG = {
   id: '5', at: new Date('2026-10-11T07:32:00Z'), actor: 'Alice', owner: 'Alice', source: 'panel', context: 'evaluate',
   kind: 'first', conclusion_before: null, conclusion_after: 'Bypass', final_before: null, final_after: null,
-  changed: true, view_s: 480, confidence: null,
+  batch_before: null, batch_after: null, changed: true, view_s: 480, confidence: null,
 }
 const ASG = { id: 9, at: new Date('2026-10-10T02:00:00Z'), action: 'assign', evaluator_name: 'Alice', from_evaluator: null, by: 'cron' }
 
@@ -63,9 +63,16 @@ describe('GET /api/evaluations/[gameId]/history', () => {
     expect(logCall.text).toMatch(/game_id = \$/)
     expect(logCall.binds).toContain('com.foo')
     expect(logCall.text).toMatch(/LIMIT 200/)
+    expect(logCall.text).toMatch(/l\.batch_before, l\.batch_after/)
     expect(asgCall.text).toMatch(/= ANY\(ah\.game_ids\)/)
     expect(asgCall.binds).toContain('com.foo')
     expect(asgCall.text).toMatch(/LIMIT 100/)
+  })
+
+  it('passes a batch change through as a Batch line', async () => {
+    logRows = [{ ...LOG, kind: 'revise', changed: false, conclusion_before: 'Bypass', conclusion_after: 'Bypass', batch_before: 'W1 Oct, 2026', batch_after: 'W2 Oct, 2026' }]
+    const body = await (await get('com.foo')).json()
+    expect(body.events[0]).toMatchObject({ verb: 'changed the batch', changes: [{ kind: 'batch', from: 'W1 Oct, 2026', to: 'W2 Oct, 2026' }] })
   })
 
   it('still returns the assignment history when migration 045 is missing', async () => {

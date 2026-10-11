@@ -45,6 +45,26 @@ describe('EvalHistoryModal', () => {
     ])
     expect(row.querySelector('.lbl')?.textContent).toBe('Final')
   })
+  it('shows the batch on its own labelled line, with an arrow when it moved from something', () => {
+    const ev = (changes: HistoryEvent['changes']): HistoryEvent => ({ ...EVENTS[0], changes })
+    const { rerender } = view({ events: [ev([{ kind: 'batch', from: 'W1 Oct, 2026', to: 'W2 Oct, 2026' }])] })
+    let row = screen.getAllByTestId('history-row')[0]
+    expect(row.querySelector('.lbl')?.textContent).toBe('Batch')
+    expect(Array.from(row.querySelectorAll('.badge')).map(b => [b.textContent, b.className])).toEqual([
+      ['W1 Oct, 2026', 'badge neutral'],
+      ['W2 Oct, 2026', 'badge neutral'],
+    ])
+    expect(row.querySelectorAll('.hx-chg svg')).toHaveLength(1) // the arrow
+    // batch text is shown as is, not run through the conclusion prettifier
+    rerender(<EvalHistoryModal events={[ev([{ kind: 'batch', from: null, to: 'W2_Oct' }])]} logReady error={false} onClose={noop} onRetry={noop} />)
+    row = screen.getAllByTestId('history-row')[0]
+    expect(Array.from(row.querySelectorAll('.badge')).map(b => b.textContent)).toEqual(['W2_Oct'])
+    expect(row.querySelectorAll('.hx-chg svg')).toHaveLength(0)
+    // cleared batch shows a dash
+    rerender(<EvalHistoryModal events={[ev([{ kind: 'batch', from: 'W1 Oct, 2026', to: null }])]} logReady error={false} onClose={noop} onRetry={noop} />)
+    row = screen.getAllByTestId('history-row')[0]
+    expect(Array.from(row.querySelectorAll('.badge')).map(b => b.textContent)).toEqual(['W1 Oct, 2026', '—'])
+  })
   it('summarises events, panel time and people under the title', () => {
     view()
     const sum = document.querySelector('.hx-sum')!

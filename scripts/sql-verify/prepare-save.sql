@@ -6,7 +6,7 @@
 PREPARE save(unknown, boolean, unknown, unknown, unknown, unknown, unknown, unknown, unknown,
              unknown, unknown, unknown, boolean, boolean) AS
 WITH old AS (
-  SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
+  SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date, batch
   FROM game_evaluations WHERE id = $1
   FOR NO KEY UPDATE
 ), upd AS (
@@ -33,7 +33,7 @@ WITH old AS (
 ), logged AS (
   INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
     context, kind, conclusion_before, conclusion_after, final_before, final_after, changed,
-    view_s, hidden_s, idle_s)
+    view_s, hidden_s, idle_s, batch_before, batch_after)
   SELECT old.id, old.game_id, $6::text, $7::text, old.initial_evaluator, $8::text, $9::text,
     CASE
       WHEN NOT $13 AND $14 THEN 'final'
@@ -45,7 +45,8 @@ WITH old AS (
       ELSE 'revise' END,
     old.initial_conclusion, upd.initial_conclusion, old.final_conclusion, upd.final_conclusion,
     old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion,
-    $10::int, $11::int, $12::int
+    $10::int, $11::int, $12::int,
+    old.batch, upd.batch
   FROM old JOIN upd ON upd.id = old.id
 )
 SELECT id FROM upd;

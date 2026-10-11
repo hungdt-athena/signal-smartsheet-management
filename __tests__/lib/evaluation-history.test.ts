@@ -6,7 +6,7 @@ import {
 const log = (o: Partial<LogRow>): LogRow => ({
   id: '1', at: '2026-10-11T07:32:00.000Z', actor: 'Alice', owner: 'Alice', source: 'panel', context: 'evaluate',
   kind: 'first', conclusion_before: null, conclusion_after: 'Bypass', final_before: null, final_after: null,
-  changed: true, view_s: 480, confidence: null, ...o,
+  batch_before: null, batch_after: null, changed: true, view_s: 480, confidence: null, ...o,
 })
 const asg = (o: Partial<AssignRow>): AssignRow => ({
   id: 7, at: '2026-10-10T02:00:00.000Z', action: 'reassign', evaluator_name: 'Alice', from_evaluator: 'Bob', by: 'cron', ...o,
@@ -66,6 +66,41 @@ describe('fromLog', () => {
     expect(e.verb).toBe('updated the game')
     expect(e.changes).toEqual([])
   })
+  it('appends a batch change as the last line', () => {
+    const e = fromLog(log({ kind: 'revise', conclusion_before: 'Bypass', conclusion_after: 'List_Idea', final_before: null, final_after: 'Priority I',
+      batch_before: 'W1 Oct, 2026', batch_after: 'W2 Oct, 2026' }))
+    expect(e.verb).toBe('changed the verdict')
+    expect(e.changes).toEqual([
+      { kind: 'initial', from: 'Bypass', to: 'List_Idea' },
+      { kind: 'final', from: null, to: 'Priority I' },
+      { kind: 'batch', from: 'W1 Oct, 2026', to: 'W2 Oct, 2026' },
+    ])
+  })
+  it('a save that only moves the batch is "changed the batch" with no verdict chip', () => {
+    const e = fromLog(log({ kind: 'revise', changed: false, conclusion_before: 'Bypass', conclusion_after: 'Bypass',
+      batch_before: 'W1 Oct, 2026', batch_after: 'W2 Oct, 2026' }))
+    expect(e.verb).toBe('changed the batch')
+    expect(e.changes).toEqual([{ kind: 'batch', from: 'W1 Oct, 2026', to: 'W2 Oct, 2026' }])
+  })
+  it('a batch set for the first time has no "from"', () => {
+    const e = fromLog(log({ kind: 'revise', changed: false, conclusion_before: 'Bypass', conclusion_after: 'Bypass', batch_before: null, batch_after: 'W2 Oct, 2026' }))
+    expect(e.changes).toEqual([{ kind: 'batch', from: null, to: 'W2 Oct, 2026' }])
+  })
+  it('keeps "edited the evaluation" and the verdict when the batch moved together with the final conclusion', () => {
+    const e = fromLog(log({ kind: 'revise', changed: false, conclusion_before: 'Bypass', conclusion_after: 'Bypass', final_before: null, final_after: 'Priority I',
+      batch_before: 'W1', batch_after: 'W2' }))
+    expect(e.verb).toBe('edited the evaluation')
+    expect(e.changes.map(c => c.kind)).toEqual(['initial', 'final', 'batch'])
+  })
+  it('a final-only save with a batch move shows the final change, then the batch', () => {
+    const e = fromLog(log({ kind: 'final', changed: false, final_before: null, final_after: 'Priority I', batch_before: 'W1', batch_after: 'W2' }))
+    expect(e.verb).toBe('set the final conclusion')
+    expect(e.changes.map(c => c.kind)).toEqual(['final', 'batch'])
+  })
+  it('adds no batch line when the batch is equal, NULL or not', () => {
+    expect(fromLog(log({ kind: 'revise', changed: false, conclusion_before: 'Bypass', conclusion_after: 'Bypass', batch_before: 'W2', batch_after: 'W2' })).changes.map(c => c.kind)).toEqual(['initial'])
+    expect(fromLog(log({ batch_before: null, batch_after: null })).changes.map(c => c.kind)).toEqual(['initial'])
+  })
   it('names the tab when the save came from another panel than Evaluate', () => {
     expect(fromLog(log({ context: 'shortlist' })).note).toBe('From Short List')
     expect(fromLog(log({ context: 'record' })).note).toBe('From Record')
@@ -82,12 +117,24 @@ describe('fromLog', () => {
     expect(e).toMatchObject({ type: 'record', verb: 'added to record', time: null, seconds: null })
     expect(e.changes).toEqual([{ kind: 'initial', from: 'Bypass', to: 'List_Idea' }])
   })
+  it('an add-to-record pull that moved the batch shows it after the verdict', () => {
+    const e = fromLog(log({ source: 'add_to_record', view_s: null, context: null, conclusion_before: 'List_Idea', conclusion_after: 'List_Idea', changed: false,
+      batch_before: 'W1 Oct, 2026', batch_after: 'W2 Oct, 2026' }))
+    expect(e.verb).toBe('added to record')
+    expect(e.changes).toEqual([
+      { kind: 'initial', from: null, to: 'List_Idea' },
+      { kind: 'batch', from: 'W1 Oct, 2026', to: 'W2 Oct, 2026' },
+    ])
+  })
   it('a seed row is an old verdict credited to the owner, with a warning when its time is unsure', () => {
     const ok = fromLog(log({ source: 'seed', actor: null, owner: 'Carol', view_s: null, context: null, confidence: 'ok' }))
     expect(ok).toMatchObject({ who: 'Carol', type: 'seed', verb: 'evaluated', time: null, note: 'Copied from the old record' })
     expect(ok.changes).toEqual([{ kind: 'initial', from: null, to: 'Bypass' }])
     const low = fromLog(log({ source: 'seed', actor: null, owner: 'Carol', view_s: null, context: null, confidence: 'low' }))
     expect(low.note).toBe('Copied from the old record · time may be off')
+    // a seed row never shows a batch line, even if the columns were somehow filled
+    expect(fromLog(log({ source: 'seed', actor: null, view_s: null, confidence: 'ok', batch_before: 'W1', batch_after: 'W2' })).changes)
+      .toEqual([{ kind: 'initial', from: null, to: 'Bypass' }])
     expect(fromLog(log({ source: 'seed', actor: null, view_s: null, confidence: 'corrected' })).note)
       .toBe('Copied from the old record · time taken from the first trend tag')
   })

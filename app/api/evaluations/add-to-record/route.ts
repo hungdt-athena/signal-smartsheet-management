@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
       // confirming an unchanged real evaluation doesn't skew report timing.
       result = await sql`
         WITH old AS (
-          SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
+          SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date, batch
           FROM game_evaluations
           WHERE game_id = ${game_id} AND category_group = ${category_group}
           FOR NO KEY UPDATE
@@ -124,14 +124,16 @@ export async function POST(req: NextRequest) {
                   THEN NOW() ELSE ge.final_conclusion_date END,
               final_evaluator = COALESCE(${finalEval}, ge.final_evaluator)
           FROM old WHERE ge.id = old.id
-          RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion
+          RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion, ge.batch
         ), logged AS (
           INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
-            kind, conclusion_before, conclusion_after, final_before, final_after, changed)
+            kind, conclusion_before, conclusion_after, final_before, final_after, changed,
+            batch_before, batch_after)
           SELECT old.id, old.game_id, ${actor}::text, ${role}::text, old.initial_evaluator, 'add_to_record',
             ${logKindSql(sql, { initialTouched: !!(initEval || initConcl), finalTouched: !!(finalConcl || finalEval) })},
             old.initial_conclusion, upd.initial_conclusion, old.final_conclusion, upd.final_conclusion,
-            old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion
+            old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion,
+            old.batch, upd.batch
           FROM old JOIN upd ON upd.id = old.id
         )
         SELECT id FROM upd
@@ -146,7 +148,7 @@ export async function POST(req: NextRequest) {
       const autoFill = sql`(ge.initial_conclusion IS NULL OR ge.initial_conclusion ILIKE '%bypass%')`
       result = await sql`
         WITH old AS (
-          SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
+          SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date, batch
           FROM game_evaluations
           WHERE game_id = ${game_id} AND category_group = ${category_group}
           FOR NO KEY UPDATE
@@ -161,14 +163,16 @@ export async function POST(req: NextRequest) {
               final_conclusion_date = CASE WHEN ${autoFill} THEN NOW() ELSE ge.final_conclusion_date END,
               final_evaluator = CASE WHEN ${autoFill} THEN ${AUTO_EVALUATOR} ELSE ge.final_evaluator END
           FROM old WHERE ge.id = old.id
-          RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion
+          RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion, ge.batch
         ), logged AS (
           INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
-            kind, conclusion_before, conclusion_after, final_before, final_after, changed)
+            kind, conclusion_before, conclusion_after, final_before, final_after, changed,
+            batch_before, batch_after)
           SELECT old.id, old.game_id, ${actor}::text, ${role}::text, old.initial_evaluator, 'add_to_record',
             ${logKindSql(sql, { initialTouched: true, finalTouched: true })},
             old.initial_conclusion, upd.initial_conclusion, old.final_conclusion, upd.final_conclusion,
-            old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion
+            old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion,
+            old.batch, upd.batch
           FROM old JOIN upd ON upd.id = old.id
         )
         SELECT id FROM upd

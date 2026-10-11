@@ -102,6 +102,29 @@ BEGIN
   ASSERT (SELECT view_s FROM evaluation_log ORDER BY id LIMIT 1) = 60, 'view_s is an int';
 END $$;
 
+-- Batch is logged next to the verdict. p4 (id 34) went 'W1 Aug, 2026' -> 'W2 Oct, 2026' above.
+DO $$ BEGIN
+  ASSERT (SELECT batch_before || '>' || batch_after FROM evaluation_log WHERE game_evaluation_id = 34)
+         = 'W1 Aug, 2026>W2 Oct, 2026', 'batch change logged';
+  -- a save that does not touch batch logs equal before/after (NULL stays NULL)
+  ASSERT (SELECT batch_before IS NOT DISTINCT FROM batch_after FROM evaluation_log WHERE game_evaluation_id = 32 AND kind = 'final'), 'untouched NULL batch logs equal';
+  ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id <> 34 AND batch_before IS DISTINCT FROM batch_after),
+    'only the batch-changing save has batch_before <> batch_after';
+END $$;
+-- a non-NULL batch that a save leaves alone (concluding without sending a batch)
+EXECUTE save(34, true, 'List_Idea', NULL, NULL, 'HungDT', 'admin', 'panel', 'evaluate', 7, 0, 0, true, false);
+-- a manager moving only the batch (same verdict): kind 'revise', changed false
+EXECUTE save(34, false, NULL, 'W3 Oct, 2026', NULL, 'HungDT', 'admin', 'panel', 'evaluate', 8, 0, 0, true, false);
+DO $$
+DECLARE r record;
+BEGIN
+  SELECT * INTO r FROM (SELECT * FROM evaluation_log WHERE game_evaluation_id = 34 ORDER BY id DESC OFFSET 1 LIMIT 1) x;
+  ASSERT r.batch_before = 'W2 Oct, 2026' AND r.batch_after = 'W2 Oct, 2026', 'untouched non-NULL batch logs equal';
+  SELECT * INTO r FROM evaluation_log WHERE game_evaluation_id = 34 ORDER BY id DESC LIMIT 1;
+  ASSERT r.batch_before = 'W2 Oct, 2026' AND r.batch_after = 'W3 Oct, 2026', 'W2 -> W3 logged';
+  ASSERT r.changed = false AND r.kind = 'revise', 'batch-only save is a revise without a verdict change';
+END $$;
+
 -- Without the join the log is empty: proves `UPDATE ... FROM old` is required.
 PREPARE nojoin(unknown) AS
 WITH old AS (SELECT id, game_id FROM game_evaluations WHERE id = $1 FOR NO KEY UPDATE),
@@ -125,19 +148,20 @@ INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion
  (42, 'r2', 'HuyDD', 'List_Idea', '2026-10-01 10:00+07');
 PREPARE atr(unknown, unknown) AS
 WITH old AS (
-  SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date
+  SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date, batch
   FROM game_evaluations WHERE game_id = $1 AND category_group = 'puzzle' FOR NO KEY UPDATE
 ), upd AS (
   UPDATE game_evaluations ge SET
     initial_evaluator = CASE WHEN (ge.initial_conclusion IS NULL OR ge.initial_conclusion ILIKE '%bypass%') THEN 'Shortcut' ELSE ge.initial_evaluator END,
     initial_conclusion = CASE WHEN (ge.initial_conclusion IS NULL OR ge.initial_conclusion ILIKE '%bypass%') THEN 'List_Idea' ELSE ge.initial_conclusion END
   FROM old WHERE ge.id = old.id
-  RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion
+  RETURNING ge.id, ge.initial_conclusion, ge.final_conclusion, ge.batch
 ), logged AS (
   INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, source, kind,
-    conclusion_before, conclusion_after, changed)
+    conclusion_before, conclusion_after, changed, batch_before, batch_after)
   SELECT old.id, old.game_id, $2::text, old.initial_evaluator, 'add_to_record', 'revise',
-    old.initial_conclusion, upd.initial_conclusion, old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion
+    old.initial_conclusion, upd.initial_conclusion, old.initial_conclusion IS DISTINCT FROM upd.initial_conclusion,
+    old.batch, upd.batch
   FROM old JOIN upd ON upd.id = old.id
 )
 SELECT id FROM upd;
@@ -149,6 +173,7 @@ DO $$ BEGIN
   ASSERT (SELECT owner || ':' || conclusion_before || '>' || conclusion_after FROM evaluation_log WHERE game_evaluation_id = 41)
          = 'HuyDD:Bypass>List_Idea', 'r1 log shows what was overridden';
   ASSERT (SELECT changed FROM evaluation_log WHERE game_evaluation_id = 42) = false, 'r2 logged, unchanged';
+  ASSERT (SELECT batch_before IS NOT DISTINCT FROM batch_after FROM evaluation_log WHERE game_evaluation_id = 41), 'r1 batch equal';
 END $$;
 DELETE FROM evaluation_log;
 
@@ -247,10 +272,10 @@ END $$;
 -- ---------- History modal (mirrors app/api/evaluations/[gameId]/history/route.ts) ----------
 -- Untyped params, as postgres.js sends strings: `$1 = ANY(text[])` must resolve to text.
 INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, source, context, kind,
-  conclusion_before, conclusion_after, changed, view_s, created_at) VALUES
-  (NULL, 'hist1', NULL, 'Alice', 'seed', NULL, 'first', NULL, 'Bypass', TRUE, NULL, '2026-10-01 10:00+07'),
-  (NULL, 'hist1', 'Alice', 'Alice', 'panel', 'evaluate', 'revise', 'Bypass', 'List_Idea', TRUE, 300, '2026-10-03 10:00+07'),
-  (NULL, 'hist2', 'Bob', 'Bob', 'panel', 'evaluate', 'first', NULL, 'Bypass', TRUE, 60, '2026-10-03 11:00+07');
+  conclusion_before, conclusion_after, changed, view_s, created_at, batch_before, batch_after) VALUES
+  (NULL, 'hist1', NULL, 'Alice', 'seed', NULL, 'first', NULL, 'Bypass', TRUE, NULL, '2026-10-01 10:00+07', NULL, NULL),
+  (NULL, 'hist1', 'Alice', 'Alice', 'panel', 'evaluate', 'revise', 'Bypass', 'List_Idea', TRUE, 300, '2026-10-03 10:00+07', 'W1 Oct, 2026', 'W2 Oct, 2026'),
+  (NULL, 'hist2', 'Bob', 'Bob', 'panel', 'evaluate', 'first', NULL, 'Bypass', TRUE, 60, '2026-10-03 11:00+07', NULL, NULL);
 INSERT INTO assignment_history (run_date, run_at, category_group, action, evaluator_name, from_evaluator, game_count, game_ids, created_by) VALUES
   ('2026-09-30', '2026-09-30 09:00+07', 'puzzle', 'assign', 'Bob', NULL, 2, ARRAY['hist1','hist2'], 'cron'),
   ('2026-10-02', '2026-10-02 09:00+07', 'puzzle', 'reassign', 'Alice', 'Bob', 1, ARRAY['hist1'], 'hung@x'),
@@ -258,7 +283,7 @@ INSERT INTO assignment_history (run_date, run_at, category_group, action, evalua
 PREPARE hist_log AS
   SELECT l.id::text AS id, l.created_at AS at, l.actor, l.owner, l.source, l.context, l.kind,
          l.conclusion_before, l.conclusion_after, l.final_before, l.final_after,
-         l.changed, l.view_s, l.confidence
+         l.changed, l.view_s, l.confidence, l.batch_before, l.batch_after
   FROM evaluation_log l
   WHERE l.game_id = $1
   ORDER BY l.created_at DESC, l.id DESC
@@ -276,6 +301,7 @@ CREATE TEMP TABLE ha AS EXECUTE hist_asg('hist1');
 DO $$ BEGIN
   ASSERT (SELECT array_agg(source ORDER BY at DESC) FROM hl) = ARRAY['panel','seed'], 'hist1 log rows only, newest first';
   ASSERT (SELECT array_agg(action ORDER BY at DESC) FROM ha) = ARRAY['reassign','assign'], 'hist1 assignment rows only';
+  ASSERT (SELECT batch_before || '>' || batch_after FROM hl WHERE source = 'panel') = 'W1 Oct, 2026>W2 Oct, 2026', 'history query returns the batch columns';
   ASSERT (SELECT by FROM ha WHERE action = 'reassign') = 'HungDT', 'created_by email resolves to the user name';
   ASSERT (SELECT by FROM ha WHERE action = 'assign') = 'cron', 'cron stays cron';
 END $$;

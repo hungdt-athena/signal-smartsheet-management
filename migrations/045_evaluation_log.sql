@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS evaluation_log (
   conclusion_after   TEXT,
   final_before       TEXT,          -- audit only
   final_after        TEXT,          -- audit only
+  batch_before       TEXT,          -- audit: game_evaluations.batch before/after the write
+  batch_after        TEXT,          -- audit: game_evaluations.batch before/after the write
   changed            BOOLEAN NOT NULL DEFAULT FALSE, -- initial conclusion changed
   view_s             INT,           -- seconds the game was the current game in the panel
   hidden_s           INT,           -- of which the tab was hidden (<= view_s)
@@ -27,6 +29,9 @@ CREATE TABLE IF NOT EXISTS evaluation_log (
   confidence         TEXT,          -- seed rows only: ok | low | corrected
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Covers a database that already ran an earlier 045 (without the batch columns).
+ALTER TABLE evaluation_log ADD COLUMN IF NOT EXISTS batch_before TEXT, ADD COLUMN IF NOT EXISTS batch_after TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_evaluation_log_actor_time ON evaluation_log (actor, created_at);
 CREATE INDEX IF NOT EXISTS idx_evaluation_log_game ON evaluation_log (game_evaluation_id, created_at);
