@@ -45,7 +45,7 @@ the game are not in it. The name in any UI must say "panel time", not "working h
 9. Out of scope (phase 2): a "viewed but not saved" beacon; switching Report / Effort feed /
    status-log sheet to read the log; per-conclusion caps; subtracting hidden/idle time.
 
-## Schema — `migrations/045_evaluation_log.sql`
+## Schema — `migrations/046_evaluation_log.sql`
 
 ```sql
 CREATE TABLE IF NOT EXISTS evaluation_log (
@@ -212,7 +212,7 @@ Verified on PG 14 (no version-sensitive features; prod is Neon 16/17):
   catch it (see Tests).
 
 If the table is missing, Postgres raises `42P01`. In the existing catch (`:672`), return
-`500 { error: 'evaluation_log missing — apply migration 045' }`.
+`500 { error: 'evaluation_log missing — apply migration 046' }`.
 
 An admin saving from the panel always sends the note parts (`canEditEval`, `:943-946`), so their rows
 are `revise` even when they only changed the final conclusion. Harmless: admins are filtered out of
@@ -483,12 +483,12 @@ correctly shows little panel time for burst-savers, and their real play time is 
 ## Rollout
 
 1. On n8n cloud, confirm `smartsheet-to-db-evaluations` and `smartsheet-db-update-sync` are inactive.
-2. Run `scripts/verify-evaluation-log.sh` (below) on a throwaway local Postgres. Then apply `045` on a
+2. Run `scripts/verify-evaluation-log.sh` (below) on a throwaway local Postgres. Then apply `046` on a
    Neon branch of prod and run the PATCH CTE once there by hand.
-3. Apply `migrations/045_evaluation_log.sql` on prod. **Must precede Republish**: the PATCH writes the
+3. Apply `migrations/046_evaluation_log.sql` on prod. **Must precede Republish**: the PATCH writes the
    log in the same statement, so without the table every panel save fails.
 4. Republish on Replit.
-5. Re-run `045` immediately (seed catch-up for games judged between steps 3 and 4).
+5. Re-run `046` immediately (seed catch-up for games judged between steps 3 and 4).
 6. Smoke test: save one game in the panel; check one `source = 'panel'` row with a sane `view_s`.
 
 ## Tests
@@ -505,7 +505,7 @@ API tests mock `sql` entirely and only match SQL text with regexes
   the start of `save()`; reset only on `res.ok` and only for the same game; Save → Next keeps both games'
   time apart; stale `applyData` skipped.
 - **SQL (real Postgres):** `scripts/verify-evaluation-log.sh` — ported from the review harness: start a
-  throwaway PG on a local port, load minimal tables, then run 045 + re-run, the PATCH CTE through
+  throwaway PG on a local port, load minimal tables, then run 046 + re-run, the PATCH CTE through
   first/revise/clear/final/other, two concurrent sessions on one row, the `evaluate_date` rule cases
   (owner, admin judged, admin unjudged, Stale_release, List_Idea promotion, NULL actor), and the time
   query on synthetic rows including a midnight overlap and a NULL `view_s`. It never reads
@@ -513,7 +513,7 @@ API tests mock `sql` entirely and only match SQL text with regexes
 
 ## Files touched
 
-- `migrations/045_evaluation_log.sql` (new: DDL + seed)
+- `migrations/046_evaluation_log.sql` (new: DDL + seed)
 - `app/api/evaluations/route.ts` (PATCH: CTE write, `evaluate_date` rule, 42P01 message, hoist `role`)
 - `app/api/evaluations/add-to-record/route.ts` (log row via CTE)
 - `lib/reassign-core.ts`, `app/api/cron/assign-evaluators/route.ts`, `app/api/operations/reassign/route.ts`,

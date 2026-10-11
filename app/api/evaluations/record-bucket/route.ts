@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, data: result[0] })
   } catch (err) {
     if (isMissingLogTable(err)) {
-      console.error('POST /api/evaluations/record-bucket: evaluation_log missing — apply migration 045')
+      console.error('POST /api/evaluations/record-bucket: evaluation_log missing — apply migration 046')
       return NextResponse.json({ error: EVALUATION_LOG_MISSING }, { status: 500 })
     }
     console.error('POST /api/evaluations/record-bucket error:', err)

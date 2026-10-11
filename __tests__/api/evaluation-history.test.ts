@@ -77,7 +77,7 @@ describe('GET /api/evaluations/[gameId]/history', () => {
     expect(body.events[0]).toMatchObject({ verb: 'changed the batch', changes: [{ kind: 'batch', from: 'W1 Oct, 2026', to: 'W2 Oct, 2026' }] })
   })
 
-  it('still returns the assignment history when migration 045 is missing', async () => {
+  it('still returns the assignment history when migration 046 is missing', async () => {
     logRows = Object.assign(new Error('relation "evaluation_log" does not exist'), { code: '42P01' })
     asgRows = [ASG]
     const res = await get('com.foo')

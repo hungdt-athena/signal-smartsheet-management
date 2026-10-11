@@ -57,6 +57,6 @@ describe('isMissingLogTable', () => {
     expect(isMissingLogTable({ code: '42P01', message: 'relation "evaluation_log" does not exist' })).toBe(true)
     expect(isMissingLogTable({ code: '42P01', message: 'relation "other" does not exist' })).toBe(false)
     expect(isMissingLogTable(new Error('x'))).toBe(false)
-    expect(EVALUATION_LOG_MISSING).toMatch(/045/)
+    expect(EVALUATION_LOG_MISSING).toMatch(/046/)
   })
 })

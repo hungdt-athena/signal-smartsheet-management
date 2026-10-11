@@ -4,7 +4,7 @@
 
 **Goal:** Record every evaluation save in an append-only `evaluation_log` with client-measured panel seconds, so evaluator panel time is summed instead of guessed from `evaluate_date`.
 
-**Architecture:** One new table (migration 045, with a seed of old data). The PATCH and add-to-record routes write the log row in the same SQL statement as their UPDATE (CTE with `FOR UPDATE` + `UPDATE … FROM old`). The panel keeps a pure view timer (`lib/view-timer.ts`), snapshots it at the start of `save()` and sends `view_s` / `hidden_s` / `idle_s` / `context`. A read-only admin endpoint sums panel time per person per VN day.
+**Architecture:** One new table (migration 046, with a seed of old data). The PATCH and add-to-record routes write the log row in the same SQL statement as their UPDATE (CTE with `FOR UPDATE` + `UPDATE … FROM old`). The panel keeps a pure view timer (`lib/view-timer.ts`), snapshots it at the start of `save()` and sends `view_s` / `hidden_s` / `idle_s` / `context`. A read-only admin endpoint sums panel time per person per VN day.
 
 **Tech Stack:** Next.js 14 app router, postgres.js (`sql` tagged templates, prepared statements on), Neon Postgres 16/17 (local verification on Homebrew PG 14), Jest 30 + Testing Library.
 
@@ -40,12 +40,12 @@
 
 | File | Responsibility |
 |---|---|
-| `migrations/045_evaluation_log.sql` (new) | Table, indexes, idempotent seed |
+| `migrations/046_evaluation_log.sql` (new) | Table, indexes, idempotent seed |
 | `scripts/sql-verify/schema.sql` (new) | Minimal faithful copies of `game_info`, `dashboard_users`, `game_evaluations`, `playtest_tags` for the harness |
-| `scripts/sql-verify/seed-fixtures.sql` (new) | Fixture rows loaded before the first 045 run so the seed has data to copy |
+| `scripts/sql-verify/seed-fixtures.sql` (new) | Fixture rows loaded before the first 046 run so the seed has data to copy |
 | `scripts/sql-verify/prepare-save.sql` (new) | The PATCH-shaped `PREPARE save`, shared by `checks.sql` and the two-session concurrency check |
 | `scripts/sql-verify/checks.sql` (new) | Assertions: DDL, seed, CTE pattern, `evaluate_date` rule, untyped params, time query |
-| `scripts/verify-evaluation-log.sh` (new) | Starts a throwaway local PG, runs schema + 045 (twice) + checks, tears down |
+| `scripts/verify-evaluation-log.sh` (new) | Starts a throwaway local PG, runs schema + 046 (twice) + checks, tears down |
 | `lib/evaluation-log.ts` (new) | Pure helpers: read timing from a body, touched flags, `kind` CASE fragment, missing-table detection |
 | `app/api/evaluations/route.ts` | PATCH: CTE write, new `evaluate_date` rule, `role` hoist, 42P01 message |
 | `app/api/evaluations/add-to-record/route.ts` | Log row (`source = 'add_to_record'`) in both branches; behaviour unchanged |
@@ -88,10 +88,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 1: Migration 045 + SQL harness
+### Task 1: Migration 046 + SQL harness
 
 **Files:**
-- Create: `migrations/045_evaluation_log.sql`
+- Create: `migrations/046_evaluation_log.sql`
 - Create: `scripts/sql-verify/schema.sql`
 - Create: `scripts/sql-verify/seed-fixtures.sql`
 - Create: `scripts/sql-verify/checks.sql`
@@ -145,7 +145,7 @@ INSERT INTO dashboard_users (email, name, role, title) VALUES
 SET TIME ZONE 'UTC';
 
 -- ===== Task 1: DDL + seed =====
--- The runner loads seed fixtures BEFORE the first 045 run (see verify-evaluation-log.sh),
+-- The runner loads seed fixtures BEFORE the first 046 run (see verify-evaluation-log.sh),
 -- so here we only assert outcomes.
 DO $$
 DECLARE n int;
@@ -172,8 +172,8 @@ BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id IN (8, 9)), 'g8/g9 not seeded';
 END $$;
 
--- Re-running 045 inserts nothing.
-\i migrations/045_evaluation_log.sql
+-- Re-running 046 inserts nothing.
+\i migrations/046_evaluation_log.sql
 DO $$ BEGIN
   ASSERT (SELECT count(*) FROM evaluation_log WHERE source = 'seed') = 7, 'seed is idempotent';
 END $$;
@@ -185,7 +185,7 @@ INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion
   (21, 'c2', 'Alice', 'Bypass', '2026-10-09 12:05+07');
 INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, context, kind, view_s, created_at)
   VALUES (2, 'g2', 'Alice', 'panel', 'evaluate', 'revise', 30, '2026-10-09 12:00+07');
-\i migrations/045_evaluation_log.sql
+\i migrations/046_evaluation_log.sql
 DO $$ BEGIN
   ASSERT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 20 AND source = 'seed'), 'c1 seeded (before cutover)';
   ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 21 AND source = 'seed'), 'c2 skipped (after cutover)';
@@ -222,7 +222,7 @@ INSERT INTO playtest_tags (game_id, field_value, tagged_by, tagged_at) VALUES
 
 ```bash
 #!/usr/bin/env bash
-# Runs migration 045 and the evaluation_log SQL checks against a THROWAWAY local
+# Runs migration 046 and the evaluation_log SQL checks against a THROWAWAY local
 # Postgres. Never reads DATABASE_URL or .env files. Needs initdb/pg_ctl/psql on PATH
 # (Homebrew postgresql@14 or newer).
 set -euo pipefail
@@ -238,20 +238,20 @@ P=(psql -h 127.0.0.1 -p "$PORT" -U postgres -X -q -v ON_ERROR_STOP=1)
 "${P[@]}" -d postgres -c "CREATE DATABASE verify"
 "${P[@]}" -d verify -f scripts/sql-verify/schema.sql
 "${P[@]}" -d verify -f scripts/sql-verify/seed-fixtures.sql
-"${P[@]}" -d verify -f migrations/045_evaluation_log.sql
+"${P[@]}" -d verify -f migrations/046_evaluation_log.sql
 "${P[@]}" -d verify -f scripts/sql-verify/checks.sql
 echo "evaluation_log SQL checks: OK"
 ```
 
 Run: `chmod +x scripts/verify-evaluation-log.sh && scripts/verify-evaluation-log.sh`
-Expected: FAIL — `psql: … migrations/045_evaluation_log.sql: No such file or directory`.
+Expected: FAIL — `psql: … migrations/046_evaluation_log.sql: No such file or directory`.
 
 - [ ] **Step 4: Write the migration**
 
-`migrations/045_evaluation_log.sql`:
+`migrations/046_evaluation_log.sql`:
 
 ```sql
--- Migration 045: evaluation_log — one append-only row per successful evaluation save.
+-- Migration 046: evaluation_log — one append-only row per successful evaluation save.
 -- Spec: docs/superpowers/specs/2026-10-10-evaluation-time-log-design.md
 --
 -- APPLY BEFORE REPUBLISH. The PATCH handler writes this table in the same statement as
@@ -328,7 +328,7 @@ Expected: `evaluation_log SQL checks: OK`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add migrations/045_evaluation_log.sql scripts/sql-verify scripts/verify-evaluation-log.sh
+git add migrations/046_evaluation_log.sql scripts/sql-verify scripts/verify-evaluation-log.sh
 git commit -m "feat(db): evaluation_log table with a seed of old verdict times
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -416,7 +416,7 @@ describe('isMissingLogTable', () => {
     expect(isMissingLogTable({ code: '42P01', message: 'relation "evaluation_log" does not exist' })).toBe(true)
     expect(isMissingLogTable({ code: '42P01', message: 'relation "other" does not exist' })).toBe(false)
     expect(isMissingLogTable(new Error('x'))).toBe(false)
-    expect(EVALUATION_LOG_MISSING).toMatch(/045/)
+    expect(EVALUATION_LOG_MISSING).toMatch(/046/)
   })
 })
 ```
@@ -431,7 +431,7 @@ Expected: FAIL — `Cannot find module '@/lib/evaluation-log'`.
 `lib/evaluation-log.ts`:
 
 ```ts
-// lib/evaluation-log.ts — helpers for writing evaluation_log rows (migration 045).
+// lib/evaluation-log.ts — helpers for writing evaluation_log rows (migration 046).
 // Spec: docs/superpowers/specs/2026-10-10-evaluation-time-log-design.md
 //
 // Pure: no DB import at runtime (the postgres import is type-only). The `kind` CASE is
@@ -504,9 +504,9 @@ export function logKindSql(q: Sql, f: TouchedFlags) {
   END`
 }
 
-export const EVALUATION_LOG_MISSING = 'evaluation_log missing — apply migration 045'
+export const EVALUATION_LOG_MISSING = 'evaluation_log missing — apply migration 046'
 
-/** Postgres 42P01 (undefined_table) on evaluation_log: migration 045 was not applied. */
+/** Postgres 42P01 (undefined_table) on evaluation_log: migration 046 was not applied. */
 export function isMissingLogTable(err: unknown): boolean {
   const e = err as { code?: unknown; message?: unknown } | null
   return !!e && e.code === '42P01' && /evaluation_log/.test(String(e.message ?? ''))
@@ -773,7 +773,7 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     expect(t).not.toMatch(/COALESCE\(\$, (?!ge\.)[a-z_]+\)/)
   })
 
-  it('returns a readable error when migration 045 is missing', async () => {
+  it('returns a readable error when migration 046 is missing', async () => {
     routeSql()
     sqlMock.mockImplementation((strings: unknown) => {
       if (Array.isArray(strings) && /INSERT INTO evaluation_log/.test((strings as string[]).join(' '))) {
@@ -783,7 +783,7 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     })
     const res = await patch({ id: 1, initial_note: 'a real note here', view_s: 5 })
     expect(res.status).toBe(500)
-    expect((await res.json()).error).toMatch(/apply migration 045/)
+    expect((await res.json()).error).toMatch(/apply migration 046/)
   })
 })
 ```
@@ -910,7 +910,7 @@ import {
 
 ```ts
     if (isMissingLogTable(err)) {
-      console.error('PATCH /api/evaluations: evaluation_log missing — apply migration 045')
+      console.error('PATCH /api/evaluations: evaluation_log missing — apply migration 046')
       return NextResponse.json({ error: EVALUATION_LOG_MISSING }, { status: 500 })
     }
 ```
@@ -2149,7 +2149,7 @@ with:
 
 ```ts
 // - sessions: evaluate_date, the last time the initial conclusion CHANGED. Not moved by
-//   a final conclusion or an unchanged re-save. Since migration 045 a non-owner change of
+//   a final conclusion or an unchanged re-save. Since migration 046 a non-owner change of
 //   a judged verdict in the panel no longer moves it, except a List_Idea batch stamp;
 //   add-to-record still moves it as before. Measured panel time lives in evaluation_log
 //   (/api/admin/evaluation-hours).
@@ -2218,9 +2218,9 @@ Expected: empty.
 ## Rollout (manual, by the user — not part of the task loop)
 
 1. On n8n cloud, confirm `smartsheet-to-db-evaluations` and `smartsheet-db-update-sync` are **inactive** (they upsert `evaluate_date` and bypass the new rule).
-2. Create a Neon branch of prod. Apply `migrations/045_evaluation_log.sql` there. Start a throwaway server against the branch: `env DATABASE_URL=<branch url> NEXT_DIST_DIR=.next-probe SKIP_AUTH=true npx next dev -p 3336`, save one game through `/api/evaluations` (PATCH with `view_s`), and check one `source = 'panel'` row. Stop it, then `rm -rf .next-probe && git checkout -- tsconfig.json`.
-3. Apply `migrations/045_evaluation_log.sql` on prod. **Before Republish.**
+2. Create a Neon branch of prod. Apply `migrations/046_evaluation_log.sql` there. Start a throwaway server against the branch: `env DATABASE_URL=<branch url> NEXT_DIST_DIR=.next-probe SKIP_AUTH=true npx next dev -p 3336`, save one game through `/api/evaluations` (PATCH with `view_s`), and check one `source = 'panel'` row. Stop it, then `rm -rf .next-probe && git checkout -- tsconfig.json`.
+3. Apply `migrations/046_evaluation_log.sql` on prod. **Before Republish.**
 4. Push `main` and Republish on Replit.
-5. Re-run `migrations/045_evaluation_log.sql` on prod immediately (seed catch-up).
+5. Re-run `migrations/046_evaluation_log.sql` on prod immediately (seed catch-up).
 6. Smoke test on prod: save one game in the panel; `SELECT * FROM evaluation_log WHERE source = 'panel' ORDER BY id DESC LIMIT 1` shows a sane `view_s`.
 7. Tell evaluators: keep the game open in the panel while playing it (spec, case 22).

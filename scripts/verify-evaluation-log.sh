@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs migration 045 and the evaluation_log SQL checks against a THROWAWAY local
+# Runs migration 046 and the evaluation_log SQL checks against a THROWAWAY local
 # Postgres. Never reads DATABASE_URL or .env files. Needs initdb/pg_ctl/psql on PATH
 # (Homebrew postgresql@14 or newer).
 set -euo pipefail
@@ -16,7 +16,7 @@ P=(psql -h 127.0.0.1 -p "$PORT" -U postgres -X -q -v ON_ERROR_STOP=1)
 "${P[@]}" -d postgres -c "CREATE DATABASE verify"
 "${P[@]}" -d verify -f scripts/sql-verify/schema.sql
 "${P[@]}" -d verify -f scripts/sql-verify/seed-fixtures.sql
-"${P[@]}" -d verify -f migrations/045_evaluation_log.sql
+"${P[@]}" -d verify -f migrations/046_evaluation_log.sql
 "${P[@]}" -d verify -f scripts/sql-verify/checks.sql
 # Two sessions on one fresh row: B waits on A's row lock, then logs 'revise' over A's verdict.
 "${P[@]}" -d verify -c "INSERT INTO game_info VALUES ('cc1'); INSERT INTO game_evaluations (id, game_id, initial_evaluator) VALUES (90, 'cc1', 'Alice');"

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
+import { getCurrentBatch } from '@/lib/current-batch'
 import { getSession } from '@/lib/session'
 import { isStorageConfigured, deleteGameScreenshots } from '@/lib/screenshot-store'
 
@@ -34,13 +35,9 @@ export async function GET(
     const category = req.nextUrl.searchParams.get('category') || ''
     const categoryFilter = category ? sql`AND ge.category_group = ${category}` : sql``
 
-    // The game and the team's current-batch config go out together. The config read
-    // used to come after the game had landed, because the key it wants is built from
-    // that game's category_group -- one more serialized round-trip on the panel's
-    // hottest path (every open, every Next). There are only three categories, so
-    // reading all of them costs nothing on a connection that is otherwise idle and
-    // lets both queries share one round-trip. The right one is picked out below.
-    const [rows, batchCfg] = await Promise.all([
+    // The game and the team's current batch go out together: they are independent,
+    // so they share one round-trip on the panel's hottest path (every open, every Next).
+    const [rows, currentBatch] = await Promise.all([
       sql`
       SELECT ge.id, ge.game_id, ge.category_group, ge.genre_1, ge.genre_2,
         ge.initial_evaluator, ge.final_evaluator, ge.assigned_date,
@@ -72,9 +69,7 @@ export async function GET(
         ${categoryFilter}
       ORDER BY ge.id
     `,
-      sql<{ key: string; value: string }[]>`
-        SELECT key, value FROM app_config WHERE key LIKE 'current_batch:%'
-      `,
+      getCurrentBatch(),
     ])
 
     if (rows.length === 0) {
@@ -96,10 +91,9 @@ export async function GET(
       if (hasManual) cleanupManualScreenshots(gameId)
       row.manual_screenshot_urls = null
     }
-    // Team-wide "current batch" for this game's category — drives the forced
+    // Team-wide current batch (one value for every category) — drives the forced
     // batch evaluators get when marking List_Idea (see EvalDetailPanel).
-    row.current_batch =
-      batchCfg.find(c => c.key === `current_batch:${row.category_group}`)?.value ?? null
+    row.current_batch = currentBatch
     return NextResponse.json({ data: row })
   } catch (err) {
     console.error('GET /api/evaluations/[gameId] error:', err)

@@ -27,6 +27,8 @@ import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import { isManagerRole } from '@/lib/roles'
 import { saveDriveLink } from '@/lib/drive-link-client'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
+import { saveCurrentBatch } from '@/lib/current-batch-client'
+import { BatchMoveBar } from '@/components/BatchMoveBar'
 
 interface Evaluation {
   id: number
@@ -518,7 +520,7 @@ function GameAlikeCell({ item, canEdit, onSaved }: {
 }
 
 function ShortListEvalTab() {
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
   const isManager = isManagerRole(role)
@@ -535,6 +537,12 @@ function ShortListEvalTab() {
   const [filterEvaluator, setFilterEvaluator] = useState('')
   const [filterBatch, setFilterBatch] = useState('')
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
+  const [currentBatchSaveFailed, setCurrentBatchSaveFailed] = useState(false)
+  // Last value the server confirmed (loaded, or a save that succeeded), and a counter of
+  // current-batch saves. Two quick changes can settle out of order: a failure restores the
+  // confirmed value (not the one before THIS change) and only the newest request may complain.
+  const confirmedBatchRef = useRef<string | null>(null)
+  const batchSaveSeqRef = useRef(0)
   const [availableBatches, setAvailableBatches] = useState<string[]>([])
   // Short List is organised by batch, so the date filter defaults to all-time
   // (evaluated basis) rather than the current month — the month would fight the
@@ -547,6 +555,25 @@ function ShortListEvalTab() {
   // it — but only the first time, so a later manual "All batches" choice sticks.
   const batchDefaultedRef = useRef(false)
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
+  // Bulk batch move (managers). The checkbox column stays hidden until Select is pressed.
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()) }
+  // Select mode is a manager tool. If the role drops mid-session the checkboxes, toolbar
+  // and bar go with it, and the mode is reset so it does not come back by itself.
+  // A role is only known to have dropped when the session is authenticated and says so:
+  // next-auth refetches the session on window focus and `data` is null for a moment when
+  // that fails. While the role is unknown the controls hide, but the selection is kept.
+  const selecting = isManager && selectMode
+  const roleDropped = status === 'authenticated' && !!session?.user && !isManager
+  useEffect(() => {
+    if (roleDropped) { setSelectMode(false); setSelectedIds(new Set()) }
+  }, [roleDropped])
+  const toggleSelected = (id: number) => setSelectedIds(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
 
   // The filter params both fetches share. Kept in one place so the rows request and
   // the facets request can never disagree about what is being looked at.
@@ -576,6 +603,7 @@ function ShortListEvalTab() {
       if (json.available_batches) setAvailableBatches(json.available_batches)
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
+        confirmedBatchRef.current = json.current_batch
         if (!batchDefaultedRef.current) {
           batchDefaultedRef.current = true
           // Pre-select the team's current batch, but fall back to the most recent
@@ -634,6 +662,12 @@ function ShortListEvalTab() {
     fetchData()
   }, [fetchData])
 
+  // A move must only ever cover rows the manager can see. Any change to what is listed
+  // (category, any filter, the date range) drops the selection.
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, filterBatch, df.value])
+
   const handleFinalConclusionSaved = (id: number, value: string) => {
     setData(prev => prev.map(d => d.id === id ? { ...d, final_conclusion: value } : d))
   }
@@ -660,15 +694,22 @@ function ShortListEvalTab() {
 
   // Manager control: set the team's current batch. Offer this + next calendar
   // month's weeks so W4→W1-next-month rollover (after the 28th) is one click.
-  const saveCurrentBatch = async (v: string) => {
+  // The batch is global: a failed save must not leave this manager believing the whole
+  // system changed, so the picker goes back to what it was and says so.
+  const handleCurrentBatchChange = async (v: string) => {
+    const seq = ++batchSaveSeqRef.current
     setCurrentBatch(v || null)
-    try {
-      await fetch('/api/evaluations/current-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: filterCategory, batch: v || null }),
-      })
-    } catch { /* ignore */ }
+    const ok = await saveCurrentBatch(v || null)
+    const latest = seq === batchSaveSeqRef.current
+    if (ok) {
+      confirmedBatchRef.current = v || null
+      if (latest) setCurrentBatchSaveFailed(false)
+      return
+    }
+    // An older request failing after a newer one was sent says nothing about the picker.
+    if (!latest) return
+    setCurrentBatch(confirmedBatchRef.current)
+    setCurrentBatchSaveFailed(true)
   }
   const currentBatchOptions = (() => {
     const now = new Date()
@@ -679,6 +720,17 @@ function ShortListEvalTab() {
     if (currentBatch && !opts.includes(currentBatch)) opts.unshift(currentBatch)
     return opts
   })()
+  // What a move covers: only rows still on screen. After a reload the selection can hold ids
+  // that are no longer listed; the bar is driven by this list, never by the raw id set.
+  const selectedGames = data.filter(d => selectedIds.has(d.id)).map(d => ({
+    id: d.id, final_conclusion: d.final_conclusion, batch: d.batch, evaluate_date: d.evaluate_date,
+    title: d.title, icon_url: d.icon_url,
+  }))
+  // Move targets: the batches near today PLUS every batch that already has games, newest
+  // first. Without the second part a wrong move across a month boundary (e.g. out of
+  // "W4 Sep" on Oct 1) could not be moved back.
+  const moveTargetOptions = Array.from(new Set([...currentBatchOptions, ...batchOptions]))
+    .sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a))
 
   return (
     <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -691,12 +743,17 @@ function ShortListEvalTab() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Current batch</span>
-              <span style={{ fontSize: 10.5, color: 'var(--faint)' }}>evaluators auto-fill this for List_Idea</span>
+              <span style={{ fontSize: 10.5, color: 'var(--faint)' }}>all categories · evaluators auto-fill this for List_Idea</span>
+              {currentBatchSaveFailed && (
+                <span role="alert" style={{ fontSize: 11, fontWeight: 600, color: 'var(--bad)' }}>
+                  Couldn&apos;t save the batch. Try again.
+                </span>
+              )}
             </div>
             <div style={{ width: 170 }}>
               <StyledSelect
                 value={currentBatch || ''}
-                onChange={saveCurrentBatch}
+                onChange={handleCurrentBatchChange}
                 placeholder="Not set"
                 options={[{ value: '', label: '— none —' }, ...currentBatchOptions.map(b => ({ value: b, label: b }))]}
               />
@@ -780,6 +837,10 @@ function ShortListEvalTab() {
           {sortAsc ? 'Oldest first' : 'Newest first'}
         </button>
 
+        {isManager && (selecting
+          ? <button className="btn btn-sm" onClick={exitSelectMode}>Cancel</button>
+          : <button className="btn btn-sm" onClick={() => setSelectMode(true)}>Select</button>)}
+
         <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>
           {loading ? 'Loading...' : `${data.length} results`}
         </span>
@@ -790,6 +851,13 @@ function ShortListEvalTab() {
           <table className="tbl">
             <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
               <tr>
+                {selecting && (
+                  <th style={{ width: 34 }}>
+                    <input type="checkbox" aria-label="Select all shown"
+                      checked={data.length > 0 && data.every(d => selectedIds.has(d.id))}
+                      onChange={e => setSelectedIds(e.target.checked ? new Set(data.map(d => d.id)) : new Set())} />
+                  </th>
+                )}
                 <th style={{ width: 36 }}>#</th>
                 <th style={{ width: 280 }}>Game</th>
                 <th style={{ width: 110 }}>Link</th>
@@ -803,7 +871,7 @@ function ShortListEvalTab() {
             </thead>
             <tbody>
               {data.length === 0 && !loading && (
-                <tr><td colSpan={9} className="empty">No games found</td></tr>
+                <tr><td colSpan={selecting ? 10 : 9} className="empty">No games found</td></tr>
               )}
               {loading && Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>{Array.from({ length: 9 }).map((__, c) => (
@@ -813,6 +881,13 @@ function ShortListEvalTab() {
               {data.map((item, idx) => (
                 <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
                   onClick={() => setDetailGameId(item.game_id)}>
+                  {selecting && (
+                    <td onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" aria-label={`Select ${item.title}`}
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => toggleSelected(item.id)} />
+                    </td>
+                  )}
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 230 }}>
@@ -901,6 +976,15 @@ function ShortListEvalTab() {
           </table>
         </div>
       </div>
+
+      {selecting && selectedGames.length > 0 && (
+        <BatchMoveBar
+          selected={selectedGames}
+          batchOptions={moveTargetOptions}
+          onCancel={exitSelectMode}
+          onMoved={() => { exitSelectMode(); fetchData(); fetchFacets() }}
+        />
+      )}
 
       {detailGameId && (
         <div className="eval-modal-backdrop" onClick={() => requestLeaveUnsaved(() => setDetailGameId(null))}>

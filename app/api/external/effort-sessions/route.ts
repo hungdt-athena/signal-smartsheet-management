@@ -24,7 +24,7 @@ const VN = 'Asia/Ho_Chi_Minh'
 // - employee_id is the part of the company email before '@'. The person is joined
 //   to their evaluations by display name, same convention as the Report.
 // - sessions: evaluate_date, the last time the initial conclusion CHANGED. Not moved by
-//   a final conclusion or an unchanged re-save. Since migration 045 a non-owner change of
+//   a final conclusion or an unchanged re-save. Since migration 046 a non-owner change of
 //   a judged verdict in the panel no longer moves it, except a List_Idea batch stamp;
 //   add-to-record still moves it as before. Measured panel time lives in evaluation_log
 //   (/api/admin/evaluation-hours).

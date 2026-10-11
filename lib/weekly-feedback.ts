@@ -11,6 +11,16 @@ export function weekLabelOrder(label: string): number {
   return parseInt(m[3], 10) * 10000 + mon * 100 + parseInt(m[1], 10)
 }
 
+// The exact shape of a batch label a manager can pick: what weekBatches() in
+// EvalDetailPanel generates (W1-W4, English month abbreviation, 4-digit year).
+// Stricter than weekLabelOrder on purpose: this guards what gets WRITTEN as the
+// global current batch; weekLabelOrder stays tolerant so older stored values still sort.
+// Max length is 12, well inside the varchar(40) column. Pure -- safe on client and server.
+const BATCH_LABEL = /^W[1-4] (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec), [0-9]{4}$/
+export function isBatchLabel(s: string): boolean {
+  return BATCH_LABEL.test(s)
+}
+
 // Tiptap's Link extension only sanitizes hrefs at editor-input time, not when
 // generateHTML serializes stored JSON. Feedback can be written via the API
 // directly, so strip link marks with unsafe href protocols before persisting —

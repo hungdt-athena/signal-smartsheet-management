@@ -1,4 +1,4 @@
--- Migration 045: evaluation_log — one append-only row per successful evaluation save.
+-- Migration 046: evaluation_log — one append-only row per successful evaluation save.
 -- Also one row per Record-tab event: add, confirmed recorder assignment, move, remove.
 -- Spec: docs/superpowers/specs/2026-10-10-evaluation-time-log-design.md
 --
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS evaluation_log (
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Covers a database that already ran an earlier 045 (without the batch columns).
+-- Covers a database that already ran an earlier 046 (without the batch columns).
 ALTER TABLE evaluation_log ADD COLUMN IF NOT EXISTS batch_before TEXT, ADD COLUMN IF NOT EXISTS batch_after TEXT;
 -- ... and one that ran it without the Record columns.
 ALTER TABLE evaluation_log

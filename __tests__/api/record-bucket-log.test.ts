@@ -99,7 +99,7 @@ describe('POST /api/evaluations/record-bucket — evaluation_log', () => {
     expect(writeCall().binds.slice(-7)).toEqual(['VinhTD', 'moderator', 'record_move', '5min', '20min', 'Bob', 'Bob'])
   })
 
-  it('returns a readable error when migration 045 is missing', async () => {
+  it('returns a readable error when migration 046 is missing', async () => {
     sqlMock.mockImplementation((strings: readonly string[], ...binds: unknown[]) => {
       const c = render(strings, binds)
       if (/^\s*record_bucket = /.test(c.text)) return { frag: c }
@@ -108,6 +108,6 @@ describe('POST /api/evaluations/record-bucket — evaluation_log', () => {
     })
     const res = await post({ id: 7, bucket: '5min' })
     expect(res.status).toBe(500)
-    expect((await res.json()).error).toMatch(/apply migration 045/)
+    expect((await res.json()).error).toMatch(/apply migration 046/)
   })
 })

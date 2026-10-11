@@ -97,13 +97,13 @@ describe('POST /api/evaluations/confirm-records — evaluation_log', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('returns a readable error when migration 045 is missing', async () => {
+  it('returns a readable error when migration 046 is missing', async () => {
     sqlMock.mockImplementation((strings: unknown) => {
       if (!Array.isArray(strings) || !('raw' in (strings as object))) return { list: strings }
       return Promise.reject(Object.assign(new Error('relation "evaluation_log" does not exist'), { code: '42P01' }))
     })
     const res = await post({ ids: [1] })
     expect(res.status).toBe(500)
-    expect((await res.json()).error).toMatch(/apply migration 045/)
+    expect((await res.json()).error).toMatch(/apply migration 046/)
   })
 })

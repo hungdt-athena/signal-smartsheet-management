@@ -1,4 +1,4 @@
-// lib/evaluation-log.ts — helpers for writing evaluation_log rows (migration 045).
+// lib/evaluation-log.ts — helpers for writing evaluation_log rows (migration 046).
 // Spec: docs/superpowers/specs/2026-10-10-evaluation-time-log-design.md
 //
 // Pure: no DB import at runtime (the postgres import is type-only). The `kind` CASE is
@@ -71,9 +71,9 @@ export function logKindSql(q: Sql, f: TouchedFlags) {
   END`
 }
 
-export const EVALUATION_LOG_MISSING = 'evaluation_log missing — apply migration 045'
+export const EVALUATION_LOG_MISSING = 'evaluation_log missing — apply migration 046'
 
-/** Postgres 42P01 (undefined_table) on evaluation_log: migration 045 was not applied. */
+/** Postgres 42P01 (undefined_table) on evaluation_log: migration 046 was not applied. */
 export function isMissingLogTable(err: unknown): boolean {
   const e = err as { code?: unknown; message?: unknown } | null
   return !!e && e.code === '42P01' && /evaluation_log/.test(String(e.message ?? ''))

@@ -33,7 +33,7 @@ export async function GET(
         ORDER BY l.created_at DESC, l.id DESC
         LIMIT 200
       `.catch((err: unknown) => {
-        // Migration 045 not applied yet: show the hand-over history alone.
+        // Migration 046 not applied yet: show the hand-over history alone.
         if (!isMissingLogTable(err)) throw err
         logReady = false
         return [] as LogRow[]

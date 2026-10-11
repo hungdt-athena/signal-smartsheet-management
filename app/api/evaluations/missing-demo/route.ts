@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { getCurrentBatches, onlyCurrentBatch } from '@/lib/current-batch'
-import { weekLabelOrder } from '@/lib/weekly-feedback'
+import { getCurrentBatch } from '@/lib/current-batch'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,9 +33,8 @@ export async function GET(_req: NextRequest) {
     const me = session?.user?.name
     if (!me) return NextResponse.json({ items: [] })
 
-    const current = await getCurrentBatches()
-    const batches = Array.from(new Set(Object.values(current)))
-    if (batches.length === 0) return NextResponse.json({ items: [] })
+    const current = await getCurrentBatch()
+    if (!current) return NextResponse.json({ items: [] })
 
     const rows = await sql`
       SELECT ge.id, ge.game_id, gi.title, gi.icon_url, ge.genre_1, ge.category_group,
@@ -46,22 +44,20 @@ export async function GET(_req: NextRequest) {
       WHERE ge.initial_conclusion = 'List_Idea'
         AND COALESCE(ge.drive_link, '') = ''
         AND lower(ge.initial_evaluator) = lower(${me})
-        AND ge.batch = ANY(${batches})
+        AND ge.batch = ${current}
       ORDER BY ge.evaluate_date DESC NULLS LAST, ge.id
     ` as unknown as Row[]
 
-    const items = onlyCurrentBatch(rows, current)
-      .sort((a, b) => weekLabelOrder(b.batch ?? '') - weekLabelOrder(a.batch ?? ''))
-      .map(r => ({
-        id: r.id,
-        game_id: r.game_id,
-        title: r.title,
-        icon_url: r.icon_url,
-        category: r.category_group,
-        genre: r.genre_1,
-        batch: r.batch,
-        evaluate_date: r.evaluate_date,
-      }))
+    const items = rows.map(r => ({
+      id: r.id,
+      game_id: r.game_id,
+      title: r.title,
+      icon_url: r.icon_url,
+      category: r.category_group,
+      genre: r.genre_1,
+      batch: r.batch,
+      evaluate_date: r.evaluate_date,
+    }))
 
     return NextResponse.json({ items })
   } catch (err) {

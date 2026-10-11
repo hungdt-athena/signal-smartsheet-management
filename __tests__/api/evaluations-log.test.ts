@@ -121,7 +121,7 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     expect(w.binds.slice(-4)).toEqual(['VinhTD', 'moderator', 'panel', 'record'])
   })
 
-  it('returns a readable error when migration 045 is missing', async () => {
+  it('returns a readable error when migration 046 is missing', async () => {
     routeSql()
     sqlMock.mockImplementation((strings: unknown) => {
       if (Array.isArray(strings) && /INSERT INTO evaluation_log/.test((strings as string[]).join(' '))) {
@@ -131,6 +131,6 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     })
     const res = await patch({ id: 1, initial_note: 'a real note here', view_s: 5 })
     expect(res.status).toBe(500)
-    expect((await res.json()).error).toMatch(/apply migration 045/)
+    expect((await res.json()).error).toMatch(/apply migration 046/)
   })
 })

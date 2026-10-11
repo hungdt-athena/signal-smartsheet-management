@@ -2,7 +2,7 @@
 SET TIME ZONE 'UTC';
 
 -- ===== Task 1: DDL + seed =====
--- The runner loads seed fixtures BEFORE the first 045 run (see verify-evaluation-log.sh),
+-- The runner loads seed fixtures BEFORE the first 046 run (see verify-evaluation-log.sh),
 -- so here we only assert outcomes.
 DO $$
 DECLARE n int;
@@ -48,9 +48,9 @@ BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id IN (11, 12, 13)), 'g11/g12/g13 not seeded';
 END $$;
 
--- Re-running 045 inserts nothing.
+-- Re-running 046 inserts nothing.
 CREATE TEMP TABLE seed_n AS SELECT count(*) AS n FROM evaluation_log;
-\i migrations/045_evaluation_log.sql
+\i migrations/046_evaluation_log.sql
 DO $$ BEGIN
   ASSERT (SELECT count(*) FROM evaluation_log WHERE source = 'seed') = 9, 'seed is idempotent (7 verdict + 2 record)';
   ASSERT (SELECT count(*) FROM evaluation_log) = (SELECT n FROM seed_n), 'second run adds 0 rows';
@@ -73,7 +73,7 @@ INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, context,
 -- c5 already has a live Record row: a seed added after it would become the "latest" one
 INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, kind, bucket_after, recorder_after, created_at)
   VALUES (25, 'c5', 'VinhTD', 'record_tab', 'record_assign', '20min', 'Bob', '2026-10-09 11:00+07');
-\i migrations/045_evaluation_log.sql
+\i migrations/046_evaluation_log.sql
 DO $$ BEGIN
   ASSERT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 20 AND source = 'seed'), 'c1 seeded (before cutover)';
   ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_evaluation_id = 21 AND source = 'seed'), 'c2 skipped (after cutover)';

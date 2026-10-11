@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { saveDriveLink } from '@/lib/drive-link-client'
 
 interface Item {
@@ -17,13 +17,33 @@ const SAVED_FLASH_MS = 500
 const DONE_CLOSE_MS = 2000
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-// "07 Oct", read in Vietnam time like the rest of the app.
+// "07 Oct", read in Vietnam time like the rest of the app. A date that cannot be shown
+// as one (unparseable, overflows once shifted, or a year no evaluation can have) is left
+// out rather than rendered as "NaN undefined".
 function shortDate(iso: string | null): string | null {
   if (!iso) return null
   const t = Date.parse(iso)
   if (Number.isNaN(t)) return null
   const d = new Date(t + 7 * 3600 * 1000)
+  const year = d.getUTCFullYear()
+  if (Number.isNaN(year) || year < 1970 || year > 2100) return null
   return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]}`
+}
+
+/** The list comes from the network: anything that is not the shape below is dropped
+ *  instead of crashing the layout this prompt is mounted in. Optional fields fall back to null.
+ *  A missing title is NOT a reason to drop: game_info.title can be NULL and that game still
+ *  needs its demo link, so it is shown as "Untitled game". */
+function toItem(raw: unknown): Item | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.id !== 'number' || !Number.isFinite(r.id)) return null
+  if (typeof r.category !== 'string' || typeof r.batch !== 'string') return null
+  const str = (v: unknown) => (typeof v === 'string' ? v : null)
+  return {
+    id: r.id, game_id: str(r.game_id) ?? '', title: str(r.title)?.trim() ? (r.title as string) : 'Untitled game', icon_url: str(r.icon_url),
+    category: r.category, genre: str(r.genre), batch: r.batch, evaluate_date: str(r.evaluate_date),
+  }
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -44,15 +64,23 @@ export function MissingDemoPrompt() {
   const [saving, setSaving] = useState<Set<number>>(new Set())
   const [saved, setSaved] = useState<Set<number>>(new Set())
   const [failed, setFailed] = useState<Set<number>>(new Set())
+  // Ids with a save in flight. A ref, because two clicks or Enters in the same tick both see
+  // the same render's state: only a ref is updated in time to refuse the second one.
+  const inFlight = useRef<Set<number>>(new Set())
 
   useEffect(() => {
     let cancelled = false
     fetch('/api/evaluations/missing-demo')
       .then(r => (r.ok ? r.json() : null))
       .then(body => {
-        if (cancelled || !body?.items) return
-        setItems(body.items)
-        setTotal(body.items.length)
+        if (cancelled || !Array.isArray(body?.items)) return
+        // One row per id: a repeated id would give two rows the same React key.
+        const seen = new Set<number>()
+        const valid = (body.items as unknown[]).map(toItem)
+          .filter((i): i is Item => i !== null && !seen.has(i.id) && !!seen.add(i.id))
+        if (valid.length === 0) return
+        setItems(valid)
+        setTotal(valid.length)
         setLoaded(true)
       })
       .catch(() => { /* a broken list is not worth nagging about */ })
@@ -79,10 +107,12 @@ export function MissingDemoPrompt() {
 
   async function save(it: Item) {
     const v = (values[it.id] ?? '').trim()
-    if (!v) return
+    if (!v || inFlight.current.has(it.id)) return
+    inFlight.current.add(it.id)
     setSaving(s => new Set(s).add(it.id))
     setFailed(f => { const n = new Set(f); n.delete(it.id); return n })
     const ok = await saveDriveLink(it.id, v)
+    inFlight.current.delete(it.id)
     setSaving(s => { const n = new Set(s); n.delete(it.id); return n })
     if (!ok) { setFailed(f => new Set(f).add(it.id)); return }
     setSaved(s => new Set(s).add(it.id))
@@ -152,12 +182,14 @@ export function MissingDemoPrompt() {
                                 <input
                                   className="input"
                                   placeholder="Paste demo video link…"
+                                  aria-label={`Demo link for ${r.title}`}
                                   value={values[r.id] ?? ''}
                                   disabled={saving.has(r.id)}
                                   onChange={e => setValues(v => ({ ...v, [r.id]: e.target.value }))}
                                   onKeyDown={e => { if (e.key === 'Enter') save(r) }}
                                 />
                                 <button className="btn btn-primary" onClick={() => save(r)}
+                                  aria-label={`Save demo link for ${r.title}`}
                                   disabled={saving.has(r.id) || !(values[r.id] ?? '').trim()}>
                                   {saving.has(r.id) ? 'Saving…' : 'Save'}
                                 </button>

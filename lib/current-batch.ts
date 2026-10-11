@@ -1,27 +1,38 @@
 import { sql } from '@/lib/db'
+import { isBatchLabel, weekLabelOrder } from '@/lib/weekly-feedback'
 
-/** category -> its current batch label. A category with no batch set is absent. */
-export type CurrentBatches = Record<string, string>
+/** app_config key holding the ONE current batch shared by every category group. */
+export const CURRENT_BATCH_KEY = 'current_batch'
+const LEGACY_PREFIX = 'current_batch:'
 
-/** The one place that knows how "current batch" is stored.
+interface ConfigRow { key: string; value: string | null }
+
+/** Pure choice of the current batch from the app_config rows that matched.
  *
- *  Today it is per category: app_config `current_batch:<category>`. When it becomes a
- *  single global value, change THIS function to return that value for every category
- *  and nothing else has to move -- onlyCurrentBatch() and everything built on it only
- *  ever ask "is this row's batch the current one for its category". */
-export async function getCurrentBatches(): Promise<CurrentBatches> {
-  const rows = await sql`SELECT key, value FROM app_config WHERE key LIKE 'current_batch:%'`
-  const out: CurrentBatches = {}
-  for (const r of rows as unknown as { key: string; value: string | null }[]) {
-    if (r.value) out[r.key.slice('current_batch:'.length)] = r.value
+ *  A global row is authoritative even when its value is empty: clearing the batch must
+ *  mean "none", not "whatever a legacy per-category row still says". Legacy rows
+ *  (`current_batch:<category>`) only matter until migration 045 folds them into the
+ *  global row; until then the newest one by week order stands in, so code deployed
+ *  before the migration never reports "no active batch" for the whole system. */
+export function pickCurrentBatch(rows: ConfigRow[]): string | null {
+  const global = rows.find(r => r.key === CURRENT_BATCH_KEY)
+  // Values are trimmed and a whitespace-only one is empty: a stored "  " must not read as a batch.
+  if (global) return global.value?.trim() || null
+  let best: string | null = null
+  for (const r of rows) {
+    const value = r.value?.trim()
+    if (!r.key.startsWith(LEGACY_PREFIX) || !value || !isBatchLabel(value)) continue
+    if (best === null || weekLabelOrder(value) > weekLabelOrder(best)) best = value
   }
-  return out
+  return best
 }
 
-/** Rows whose batch is the current one for their own category. */
-export function onlyCurrentBatch<T extends { category_group: string; batch: string | null }>(
-  rows: T[],
-  current: CurrentBatches,
-): T[] {
-  return rows.filter(r => r.batch != null && current[r.category_group] === r.batch)
+/** The current batch, or null when none is set. One query: the database is ~225ms
+ *  away, so the legacy fallback rides along in the same read instead of a second one. */
+export async function getCurrentBatch(): Promise<string | null> {
+  const rows = await sql`
+    SELECT key, value FROM app_config
+    WHERE key = 'current_batch' OR key LIKE 'current_batch:%'
+  `
+  return pickCurrentBatch(rows as unknown as ConfigRow[])
 }
