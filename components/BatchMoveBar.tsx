@@ -9,6 +9,9 @@ export interface SelectedGame {
   final_conclusion: string | null
   batch: string | null
   evaluate_date: string | null
+  /** Shown in the confirm dialog's list; callers that have no title still work. */
+  title?: string | null
+  icon_url?: string | null
 }
 
 /** The Report derives a batch's date window from its earliest evaluate_date, so a game
@@ -43,14 +46,6 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
   const locked = selected.filter(s => !!s.final_conclusion).length
   const tooMany = n > MAX_MOVE
   const alreadyThere = !!batch && n > 0 && selected.every(s => s.batch === batch)
-  // Where the games are now, newest batch first, so the dialog always says something even
-  // when no warning below applies.
-  const counts = new Map<string, number>()
-  for (const s of selected) if (s.batch) counts.set(s.batch, (counts.get(s.batch) ?? 0) + 1)
-  const nowIn = Array.from(counts).sort((a, b) => weekLabelOrder(b[0]) - weekLabelOrder(a[0]))
-    .map(([b, c]) => `${b} (${c})`)
-  const noBatch = selected.filter(s => !s.batch).length
-  if (noBatch > 0) nowIn.push(`no batch (${noBatch})`)
   const now = Date.now()
   const oldForward = batch ? selected.filter(s =>
     !!s.evaluate_date && now - Date.parse(s.evaluate_date) > OLD_EVALUATION_DAYS * 86_400_000 &&
@@ -101,7 +96,20 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
               </div>
             </div>
             <div className="modal-body">
-              <p className="bmb-from">Now in: {nowIn.join(', ')}</p>
+              <ul className="bmb-list" aria-label="Games to move">
+                {selected.map(g => (
+                  <li key={g.id} className="bmb-row" data-move-row>
+                    <div className="bmb-icon" style={g.icon_url ? { backgroundImage: `url(${g.icon_url})` } : undefined} />
+                    <div className="bmb-info">
+                      <div className="bmb-t" title={g.title?.trim() || undefined}>{g.title?.trim() || 'Untitled game'}</div>
+                      <div className="bmb-m">
+                        {g.batch || 'No batch'} → {batch}
+                        {g.final_conclusion && <span className="badge success">{g.final_conclusion}</span>}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
               {locked > 0 && (
                 <p className="bmb-note">
                   {locked} of them already {locked === 1 ? 'has' : 'have'} a final conclusion and will move too.

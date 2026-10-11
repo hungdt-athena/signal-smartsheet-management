@@ -723,6 +723,7 @@ function ShortListEvalTab() {
   // that are no longer listed; the bar is driven by this list, never by the raw id set.
   const selectedGames = data.filter(d => selectedIds.has(d.id)).map(d => ({
     id: d.id, final_conclusion: d.final_conclusion, batch: d.batch, evaluate_date: d.evaluate_date,
+    title: d.title, icon_url: d.icon_url,
   }))
   // Move targets: the batches near today PLUS every batch that already has games, newest
   // first. Without the second part a wrong move across a month boundary (e.g. out of

@@ -124,7 +124,7 @@ selection until the session returns.
 
 ### Confirmation
 
-Pressing Move opens a confirm dialog: "Move N games to <batch>?". If any selected game has a
+Pressing Move opens a confirm dialog: "Move N games to <batch>?". The dialog lists every game that will move (icon, title, "<current batch> → <target>", and its final conclusion if it has one; a scrolling list, so 500 rows stay usable). If any selected game has a
 final conclusion the dialog adds "K of them already have a final conclusion and will move
 too", because batch is also the week shown in the Record tab. No skip option: ticking a
 locked game means the manager wants it moved.

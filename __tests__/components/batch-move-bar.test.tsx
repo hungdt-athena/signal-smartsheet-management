@@ -52,13 +52,30 @@ describe('BatchMoveBar', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Move 2 games to W2 Oct, 2026?')
   })
 
-  it('always says which batches the games are in now, so the dialog is never blank', () => {
-    mount([plain, { ...plain, id: 3 }, { ...plain, id: 4, batch: 'W4 Sep, 2026' }, { ...plain, id: 5, batch: null }])
+  it('lists every game that will move, with its title, where it is now and where it goes', () => {
+    mount([
+      { ...plain, title: 'Alpha Quest', icon_url: 'https://x/a.png' },
+      { ...plain, id: 3, title: 'Beta Saga', batch: 'W4 Sep, 2026', final_conclusion: 'Priority IV' },
+      { ...plain, id: 4, title: '  ', batch: null },
+    ])
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    const d = screen.getByRole('dialog')
-    expect(d).toHaveTextContent('Now in: W1 Oct, 2026 (2), W4 Sep, 2026 (1), no batch (1)')
-    expect(d.querySelector('.modal-body')).not.toBeEmptyDOMElement()
+    const rows = Array.from(screen.getByRole('dialog').querySelectorAll('[data-move-row]'))
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toHaveTextContent('Alpha Quest')
+    expect(rows[0]).toHaveTextContent('W1 Oct, 2026 → W2 Oct, 2026')
+    expect(rows[1]).toHaveTextContent('Beta Saga')
+    expect(rows[1]).toHaveTextContent('W4 Sep, 2026 → W2 Oct, 2026')
+    expect(rows[1]).toHaveTextContent('Priority IV')
+    expect(rows[2]).toHaveTextContent('Untitled game')
+    expect(rows[2]).toHaveTextContent('No batch → W2 Oct, 2026')
+  })
+
+  it('still lists games when the caller gives no title', () => {
+    mount([plain])
+    pick('W2 Oct, 2026')
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    expect(screen.getByRole('dialog').querySelectorAll('[data-move-row]')).toHaveLength(1)
   })
 
   it('says how many selected games already have a final conclusion', () => {
