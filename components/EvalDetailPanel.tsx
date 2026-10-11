@@ -3,6 +3,8 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, typ
 import { StyledSelect } from '@/components/StyledSelect'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
 import { Lightbox } from '@/components/Lightbox'
+import { EvalHistoryModal } from '@/components/EvalHistoryModal'
+import type { HistoryEvent } from '@/lib/evaluation-history'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { useConfig } from '@/hooks/useConfig'
@@ -598,6 +600,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
 
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [expandedImg, setExpandedImg] = useState<string | null>(null)
+  // History modal, keyed to the game it was opened on so Prev/Next never shows another game's list.
+  const [history, setHistory] = useState<{ gameId: string; events: HistoryEvent[] | null; logReady: boolean; error: boolean } | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [autoSave, setAutoSave] = useState(false)
   const [confirmClearAll, setConfirmClearAll] = useState(false)
@@ -839,6 +843,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return
+      // History open: Esc closes it, arrows do not move to another game underneath.
+      if (history) { if (e.key === 'Escape') setHistory(null); return }
       if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev() }
       if (e.key === 'ArrowRight') { e.preventDefault(); goNext() }
       if (e.key === 'Escape') {
@@ -849,7 +855,17 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [goPrev, goNext, expandedImg, fullscreen, onClose])
+  }, [goPrev, goNext, expandedImg, history, fullscreen, onClose])
+
+  // Fetched on open only; opening a game never pays for it.
+  const openHistory = (gameId: string) => {
+    setHistory({ gameId, events: null, logReady: true, error: false })
+    fetch(`/api/evaluations/${encodeURIComponent(gameId)}/history`)
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d: { events: HistoryEvent[]; log_ready: boolean }) =>
+        setHistory(h => (h && h.gameId === gameId ? { ...h, events: d.events, logReady: d.log_ready } : h)))
+      .catch(() => setHistory(h => (h && h.gameId === gameId ? { ...h, error: true } : h)))
+  }
 
   const showToast = (msg: string, err = false) => {
     setToast({ msg, err })
@@ -1721,6 +1737,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 <span>Updated</span>
                 <span>{fmtDateTime(ev.updated_at)}{ev.updated_by ? ` · by ${ev.updated_by}` : ''}</span>
               </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--faint)' }}>
+                <span>History</span>
+                <button className="btn btn-sm btn-ghost" onClick={() => openHistory(ev.game_id)}
+                  style={{ fontSize: 11, padding: '2px 8px', height: 'auto', color: 'var(--accent)' }}>
+                  View
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1750,6 +1773,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
         onClose={() => setExpandedImg(null)}
         images={screenshots.length > 0 ? screenshots : manualShots}
       />
+
+      {history && ev && history.gameId === ev.game_id && (
+        <EvalHistoryModal events={history.events} logReady={history.logReady} error={history.error}
+          onClose={() => setHistory(null)} />
+      )}
 
       {/* Toast */}
       {toast && (

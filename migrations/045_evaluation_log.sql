@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS evaluation_log (
 
 CREATE INDEX IF NOT EXISTS idx_evaluation_log_actor_time ON evaluation_log (actor, created_at);
 CREATE INDEX IF NOT EXISTS idx_evaluation_log_game ON evaluation_log (game_evaluation_id, created_at);
+-- the panel's History modal reads by game_id (survives deleted evaluation rows)
+CREATE INDEX IF NOT EXISTS idx_evaluation_log_game_id ON evaluation_log (game_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_evaluation_log_seed
   ON evaluation_log (game_evaluation_id) WHERE source = 'seed';
 

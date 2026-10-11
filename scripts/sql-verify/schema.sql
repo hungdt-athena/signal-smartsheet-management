@@ -1,5 +1,5 @@
 -- Minimal copies of the prod tables evaluation_log touches. Columns and types follow
--- migrations 001/002/005/008/012/020-024/032/035/038/041/044. game_info is owned by the
+-- migrations 001/002/005/008/012/020-025/032/035/038/041/044. game_info is owned by the
 -- Signal Sense repo, so only its key is copied.
 SET TIME ZONE 'UTC';
 CREATE TABLE game_info (game_id VARCHAR(255) PRIMARY KEY);
@@ -21,6 +21,11 @@ CREATE TABLE playtest_tags (
   game_id varchar(255) NOT NULL REFERENCES game_info(game_id) ON DELETE CASCADE,
   field_value text NOT NULL, status varchar(16) NOT NULL DEFAULT 'pending',
   tagged_by varchar(255) NOT NULL, tagged_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE assignment_history (
+  id SERIAL PRIMARY KEY, run_date DATE NOT NULL, run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  category_group TEXT NOT NULL, action TEXT NOT NULL, evaluator_name TEXT NOT NULL,
+  from_evaluator TEXT, game_count INT NOT NULL, game_ids TEXT[] NOT NULL DEFAULT '{}',
+  created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
 
 INSERT INTO dashboard_users (email, name, role, title) VALUES
  ('alice@x','Alice','evaluator','Freelancer'), ('bob@x','Bob','evaluator','Fulltime'),

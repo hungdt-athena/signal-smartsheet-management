@@ -243,3 +243,41 @@ DO $$ BEGIN
             AND (l.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = '2026-10-07') = 2,
     'NULL game_evaluation_id first rows still count: 2 distinct games';
 END $$;
+
+-- ---------- History modal (mirrors app/api/evaluations/[gameId]/history/route.ts) ----------
+-- Untyped params, as postgres.js sends strings: `$1 = ANY(text[])` must resolve to text.
+INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, source, context, kind,
+  conclusion_before, conclusion_after, changed, view_s, created_at) VALUES
+  (NULL, 'hist1', NULL, 'Alice', 'seed', NULL, 'first', NULL, 'Bypass', TRUE, NULL, '2026-10-01 10:00+07'),
+  (NULL, 'hist1', 'Alice', 'Alice', 'panel', 'evaluate', 'revise', 'Bypass', 'List_Idea', TRUE, 300, '2026-10-03 10:00+07'),
+  (NULL, 'hist2', 'Bob', 'Bob', 'panel', 'evaluate', 'first', NULL, 'Bypass', TRUE, 60, '2026-10-03 11:00+07');
+INSERT INTO assignment_history (run_date, run_at, category_group, action, evaluator_name, from_evaluator, game_count, game_ids, created_by) VALUES
+  ('2026-09-30', '2026-09-30 09:00+07', 'puzzle', 'assign', 'Bob', NULL, 2, ARRAY['hist1','hist2'], 'cron'),
+  ('2026-10-02', '2026-10-02 09:00+07', 'puzzle', 'reassign', 'Alice', 'Bob', 1, ARRAY['hist1'], 'hung@x'),
+  ('2026-10-02', '2026-10-02 09:30+07', 'puzzle', 'rescue', 'Carol', 'Dave', 1, ARRAY['other'], 'nobody@x');
+PREPARE hist_log AS
+  SELECT l.id::text AS id, l.created_at AS at, l.actor, l.owner, l.source, l.context, l.kind,
+         l.conclusion_before, l.conclusion_after, l.final_before, l.final_after,
+         l.changed, l.view_s, l.confidence
+  FROM evaluation_log l
+  WHERE l.game_id = $1
+  ORDER BY l.created_at DESC, l.id DESC
+  LIMIT 200;
+PREPARE hist_asg AS
+  SELECT ah.id, ah.run_at AS at, ah.action, ah.evaluator_name, ah.from_evaluator,
+         COALESCE(du.name, ah.created_by) AS by
+  FROM assignment_history ah
+  LEFT JOIN dashboard_users du ON lower(du.email) = lower(ah.created_by)
+  WHERE $1 = ANY(ah.game_ids)
+  ORDER BY ah.run_at DESC
+  LIMIT 100;
+CREATE TEMP TABLE hl AS EXECUTE hist_log('hist1');
+CREATE TEMP TABLE ha AS EXECUTE hist_asg('hist1');
+DO $$ BEGIN
+  ASSERT (SELECT array_agg(source ORDER BY at DESC) FROM hl) = ARRAY['panel','seed'], 'hist1 log rows only, newest first';
+  ASSERT (SELECT array_agg(action ORDER BY at DESC) FROM ha) = ARRAY['reassign','assign'], 'hist1 assignment rows only';
+  ASSERT (SELECT by FROM ha WHERE action = 'reassign') = 'HungDT', 'created_by email resolves to the user name';
+  ASSERT (SELECT by FROM ha WHERE action = 'assign') = 'cron', 'cron stays cron';
+END $$;
+DEALLOCATE hist_log;
+DEALLOCATE hist_asg;
