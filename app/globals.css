@@ -3188,6 +3188,12 @@ input:checked + .slider:before {
 .mdp-in .btn { padding: 5px 10px; font-size: 12px; flex: none; }
 .mdp-in .btn:disabled { opacity: .45; cursor: default; }
 .mdp-err { font-size: 11px; color: var(--bad); margin-top: 4px; }
+.mdp-sug { grid-template-columns: 36px minmax(0, 1fr) 340px; align-items: start; }
+.mdp-sug .mdp-icon { margin-top: 2px; }
+.mdp-warn { font-size: 11.5px; color: var(--warn); margin-top: 4px; line-height: 1.4; }
+.mdp-warn b { font-weight: 600; }
+.mdp-file { display: block; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mdp-in a.btn { padding: 5px 10px; font-size: 12px; flex: none; text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap; }
 .mdp-ok { background: var(--good-weak); margin: 0 -22px; padding: 10px 22px; border-top-color: transparent; }
 .mdp-okmsg { font-size: 12px; font-weight: 600; color: var(--good); }
 .mdp-foot { justify-content: space-between; align-items: center; }

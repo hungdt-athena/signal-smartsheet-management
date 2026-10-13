@@ -21,18 +21,24 @@ function game(over: Record<string, unknown>) {
   return {
     id: 1, game_id: 'g1', title: 'Game', icon_url: null, genre_1: 'Casual',
     category_group: 'puzzle', batch: 'W2 Oct, 2026', evaluate_date: '2026-10-07T10:00:00Z',
+    suggested_link: null, suggested_name: null, shared_with: null,
     ...over,
   }
 }
 
 /** config rows for getCurrentBatch(); `games` for the missing-demo query. */
-function db(config: { key: string; value: string | null }[], games: Record<string, unknown>[]) {
+function db(config: { key: string; value: string | null }[], games: Record<string, unknown>[],
+  /** reject any game query that mentions this table, with Postgres 42P01 (undefined_table) */
+  missingTable?: string) {
   gameQueries = []
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: unknown, ...binds: Binds) => {
     const text = Array.isArray(strings) ? (strings as string[]).join(' ') : ''
     if (text.includes('app_config')) return Promise.resolve(config)
     gameQueries.push({ text, binds })
+    if (missingTable && text.includes(missingTable)) {
+      return Promise.reject(Object.assign(new Error(`relation "${missingTable}" does not exist`), { code: '42P01' }))
+    }
     return Promise.resolve(games)
   })
 }
@@ -115,6 +121,57 @@ describe('GET /api/evaluations/missing-demo', () => {
       id: 1, game_id: 'g1', title: 'ArcFlush', icon_url: 'https://x/i.png',
       category: 'puzzle', genre: 'Casual', batch: 'W2 Oct, 2026',
       evaluate_date: '2026-10-07T10:00:00Z',
+      suggested_link: null, suggested_name: null, shared_with: null,
+    })
+  })
+
+  describe('suggested links (titles shared by different games)', () => {
+    it('joins the suggestion table on the evaluation id, and still only asks for rows with no link', async () => {
+      db(CFG, [])
+      await GET(req())
+      const { text } = gameQueries[0]
+      expect(text).toMatch(/LEFT JOIN drive_link_suggestions\s+s\s+ON\s+s\.game_evaluation_id\s*=\s*ge\.id/i)
+      expect(text).toMatch(/COALESCE\(ge\.drive_link, ''\)\s*=\s*''/)
+    })
+
+    it('returns the suggested link, the file it came from, and how many other games share the title', async () => {
+      db(CFG, [game({
+        id: 7, suggested_link: 'https://drive.google.com/file/d/abc/view',
+        suggested_name: 'Nail Box Sort.mp4', shared_with: 2,
+      })])
+      const body = await (await GET(req())).json()
+      expect(body.items[0]).toMatchObject({
+        id: 7, suggested_link: 'https://drive.google.com/file/d/abc/view',
+        suggested_name: 'Nail Box Sort.mp4', shared_with: 2,
+      })
+    })
+
+    it('falls back to the plain list when migration 048 is not applied, instead of dropping the prompt', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      db(CFG, [game({ id: 3 })], 'drive_link_suggestions')
+      const res = await GET(req())
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.items.map((i: { id: number }) => i.id)).toEqual([3])
+      expect(body.items[0]).toMatchObject({ suggested_link: null, suggested_name: null, shared_with: null })
+      // the retry must not mention the missing table, and must keep the same scope
+      expect(gameQueries).toHaveLength(2)
+      expect(gameQueries[1].text).not.toMatch(/drive_link_suggestions/)
+      expect(gameQueries[1].binds).toContain('PhuongNT1')
+      spy.mockRestore()
+    })
+
+    it('does not swallow other database errors', async () => {
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+      sqlMock.mockReset()
+      sqlMock.mockImplementation((strings: unknown) => {
+        const text = Array.isArray(strings) ? (strings as string[]).join(' ') : ''
+        if (text.includes('app_config')) return Promise.resolve(CFG)
+        return Promise.reject(Object.assign(new Error('boom'), { code: '57014' }))
+      })
+      const res = await GET(req())
+      expect(res.status).toBe(500)
+      spy.mockRestore()
     })
   })
 })

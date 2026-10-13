@@ -4,6 +4,7 @@ import { MissingDemoPrompt } from '@/components/MissingDemoPrompt'
 type Item = {
   id: number; game_id: string; title: string; icon_url: string | null
   category: string; genre: string | null; batch: string; evaluate_date: string | null
+  suggested_link?: string | null; suggested_name?: string | null; shared_with?: number | null
 }
 
 const item = (over: Partial<Item>): Item => ({
@@ -293,5 +294,80 @@ describe('MissingDemoPrompt', () => {
     expect(save).toHaveTextContent('Save')
     expect(screen.getByLabelText('Demo link for Color Queue Shooter')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save demo link for Color Queue Shooter' })).toBeInTheDocument()
+  })
+
+  // The auto-sync leaves a suggestion (instead of a link) when the title belongs to different games.
+  describe('suggested link', () => {
+    const LINK = 'https://drive.google.com/file/d/abc/view'
+    const S = item({ id: 5, title: 'Nail Box Sort', suggested_link: LINK, suggested_name: 'Nail Box Sort.mp4', shared_with: 2 })
+
+    it('prefills the input with the suggested link', async () => {
+      await open([S])
+      expect(within(rowOf('Nail Box Sort')).getByLabelText('Demo link for Nail Box Sort')).toHaveValue(LINK)
+    })
+
+    it('says the title is shared, how many other games share it, and which file matched', async () => {
+      await open([S])
+      const row = rowOf('Nail Box Sort')
+      expect(row).toHaveTextContent('Same title as 2 other games')
+      expect(row).toHaveTextContent('Nail Box Sort.mp4')
+    })
+
+    it('uses the singular when one other game shares the title', async () => {
+      await open([item({ id: 6, title: 'Puzzle Hub', suggested_link: LINK, shared_with: 1 })])
+      expect(rowOf('Puzzle Hub')).toHaveTextContent('Same title as 1 other game')
+      expect(rowOf('Puzzle Hub')).not.toHaveTextContent('1 other games')
+    })
+
+    it('opens the suggested video in a new tab so it can be checked', async () => {
+      await open([S])
+      const open_ = within(rowOf('Nail Box Sort')).getByRole('link', { name: 'Open suggested video for Nail Box Sort' })
+      expect(open_).toHaveAttribute('href', LINK)
+      expect(open_).toHaveAttribute('target', '_blank')
+      expect(open_.getAttribute('rel')).toMatch(/noopener/)
+    })
+
+    it('offers Confirm, not Save, while the link is untouched, and saves it with PATCH', async () => {
+      await open([S, A])
+      const row = rowOf('Nail Box Sort')
+      expect(within(row).queryByRole('button', { name: /^Save demo link for / })).toBeNull()
+      const confirm = within(row).getByRole('button', { name: 'Confirm demo link for Nail Box Sort' })
+      expect(confirm).toHaveTextContent('Confirm')
+      expect(confirm).toBeEnabled()
+      fireEvent.click(confirm)
+      await waitFor(() => expect(screen.queryByText('Nail Box Sort')).toBeNull())
+      expect(patches).toEqual([{ id: 5, drive_link: LINK }])
+    })
+
+    it('turns back into Save when the evaluator edits the link, and saves what they typed', async () => {
+      await open([S, A])
+      const row = rowOf('Nail Box Sort')
+      fireEvent.change(within(row).getByLabelText('Demo link for Nail Box Sort'), { target: { value: 'https://mine' } })
+      expect(within(row).queryByRole('button', { name: /^Confirm demo link for / })).toBeNull()
+      fireEvent.click(within(row).getByRole('button', { name: 'Save demo link for Nail Box Sort' }))
+      await waitFor(() => expect(screen.queryByText('Nail Box Sort')).toBeNull())
+      expect(patches).toEqual([{ id: 5, drive_link: 'https://mine' }])
+    })
+
+    it('leaves rows without a suggestion exactly as before', async () => {
+      await open([S, A])
+      const row = rowOf('Color Queue Shooter')
+      expect(within(row).getByLabelText('Demo link for Color Queue Shooter')).toHaveValue('')
+      expect(within(row).getByRole('button', { name: 'Save demo link for Color Queue Shooter' })).toBeDisabled()
+      expect(within(row).queryByRole('link')).toBeNull()
+      expect(row).not.toHaveTextContent('Same title')
+    })
+
+    it('does not offer to open a suggestion that is not an http(s) link', async () => {
+      await open([item({ id: 8, title: 'Odd Game', suggested_link: 'javascript:alert(1)', shared_with: 1 })])
+      expect(within(rowOf('Odd Game')).queryByRole('link')).toBeNull()
+    })
+
+    it('ignores suggestion fields of the wrong type instead of crashing', async () => {
+      mockRaw({ items: [{ ...A, suggested_link: 42, suggested_name: {}, shared_with: 'x' }] })
+      const row = (await screen.findByText('Color Queue Shooter')).closest('[data-row]') as HTMLElement
+      expect(within(row).getByLabelText('Demo link for Color Queue Shooter')).toHaveValue('')
+      expect(row).not.toHaveTextContent('Same title')
+    })
   })
 })

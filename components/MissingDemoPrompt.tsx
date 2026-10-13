@@ -11,6 +11,11 @@ interface Item {
   genre: string | null
   batch: string
   evaluate_date: string | null
+  // Set when the Drive auto-sync found a file for a title that different games share: it is
+  // shown prefilled for the evaluator to check and confirm, never saved on its own.
+  suggested_link: string | null
+  suggested_name: string | null
+  shared_with: number | null
 }
 
 const SAVED_FLASH_MS = 500
@@ -43,7 +48,18 @@ function toItem(raw: unknown): Item | null {
   return {
     id: r.id, game_id: str(r.game_id) ?? '', title: str(r.title)?.trim() ? (r.title as string) : 'Untitled game', icon_url: str(r.icon_url),
     category: r.category, genre: str(r.genre), batch: r.batch, evaluate_date: str(r.evaluate_date),
+    suggested_link: str(r.suggested_link)?.trim() || null, suggested_name: str(r.suggested_name),
+    shared_with: typeof r.shared_with === 'number' && Number.isFinite(r.shared_with) && r.shared_with > 0 ? r.shared_with : null,
   }
+}
+
+/** Only a web link gets an Open button: the value comes from a table, and `javascript:` must not
+ *  become a clickable href. */
+const isWebLink = (v: string) => /^https?:\/\//i.test(v)
+
+function sharedNote(it: Item): string {
+  if (it.shared_with == null) return 'Same title as other games'
+  return `Same title as ${it.shared_with} other ${it.shared_with === 1 ? 'game' : 'games'}`
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -105,8 +121,11 @@ export function MissingDemoPrompt() {
     return out
   }, [items])
 
+  // What the input shows: what the evaluator typed, else the suggestion, else nothing.
+  const valueOf = (it: Item) => values[it.id] ?? it.suggested_link ?? ''
+
   async function save(it: Item) {
-    const v = (values[it.id] ?? '').trim()
+    const v = valueOf(it).trim()
     if (!v || inFlight.current.has(it.id)) return
     inFlight.current.add(it.id)
     setSaving(s => new Set(s).add(it.id))
@@ -167,12 +186,21 @@ export function MissingDemoPrompt() {
                       const isSaved = saved.has(r.id)
                       const meta = [cap(r.category), r.genre, shortDate(r.evaluate_date) && `evaluated ${shortDate(r.evaluate_date)}`]
                         .filter(Boolean).join(' · ')
+                      const value = valueOf(r)
+                      // A suggestion the evaluator has not changed is confirmed, not typed.
+                      const confirming = !!r.suggested_link && value.trim() === r.suggested_link
                       return (
-                        <div key={r.id} data-row className={`mdp-row${isSaved ? ' mdp-ok' : ''}`}>
+                        <div key={r.id} data-row className={`mdp-row${isSaved ? ' mdp-ok' : ''}${r.suggested_link ? ' mdp-sug' : ''}`}>
                           <div className="mdp-icon" style={r.icon_url ? { backgroundImage: `url(${r.icon_url})` } : undefined} />
                           <div className="mdp-info">
                             <div className="mdp-t" title={r.title}>{r.title}</div>
                             <div className="mdp-m">{meta}</div>
+                            {r.suggested_link && !isSaved && (
+                              <div className="mdp-warn">
+                                <b>{sharedNote(r)}.</b> Open the video and check it is this game.
+                                {r.suggested_name && <span className="mdp-file" title={r.suggested_name}>File: {r.suggested_name}</span>}
+                              </div>
+                            )}
                           </div>
                           {isSaved ? (
                             <div className="mdp-okmsg">✓ Saved</div>
@@ -183,15 +211,19 @@ export function MissingDemoPrompt() {
                                   className="input"
                                   placeholder="Paste demo video link…"
                                   aria-label={`Demo link for ${r.title}`}
-                                  value={values[r.id] ?? ''}
+                                  value={value}
                                   disabled={saving.has(r.id)}
                                   onChange={e => setValues(v => ({ ...v, [r.id]: e.target.value }))}
                                   onKeyDown={e => { if (e.key === 'Enter') save(r) }}
                                 />
+                                {r.suggested_link && isWebLink(r.suggested_link) && (
+                                  <a className="btn" href={r.suggested_link} target="_blank" rel="noopener noreferrer"
+                                    aria-label={`Open suggested video for ${r.title}`}>Open ↗</a>
+                                )}
                                 <button className="btn btn-primary" onClick={() => save(r)}
-                                  aria-label={`Save demo link for ${r.title}`}
-                                  disabled={saving.has(r.id) || !(values[r.id] ?? '').trim()}>
-                                  {saving.has(r.id) ? 'Saving…' : 'Save'}
+                                  aria-label={`${confirming ? 'Confirm' : 'Save'} demo link for ${r.title}`}
+                                  disabled={saving.has(r.id) || !value.trim()}>
+                                  {saving.has(r.id) ? 'Saving…' : confirming ? 'Confirm' : 'Save'}
                                 </button>
                               </div>
                               {failed.has(r.id) && <div className="mdp-err">Couldn&apos;t save, try again</div>}
