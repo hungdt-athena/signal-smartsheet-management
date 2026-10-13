@@ -16,6 +16,7 @@ export interface LogRow {
   final_after: string | null
   batch_before: string | null
   batch_after: string | null
+  demo_added: boolean // this save gave the game its demo link (migration 047)
   bucket_before: string | null // Record bucket ('5min' | '20min') before / after
   bucket_after: string | null
   recorder_before: string | null
@@ -187,7 +188,11 @@ export function fromLog(r: LogRow): HistoryEvent {
       changes = [{ kind: 'initial', from: r.conclusion_before, to: null }]
       break
     case 'revise':
-      if (!r.changed && batchMoved && !finalMoved) {
+      if (r.demo_added && !r.changed && !batchMoved && !finalMoved) {
+        // Only the demo link was added: no verdict chip.
+        verb = 'added the demo link'
+        changes = []
+      } else if (!r.changed && batchMoved && !finalMoved) {
         // Only the batch moved: no verdict chip, the batch line says it all.
         verb = 'changed the batch'
         changes = []

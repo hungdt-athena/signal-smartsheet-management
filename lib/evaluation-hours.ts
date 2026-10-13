@@ -5,6 +5,9 @@
 import { sql } from '@/lib/db'
 
 export const PANEL_CAP_S = 1800
+// A demo link added outside the panel (no view_s) to a game that was already judged counts as
+// this much, once per game: the recording happened off-screen, so the panel never saw it.
+export const DEMO_CREDIT_S = 300
 export const DEFAULT_TITLES = ['Fulltime', 'Freelancer']
 
 export interface PanelTimeRow { who: string; day: string; hours: number; capped_saves: number; idle_s: number; hidden_s: number }
@@ -14,7 +17,16 @@ export async function loadPanelTime(opts: { from: string; to: string; titles?: s
   const titles = opts.titles?.length ? opts.titles : DEFAULT_TITLES
   const [time, games] = await Promise.all([
     sql<PanelTimeRow[]>`
-      WITH iv AS (
+      WITH first_demo AS (
+        -- the save that gave each game its first demo link, whatever its source: a link first
+        -- added in the panel is never credited again if it is cleared and re-added elsewhere
+        SELECT * FROM (
+          SELECT l.*, ROW_NUMBER() OVER (
+                   PARTITION BY COALESCE(l.game_evaluation_id::text, 'g:' || l.game_id)
+                   ORDER BY l.created_at, l.id) AS rn
+          FROM evaluation_log l WHERE l.demo_added
+        ) d WHERE d.rn = 1
+      ), iv AS (
         SELECT lower(l.actor) AS who,
                l.created_at - make_interval(secs => LEAST(l.view_s, ${PANEL_CAP_S}::int)) AS s,
                l.created_at AS e,
@@ -24,6 +36,17 @@ export async function loadPanelTime(opts: { from: string; to: string; titles?: s
         JOIN dashboard_users du ON lower(du.name) = lower(l.actor)
         WHERE l.source = 'panel'
           AND l.view_s IS NOT NULL
+          AND du.title = ANY(${titles}::text[])
+          AND l.created_at >= (${opts.from}::date)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+          AND l.created_at <  (${opts.to}::date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+        UNION ALL
+        SELECT lower(l.actor), l.created_at - make_interval(secs => ${DEMO_CREDIT_S}::int), l.created_at,
+               FALSE, 0, 0
+        FROM first_demo l
+        JOIN dashboard_users du ON lower(du.name) = lower(l.actor)
+        WHERE l.source = 'other'
+          AND l.kind IN ('revise', 'other')
+          AND l.conclusion_before IS NOT NULL AND l.conclusion_before <> 'Stale_release'
           AND du.title = ANY(${titles}::text[])
           AND l.created_at >= (${opts.from}::date)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
           AND l.created_at <  (${opts.to}::date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'

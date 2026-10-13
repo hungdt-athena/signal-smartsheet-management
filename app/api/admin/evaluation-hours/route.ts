@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
-import { loadPanelTime, PANEL_CAP_S, DEFAULT_TITLES } from '@/lib/evaluation-hours'
+import { loadPanelTime, PANEL_CAP_S, DEMO_CREDIT_S, DEFAULT_TITLES } from '@/lib/evaluation-hours'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   if (days > MAX_SPAN_DAYS) return NextResponse.json({ error: 'range over 92 days' }, { status: 400 })
   try {
     const { time, games } = await loadPanelTime({ from, to })
-    return NextResponse.json({ from, to, cap_s: PANEL_CAP_S, titles: DEFAULT_TITLES, time, games })
+    return NextResponse.json({ from, to, cap_s: PANEL_CAP_S, demo_credit_s: DEMO_CREDIT_S, titles: DEFAULT_TITLES, time, games })
   } catch (err) {
     console.error('GET /api/admin/evaluation-hours error:', err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })

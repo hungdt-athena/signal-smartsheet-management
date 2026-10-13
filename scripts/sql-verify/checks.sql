@@ -521,7 +521,14 @@ INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, context,
  (119,'h19','HungDT','panel','evaluate','revise',600,0,0,'2026-10-05 09:10+07');
 
 PREPARE panel_time(unknown, unknown, text[]) AS
-WITH iv AS (
+WITH first_demo AS (
+  SELECT * FROM (
+    SELECT l.*, ROW_NUMBER() OVER (
+             PARTITION BY COALESCE(l.game_evaluation_id::text, 'g:' || l.game_id)
+             ORDER BY l.created_at, l.id) AS rn
+    FROM evaluation_log l WHERE l.demo_added
+  ) d WHERE d.rn = 1
+), iv AS (
   SELECT lower(l.actor) AS who,
          l.created_at - make_interval(secs => LEAST(l.view_s, 1800)) AS s,
          l.created_at AS e,
@@ -531,6 +538,16 @@ WITH iv AS (
   JOIN dashboard_users du ON lower(du.name) = lower(l.actor)
   WHERE l.source = 'panel'
     AND l.view_s IS NOT NULL
+    AND du.title = ANY($3)
+    AND l.created_at >= ($1::date)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+    AND l.created_at <  ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+  UNION ALL
+  SELECT lower(l.actor), l.created_at - make_interval(secs => 300), l.created_at, FALSE, 0, 0
+  FROM first_demo l
+  JOIN dashboard_users du ON lower(du.name) = lower(l.actor)
+  WHERE l.source = 'other'
+    AND l.kind IN ('revise', 'other')
+    AND l.conclusion_before IS NOT NULL AND l.conclusion_before <> 'Stale_release'
     AND du.title = ANY($3)
     AND l.created_at >= ($1::date)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
     AND l.created_at <  ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
@@ -569,6 +586,72 @@ DO $$ BEGIN
   ASSERT (SELECT abs(hours * 60 - 10) < 0.01 FROM got WHERE who = 'dave'), 'dave 10 (NULL view_s excluded)';
   -- admins, moderators, system accounts and NULL actors never appear
   ASSERT NOT EXISTS (SELECT 1 FROM got WHERE who IN ('hungdt', 'vinhtd', 'shortcut') OR who IS NULL), 'only titled people';
+END $$;
+
+-- ---------- Demo-link credit (migration 047; mirrors the PATCH `demo_added` column) ----------
+-- Trimmed copy of the route's save: only drive_link, so the demo_added expression runs for real.
+-- $1 id, $2 drive_link (NULL = clear), $3 actor, $4 source, $5 view_s
+PREPARE save_demo(unknown, unknown, unknown, unknown, unknown) AS
+WITH old AS (
+  SELECT id, game_id, initial_conclusion, initial_evaluator, drive_link FROM game_evaluations
+  WHERE id = $1 FOR NO KEY UPDATE
+), upd AS (
+  UPDATE game_evaluations ge SET drive_link = $2::text, updated_by = $3::text
+  FROM old WHERE ge.id = old.id RETURNING ge.*
+), logged AS (
+  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, source, kind,
+    conclusion_before, conclusion_after, changed, view_s, demo_added)
+  SELECT old.id, old.game_id, $3::text, old.initial_evaluator, $4::text, 'revise',
+    old.initial_conclusion, upd.initial_conclusion, FALSE, $5::int,
+    COALESCE(old.drive_link, '') = '' AND COALESCE(upd.drive_link, '') <> ''
+  FROM old JOIN upd ON upd.id = old.id
+)
+SELECT id FROM upd;
+
+INSERT INTO game_info VALUES ('d200'),('d201'),('d202'),('d203');
+INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion, evaluate_date) VALUES
+  (200,'d200','Alice','Bypass','2026-10-12 09:00+07'),   -- judged, link added off-panel
+  (201,'d201','Alice','Bypass','2026-10-12 09:00+07'),   -- judged, link added in the panel
+  (202,'d202','Alice',NULL,NULL),                        -- never judged
+  (203,'d203','Alice','Bypass','2026-10-12 09:00+07');   -- link added off-panel by a manager
+EXECUTE save_demo(200, 'https://d/200', 'Alice', 'other', NULL);
+EXECUTE save_demo(200, 'https://d/200', 'Alice', 'other', NULL);   -- same link again: not "added"
+EXECUTE save_demo(200, NULL, 'Alice', 'other', NULL);              -- cleared
+EXECUTE save_demo(200, 'https://d/200b', 'Alice', 'other', NULL);  -- re-added: still one credit
+EXECUTE save_demo(201, 'https://d/201', 'Alice', 'panel', 120);
+EXECUTE save_demo(202, 'https://d/202', 'Alice', 'other', NULL);
+EXECUTE save_demo(203, 'https://d/203', 'HungDT', 'other', NULL);
+-- pin the timestamps (the saves above all ran "now")
+UPDATE evaluation_log SET created_at = '2026-10-12 10:00+07' WHERE game_id = 'd200' AND id = (SELECT min(id) FROM evaluation_log WHERE game_id = 'd200');
+UPDATE evaluation_log SET created_at = '2026-10-12 10:30+07' WHERE game_id = 'd200' AND created_at > NOW() - INTERVAL '1 hour';
+UPDATE evaluation_log SET created_at = '2026-10-12 14:00+07' WHERE game_id = 'd201';
+UPDATE evaluation_log SET created_at = '2026-10-12 16:00+07' WHERE game_id IN ('d202', 'd203');
+DO $$ BEGIN
+  ASSERT (SELECT array_agg(demo_added ORDER BY id) FROM evaluation_log WHERE game_id = 'd200') = ARRAY[true, false, false, true],
+    'demo_added: empty->value only';
+  ASSERT (SELECT demo_added FROM evaluation_log WHERE game_id = 'd201'), 'panel save adding the link is demo_added';
+END $$;
+CREATE TEMP TABLE got_demo AS EXECUTE panel_time('2026-10-12', '2026-10-12', ARRAY['Fulltime','Freelancer']);
+DO $$ BEGIN
+  -- d200: +5 (off-panel, judged, first link). d201: 2 min panel time, no credit on top.
+  -- d200 re-add: no second credit. d202: never judged. d203: HungDT is not a titled person.
+  ASSERT (SELECT abs(hours * 60 - 7) < 0.01 FROM got_demo WHERE who = 'alice' AND day = '2026-10-12'),
+    'alice 10-12: 5 (off-panel first link) + 2 (panel) = 7 min';
+  ASSERT NOT EXISTS (SELECT 1 FROM got_demo WHERE who = 'hungdt'), 'manager credit excluded';
+END $$;
+-- The credit merges with panel time instead of adding to it: Bob's off-panel link at 11:05 gets
+-- the window 11:00-11:05, which is exactly his 5-minute panel block, so the day totals 5 min.
+INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, source, context, kind, view_s, created_at)
+  VALUES (NULL, 'ov1', 'Bob', 'panel', 'evaluate', 'first', 300, '2026-10-12 11:05+07');
+INSERT INTO game_info VALUES ('d204');
+INSERT INTO game_evaluations (id, game_id, initial_evaluator, initial_conclusion, evaluate_date)
+  VALUES (204,'d204','Bob','Bypass','2026-10-12 09:00+07');
+EXECUTE save_demo(204, 'https://d/204', 'Bob', 'other', NULL);
+UPDATE evaluation_log SET created_at = '2026-10-12 11:05+07' WHERE game_id = 'd204';
+CREATE TEMP TABLE got_demo2 AS EXECUTE panel_time('2026-10-12', '2026-10-12', ARRAY['Fulltime','Freelancer']);
+DO $$ BEGIN
+  ASSERT (SELECT abs(hours * 60 - 5) < 0.01 FROM got_demo2 WHERE who = 'bob'),
+    'credit window 11:00-11:05 equals the panel block 11:00-11:05: merged, 5 min not 10';
 END $$;
 
 -- Games per day (mirrors lib/evaluation-hours.ts): a 'first' row whose game_evaluations

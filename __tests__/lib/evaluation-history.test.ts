@@ -6,7 +6,7 @@ import {
 const log = (o: Partial<LogRow>): LogRow => ({
   id: '1', at: '2026-10-11T07:32:00.000Z', actor: 'Alice', owner: 'Alice', source: 'panel', context: 'evaluate',
   kind: 'first', conclusion_before: null, conclusion_after: 'Bypass', final_before: null, final_after: null,
-  batch_before: null, batch_after: null, bucket_before: null, bucket_after: null, recorder_before: null, recorder_after: null, owner_after: null,
+  batch_before: null, batch_after: null, demo_added: false, bucket_before: null, bucket_after: null, recorder_before: null, recorder_after: null, owner_after: null,
   changed: true, view_s: 480, confidence: null, ...o,
 })
 const asg = (o: Partial<AssignRow>): AssignRow => ({
@@ -92,6 +92,15 @@ describe('fromLog', () => {
       batch_before: 'W1', batch_after: 'W2' }))
     expect(e.verb).toBe('edited the evaluation')
     expect(e.changes.map(c => c.kind)).toEqual(['initial', 'final', 'batch'])
+  })
+  it('a save that only added the demo link is "added the demo link", with no verdict chip', () => {
+    const e = fromLog(log({ kind: 'revise', source: 'other', context: null, changed: false, conclusion_before: 'Bypass', conclusion_after: 'Bypass', demo_added: true }))
+    expect(e.verb).toBe('added the demo link')
+    expect(e.changes).toEqual([])
+  })
+  it('keeps the verdict change when the verdict moved in the same save as the link', () => {
+    const e = fromLog(log({ kind: 'revise', changed: true, conclusion_before: 'Bypass', conclusion_after: 'List_Idea', demo_added: true }))
+    expect(e.verb).toBe('changed the verdict')
   })
   it('a final-only save with a batch move shows the final change, then the batch', () => {
     const e = fromLog(log({ kind: 'final', changed: false, final_before: null, final_after: 'Priority I', batch_before: 'W1', batch_after: 'W2' }))

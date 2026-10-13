@@ -1,5 +1,5 @@
 import {
-  readTiming, touchedFlags, logKindSql, isMissingLogTable, EVALUATION_LOG_MISSING,
+  readTiming, touchedFlags, logKindSql, isMissingLogTable, EVALUATION_LOG_MISSING, isMissingDemoColumn, DEMO_COLUMN_MISSING,
 } from '@/lib/evaluation-log'
 
 describe('readTiming', () => {
@@ -58,5 +58,14 @@ describe('isMissingLogTable', () => {
     expect(isMissingLogTable({ code: '42P01', message: 'relation "other" does not exist' })).toBe(false)
     expect(isMissingLogTable(new Error('x'))).toBe(false)
     expect(EVALUATION_LOG_MISSING).toMatch(/046/)
+  })
+})
+
+describe('isMissingDemoColumn', () => {
+  it('matches 42703 on demo_added only', () => {
+    expect(isMissingDemoColumn({ code: '42703', message: 'column "demo_added" of relation "evaluation_log" does not exist' })).toBe(true)
+    expect(isMissingDemoColumn({ code: '42703', message: 'column "x" does not exist' })).toBe(false)
+    expect(isMissingDemoColumn(new Error('demo_added'))).toBe(false)
+    expect(DEMO_COLUMN_MISSING).toMatch(/047/)
   })
 })

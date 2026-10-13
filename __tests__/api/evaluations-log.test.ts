@@ -58,16 +58,16 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     await patch({ id: 1, initial_note: 'a real note here', view_s: 5, context: 'evaluate' })
     const t = writeCall().text
     expect(t).toMatch(/\$::text, \$::text, old\.initial_evaluator, \$::text, \$::text/)
-    expect(t).toMatch(/\$::int, \$::int, \$::int,\s+old\.batch, upd\.batch\s+FROM old JOIN upd/)
+    expect(t).toMatch(/\$::int, \$::int, \$::int,\s+old\.batch, upd\.batch,\s+COALESCE\(old\.drive_link, ''\) = '' AND COALESCE\(upd\.drive_link, ''\) <> ''\s+FROM old JOIN upd/)
   })
 
   it('records the batch before and after the write, from the locked row and the updated row', async () => {
     routeSql()
     await patch({ id: 1, initial_note: 'a real note here', view_s: 5, context: 'evaluate' })
     const t = writeCall().text
-    expect(t).toMatch(/INSERT INTO evaluation_log \([^)]*batch_before, batch_after\)/)
+    expect(t).toMatch(/INSERT INTO evaluation_log \([^)]*batch_before, batch_after, demo_added\)/)
     expect(t).toMatch(/old\.batch, upd\.batch/)
-    expect(t).toMatch(/evaluate_date, batch,\s+record_5min_assignee/) // old CTE selects batch
+    expect(t).toMatch(/evaluate_date, batch, drive_link,\s+record_5min_assignee/) // old CTE selects batch
   })
 
   it('logs a save without view_s as source "other" with no timing', async () => {
@@ -100,7 +100,7 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     expect(res.status).toBe(200)
     const w = writeCall()
     // the old CTE reads the recorder columns and the confirmation
-    expect(w.text).toMatch(/evaluate_date, batch,\s+record_5min_assignee, record_20min_assignee, record_confirmed_at\s+FROM game_evaluations WHERE id = \$/)
+    expect(w.text).toMatch(/evaluate_date, batch, drive_link,\s+record_5min_assignee, record_20min_assignee, record_confirmed_at\s+FROM game_evaluations WHERE id = \$/)
     expect(w.text).toMatch(/\), logged_rec AS \(/)
     expect(w.text).toMatch(/'record_assign', v\.bucket, v\.before, v\.after,\s+NULL::int, NULL::int, NULL::int, old\.batch, upd\.batch/)
     expect(w.text).toMatch(/CROSS JOIN LATERAL \(VALUES \('5min', old\.record_5min_assignee, upd\.record_5min_assignee\),\s+\('20min', old\.record_20min_assignee, upd\.record_20min_assignee\)\) AS v\(bucket, before, after\)/)
@@ -132,5 +132,18 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     const res = await patch({ id: 1, initial_note: 'a real note here', view_s: 5 })
     expect(res.status).toBe(500)
     expect((await res.json()).error).toMatch(/apply migration 046/)
+  })
+
+  it('returns a readable error when migration 047 (demo_added) is missing', async () => {
+    routeSql()
+    sqlMock.mockImplementation((strings: unknown) => {
+      if (Array.isArray(strings) && /INSERT INTO evaluation_log/.test((strings as string[]).join(' '))) {
+        return Promise.reject(Object.assign(new Error('column "demo_added" of relation "evaluation_log" does not exist'), { code: '42703' }))
+      }
+      return Promise.resolve([{ id: 1, initial_evaluator: 'Alice', initial_conclusion: null }])
+    })
+    const res = await patch({ id: 1, initial_note: 'a real note here', view_s: 5 })
+    expect(res.status).toBe(500)
+    expect((await res.json()).error).toMatch(/apply migration 047/)
   })
 })

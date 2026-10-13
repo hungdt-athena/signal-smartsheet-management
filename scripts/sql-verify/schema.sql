@@ -17,7 +17,7 @@ CREATE TABLE game_evaluations (
   record_bucket TEXT, updated_at TIMESTAMPTZ DEFAULT NOW(), updated_by TEXT,
   record_5min_assignee VARCHAR(100), record_5min_date TIMESTAMPTZ,
   record_20min_assignee VARCHAR(100), record_20min_date TIMESTAMPTZ,
-  record_confirmed_at TIMESTAMPTZ,
+  record_confirmed_at TIMESTAMPTZ, drive_link TEXT,
   UNIQUE (game_id, category_group));
 CREATE TABLE playtest_tags (
   id serial PRIMARY KEY,

@@ -73,6 +73,14 @@ export function logKindSql(q: Sql, f: TouchedFlags) {
 
 export const EVALUATION_LOG_MISSING = 'evaluation_log missing — apply migration 046'
 
+export const DEMO_COLUMN_MISSING = 'evaluation_log.demo_added missing — apply migration 047'
+
+/** Postgres 42703 (undefined_column) on demo_added: migration 047 was not applied. */
+export function isMissingDemoColumn(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown } | null
+  return !!e && e.code === '42703' && /demo_added/.test(String(e.message ?? ''))
+}
+
 /** Postgres 42P01 (undefined_table) on evaluation_log: migration 046 was not applied. */
 export function isMissingLogTable(err: unknown): boolean {
   const e = err as { code?: unknown; message?: unknown } | null
