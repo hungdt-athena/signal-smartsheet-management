@@ -9,10 +9,11 @@ jest.mock('@/lib/db', () => ({ sql: (...a: unknown[]) => sqlMock(...a) }))
 
 import { loadBatchSpans, resolveBatchSpan, clearBatchSpanCache } from '@/lib/report-batches'
 
+// fromAt/toAt are the exact switch instants (UTC); from/to the VN days they fall on.
 const SPANS = [
-  { batch: 'W4 Sep, 2026', from: '2026-09-21', to: '2026-09-23' },
-  { batch: 'W3 Sep, 2026', from: '2026-09-14', to: '2026-09-21' },
-  { batch: 'W2 Sep, 2026', from: '2026-09-07', to: '2026-09-14' },
+  { batch: 'W4 Sep, 2026', from: '2026-09-21', to: '2026-09-23', fromAt: '2026-09-21T02:14:00Z', toAt: null },
+  { batch: 'W3 Sep, 2026', from: '2026-09-14', to: '2026-09-21', fromAt: '2026-09-14T02:17:00Z', toAt: '2026-09-21T02:14:00Z' },
+  { batch: 'W2 Sep, 2026', from: '2026-09-07', to: '2026-09-14', fromAt: '2026-09-07T04:17:00Z', toAt: '2026-09-14T02:17:00Z' },
 ]
 
 beforeEach(() => {
@@ -23,7 +24,7 @@ beforeEach(() => {
 })
 
 it('resolves a label to the days it covers', async () => {
-  expect(await resolveBatchSpan('W3 Sep, 2026')).toEqual({ batch: 'W3 Sep, 2026', from: '2026-09-14', to: '2026-09-21' })
+  expect(await resolveBatchSpan('W3 Sep, 2026')).toEqual(SPANS[1])
 })
 
 it('returns null for a label it does not know, rather than an empty window', async () => {
@@ -33,7 +34,7 @@ it('returns null for a label it does not know, rather than an empty window', asy
   expect(await resolveBatchSpan('')).toBeNull()
 })
 
-it('reads the stored start of each batch and ends it where the next one starts', async () => {
+it('reads the stored start TIME of each batch and ends it where the next one starts', async () => {
   // The tiling rule lives in SQL, so asserting it on mocked rows would only re-read the
   // fixture; pin the shape of the query instead. A batch's last ACTIVE day is not its
   // end - the team runs batches of 7, 11, 17 days and a quiet Friday would otherwise fall
@@ -41,14 +42,18 @@ it('reads the stored start of each batch and ends it where the next one starts',
   await loadBatchSpans()
   const text = (sqlMock.mock.calls[0][0] as unknown as string[]).join(' ')
   expect(text).toMatch(/FROM batches/)
-  expect(text).toMatch(/lead\(starts_on\)\s+OVER\s+\(ORDER BY starts_on\)/)
-  expect(text).toMatch(/Asia\/Ho_Chi_Minh/)    // the newest batch runs to today, VN time
-  expect(text).toMatch(/starts_on \+ 1/)        // a batch scheduled for tomorrow never gets an inverted window
+  expect(text).toMatch(/lead\(starts_at\)\s+OVER\s+\(ORDER BY starts_at\)/)
+  expect(text).toMatch(/Asia\/Ho_Chi_Minh/)    // the day columns are VN calendar days
+  expect(text).toMatch(/"fromAt"/)              // the exact instants the Report compares evaluate_date to
+  expect(text).toMatch(/"toAt"/)
+  expect(text).toMatch(/\+ 1\)::text AS to/)    // a batch starting later today never gets an inverted day window
   expect(text).not.toMatch(/evaluate_date/)    // never inferred from the games any more
   expect(text).not.toMatch(/max\(/)
   const spans = await loadBatchSpans()
-  const byAge = [...spans].sort((a, b) => a.from.localeCompare(b.from))
-  for (let i = 1; i < byAge.length; i++) expect(byAge[i - 1].to).toBe(byAge[i].from)
+  const byAge = [...spans].sort((a, b) => a.fromAt.localeCompare(b.fromAt))
+  // consecutive batches tile TIME exactly: one ends at the instant the next starts
+  for (let i = 1; i < byAge.length; i++) expect(byAge[i - 1].toAt).toBe(byAge[i].fromAt)
+  expect(byAge[byAge.length - 1].toAt).toBeNull()      // the newest has no end yet
 })
 
 it('asks the database once, then serves the rest from cache', async () => {

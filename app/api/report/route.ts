@@ -238,7 +238,11 @@ export async function GET(req: NextRequest) {
     const batchSpan = batchAt >= 0 ? batchSpans[batchAt] : null
     // the list is newest-first, so the batch before this one is the NEXT entry
     const prevBatch = batchAt >= 0 ? batchSpans[batchAt + 1] ?? null : null
-    const win = batchSpan ? { ...winBase, from: batchSpan.from, to: batchSpan.to } : winBase
+    // `fromAt` / `toAt` are the exact instants a batch starts and ends (null on every other
+    // view, and `toAt` on the newest batch). `from` / `to` stay the matching calendar days.
+    const win = batchSpan
+      ? { ...winBase, from: batchSpan.from, to: batchSpan.to, fromAt: batchSpan.fromAt as string | null, toAt: batchSpan.toAt }
+      : { ...winBase, fromAt: null as string | null, toAt: null as string | null }
 
     // WHERE fragments shared by evaluation queries.
     const catF = category !== 'all' ? sql`AND ge.category_group = ${category}` : sql``
@@ -290,9 +294,15 @@ export async function GET(req: NextRequest) {
       ? sql`AND ge.batch = ${legacyBatch}`
       : winLabel ? sql`AND (ge.batch = ${winLabel} OR (${unlabeledGe} ${frag}))` : frag
 
+    /* A batch is cut at the exact moment it started and ended, not at midnight: on the day
+       the team switches batches, games judged before the switch are the old batch's and
+       the rest the new one's. Every other view is whole days. */
     const winDates = sql`
-        ${win.from ? sql`AND ge.evaluate_date >= ${vnBound(win.from)}` : sql``}
-        ${win.to ? sql`AND ge.evaluate_date < ${vnBound(win.to)}` : sql``}`
+        ${win.fromAt ? sql`AND ge.evaluate_date >= ${win.fromAt}::timestamptz`
+          : win.from ? sql`AND ge.evaluate_date >= ${vnBound(win.from)}` : sql``}
+        ${win.toAt ? sql`AND ge.evaluate_date < ${win.toAt}::timestamptz`
+          : win.fromAt ? sql``
+          : win.to ? sql`AND ge.evaluate_date < ${vnBound(win.to)}` : sql``}`
     const winF = legacyBatch
       ? sql`AND ge.batch = ${legacyBatch}`
       : winLabel ? sql`AND (ge.batch = ${winLabel} OR (${unlabeledGe} ${winDates}))` : winDates
@@ -361,6 +371,9 @@ export async function GET(req: NextRequest) {
     const ownVideoLink = sql`CASE WHEN ge.youtube_uploaded_at IS NOT NULL THEN ge.youtube_link END`
     const recAtFrom = (d: string) => sql`AND ${recAt} >= ${vnBound(d)}`
     const recAtTo   = (d: string) => sql`AND ${recAt} < ${vnBound(d)}`
+    // The recording date is a timestamp too, so a batch window cuts it at the same instant.
+    const recWinFrom = win.fromAt ? sql`AND ${recAt} >= ${win.fromAt}::timestamptz` : win.from ? recAtFrom(win.from) : sql``
+    const recWinTo = win.toAt ? sql`AND ${recAt} < ${win.toAt}::timestamptz` : win.fromAt ? sql`` : win.to ? recAtTo(win.to) : sql``
 
     // "Judged" as every other number on the report counts it. Link_dead and
     // Stale_release are housekeeping, not decisions, and leaving them in made the
@@ -379,7 +392,7 @@ export async function GET(req: NextRequest) {
        manager moved in. They are counted in every number on the tab, but the day charts
        only draw the batch's own days, so without this the two would not add up and nothing
        would say why. Sent as one chip, not as extra bars. */
-    const movedInPromise = winLabel && win.from && win.to
+    const movedInPromise = winLabel && win.fromAt
       ? sql`
         SELECT count(*)::int AS n,
                min((ge.evaluate_date AT TIME ZONE ${VN})::date)::text AS first,
@@ -389,7 +402,8 @@ export async function GET(req: NextRequest) {
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
           AND ge.batch = ${winLabel}
-          AND (ge.evaluate_date < ${vnBound(win.from)} OR ge.evaluate_date >= ${vnBound(win.to)})`
+          AND (ge.evaluate_date < ${win.fromAt}::timestamptz
+               ${win.toAt ? sql`OR ge.evaluate_date >= ${win.toAt}::timestamptz` : sql``})`
       : Promise.resolve([])
 
     /* The waiting stock, right now. Deliberately OUTSIDE `pipelinePromise`: it has no
@@ -800,8 +814,8 @@ export async function GET(req: NextRequest) {
             ${recOk('record_5min_assignee')} ${ownSlot('5min')}
             ${catF}
             ${winOn(sql`
-              ${win.from ? recAtFrom(win.from) : sql``}
-              ${win.to ? recAtTo(win.to) : sql``}`)}
+              ${recWinFrom}
+              ${recWinTo}`)}
           UNION ALL
           SELECT lower(ge.record_20min_assignee), ge.record_20min_assignee, '20min'
           FROM game_evaluations ge
@@ -809,8 +823,8 @@ export async function GET(req: NextRequest) {
             ${recOk('record_20min_assignee')} ${ownSlot('20min')}
             ${catF}
             ${winOn(sql`
-              ${win.from ? recAtFrom(win.from) : sql``}
-              ${win.to ? recAtTo(win.to) : sql``}`)}
+              ${recWinFrom}
+              ${recWinTo}`)}
         )
         SELECT k, mode() WITHIN GROUP (ORDER BY name) AS name,
           count(*)::int AS recorded,
@@ -861,8 +875,8 @@ export async function GET(req: NextRequest) {
         FROM rec
         WHERE TRUE ${legacyBatch ? sql`AND batch = ${legacyBatch}` : winLabel ? sql`
           AND (batch = ${winLabel} OR (${unlabeledRec} AND (rec_at IS NULL OR (TRUE
-            ${win.from ? sql`AND rec_at >= ${vnBound(win.from)}` : sql``}
-            ${win.to ? sql`AND rec_at < ${vnBound(win.to)}` : sql``}))))` : sql`
+            ${win.fromAt ? sql`AND rec_at >= ${win.fromAt}::timestamptz` : win.from ? sql`AND rec_at >= ${vnBound(win.from)}` : sql``}
+            ${win.toAt ? sql`AND rec_at < ${win.toAt}::timestamptz` : win.fromAt ? sql`` : win.to ? sql`AND rec_at < ${vnBound(win.to)}` : sql``}))))` : sql`
           AND (rec_at IS NULL OR (TRUE
             ${win.from ? sql`AND rec_at >= ${vnBound(win.from)}` : sql``}
             ${win.to ? sql`AND rec_at < ${vnBound(win.to)}` : sql``}))`}

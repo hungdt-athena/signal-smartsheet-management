@@ -5,11 +5,15 @@ import { sql } from '@/lib/db'
    games), so filtering the Performance tab by the label alone shows a cohort, not a week:
    415 games for W3 Sep against the 4,903 the team actually judged.
 
-   So each batch has a row in `batches` with the day it starts (migration 049). It ends the
-   day the next batch starts, and the newest one runs to today, so consecutive batches tile
-   the calendar whatever length the team ran them for. The day a batch is closed belongs to
-   the OLD batch; the new one starts the next day. Starts are set by a manager when the
-   current batch is changed - they are not Mondays.
+   So each batch has a row in `batches` with the moment it starts (`starts_at`, migrations
+   049/050). It ends the moment the next batch starts and the newest one is open-ended, so
+   consecutive batches tile time whatever length the team ran them for. Batches change in
+   the middle of a day, not at midnight: a game judged before the switch belongs to the old
+   batch and one judged after it to the new one, so evaluate_date is compared to the exact
+   instant (`fromAt` / `toAt`). `from` / `to` are the matching VN calendar days, for the
+   things that work in whole days (day charts, DATE columns, labels): they tile too, the
+   day of the switch going to the new batch. Starts are set by a manager when the current
+   batch is changed - they are not Mondays.
 
    This used to be INFERRED: start = the first day any game with that label was judged.
    Managers then began moving games between batches in bulk (a game judged 07/09 and later
@@ -19,7 +23,8 @@ import { sql } from '@/lib/db'
    How a game picks its batch is the Report route's job (label wins, dates only place the
    unlabeled games); this file only says which days a label covers. */
 
-export type BatchSpan = { batch: string; from: string; to: string }
+// `fromAt` / `toAt` are UTC ISO instants; `toAt` is null for the newest batch (no end yet).
+export type BatchSpan = { batch: string; from: string; to: string; fromAt: string; toAt: string | null }
 
 // Spans change when the team opens a new batch, i.e. about once a week, so a short
 // process-local cache turns the extra round-trip into a first-request cost. The TTL is the
@@ -35,19 +40,25 @@ export async function loadBatchSpans(): Promise<BatchSpan[]> {
   if (inflight) return inflight
   inflight = (async () => {
     try {
-      const rows = await sql<{ batch: string; from: string; to: string }[]>`
+      const rows = await sql<BatchSpan[]>`
+        WITH s AS (
+          SELECT label, starts_at, lead(starts_at) OVER (ORDER BY starts_at) AS next_at
+          FROM batches
+        )
         SELECT label AS batch,
-               starts_on::text AS from,
-               -- exclusive, and it is the NEXT batch's start rather than this batch's last
+               (starts_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date::text AS from,
+               -- exclusive, and it is the NEXT batch's day rather than this batch's last
                -- day: consecutive batches tile the calendar with no gap and no overlap.
-               -- GREATEST keeps a batch scheduled for tomorrow from getting a window that
+               -- GREATEST keeps a batch that starts later today from getting a window that
                -- ends before it starts.
                GREATEST(
-                 COALESCE(lead(starts_on) OVER (ORDER BY starts_on),
+                 COALESCE((next_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
                           (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + 1),
-                 starts_on + 1)::text AS to
-        FROM batches
-        ORDER BY starts_on DESC`
+                 (starts_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + 1)::text AS to,
+               to_char(starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "fromAt",
+               to_char(next_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "toAt"
+        FROM s
+        ORDER BY starts_at DESC`
       cache = { at: Date.now(), rows }
       return rows
     } catch (err) {

@@ -26,18 +26,18 @@ describe('saveCurrentBatch', () => {
   })
 })
 
-describe('start day', () => {
-  it('sends starts_on only when one is given', async () => {
+describe('start time', () => {
+  it('sends starts_at only when one is given', async () => {
     const fetchMock = jest.fn().mockResolvedValue({ ok: true })
     global.fetch = fetchMock as unknown as typeof fetch
-    await saveCurrentBatch('W3 Oct, 2026', '2026-10-14')
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ batch: 'W3 Oct, 2026', starts_on: '2026-10-14' })
+    await saveCurrentBatch('W3 Oct, 2026', '2026-10-14T09:30')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ batch: 'W3 Oct, 2026', starts_at: '2026-10-14T09:30' })
   })
 
   it('reads the current start, and null on anything else', async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ current_batch: 'W3 Oct, 2026', starts_on: '2026-10-14' }) }) as unknown as typeof fetch
-    expect(await loadCurrentBatchStart()).toBe('2026-10-14')
-    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ current_batch: null, starts_on: null }) }) as unknown as typeof fetch
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ current_batch: 'W3 Oct, 2026', starts_at: '2026-10-14T09:30' }) }) as unknown as typeof fetch
+    expect(await loadCurrentBatchStart()).toBe('2026-10-14T09:30')
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ current_batch: null, starts_at: null }) }) as unknown as typeof fetch
     expect(await loadCurrentBatchStart()).toBeNull()
     global.fetch = jest.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch
     expect(await loadCurrentBatchStart()).toBeNull()

@@ -538,8 +538,9 @@ function ShortListEvalTab() {
   const [filterBatch, setFilterBatch] = useState('')
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
   const [currentBatchSaveFailed, setCurrentBatchSaveFailed] = useState(false)
-  // The day the current batch starts (batches.starts_on). The Report places games that
-  // carry no label by it, so a manager can see and change it where the batch is set.
+  // The moment the current batch starts (batches.starts_at, Vietnam time). The Report
+  // places games that carry no label by it, so a manager can see and change it where the
+  // batch is set.
   const [currentBatchStart, setCurrentBatchStart] = useState<string | null>(null)
   // Last value the server confirmed (loaded, or a save that succeeded), and a counter of
   // current-batch saves. Two quick changes can settle out of order: a failure restores the
@@ -718,13 +719,13 @@ function ShortListEvalTab() {
     setCurrentBatch(confirmedBatchRef.current)
     setCurrentBatchSaveFailed(true)
   }
-  const handleCurrentBatchStartChange = async (day: string) => {
-    if (!currentBatch || !day) return
+  const handleCurrentBatchStartChange = async (at: string) => {
+    if (!currentBatch || !at) return
     const before = currentBatchStart
-    setCurrentBatchStart(day)
-    const ok = await saveCurrentBatch(currentBatch, day)
+    setCurrentBatchStart(at)
+    const ok = await saveCurrentBatch(currentBatch, at)
     if (ok) { setCurrentBatchSaveFailed(false); return }
-    // e.g. another batch already starts that day: show what the server still has.
+    // e.g. another batch already starts at that time: show what the server still has.
     setCurrentBatchStart(before)
     setCurrentBatchSaveFailed(true)
   }
@@ -777,8 +778,8 @@ function ShortListEvalTab() {
             </div>
             {currentBatch && (
               <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 10.5, color: 'var(--faint)' }}>
-                Starts on
-                <input type="date" className="input" value={currentBatchStart || ''}
+                Starts at
+                <input type="datetime-local" className="input" value={currentBatchStart || ''}
                   onChange={e => handleCurrentBatchStartChange(e.target.value)} />
               </label>
             )}

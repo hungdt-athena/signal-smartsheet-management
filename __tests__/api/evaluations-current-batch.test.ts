@@ -15,7 +15,7 @@ const sqlMock = sql as unknown as jest.Mock
 const sessionMock = getServerSession as unknown as jest.Mock
 
 let calls: { text: string; binds: unknown[] }[] = []
-let batchStart: string | null = '2026-10-14'
+let batchStart: string | null = '2026-10-14T09:30'
 
 function db(config: { key: string; value: string | null }[]) {
   calls = []
@@ -25,8 +25,8 @@ function db(config: { key: string; value: string | null }[]) {
     calls.push({ text, binds })
     if (text.includes('SELECT key, value')) return Promise.resolve(config)
     // the batch's own start day: the upsert returns it, the read-back selects it
-    if (text.includes('INSERT INTO batches')) return Promise.resolve([{ starts_on: batchStart }])
-    if (text.includes('FROM batches')) return Promise.resolve(batchStart ? [{ starts_on: batchStart }] : [])
+    if (text.includes('INSERT INTO batches')) return Promise.resolve([{ starts_at: batchStart }])
+    if (text.includes('FROM batches')) return Promise.resolve(batchStart ? [{ starts_at: batchStart }] : [])
     return Promise.resolve([])
   })
 }
@@ -50,13 +50,13 @@ describe('/api/evaluations/current-batch', () => {
       { key: 'current_batch', value: 'W2 Oct, 2026' },
     ])
     const res = await GET(new NextRequest('http://localhost/api/evaluations/current-batch?category=puzzle'))
-    expect(await res.json()).toEqual({ current_batch: 'W2 Oct, 2026', starts_on: '2026-10-14' })
+    expect(await res.json()).toEqual({ current_batch: 'W2 Oct, 2026', starts_at: '2026-10-14T09:30' })
   })
 
   it('POST writes the single global key, whatever category the caller sends', async () => {
     db([])
     const res = await post({ category: 'arcade', batch: 'W3 Oct, 2026' })
-    expect(await res.json()).toEqual({ current_batch: 'W3 Oct, 2026', starts_on: '2026-10-14' })
+    expect(await res.json()).toEqual({ current_batch: 'W3 Oct, 2026', starts_at: '2026-10-14T09:30' })
     const write = calls.find(c => c.text.includes('INSERT INTO app_config'))!
     expect(write.binds[0]).toBe('current_batch')
     expect(write.binds).toContain('W3 Oct, 2026')
@@ -66,7 +66,7 @@ describe('/api/evaluations/current-batch', () => {
   it('POST with no batch stores null, meaning "none"', async () => {
     db([])
     const res = await post({ batch: null })
-    expect(await res.json()).toEqual({ current_batch: null, starts_on: null })
+    expect(await res.json()).toEqual({ current_batch: null, starts_at: null })
     const write = calls.find(c => c.text.includes('INSERT INTO app_config'))!
     expect(write.binds[1]).toBeNull()
   })
@@ -87,41 +87,48 @@ describe('/api/evaluations/current-batch', () => {
   })
 })
 
-describe('/api/evaluations/current-batch start day', () => {
+describe('/api/evaluations/current-batch start time', () => {
   const realSkip = process.env.SKIP_AUTH
   beforeEach(() => {
     process.env.SKIP_AUTH = 'false'
     sessionMock.mockResolvedValue({ user: { name: 'HungDT', role: 'admin' } })
-    batchStart = '2026-10-14'
+    batchStart = '2026-10-14T09:30'
   })
   afterAll(() => { process.env.SKIP_AUTH = realSkip })
   const upsert = () => calls.find(c => c.text.includes('INSERT INTO batches'))!
 
-  it('a new batch starts tomorrow (Vietnam time) unless a day is given', async () => {
+  it('a new batch starts NOW unless a time is given (the switch happens mid-day)', async () => {
     db([])
     await post({ batch: 'W4 Oct, 2026' })
+    expect(upsert().text).toMatch(/COALESCE\(\$\d*\s*::timestamp AT TIME ZONE 'Asia\/Ho_Chi_Minh', NOW\(\)\)|NOW\(\)/)
     expect(upsert().text).toMatch(/Asia\/Ho_Chi_Minh/)
-    expect(upsert().text).toMatch(/::date \+ 1/)
     expect(upsert().binds).toContain('W4 Oct, 2026')
     expect(upsert().binds).toContain(null)               // no start given -> server default / keep
   })
 
-  it('stores the day the manager picked', async () => {
+  it('stores the time the manager picked, read as Vietnam time', async () => {
     db([])
-    const res = await post({ batch: 'W4 Oct, 2026', starts_on: '2026-10-21' })
+    const res = await post({ batch: 'W4 Oct, 2026', starts_at: '2026-10-21T09:15' })
     expect(res.status).toBe(200)
-    expect(upsert().binds).toContain('2026-10-21')
+    expect(upsert().binds).toContain('2026-10-21T09:15')
+    expect(upsert().text).toMatch(/::timestamp AT TIME ZONE 'Asia\/Ho_Chi_Minh'/)
+  })
+
+  it('keeps starts_on in step with starts_at for a build that still reads it', async () => {
+    db([])
+    await post({ batch: 'W4 Oct, 2026', starts_at: '2026-10-21T09:15' })
+    expect(upsert().text).toMatch(/starts_on/)
   })
 
   it('writes the start BEFORE the current batch, so a refused start changes nothing', async () => {
     db([])
-    await post({ batch: 'W4 Oct, 2026', starts_on: '2026-10-21' })
+    await post({ batch: 'W4 Oct, 2026', starts_at: '2026-10-21T09:15' })
     const order = calls.map(c => (c.text.includes('INSERT INTO batches') ? 'batches' : c.text.includes('INSERT INTO app_config') ? 'config' : ''))
       .filter(Boolean)
     expect(order).toEqual(['batches', 'config'])
   })
 
-  it('answers 409 and leaves the current batch alone when another batch starts that day', async () => {
+  it('answers 409 and leaves the current batch alone when another batch starts at that moment', async () => {
     db([])
     sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
       const text = Array.isArray(strings) ? (strings as string[]).join(' ') : ''
@@ -129,14 +136,14 @@ describe('/api/evaluations/current-batch start day', () => {
       if (text.includes('INSERT INTO batches')) return Promise.reject(Object.assign(new Error('dup'), { code: '23505' }))
       return Promise.resolve([])
     })
-    const res = await post({ batch: 'W4 Oct, 2026', starts_on: '2026-10-14' })
+    const res = await post({ batch: 'W4 Oct, 2026', starts_at: '2026-10-14T09:30' })
     expect(res.status).toBe(409)
     expect(calls.some(c => c.text.includes('INSERT INTO app_config'))).toBe(false)
   })
 
-  it.each([['2026-02-31'], ['14/10/2026'], ['2026-10-14T00:00:00Z'], [20261014], [true]])('400 and no write for starts_on %j', async day => {
+  it.each([['2026-02-31T09:00'], ['2026-10-14'], ['2026-10-14 09:30'], ['2026-10-14T25:00'], ['2026-10-14T09:30:00Z'], [20261014], [true]])('400 and no write for starts_at %j', async at => {
     db([])
-    const res = await post({ batch: 'W4 Oct, 2026', starts_on: day })
+    const res = await post({ batch: 'W4 Oct, 2026', starts_at: at })
     expect(res.status).toBe(400)
     expect(calls.some(c => c.text.includes('INSERT INTO'))).toBe(false)
   })
@@ -197,14 +204,14 @@ describe('POST /api/evaluations/current-batch validation', () => {
     db([])
     const res = await post({ batch: value })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ current_batch: null, starts_on: null })
+    expect(await res.json()).toEqual({ current_batch: null, starts_at: null })
     expect(calls.find(c => c.text.includes('INSERT INTO app_config'))!.binds[1]).toBeNull()
   })
 
   it('stores the trimmed label', async () => {
     db([])
     const res = await post({ batch: '  W3 Oct, 2026\n' })
-    expect(await res.json()).toEqual({ current_batch: 'W3 Oct, 2026', starts_on: '2026-10-14' })
+    expect(await res.json()).toEqual({ current_batch: 'W3 Oct, 2026', starts_at: '2026-10-14T09:30' })
     expect(calls.find(c => c.text.includes('INSERT INTO app_config'))!.binds).toContain('W3 Oct, 2026')
   })
 })

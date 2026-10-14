@@ -33,8 +33,8 @@ import { clearBatchSpanCache } from '@/lib/report-batches'
 const sqlMock = sql as unknown as jest.Mock
 
 const SPANS = [
-  { batch: 'W3 Sep, 2026', from: '2026-09-14', to: '2026-09-21' },
-  { batch: 'W2 Sep, 2026', from: '2026-09-07', to: '2026-09-14' },
+  { batch: 'W3 Sep, 2026', from: '2026-09-14', to: '2026-09-21', fromAt: '2026-09-14T02:17:00Z', toAt: null },
+  { batch: 'W2 Sep, 2026', from: '2026-09-07', to: '2026-09-14', fromAt: '2026-09-07T04:17:00Z', toAt: '2026-09-14T02:17:00Z' },
 ]
 
 function setup(spans = SPANS) {
@@ -77,8 +77,11 @@ describe('GET /api/report?view=batch', () => {
   it('lets the label win and places only unlabeled games by date', async () => {
     setup()
     await call('W3 Sep, 2026')
-    // the resolved window is still bound as a parameter: it places the unlabeled games
-    expect(params()).toEqual(expect.arrayContaining(['2026-09-14', '2026-09-21']))
+    // the resolved window is still bound as a parameter: it places the unlabeled games, and
+    // it is cut at the exact INSTANT the batch started (the switch happens mid-day), not
+    // at midnight; the newest batch has no end yet, so no upper bound is bound for it
+    expect(params()).toEqual(expect.arrayContaining(['2026-09-14', '2026-09-14T02:17:00Z']))
+    expect(queries().some((q) => /evaluate_date >= .*::timestamptz/.test(q))).toBe(true)
     const qs = queries()
     // a labeled game is in whatever batch it carries...
     expect(qs.some((q) => /AND \(ge\.batch = /.test(q))).toBe(true)
@@ -87,6 +90,15 @@ describe('GET /api/report?view=batch', () => {
     // the known labels are what "another batch" is measured against
     const known = params().filter((v) => Array.isArray(v)).flat()
     expect(known).toEqual(expect.arrayContaining(['W3 Sep, 2026', 'W2 Sep, 2026']))
+  })
+
+  it('cuts a closed batch at both exact instants, so the day of a switch is split by time', async () => {
+    setup()
+    await call('W2 Sep, 2026', 'arcade')
+    // W2 Sep ran from 07/09 11:17 (VN) to the moment W3 Sep started, 14/09 09:17 (VN):
+    // a game judged at 10:00 on 14/09 is W3 Sep's, one judged at 08:00 is W2 Sep's
+    expect(params()).toEqual(expect.arrayContaining(['2026-09-07T04:17:00Z', '2026-09-14T02:17:00Z']))
+    expect(queries().some((q) => /evaluate_date < .*::timestamptz/.test(q))).toBe(true)
   })
 
   it('reports games moved in from outside the days, in a query of their own', async () => {
