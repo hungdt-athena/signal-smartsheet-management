@@ -15,6 +15,7 @@ const sqlMock = sql as unknown as jest.Mock
 const sessionMock = getServerSession as unknown as jest.Mock
 
 let calls: { text: string; binds: unknown[] }[] = []
+let batchStart: string | null = '2026-10-14'
 
 function db(config: { key: string; value: string | null }[]) {
   calls = []
@@ -22,7 +23,11 @@ function db(config: { key: string; value: string | null }[]) {
   sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
     const text = Array.isArray(strings) ? (strings as string[]).join(' ') : ''
     calls.push({ text, binds })
-    return Promise.resolve(text.includes('SELECT key, value') ? config : [])
+    if (text.includes('SELECT key, value')) return Promise.resolve(config)
+    // the batch's own start day: the upsert returns it, the read-back selects it
+    if (text.includes('INSERT INTO batches')) return Promise.resolve([{ starts_on: batchStart }])
+    if (text.includes('FROM batches')) return Promise.resolve(batchStart ? [{ starts_on: batchStart }] : [])
+    return Promise.resolve([])
   })
 }
 
@@ -45,13 +50,13 @@ describe('/api/evaluations/current-batch', () => {
       { key: 'current_batch', value: 'W2 Oct, 2026' },
     ])
     const res = await GET(new NextRequest('http://localhost/api/evaluations/current-batch?category=puzzle'))
-    expect(await res.json()).toEqual({ current_batch: 'W2 Oct, 2026' })
+    expect(await res.json()).toEqual({ current_batch: 'W2 Oct, 2026', starts_on: '2026-10-14' })
   })
 
   it('POST writes the single global key, whatever category the caller sends', async () => {
     db([])
     const res = await post({ category: 'arcade', batch: 'W3 Oct, 2026' })
-    expect(await res.json()).toEqual({ current_batch: 'W3 Oct, 2026' })
+    expect(await res.json()).toEqual({ current_batch: 'W3 Oct, 2026', starts_on: '2026-10-14' })
     const write = calls.find(c => c.text.includes('INSERT INTO app_config'))!
     expect(write.binds[0]).toBe('current_batch')
     expect(write.binds).toContain('W3 Oct, 2026')
@@ -61,7 +66,7 @@ describe('/api/evaluations/current-batch', () => {
   it('POST with no batch stores null, meaning "none"', async () => {
     db([])
     const res = await post({ batch: null })
-    expect(await res.json()).toEqual({ current_batch: null })
+    expect(await res.json()).toEqual({ current_batch: null, starts_on: null })
     const write = calls.find(c => c.text.includes('INSERT INTO app_config'))!
     expect(write.binds[1]).toBeNull()
   })
@@ -79,6 +84,67 @@ describe('/api/evaluations/current-batch', () => {
     db([])
     const res = await post({ batch: 'W3 Oct, 2026' })
     expect(res.status).toBe(401)
+  })
+})
+
+describe('/api/evaluations/current-batch start day', () => {
+  const realSkip = process.env.SKIP_AUTH
+  beforeEach(() => {
+    process.env.SKIP_AUTH = 'false'
+    sessionMock.mockResolvedValue({ user: { name: 'HungDT', role: 'admin' } })
+    batchStart = '2026-10-14'
+  })
+  afterAll(() => { process.env.SKIP_AUTH = realSkip })
+  const upsert = () => calls.find(c => c.text.includes('INSERT INTO batches'))!
+
+  it('a new batch starts tomorrow (Vietnam time) unless a day is given', async () => {
+    db([])
+    await post({ batch: 'W4 Oct, 2026' })
+    expect(upsert().text).toMatch(/Asia\/Ho_Chi_Minh/)
+    expect(upsert().text).toMatch(/::date \+ 1/)
+    expect(upsert().binds).toContain('W4 Oct, 2026')
+    expect(upsert().binds).toContain(null)               // no start given -> server default / keep
+  })
+
+  it('stores the day the manager picked', async () => {
+    db([])
+    const res = await post({ batch: 'W4 Oct, 2026', starts_on: '2026-10-21' })
+    expect(res.status).toBe(200)
+    expect(upsert().binds).toContain('2026-10-21')
+  })
+
+  it('writes the start BEFORE the current batch, so a refused start changes nothing', async () => {
+    db([])
+    await post({ batch: 'W4 Oct, 2026', starts_on: '2026-10-21' })
+    const order = calls.map(c => (c.text.includes('INSERT INTO batches') ? 'batches' : c.text.includes('INSERT INTO app_config') ? 'config' : ''))
+      .filter(Boolean)
+    expect(order).toEqual(['batches', 'config'])
+  })
+
+  it('answers 409 and leaves the current batch alone when another batch starts that day', async () => {
+    db([])
+    sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
+      const text = Array.isArray(strings) ? (strings as string[]).join(' ') : ''
+      calls.push({ text, binds })
+      if (text.includes('INSERT INTO batches')) return Promise.reject(Object.assign(new Error('dup'), { code: '23505' }))
+      return Promise.resolve([])
+    })
+    const res = await post({ batch: 'W4 Oct, 2026', starts_on: '2026-10-14' })
+    expect(res.status).toBe(409)
+    expect(calls.some(c => c.text.includes('INSERT INTO app_config'))).toBe(false)
+  })
+
+  it.each([['2026-02-31'], ['14/10/2026'], ['2026-10-14T00:00:00Z'], [20261014], [true]])('400 and no write for starts_on %j', async day => {
+    db([])
+    const res = await post({ batch: 'W4 Oct, 2026', starts_on: day })
+    expect(res.status).toBe(400)
+    expect(calls.some(c => c.text.includes('INSERT INTO'))).toBe(false)
+  })
+
+  it('clearing the batch does not touch `batches`', async () => {
+    db([])
+    await post({ batch: null })
+    expect(calls.some(c => c.text.includes('INSERT INTO batches'))).toBe(false)
   })
 })
 
@@ -131,14 +197,14 @@ describe('POST /api/evaluations/current-batch validation', () => {
     db([])
     const res = await post({ batch: value })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ current_batch: null })
+    expect(await res.json()).toEqual({ current_batch: null, starts_on: null })
     expect(calls.find(c => c.text.includes('INSERT INTO app_config'))!.binds[1]).toBeNull()
   })
 
   it('stores the trimmed label', async () => {
     db([])
     const res = await post({ batch: '  W3 Oct, 2026\n' })
-    expect(await res.json()).toEqual({ current_batch: 'W3 Oct, 2026' })
+    expect(await res.json()).toEqual({ current_batch: 'W3 Oct, 2026', starts_on: '2026-10-14' })
     expect(calls.find(c => c.text.includes('INSERT INTO app_config'))!.binds).toContain('W3 Oct, 2026')
   })
 })

@@ -1,4 +1,4 @@
-import { saveCurrentBatch } from '@/lib/current-batch-client'
+import { saveCurrentBatch, loadCurrentBatchStart } from '@/lib/current-batch-client'
 
 describe('saveCurrentBatch', () => {
   it('POSTs only the batch (no category) and resolves true on success', async () => {
@@ -23,5 +23,23 @@ describe('saveCurrentBatch', () => {
     expect(await saveCurrentBatch('W2 Oct, 2026')).toBe(false)
     global.fetch = jest.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch
     expect(await saveCurrentBatch('W2 Oct, 2026')).toBe(false)
+  })
+})
+
+describe('start day', () => {
+  it('sends starts_on only when one is given', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true })
+    global.fetch = fetchMock as unknown as typeof fetch
+    await saveCurrentBatch('W3 Oct, 2026', '2026-10-14')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ batch: 'W3 Oct, 2026', starts_on: '2026-10-14' })
+  })
+
+  it('reads the current start, and null on anything else', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ current_batch: 'W3 Oct, 2026', starts_on: '2026-10-14' }) }) as unknown as typeof fetch
+    expect(await loadCurrentBatchStart()).toBe('2026-10-14')
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ current_batch: null, starts_on: null }) }) as unknown as typeof fetch
+    expect(await loadCurrentBatchStart()).toBeNull()
+    global.fetch = jest.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch
+    expect(await loadCurrentBatchStart()).toBeNull()
   })
 })

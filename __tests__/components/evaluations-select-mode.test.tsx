@@ -75,6 +75,9 @@ function stubFetch() {
     let body: unknown = {}
     if (url.startsWith('/api/evaluations/facets')) {
       body = { available_months: [], available_conclusions: ['List_Idea'], available_evaluators: ['PhuongNT1'], available_batches: ['W1 Oct, 2026', 'W4 Sep, 2026'], current_batch: 'W2 Oct, 2026', default_batch: 'W1 Oct, 2026' }
+    } else if (url.startsWith('/api/evaluations/current-batch') && init?.method !== 'POST') {
+      // the picker also READS the batch's start day; that is not a save
+      body = { current_batch: 'W2 Oct, 2026', starts_on: '2026-10-06' }
     } else if (url.startsWith('/api/evaluations/current-batch')) {
       if (holdCurrentBatch) {
         return new Promise<Response>(r => { pendingPosts.push(ok => r({ ok, json: () => Promise.resolve({}) } as Response)) })
@@ -295,9 +298,19 @@ describe('Short List select mode', () => {
   })
 
   describe('current batch picker', () => {
-    const post = (calls: { url: string }[]) => calls.filter(c => c.url === '/api/evaluations/current-batch')
+    const post = (calls: { url: string; init?: RequestInit }[]) => calls.filter(c => c.url === '/api/evaluations/current-batch' && c.init?.method === 'POST')
     const picker = () => screen.getByLabelText('Not set') as HTMLSelectElement
     const ALERT = "Couldn't save the batch. Try again."
+
+    it('shows the day the batch starts and saves a changed day with the batch', async () => {
+      const calls = await open()
+      const day = () => screen.getByLabelText('Starts on') as HTMLInputElement
+      await waitFor(() => expect(day().value).toBe('2026-10-06'))
+      await act(async () => { fireEvent.change(day(), { target: { value: '2026-10-07' } }) })
+      const sent = post(calls)
+      expect(sent).toHaveLength(1)
+      expect(JSON.parse(String(sent[0].init?.body))).toEqual({ batch: 'W2 Oct, 2026', starts_on: '2026-10-07' })
+    })
 
     it('puts the old value back and says so when the save fails', async () => {
       const calls = await open()

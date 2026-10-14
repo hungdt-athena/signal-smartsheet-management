@@ -27,7 +27,7 @@ import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import { isManagerRole } from '@/lib/roles'
 import { saveDriveLink } from '@/lib/drive-link-client'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
-import { saveCurrentBatch } from '@/lib/current-batch-client'
+import { saveCurrentBatch, loadCurrentBatchStart } from '@/lib/current-batch-client'
 import { BatchMoveBar } from '@/components/BatchMoveBar'
 
 interface Evaluation {
@@ -538,6 +538,9 @@ function ShortListEvalTab() {
   const [filterBatch, setFilterBatch] = useState('')
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
   const [currentBatchSaveFailed, setCurrentBatchSaveFailed] = useState(false)
+  // The day the current batch starts (batches.starts_on). The Report places games that
+  // carry no label by it, so a manager can see and change it where the batch is set.
+  const [currentBatchStart, setCurrentBatchStart] = useState<string | null>(null)
   // Last value the server confirmed (loaded, or a save that succeeded), and a counter of
   // current-batch saves. Two quick changes can settle out of order: a failure restores the
   // confirmed value (not the one before THIS change) and only the newest request may complain.
@@ -604,6 +607,7 @@ function ShortListEvalTab() {
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
         confirmedBatchRef.current = json.current_batch
+        if (json.current_batch) loadCurrentBatchStart().then(setCurrentBatchStart)
         if (!batchDefaultedRef.current) {
           batchDefaultedRef.current = true
           // Pre-select the team's current batch, but fall back to the most recent
@@ -703,12 +707,25 @@ function ShortListEvalTab() {
     const latest = seq === batchSaveSeqRef.current
     if (ok) {
       confirmedBatchRef.current = v || null
-      if (latest) setCurrentBatchSaveFailed(false)
+      if (latest) {
+        setCurrentBatchSaveFailed(false)
+        setCurrentBatchStart(v ? await loadCurrentBatchStart() : null)
+      }
       return
     }
     // An older request failing after a newer one was sent says nothing about the picker.
     if (!latest) return
     setCurrentBatch(confirmedBatchRef.current)
+    setCurrentBatchSaveFailed(true)
+  }
+  const handleCurrentBatchStartChange = async (day: string) => {
+    if (!currentBatch || !day) return
+    const before = currentBatchStart
+    setCurrentBatchStart(day)
+    const ok = await saveCurrentBatch(currentBatch, day)
+    if (ok) { setCurrentBatchSaveFailed(false); return }
+    // e.g. another batch already starts that day: show what the server still has.
+    setCurrentBatchStart(before)
     setCurrentBatchSaveFailed(true)
   }
   const currentBatchOptions = (() => {
@@ -758,6 +775,13 @@ function ShortListEvalTab() {
                 options={[{ value: '', label: '— none —' }, ...currentBatchOptions.map(b => ({ value: b, label: b }))]}
               />
             </div>
+            {currentBatch && (
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 10.5, color: 'var(--faint)' }}>
+                Starts on
+                <input type="date" className="input" value={currentBatchStart || ''}
+                  onChange={e => handleCurrentBatchStartChange(e.target.value)} />
+              </label>
+            )}
           </div>
         )}
       </div>

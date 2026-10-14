@@ -3,11 +3,12 @@
  */
 /* A batch is the team's name for a week, but in the schema it is only a LABEL - and one
  * carried by ~4% of rows, almost all of them shortlisted games. `/api/report` therefore
- * resolves the label to the days it covers and filters on those days like every other
- * view. These tests pin the two halves of that:
+ * resolves the label to the days it covers (table `batches`). These tests pin the rules:
  *
- *   1. a resolvable batch filters by DATE and never by the label
- *   2. an unresolvable one falls back to the LABEL
+ *   1. LABEL WINS: a game carrying the batch's label is in it whatever day it was judged;
+ *      only games without a label (or with a label that has no row) are placed by date
+ *   2. an unresolvable batch falls back to the LABEL
+ *   3. games moved in from outside the days are reported as `movedIn`
  *
  * (2) is the one that matters. Without the fallback its window carries neither dates nor
  * a label, which is not an error - it is an empty predicate that silently widens to ALL
@@ -43,7 +44,7 @@ function setup(spans = SPANS) {
     if (!Array.isArray(strings)) return Promise.resolve([])
     const q = (strings as string[]).join(' ')
     // the span lookup itself
-    if (q.includes('lead(f) OVER')) return Promise.resolve(spans)
+    if (q.includes('FROM batches')) return Promise.resolve(spans)
     // "which batch is newest" (the default key) and the dropdown option list
     if (q.includes('GROUP BY batch')) return Promise.resolve([{ batch: 'W3 Sep, 2026' }, { batch: 'W2 Sep, 2026' }])
     if (q.includes("'week' AS kind")) {
@@ -73,14 +74,26 @@ const call = (key: string, category = 'puzzle') =>
   GET(new NextRequest(`http://localhost/api/report?view=batch&key=${encodeURIComponent(key)}&category=${category}`))
 
 describe('GET /api/report?view=batch', () => {
-  it('filters a known batch by its days, not by its label', async () => {
+  it('lets the label win and places only unlabeled games by date', async () => {
     setup()
     await call('W3 Sep, 2026')
-    // the resolved window is bound as a parameter somewhere
+    // the resolved window is still bound as a parameter: it places the unlabeled games
     expect(params()).toEqual(expect.arrayContaining(['2026-09-14', '2026-09-21']))
-    // and nothing narrows on the label any more - that is what made the view a cohort
-    const labelFilters = queries().filter((q) => /AND ge\.batch =/.test(q) || /AND batch =/.test(q))
-    expect(labelFilters).toEqual([])
+    const qs = queries()
+    // a labeled game is in whatever batch it carries...
+    expect(qs.some((q) => /AND \(ge\.batch = /.test(q))).toBe(true)
+    // ...and a game labeled for ANOTHER known batch is not placed here by its date
+    expect(qs.some((q) => /ge\.batch IS NULL OR ge\.batch <> ALL/.test(q))).toBe(true)
+    // the known labels are what "another batch" is measured against
+    const known = params().filter((v) => Array.isArray(v)).flat()
+    expect(known).toEqual(expect.arrayContaining(['W3 Sep, 2026', 'W2 Sep, 2026']))
+  })
+
+  it('reports games moved in from outside the days, in a query of their own', async () => {
+    setup()
+    await call('W3 Sep, 2026', 'simulation')
+    const moved = queries().find((q) => /ge\.batch = /.test(q) && /ge\.evaluate_date </.test(q) && /count\(\*\)::int AS n/.test(q))
+    expect(moved).toBeTruthy()
   })
 
   it('reports the resolved days back to the client', async () => {

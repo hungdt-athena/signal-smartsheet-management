@@ -262,7 +262,7 @@ export async function GET(req: NextRequest) {
        covers, so nothing filters on the label any anymore - which is what made batch
        view a ~5% cohort instead of a week.
 
-       The fallback matters. A batch from before `BATCH_ERA_START` has no resolvable
+       The fallback matters. A batch with no row in `batches` (the pre-July leftovers) has no resolvable
        span, and without this branch its window would carry neither dates nor a label:
        an empty predicate, which does not fail - it silently widens to ALL TIME and
        renders a perfectly healthy-looking page of the wrong numbers. Falling back to
@@ -272,13 +272,30 @@ export async function GET(req: NextRequest) {
        must narrow to its label, never to nothing. `legacyBatch` is that one condition,
        named once so a new query cannot quietly forget it. */
     const legacyBatch: string | null = win.batch && !batchSpan ? win.batch : null
-    const winOn = (frag: ReturnType<typeof sql>) => legacyBatch ? sql`AND ge.batch = ${legacyBatch}` : frag
 
-    const winF = legacyBatch
+    /* LABEL WINS. A game that carries a batch label belongs to that batch, whatever day it
+       was judged: managers move games between batches on purpose (a game judged 01/10 and
+       pulled into W2 Oct for recording is W2 Oct's game). The dates only place the games
+       that carry no label - or a label with no row in `batches`, i.e. the pre-July
+       leftovers, which fall back to dates rather than vanishing from every window.
+
+       Only a RESOLVED batch gets this. Date views (week/month/quarter/year) are what they
+       always were: they filter on the day. So the same game can be in "W2 Oct" (batch view)
+       and in the week it was judged (week view); inside one view it is counted once. */
+    const winLabel: string | null = batchSpan ? win.batch ?? null : null
+    const knownBatches = batchSpans.map((b) => b.batch)
+    const unlabeledGe = sql`(ge.batch IS NULL OR ge.batch <> ALL(${knownBatches}::text[]))`
+    const unlabeledRec = sql`(batch IS NULL OR batch <> ALL(${knownBatches}::text[]))`
+    const winOn = (frag: ReturnType<typeof sql>) => legacyBatch
       ? sql`AND ge.batch = ${legacyBatch}`
-      : sql`
+      : winLabel ? sql`AND (ge.batch = ${winLabel} OR (${unlabeledGe} ${frag}))` : frag
+
+    const winDates = sql`
         ${win.from ? sql`AND ge.evaluate_date >= ${vnBound(win.from)}` : sql``}
         ${win.to ? sql`AND ge.evaluate_date < ${vnBound(win.to)}` : sql``}`
+    const winF = legacyBatch
+      ? sql`AND ge.batch = ${legacyBatch}`
+      : winLabel ? sql`AND (ge.batch = ${winLabel} OR (${unlabeledGe} ${winDates}))` : winDates
 
     // Bucket unit for the time series, from the window span.
     const spanDays = win.from && win.to
@@ -357,6 +374,23 @@ export async function GET(req: NextRequest) {
         AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
         ${notSystem}
         ${catF} ${winF}`
+
+    /* Games that belong to this batch by label but were judged outside its days: the ones a
+       manager moved in. They are counted in every number on the tab, but the day charts
+       only draw the batch's own days, so without this the two would not add up and nothing
+       would say why. Sent as one chip, not as extra bars. */
+    const movedInPromise = winLabel && win.from && win.to
+      ? sql`
+        SELECT count(*)::int AS n,
+               min((ge.evaluate_date AT TIME ZONE ${VN})::date)::text AS first,
+               max((ge.evaluate_date AT TIME ZONE ${VN})::date)::text AS last
+        FROM game_evaluations ge
+        WHERE ge.evaluate_date IS NOT NULL
+          AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+          ${notSystem} ${catF}
+          AND ge.batch = ${winLabel}
+          AND (ge.evaluate_date < ${vnBound(win.from)} OR ge.evaluate_date >= ${vnBound(win.to)})`
+      : Promise.resolve([])
 
     /* The waiting stock, right now. Deliberately OUTSIDE `pipelinePromise`: it has no
        window in it at all - no date bound, no batch - so it is the one number on this
@@ -637,7 +671,7 @@ export async function GET(req: NextRequest) {
        FROM daily WHERE day < ${win.from}::date
        ORDER BY k, day DESC)` : sql``}`
 
-    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, pipelineRaw, baselineRaw, prevRaw, personClearedRaw, personAgedRaw, backlogByRaw, stockRaw, rescueStats, personBacklogRaw] = await Promise.all([
+    const [perEval, assignedRows, assignedSeries, teamAssignedRows, initConcl, finConcl, series, dayPeople, actSeries, evalSeries, evalAsgSeries, recorders, optRows, videoRows, pipelineRaw, baselineRaw, prevRaw, personClearedRaw, personAgedRaw, backlogByRaw, stockRaw, rescueStats, personBacklogRaw, movedInRaw] = await Promise.all([
       // per-evaluator core + funnel. Shortlist = initial not bypassed (List_Idea);
       // Final Priority = moderator judged 'Priority IV' or 'Insight' (user-defined -
       // Priority V intentionally NOT counted).
@@ -825,7 +859,10 @@ export async function GET(req: NextRequest) {
           (record_confirmed_at AT TIME ZONE ${VN})::date::text AS confirmed_on,
           youtube_link
         FROM rec
-        WHERE TRUE ${legacyBatch ? sql`AND batch = ${legacyBatch}` : sql`
+        WHERE TRUE ${legacyBatch ? sql`AND batch = ${legacyBatch}` : winLabel ? sql`
+          AND (batch = ${winLabel} OR (${unlabeledRec} AND (rec_at IS NULL OR (TRUE
+            ${win.from ? sql`AND rec_at >= ${vnBound(win.from)}` : sql``}
+            ${win.to ? sql`AND rec_at < ${vnBound(win.to)}` : sql``}))))` : sql`
           AND (rec_at IS NULL OR (TRUE
             ${win.from ? sql`AND rec_at >= ${vnBound(win.from)}` : sql``}
             ${win.to ? sql`AND rec_at < ${vnBound(win.to)}` : sql``}))`}
@@ -926,6 +963,7 @@ export async function GET(req: NextRequest) {
       // result is thrown away below (rescue is manager-only).
       !scoped ? scanRescueRoster(category, rescueCfg) : Promise.resolve([]),
       personBacklogPromise,
+      movedInPromise,
     ])
 
     // fold conclusion maps
@@ -1469,6 +1507,11 @@ export async function GET(req: NextRequest) {
 
     const yearLabels = opts.year.map((k) => ({ key: k, label: `${k} · 1/1 – 31/12` }))
     const options = { week: weekLabels, month: monthLabels, quarter: quarterLabels, year: yearLabels, batch: batchLabels }
+    // See `movedInPromise`. null when the view is not a resolved batch or nothing was moved in.
+    const movedInRow = (movedInRaw as unknown as { n: number; first: string | null; last: string | null }[])[0]
+    const movedIn = movedInRow && movedInRow.n > 0
+      ? { count: movedInRow.n, firstJudged: movedInRow.first, lastJudged: movedInRow.last }
+      : null
     const shell = {
       // Two grains, and the client needs both by name. `bucketUnit` is the trend
       // charts' x axis; `activityUnit` is the heatmap's, which is deliberately finer.
@@ -1477,6 +1520,7 @@ export async function GET(req: NextRequest) {
       // evaluated" over a grid of days.
       view, category, title, window: win, bucketUnit: unit, activityUnit: actUnit, options,
       teamTotals, funnel, bench, baseline, prev, stock,
+      movedIn,
       staleDays: rescueCfg.staleDays,
     }
 
