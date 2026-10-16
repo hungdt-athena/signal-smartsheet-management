@@ -1,4 +1,4 @@
-import { normalizeTitle, durationBucket, ytKey, buildYtMap, ytLookup } from '@/lib/ytb-match'
+import { normalizeTitle, durationBucket, ytKey, buildYtMap, ytLookup, resolveYtMatches } from '@/lib/ytb-match'
 
 describe('lib/ytb-match', () => {
   it('normalizeTitle strips accents/case/extra spaces', () => {
@@ -74,5 +74,87 @@ describe('lib/ytb-match', () => {
     const map = buildYtMap([{ gameTitle: '★★★', youtubeId: 'stars', duration: '5', time: '' }])
     expect(ytLookup(map, '★★★', '5min')?.id).toBe('stars')
     expect(ytLookup(map, '☆☆☆', '5min')).toBeUndefined()
+  })
+})
+
+// Real prod misses: an upload only exists for an assigned game, so an upload no
+// game claims exactly is a typo of one.
+describe('resolveYtMatches', () => {
+  const up = (gameTitle: string, duration: string, pic: string, id = gameTitle, time = '') =>
+    ({ gameTitle, youtubeId: id, duration, pic, time })
+  const one = (title: string, bucket: '5min' | '20min', recorder: string, rows: ReturnType<typeof up>[]) =>
+    resolveYtMatches([{ key: 1, title, bucket, recorder }], rows).get(1)
+
+  it('exact title+bucket still wins and carries no approx flag', () => {
+    expect(one('Yarn Drop', '20min', 'KietCD', [up('Yarn Drop', '20', 'KietCD', 'a')])).toEqual({ id: 'a', time: '', pic: 'KietCD' })
+  })
+
+  it('tier A: sheet title is a word-prefix of the store title (dropped subtitle)', () => {
+    expect(one('Ant Jam - Bus Color Master', '5min', 'QuangVN', [up('Ant Jam', '5', 'QuangVN', 'a')])?.id).toBe('a')
+    expect(one('Tracewing: Word Search', '20min', 'ThuDT', [up('Tracewing Word Search Art', '20', 'ThuDT', 'a')])?.id).toBe('a')
+  })
+
+  it('tier A: one typo', () => {
+    expect(one('Yarn Drop', '20min', 'KietCD', [up('Yan Drop', '20', 'KietCD', 'a')])?.id).toBe('a')
+    expect(one('Snacky Traffic', '20min', 'MiTT', [up('Snacks Traffic', '20', 'MYTL', 'a')])?.id).toBe('a') // other uploader is fine
+    expect(one('Peng Shot', '20min', 'KietCD', [up('Peng Short', '20', 'KietCD', 'a')])?.id).toBe('a')
+  })
+
+  it('tier B: shared words count only with the same recorder', () => {
+    const rows = [up('Pixel Gem Loop - Sort Flow', '20', 'ThuDT', 'a')]
+    expect(one('Pixel Gem Loop - Jewel Flow', '20min', 'ThuDT', rows)?.id).toBe('a')
+    expect(one('Pixel Gem Loop - Jewel Flow', '20min', 'MiTT', rows)).toBeUndefined()
+  })
+
+  it('does not match unrelated titles that share a word or two', () => {
+    expect(one('Jelly Color Jam: Color Sort', '20min', 'MiTT', [up('Word Jam Sort', '20', 'MiTT')])).toBeUndefined()
+    expect(one('Gift Triple - Fruit Match Game', '5min', 'HuyDD', [up('Screw Triple Match', '5', 'MYTL')])).toBeUndefined()
+    // one bare word is too common without the same recorder
+    expect(one('Block Reveal!', '20min', 'MyTL', [up('Block', '20', 'ThuDT')])).toBeUndefined()
+  })
+
+  it('wrong duration: same title in the other bucket matches', () => {
+    expect(one('Dig Treasure!', '5min', 'PhuongNT1', [up('Dig Treasure!', '15', 'PhuongNT1', 'a')])?.id).toBe('a')
+  })
+
+  it('wrong duration + typo needs the same recorder', () => {
+    const rows = [up('Perfect Plan: Logic Puzzle', '20', 'KietCD', 'a')]
+    expect(one('Perfect Plan: Logic Puzzles', '5min', 'KietCD', rows)?.id).toBe('a')
+    expect(one('Perfect Plan: Logic Puzzles', '5min', 'ThuDT', rows)).toBeUndefined()
+  })
+
+  it('same bucket beats the other bucket', () => {
+    const rows = [up('Peng Short', '5', 'KietCD', 'five'), up('Peng Short', '20', 'KietCD', 'twenty')]
+    expect(one('Peng Shot', '20min', 'KietCD', rows)?.id).toBe('twenty')
+  })
+
+  it('never takes an upload another game matches exactly', () => {
+    const out = resolveYtMatches(
+      [{ key: 1, title: 'Peng Shot', bucket: '20min', recorder: 'KietCD' }, { key: 2, title: 'Peng Short', bucket: '20min', recorder: 'KietCD' }],
+      [up('Peng Short', '20', 'KietCD', 'a')],
+    )
+    expect(out.get(2)?.id).toBe('a')
+    expect(out.get(1)).toBeUndefined()
+  })
+
+  it('an upload that two different titles want equally goes to neither', () => {
+    const out = resolveYtMatches(
+      [{ key: 1, title: 'Tile Sort A', bucket: '5min', recorder: 'X' }, { key: 2, title: 'Tile Sort B', bucket: '5min', recorder: 'X' }],
+      [up('Tile Sort', '5', 'X', 'a')],
+    )
+    expect(out.size).toBe(0)
+  })
+
+  it('android and ios rows with one title share the upload', () => {
+    const out = resolveYtMatches(
+      [{ key: 1, title: 'Ant Jam - Bus Color Master', bucket: '5min', recorder: 'Q' }, { key: 2, title: 'Ant Jam - Bus Color Master', bucket: '5min', recorder: 'Q' }],
+      [up('Ant Jam', '5', 'Q', 'a')],
+    )
+    expect(out.get(1)?.id).toBe('a')
+    expect(out.get(2)?.id).toBe('a')
+  })
+
+  it('records which upload title an approximate match came from', () => {
+    expect(one('Yarn Drop', '20min', 'K', [up('Yan Drop', '20', 'K', 'a')])?.approx).toBe('Yan Drop')
   })
 })

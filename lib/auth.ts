@@ -86,7 +86,7 @@ export const authOptions: NextAuthOptions = {
           return '/login?error=domain'
         }
 
-        const existing = await sql`SELECT id, active FROM dashboard_users WHERE email = ${user.email}`
+        const existing = await sql`SELECT id, active FROM dashboard_users WHERE lower(trim(email)) = ${user.email.trim().toLowerCase()}`
         // A deactivated account keeps its row (and all its history) but must not
         // get back in — this is what Users Management' Deactivate now means.
         if (existing.length > 0) return existing[0].active === false ? '/login?error=inactive' : true

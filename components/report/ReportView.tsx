@@ -220,6 +220,10 @@ interface Bundle {
   // reaches - which is exactly why it is not inside `pipeline`, whose contents all need
   // a time axis and are therefore null on batch view.
   stock: { backlog: number; age: { a0: number; a1: number; a2: number; a3: number } }
+  // Batch view only: games that carry this batch's label but were judged outside its days
+  // (a manager moved them in). They are inside every total here; the day charts draw only
+  // the batch's own days, so this is the line that makes the two add up.
+  movedIn?: { count: number; firstJudged: string | null; lastJudged: string | null } | null
   // Who the unevaluated backlog is sitting with, as of NOW (never window-sliced - it
   // is the same stock as Overview's Backlog KPI and sums to the same total). Age
   // bands are days since `assigned_date`, i.e. how long THIS person has held it.
@@ -422,7 +426,10 @@ function ReportInner() {
             ? <>Evaluator performance · initial evaluation, recording &amp; shortlist funnel</>
             : <>Your performance · initial evaluation, recording &amp; shortlist quality, compared with the team average</>}
             {data && <> · <b>{data.window.label}</b>
-              {rangeText(data.window.from, data.window.to) && <> · {rangeText(data.window.from, data.window.to)}</>}</>}</p>
+              {rangeText(data.window.from, data.window.to) && <> · {rangeText(data.window.from, data.window.to)}</>}</>}
+            {data?.movedIn && <> · <span title="Games with this batch's label that were judged outside these days. They count in every total on this tab but are not drawn in the day charts.">
+              {data.movedIn.count} moved in{data.movedIn.firstJudged && data.movedIn.lastJudged
+                ? ` (judged ${rangeText(data.movedIn.firstJudged, addDays(data.movedIn.lastJudged, 1))})` : ''}</span></>}</p>
         </div>
         <div className="head-actions">
           <button className="btn btn-sm" onClick={fetchData} disabled={loading}>{loading ? 'Loading…' : '↻ Refresh'}</button>

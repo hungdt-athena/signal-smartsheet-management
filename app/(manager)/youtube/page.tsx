@@ -3,7 +3,7 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
-import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
+import { resolveYtMatches, type YtMatch } from '@/lib/ytb-match'
 import { prettyConclusion } from '@/lib/buckets'
 import { useConfig } from '@/hooks/useConfig'
 import { LockIcon, UserIcon } from '@/components/icons'
@@ -963,11 +963,11 @@ const FINAL_CONC_STYLES: Record<string, { bg: string; color: string }> = {
   'Not Found':   { bg: '#374151', color: '#e5e7eb' },
 }
 
-function recordStatus(item: ShortListItem, ytMap: Map<string, YtMatch>): { status: RecordStatus; youtubeId?: string } {
+function recordStatus(item: ShortListItem, ytMap: Map<number | string, YtMatch>): { status: RecordStatus; youtubeId?: string; approx?: string } {
   const bucket = effectiveBucket(item)
   const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
-  const yt = ytLookup(ytMap, item.title, bucket)
-  if (yt) return { status: 'recorded', youtubeId: yt.id }
+  const yt = ytMap.get(item.id)
+  if (yt) return { status: 'recorded', youtubeId: yt.id, approx: yt.approx }
   if (!assignee) return { status: 'pending' }
   if (item.record_confirmed_at) return { status: 'recording' }
   return { status: 'draft' }
@@ -982,7 +982,7 @@ const RECORD_STATUS_STYLES: Record<RecordStatus, { cls: string; label: string; s
   recorded:  { cls: 'success', label: 'Recorded' },
 }
 
-function RecordStatusBadge({ status, youtubeId }: { status: RecordStatus; youtubeId?: string }) {
+function RecordStatusBadge({ status, youtubeId, approx }: { status: RecordStatus; youtubeId?: string; approx?: string }) {
   const s = RECORD_STATUS_STYLES[status]
   if (status === 'recorded' && youtubeId) {
     return (
@@ -991,7 +991,7 @@ function RecordStatusBadge({ status, youtubeId }: { status: RecordStatus; youtub
         target="_blank"
         rel="noopener noreferrer"
         onClick={e => e.stopPropagation()}
-        title="Open on YouTube"
+        title={approx ? `Matched to upload "${approx}" — open on YouTube` : 'Open on YouTube'}
         className={`badge ${s.cls} yt-link`}
         style={{ textDecoration: 'none', cursor: 'pointer', ...s.style }}
       >
@@ -1016,7 +1016,7 @@ function RecordTable({
   recorders: string[]
   onAssign: (item: ShortListItem, name: string) => void
   onReset: (id: number) => void
-  ytMap: Map<string, YtMatch>
+  ytMap: Map<number | string, YtMatch>
   onClickGame: (gameId: string) => void
   dragOver: boolean
   onHeaderAdd?: () => void
@@ -1065,7 +1065,7 @@ function RecordTable({
             {items.map((item, idx) => {
               const eb = effectiveBucket(item)
               const assignee = eb === '20min' ? item.record_20min_assignee : item.record_5min_assignee
-              const { status, youtubeId } = recordStatus(item, ytMap)
+              const { status, youtubeId, approx } = recordStatus(item, ytMap)
               // Once confirmed (recording) — or already recorded — the recorder
               // is locked; no reassigning.
               const assignLocked = status === 'recording' || status === 'recorded'
@@ -1147,7 +1147,7 @@ function RecordTable({
                         )}
                       </td>
                       <td>
-                        <RecordStatusBadge status={status} youtubeId={youtubeId} />
+                        <RecordStatusBadge status={status} youtubeId={youtubeId} approx={approx} />
                       </td>
                       {isManager && (
                         <td onClick={e => e.stopPropagation()} style={{ textAlign: 'center' }}>
@@ -1514,7 +1514,7 @@ function RecordTab() {
   // matching how Extract Chat groups them. Default on; toggle back to date order.
   const [groupByRecorder, setGroupByRecorder] = useState(true)
   const [recorders, setRecorders] = useState<string[]>([])
-  const [ytMap, setYtMap] = useState<Map<string, YtMatch>>(new Map())
+  const [ytRows, setYtRows] = useState<YtbRow[]>([])
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
   const [showExtract, setShowExtract] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -1571,7 +1571,7 @@ function RecordTab() {
     fetch('/api/team/recorders').then(r => r.ok ? r.json() : []).then(setRecorders).catch(() => {})
     fetch('/api/sheets/ytb-uploaded', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : [])
-      .then((rows: YtbRow[]) => setYtMap(buildYtMap(rows)))
+      .then((rows: YtbRow[]) => setYtRows(rows))
       .catch(() => {})
   }, [])
 
@@ -1692,6 +1692,13 @@ function RecordTab() {
     if (dragged.from === target) return
     moveBucket(dragged.id, target)
   }, [moveBucket])
+
+  // Each game's YouTube upload: exact title+bucket first, then the closest
+  // unclaimed upload (typo, dropped subtitle, wrong duration) — see lib/ytb-match.
+  const ytMap = useMemo(() => resolveYtMatches(
+    data.map(d => ({ key: d.id, title: d.title, bucket: effectiveBucket(d), recorder: recorderOf(d) })),
+    ytRows,
+  ), [data, ytRows])
 
   // Split into the two buckets by effective bucket, then apply the status filter.
   const list5 = useMemo(() => data.filter(d => effectiveBucket(d) === '5min'), [data])

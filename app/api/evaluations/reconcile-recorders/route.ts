@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getYtbUploaded } from '@/lib/ytb-cache'
-import { buildYtMap, ytLookup, normalizeName, type Bucket } from '@/lib/ytb-match'
+import { buildYtMap, ytLookup, resolveYtMatches, normalizeName, type Bucket } from '@/lib/ytb-match'
 
 export const dynamic = 'force-dynamic'
 
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
       ? new Set(body.ids.map((n: unknown) => Number(n)).filter(Number.isFinite))
       : null
 
-    // 1. Uploads → map keyed by title+bucket, keeping the earliest upload's pic.
+    // 1. Uploads → map keyed by title+bucket (earliest upload's pic) for the demo-link lookups.
     const ytRows = await getYtbUploaded()
     const ytMap = buildYtMap(ytRows)
 
@@ -129,12 +129,25 @@ export async function POST(req: NextRequest) {
     const unmatched: Unmatched[] = []
     const linkChanges: LinkChange[] = []
 
-    for (const row of rows) {
-      // The bucket the game sits in, same rule as the Record tab.
-      const bucket: Bucket = row.record_bucket === '5min' || row.record_bucket === '20min'
+    // The bucket the game sits in, same rule as the Record tab.
+    const bucketOf = (row: typeof rows[number]): Bucket =>
+      row.record_bucket === '5min' || row.record_bucket === '20min'
         ? row.record_bucket
         : (row.final_conclusion === 'Priority IV' ? '20min' : '5min')
-      const own = ytLookup(ytMap, row.title, bucket)
+
+    // Exact title+bucket first, then an unclaimed upload that is close enough
+    // (typo / dropped subtitle / wrong duration) — same resolver as the Record tab.
+    const resolved = resolveYtMatches(
+      rows.map(r => {
+        const b = bucketOf(r)
+        return { key: r.id, title: r.title, bucket: b, recorder: b === '5min' ? r.record_5min_assignee : r.record_20min_assignee }
+      }),
+      ytRows,
+    )
+
+    for (const row of rows) {
+      const bucket = bucketOf(row)
+      const own = resolved.get(row.id)
 
       // Demo link: 20min preferred (the full gameplay record beats the 5-min clip).
       // Matched by title, so Android and iOS share one demo, which is fine.
@@ -142,8 +155,8 @@ export async function POST(req: NextRequest) {
       // video (its bucket), the one the Record tab shows as Recorded, and NULL
       // when that video doesn't exist. Report counts a recording by it, so a
       // same-title game's video on the other OS must not mark this one done.
-      const yt20 = ytLookup(ytMap, row.title, '20min')
-      const yt5 = ytLookup(ytMap, row.title, '5min')
+      const yt20 = bucket === '20min' ? own : ytLookup(ytMap, row.title, '20min')
+      const yt5 = bucket === '5min' ? own : ytLookup(ytMap, row.title, '5min')
       const ytLink = yt20 || yt5
       const ownAt = own ? vnStamp(own.time) : null
       if (ytLink?.id && (extractYtId(row.youtube_link || '') !== ytLink.id || (row.uploaded_local ?? null) !== ownAt)) {

@@ -75,6 +75,9 @@ function stubFetch() {
     let body: unknown = {}
     if (url.startsWith('/api/evaluations/facets')) {
       body = { available_months: [], available_conclusions: ['List_Idea'], available_evaluators: ['PhuongNT1'], available_batches: ['W1 Oct, 2026', 'W4 Sep, 2026'], current_batch: 'W2 Oct, 2026', default_batch: 'W1 Oct, 2026' }
+    } else if (url.startsWith('/api/evaluations/current-batch') && init?.method !== 'POST') {
+      // the picker also READS the batch's start day; that is not a save
+      body = { current_batch: 'W2 Oct, 2026', starts_at: '2026-10-06T11:28' }
     } else if (url.startsWith('/api/evaluations/current-batch')) {
       if (holdCurrentBatch) {
         return new Promise<Response>(r => { pendingPosts.push(ok => r({ ok, json: () => Promise.resolve({}) } as Response)) })
@@ -296,13 +299,23 @@ describe('Short List select mode', () => {
   })
 
   describe('current batch picker', () => {
-    const post = (calls: { url: string }[]) => calls.filter(c => c.url === '/api/evaluations/current-batch')
+    const post = (calls: { url: string; init?: RequestInit }[]) => calls.filter(c => c.url === '/api/evaluations/current-batch' && c.init?.method === 'POST')
     // The picker lives in a popover off the header: open it the first time it is needed.
-    const picker = () => {
+    const openPopover = () => {
       if (!screen.queryByLabelText('Not set')) fireEvent.click(screen.getByRole('button', { name: /Current batch/ }))
-      return screen.getByLabelText('Not set') as HTMLSelectElement
     }
+    const picker = () => { openPopover(); return screen.getByLabelText('Not set') as HTMLSelectElement }
     const ALERT = "Couldn't save the batch. Try again."
+
+    it('shows the moment the batch starts and saves a changed time with the batch', async () => {
+      const calls = await open()
+      const at = () => { openPopover(); return screen.getByLabelText('Starts at') as HTMLInputElement }
+      await waitFor(() => expect(at().value).toBe('2026-10-06T11:28'))
+      await act(async () => { fireEvent.change(at(), { target: { value: '2026-10-07T09:00' } }) })
+      const sent = post(calls)
+      expect(sent).toHaveLength(1)
+      expect(JSON.parse(String(sent[0].init?.body))).toEqual({ batch: 'W2 Oct, 2026', starts_at: '2026-10-07T09:00' })
+    })
 
     it('puts the old value back and says so when the save fails', async () => {
       const calls = await open()

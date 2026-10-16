@@ -27,7 +27,7 @@ import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import { isManagerRole } from '@/lib/roles'
 import { saveDriveLink } from '@/lib/drive-link-client'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
-import { saveCurrentBatch } from '@/lib/current-batch-client'
+import { saveCurrentBatch, loadCurrentBatchStart } from '@/lib/current-batch-client'
 import { BatchMoveBar } from '@/components/BatchMoveBar'
 import { batchLabelsOfMonth, monthKeyOfBatch, monthKeyLabel } from '@/lib/batch-month'
 
@@ -567,8 +567,9 @@ function StatCard({ label, current, pct, value, pair, split, foot, on, onClick }
 
 // The team's current batch is a global setting, not a filter, so it lives in a popover off
 // the header instead of sitting in the filter bar.
-function CurrentBatchMenu({ value, options, failed, onChange }: {
-  value: string | null; options: string[]; failed: boolean; onChange: (v: string) => void
+function CurrentBatchMenu({ value, options, startsAt, failed, onChange, onStartChange }: {
+  value: string | null; options: string[]; startsAt: string | null; failed: boolean
+  onChange: (v: string) => void; onStartChange: (at: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -605,6 +606,13 @@ function CurrentBatchMenu({ value, options, failed, onChange }: {
             placeholder="Not set"
             options={[{ value: '', label: '— none —' }, ...options.map(b => ({ value: b, label: b }))]}
           />
+          {value && (
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
+              Starts at
+              <input type="datetime-local" className="input" value={startsAt || ''}
+                onChange={e => onStartChange(e.target.value)} />
+            </label>
+          )}
           {failed && <span role="alert" className="alert">Couldn&apos;t save the batch. Try again.</span>}
         </div>
       )}
@@ -637,6 +645,10 @@ function ShortListEvalTab() {
   const [filterBatch, setFilterBatch] = useState('')
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
   const [currentBatchSaveFailed, setCurrentBatchSaveFailed] = useState(false)
+  // The moment the current batch starts (batches.starts_at, Vietnam time). The Report
+  // places games that carry no label by it, so a manager can see and change it where the
+  // batch is set.
+  const [currentBatchStart, setCurrentBatchStart] = useState<string | null>(null)
   // Last value the server confirmed (loaded, or a save that succeeded), and a counter of
   // current-batch saves. Two quick changes can settle out of order: a failure restores the
   // confirmed value (not the one before THIS change) and only the newest request may complain.
@@ -706,6 +718,7 @@ function ShortListEvalTab() {
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
         confirmedBatchRef.current = json.current_batch
+        if (json.current_batch) loadCurrentBatchStart().then(setCurrentBatchStart)
         if (!batchDefaultedRef.current) {
           batchDefaultedRef.current = true
           // Pre-select the team's current batch, but fall back to the most recent
@@ -814,12 +827,25 @@ function ShortListEvalTab() {
     const latest = seq === batchSaveSeqRef.current
     if (ok) {
       confirmedBatchRef.current = v || null
-      if (latest) setCurrentBatchSaveFailed(false)
+      if (latest) {
+        setCurrentBatchSaveFailed(false)
+        setCurrentBatchStart(v ? await loadCurrentBatchStart() : null)
+      }
       return
     }
     // An older request failing after a newer one was sent says nothing about the picker.
     if (!latest) return
     setCurrentBatch(confirmedBatchRef.current)
+    setCurrentBatchSaveFailed(true)
+  }
+  const handleCurrentBatchStartChange = async (at: string) => {
+    if (!currentBatch || !at) return
+    const before = currentBatchStart
+    setCurrentBatchStart(at)
+    const ok = await saveCurrentBatch(currentBatch, at)
+    if (ok) { setCurrentBatchSaveFailed(false); return }
+    // e.g. another batch already starts at that time: show what the server still has.
+    setCurrentBatchStart(before)
     setCurrentBatchSaveFailed(true)
   }
   const currentBatchOptions = (() => {
@@ -964,8 +990,8 @@ function ShortListEvalTab() {
               aria-pressed={view === 'monthly'} onClick={() => switchView('monthly')}>Monthly</button>
           </div>
           {isManager && (
-            <CurrentBatchMenu value={currentBatch} options={currentBatchOptions}
-              failed={currentBatchSaveFailed} onChange={handleCurrentBatchChange} />
+            <CurrentBatchMenu value={currentBatch} options={currentBatchOptions} startsAt={currentBatchStart}
+              failed={currentBatchSaveFailed} onChange={handleCurrentBatchChange} onStartChange={handleCurrentBatchStartChange} />
           )}
         </div>
       </div>

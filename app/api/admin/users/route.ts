@@ -3,6 +3,7 @@ import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { invalidateUserCache } from '@/lib/auth'
+import { renamePerson } from '@/lib/rename-person'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +45,11 @@ export async function POST(req: NextRequest) {
   const guard = await requireManager()
   if (guard) return guard
 
-  const { email, name, role } = await req.json()
+  const body = await req.json()
+  const { name, role } = body
+  // A pasted address often carries a leading space; stored as-is, sign-in's exact
+  // match never finds the row and the person is told they are not authorized.
+  const email: string = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
   if (!email || !role) {
     return NextResponse.json({ error: 'email and role are required' }, { status: 400 })
   }
@@ -60,12 +65,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Only an admin can invite an admin' }, { status: 403 })
   }
 
-  const displayName = name || email.split('@')[0]
+  const displayName = (typeof name === 'string' && name.trim()) || email.split('@')[0]
 
   try {
     await sql`
       INSERT INTO dashboard_users (email, name, role)
-      VALUES (${email.toLowerCase()}, ${displayName}, ${role})
+      VALUES (${email}, ${displayName}, ${role})
       ON CONFLICT (email) DO NOTHING
     `
     return NextResponse.json({ ok: true })
@@ -109,7 +114,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'name cannot be empty' }, { status: 400 })
   }
 
-  const user = await sql`SELECT email, role FROM dashboard_users WHERE id = ${id}`
+  const user = await sql`SELECT email, role, name FROM dashboard_users WHERE id = ${id}`
   if (user.length === 0) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 })
   }
@@ -120,6 +125,25 @@ export async function PUT(req: NextRequest) {
   }
   if (active === false && user[0].email === SUPER_ADMIN_EMAIL) {
     return NextResponse.json({ error: 'Cannot deactivate super admin' }, { status: 403 })
+  }
+
+  // A new display name is carried to the roster, the games and the logs, so the
+  // filters and the Report stop showing the old spelling. Casing-only changes
+  // (phuongpt -> PhuongPT) go through the same path.
+  let renamed: Record<string, number> | undefined
+  if (name !== undefined && name.trim() !== user[0].name) {
+    const clash = await sql`
+      SELECT 1 FROM dashboard_users WHERE id <> ${id} AND lower(trim(name)) = lower(${name.trim()}) LIMIT 1
+    `
+    if (clash.length > 0) {
+      return NextResponse.json({ error: 'Another user already has that name' }, { status: 409 })
+    }
+    try {
+      renamed = await renamePerson(user[0].name as string, name)
+    } catch (err) {
+      console.error('Failed to carry rename:', err)
+      return NextResponse.json({ error: 'Could not rename: that name is already on the roster' }, { status: 409 })
+    }
   }
 
   await sql`
@@ -134,7 +158,7 @@ export async function PUT(req: NextRequest) {
   // every API request. Drop it here so a role change or a deactivation is in force
   // on the user's very next request rather than up to the TTL later.
   invalidateUserCache(user[0].email as string)
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, renamed })
 }
 
 // Deleting a user is gone on purpose. It removed the only row saying a name
