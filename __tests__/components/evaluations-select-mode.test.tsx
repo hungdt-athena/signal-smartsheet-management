@@ -164,7 +164,8 @@ describe('Short List select mode', () => {
     ['category', () => fireEvent.click(screen.getByRole('button', { name: 'Arcade' }))],
     ['evaluator', () => fireEvent.change(screen.getByLabelText('All evaluators'), { target: { value: 'PhuongNT1' } })],
     ['batch', () => fireEvent.change(screen.getByLabelText('All batches'), { target: { value: 'W4 Sep, 2026' } })],
-    ['conclusion', () => toggleMulti('List Idea', 'List Idea')],
+    // The bar's multi-select is Final conclusions; the cards are shortcuts into the same filter.
+    ['final conclusion (menu)', () => toggleMulti('Final conclusions', 'Good')],
     // Final conclusion is filtered from the stat cards now, not a select.
     ['final conclusion', () => fireEvent.click(screen.getByRole('button', { name: /^Insight/ }))],
     ['date range', () => {

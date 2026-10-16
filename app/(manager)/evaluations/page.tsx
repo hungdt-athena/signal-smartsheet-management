@@ -69,12 +69,6 @@ const CONCLUSION_COLORS: Record<string, string> = {
   'Check Market Data': 'running', 'Need Direction': 'running',
 }
 
-const CONCLUSION_OPTIONS = [
-  'Bypass', 'Conclusion', 'Good', 'Link_dead', 'M_ByPass', 'Need deeper testing', 'Skip',
-  'Wait for PlayTest', 'Priority IV: Idea', 'Priority III: Watchlist for next phase',
-  'Check Market Data', 'Watchlist for next milestone', 'Priority II', 'Priority I',
-  'Need Direction', 'List_Idea', 'Playtest & Bypass',
-]
 
 // Sentinel for the Short List "Final conclusion" filter meaning "not yet
 // decided" (final_conclusion IS NULL). Kept in sync with the server check.
@@ -565,6 +559,14 @@ function StatCard({ label, current, pct, value, pair, split, foot, on, onClick }
   )
 }
 
+// "2026-10-13T17:09" -> "13 Oct, 17:09": the batch start as the header button shows it.
+function fmtStart(at: string | null) {
+  const m = at ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(at) : null
+  if (!m) return ''
+  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(m[2], 10) - 1]
+  return `${parseInt(m[3], 10)} ${mon}, ${m[4]}`
+}
+
 // The team's current batch is a global setting, not a filter, so it lives in a popover off
 // the header instead of sitting in the filter bar.
 function CurrentBatchMenu({ value, options, startsAt, failed, onChange, onStartChange }: {
@@ -592,6 +594,7 @@ function CurrentBatchMenu({ value, options, startsAt, failed, onChange, onStartC
       <button type="button" className="btn sl-cur-btn" aria-expanded={open} onClick={() => setOpen(o => !o)}>
         <span className="k">Current batch</span>
         <b>{value || '— none —'}</b>
+        {value && startsAt && <span className="k" title="When this batch starts (Vietnam time)">from {fmtStart(startsAt)}</span>}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--faint)' }}>
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -639,7 +642,6 @@ function ShortListEvalTab() {
   const [breakdown, setBreakdown] = useState<BreakdownRow[] | null>(null)
   const shortListScope = useRef<{ category: string; conclusions: string[]; finals: string[]; batch: string } | null>(null)
   const [filterConclusions, setFilterConclusions] = useState<string[]>(['List_Idea'])
-  const [availableConclusions, setAvailableConclusions] = useState<string[]>(CONCLUSION_OPTIONS)
   const [filterFinalConclusions, setFilterFinalConclusions] = useState<string[]>([])
   const [filterEvaluator, setFilterEvaluator] = useState('')
   const [filterBatch, setFilterBatch] = useState('')
@@ -727,12 +729,8 @@ function ShortListEvalTab() {
           if (def) setFilterBatch(def)
         }
       }
-      if (json.available_conclusions?.length) {
-        const merged = Array.from(new Set([...json.available_conclusions, ...filterConclusions]))
-        setAvailableConclusions(CONCLUSION_OPTIONS.filter(c => merged.includes(c)).concat(merged.filter(c => !CONCLUSION_OPTIONS.includes(c))))
-      }
     } catch { /* ignore */ }
-  }, [scopeParams, filterConclusions])
+  }, [scopeParams])
 
   const fetchData = useCallback(async () => {
     const seq = ++fetchSeqRef.current
@@ -1052,11 +1050,16 @@ function ShortListEvalTab() {
                 options={MONTHLY_FINALS.map(c => ({ value: c, label: c }))}
               />
             ) : (
+              // The initial conclusion is fixed to List_Idea here (that is what Short List is);
+              // the stat cards above are shortcuts into this same filter.
               <MultiSelect
-                value={filterConclusions}
-                onChange={setFilterConclusions}
-                placeholder="Initial conclusions"
-                options={availableConclusions.map(c => ({ value: c, label: prettyConclusion(c) }))}
+                value={filterFinalConclusions}
+                onChange={setFilterFinalConclusions}
+                placeholder="Final conclusions"
+                options={[
+                  { value: FINAL_CONCLUSION_NONE, label: '— Not set —' },
+                  ...finalConclusionOptions.map(c => ({ value: c, label: c })),
+                ]}
               />
             )}
           </div>

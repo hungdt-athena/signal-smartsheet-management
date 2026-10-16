@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 class NoopObserver { observe() {} disconnect() {} unobserve() {} }
 global.IntersectionObserver = NoopObserver as unknown as typeof IntersectionObserver
@@ -56,6 +56,8 @@ function stubFetch() {
     let body: unknown = {}
     if (url.startsWith('/api/evaluations/facets')) {
       body = { available_months: [], available_conclusions: ['List_Idea'], available_evaluators: [], available_batches: ['W1 Oct, 2026', 'W2 Oct, 2026', 'W4 Sep, 2026'], current_batch: 'W2 Oct, 2026', default_batch: 'W2 Oct, 2026' }
+    } else if (url.startsWith('/api/evaluations/current-batch')) {
+      body = { current_batch: 'W2 Oct, 2026', starts_at: '2026-10-06T11:28' }
     } else if (url.startsWith('/api/evaluations?')) {
       body = { data: [row({})], total: 1, applied_month: null, breakdown: BREAKDOWN }
     }
@@ -66,6 +68,8 @@ function stubFetch() {
 const rowsUrls = (urls: string[]) => urls.filter(u => u.startsWith('/api/evaluations?')).map(u => new URLSearchParams(u.split('?')[1]))
 const lastRows = (urls: string[]) => rowsUrls(urls).slice(-1)[0]
 const view = (name: string | RegExp) => screen.getByRole('button', { name })
+// A stat card, not the filter menu that may show the same word.
+const card = (name: RegExp) => within(document.querySelector('.sl-stats') as HTMLElement).getByRole('button', { name })
 
 describe('Short List / Monthly views', () => {
   it('Short List: cards count final conclusions of the selected batch and filter on click', async () => {
@@ -73,14 +77,23 @@ describe('Short List / Monthly views', () => {
     render(<EvaluationsPage />)
     await screen.findByText('Alpha')
     // Default batch is the current one (W2): 2 Insight, 40 not set, nothing else.
-    await waitFor(() => expect(view(/^Not set/)).toHaveTextContent('40'))
-    expect(view(/^Insight/)).toHaveTextContent('2')
-    expect(view(/^All/)).toHaveTextContent('42')
+    await waitFor(() => expect(card(/^Not set/)).toHaveTextContent('40'))
+    expect(card(/^Insight/)).toHaveTextContent('2')
+    expect(card(/^All/)).toHaveTextContent('42')
 
-    fireEvent.click(view(/^Insight/))
+    fireEvent.click(card(/^Insight/))
     await waitFor(() => expect(lastRows(urls).get('final_conclusions')).toBe('Insight'))
-    fireEvent.click(view(/^Insight/)) // a second click clears it
+    fireEvent.click(card(/^Insight/)) // a second click clears it
     await waitFor(() => expect(lastRows(urls).get('final_conclusions')).toBeNull())
+  })
+
+  it('shows when the current batch starts on the header button, and offers it in the popover', async () => {
+    stubFetch()
+    render(<EvaluationsPage />)
+    await screen.findByText('Alpha')
+    const btn = await screen.findByRole('button', { name: /Current batch.*W2 Oct, 2026.*from 6 Oct, 11:28/ })
+    fireEvent.click(btn)
+    expect((screen.getByLabelText('Starts at') as HTMLInputElement).value).toBe('2026-10-06T11:28')
   })
 
   it('Monthly: lists Insight + Priority IV of every category for one month, by batch label, not by date', async () => {
