@@ -524,37 +524,24 @@ const MONTHLY_FINALS = ['Insight', 'Priority IV']
 
 const sumN = (rows: BreakdownRow[]) => rows.reduce((a, r) => a + r.n, 0)
 const fmtN = (n: number) => n.toLocaleString('en-US')
-const pctOf = (n: number, total: number) => `${total ? Math.round((n / total) * 100) : 0}%`
-const sharePct = (n: number, total: number) => (total ? (n / total) * 100 : 0)
-// "puzzle 3 · arcade 1", biggest first.
-function categoryLine(rows: BreakdownRow[]) {
-  const byCat = new Map<string, number>()
-  for (const r of rows) byCat.set(r.category_group, (byCat.get(r.category_group) || 0) + r.n)
-  return Array.from(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · ')
-}
 // This month's key in the team's timezone (UTC+7), for a Monthly view with no batch to start from.
 function vnMonthKey() {
   const now = new Date(Date.now() + 7 * 3600 * 1000)
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-function StatCard({ label, current, pct, value, pair, split, foot, on, onClick }: {
-  label: string; current?: boolean; pct: string; value: string
-  pair?: { n: string; label: string }[]; split: { cls: string; pct: number }[]; foot: string
+function StatCard({ label, current, value, pair, on, onClick }: {
+  label: string; current?: boolean; value: string
+  pair?: { n: string; label: string }[]
   on: boolean; onClick: () => void
 }) {
   return (
     <button type="button" className={'sl-stat' + (on ? ' on' : '')} aria-pressed={on} onClick={onClick}>
       <span className="top">
         <span className="k">{label}{current && <span className="cur">current</span>}</span>
-        <span className="pct">{pct}</span>
-      </span>
-      <span className="mid">
         <span className="v">{value}</span>
-        {pair && <span className="pair">{pair.map(p => <span key={p.label}><b>{p.n}</b>{p.label}</span>)}</span>}
       </span>
-      <span className="sl-split">{split.map(s => <i key={s.cls} className={s.cls} style={{ width: `${s.pct}%` }} />)}</span>
-      <span className="foot">{foot}</span>
+      {pair && <span className="pair">{pair.map(p => <span key={p.label}><b>{p.n}</b>{p.label}</span>)}</span>}
     </button>
   )
 }
@@ -912,7 +899,6 @@ function ShortListEvalTab() {
       // Cards follow the Final conclusion filter: pick only Insight and only Insight is counted.
       const shown = filterFinalConclusions.length > 0 ? filterFinalConclusions : MONTHLY_FINALS
       const inMonth = rows.filter(r => shown.includes(r.final_conclusion))
-      const total = sumN(inMonth)
       const mk = (key: string, label: string, scope: BreakdownRow[], isCurrent: boolean) => {
         const ins = shown.includes('Insight') ? sumN(scope.filter(r => r.final_conclusion === 'Insight')) : 0
         const p4 = shown.includes('Priority IV') ? sumN(scope.filter(r => r.final_conclusion === 'Priority IV')) : 0
@@ -924,10 +910,7 @@ function ShortListEvalTab() {
         ]
         return (
           <StatCard key={key || 'month'} label={label} current={isCurrent}
-            pct={isMonth ? 'all batches' : pctOf(n, total)}
             value={loaded ? fmtN(n) : '–'} pair={loaded ? pair : undefined}
-            split={[{ cls: 'i1', pct: sharePct(ins, n) }, { cls: 'i2', pct: sharePct(p4, n) }]}
-            foot={loaded ? categoryLine(scope) : ''}
             on={filterBatch === key}
             onClick={() => setFilterBatch(isMonth || filterBatch === key ? '' : key)} />
         )
@@ -950,17 +933,16 @@ function ShortListEvalTab() {
       : sameSet(f, ['Priority IV']) ? 'Priority IV'
       : sameSet(f, otherFinals) ? 'other' : ''
     const pick = (key: string, values: string[]) => setFilterFinalConclusions(active === key ? [] : values)
-    const mk = (key: string, label: string, n: number, foot: string, values: string[]) => (
-      <StatCard key={key} label={label} pct={key === 'all' ? (filterBatch ? 'this batch' : 'all batches') : pctOf(n, all)}
-        value={loaded ? fmtN(n) : '–'} split={[{ cls: 'i1', pct: sharePct(n, all) }]} foot={foot}
+    const mk = (key: string, label: string, n: number, values: string[]) => (
+      <StatCard key={key} label={label} value={loaded ? fmtN(n) : '–'}
         on={active === key} onClick={() => key === 'all' ? setFilterFinalConclusions([]) : pick(key, values)} />
     )
     return [
-      mk('all', 'All', all, `${filterCategory}${filterBatch ? ` · ${filterBatch}` : ''}`, []),
-      mk('none', 'Not set', none, 'waiting for a final call', [FINAL_CONCLUSION_NONE]),
-      mk('Insight', 'Insight', ins, '5 min record', ['Insight']),
-      mk('Priority IV', 'Priority IV', p4, '20 min record', ['Priority IV']),
-      mk('other', 'Other', other, 'all other calls', otherFinals),
+      mk('all', 'All', all, []),
+      mk('none', 'Not set', none, [FINAL_CONCLUSION_NONE]),
+      mk('Insight', 'Insight', ins, ['Insight']),
+      mk('Priority IV', 'Priority IV', p4, ['Priority IV']),
+      mk('other', 'Other', other, otherFinals),
     ]
   })()
 
