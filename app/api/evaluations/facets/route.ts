@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = req.nextUrl
     const category = searchParams.get('category') || 'puzzle'
+    const categoryCond = category === 'all' ? sql`true` : sql`ge.category_group = ${category}`
     const session = process.env.SKIP_AUTH === 'true' ? null : await getSession()
     const evaluator = resolveEvaluatorScope(searchParams, session)
     const basis = readDateBasis(searchParams)
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest) {
       sql`
         SELECT mode() WITHIN GROUP (ORDER BY ge.initial_evaluator) AS e
         FROM game_evaluations ge
-        WHERE ge.category_group = ${category}
+        WHERE ${categoryCond}
           AND ge.initial_evaluator IS NOT NULL
         GROUP BY lower(ge.initial_evaluator)
         ORDER BY 1
@@ -86,7 +87,7 @@ export async function GET(req: NextRequest) {
       sql`
         SELECT DISTINCT ge.initial_conclusion AS c
         FROM game_evaluations ge
-        WHERE ge.category_group = ${category}
+        WHERE ${categoryCond}
           AND ge.initial_conclusion IS NOT NULL
           ${f.evaluatorFilter}
           ${rangeFilter}
@@ -97,7 +98,7 @@ export async function GET(req: NextRequest) {
       sql<{ batch: string }[]>`
         SELECT DISTINCT ge.batch
         FROM game_evaluations ge
-        WHERE ge.category_group = ${category}
+        WHERE ${categoryCond}
           AND ge.batch IS NOT NULL
           ${f.evaluatorFilter}
           ${f.conclusionFilter}
@@ -108,7 +109,7 @@ export async function GET(req: NextRequest) {
         SELECT DISTINCT ge.batch
         FROM game_evaluations ge
         JOIN game_info gi ON ge.game_id = gi.game_id
-        WHERE ge.category_group = ${category}
+        WHERE ${categoryCond}
           AND ge.batch IS NOT NULL
           ${filtersNoBatch}
       `,

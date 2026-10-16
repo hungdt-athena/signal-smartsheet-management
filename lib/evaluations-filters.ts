@@ -236,7 +236,8 @@ export async function loadAvailableMonths(
       EXTRACT(YEAR FROM ${pickerDate})::int AS year,
       EXTRACT(MONTH FROM ${pickerDate})::int AS month
     FROM game_evaluations ge
-    WHERE ge.category_group = ${category}
+    -- One statement, one sql call: 'all' is the Monthly view's every-bucket scope.
+    WHERE (${category} = 'all' OR ge.category_group = ${category})
       AND ${pickerDate} IS NOT NULL
       ${evaluatorFilter}
     ORDER BY year DESC, month DESC

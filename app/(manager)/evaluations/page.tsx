@@ -29,6 +29,7 @@ import { saveDriveLink } from '@/lib/drive-link-client'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
 import { saveCurrentBatch } from '@/lib/current-batch-client'
 import { BatchMoveBar } from '@/components/BatchMoveBar'
+import { batchLabelsOfMonth, monthKeyOfBatch, monthKeyLabel } from '@/lib/batch-month'
 
 interface Evaluation {
   id: number
@@ -519,6 +520,98 @@ function GameAlikeCell({ item, canEdit, onSaved }: {
   )
 }
 
+// Games per batch x final conclusion x category, as the rows endpoint counts them
+// (breakdown=1). The stat cards are sums over these, so a card keeps its number while it
+// is the one selected.
+interface BreakdownRow { batch: string | null; final_conclusion: string; category_group: string; n: number }
+
+// What the Monthly view lists: the two calls that put a game into Record.
+const MONTHLY_FINALS = ['Insight', 'Priority IV']
+
+const sumN = (rows: BreakdownRow[]) => rows.reduce((a, r) => a + r.n, 0)
+const fmtN = (n: number) => n.toLocaleString('en-US')
+const pctOf = (n: number, total: number) => `${total ? Math.round((n / total) * 100) : 0}%`
+const sharePct = (n: number, total: number) => (total ? (n / total) * 100 : 0)
+// "puzzle 3 · arcade 1", biggest first.
+function categoryLine(rows: BreakdownRow[]) {
+  const byCat = new Map<string, number>()
+  for (const r of rows) byCat.set(r.category_group, (byCat.get(r.category_group) || 0) + r.n)
+  return Array.from(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · ')
+}
+// This month's key in the team's timezone (UTC+7), for a Monthly view with no batch to start from.
+function vnMonthKey() {
+  const now = new Date(Date.now() + 7 * 3600 * 1000)
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+function StatCard({ label, current, pct, value, pair, split, foot, on, onClick }: {
+  label: string; current?: boolean; pct: string; value: string
+  pair?: { n: string; label: string }[]; split: { cls: string; pct: number }[]; foot: string
+  on: boolean; onClick: () => void
+}) {
+  return (
+    <button type="button" className={'sl-stat' + (on ? ' on' : '')} aria-pressed={on} onClick={onClick}>
+      <span className="top">
+        <span className="k">{label}{current && <span className="cur">current</span>}</span>
+        <span className="pct">{pct}</span>
+      </span>
+      <span className="mid">
+        <span className="v">{value}</span>
+        {pair && <span className="pair">{pair.map(p => <span key={p.label}><b>{p.n}</b>{p.label}</span>)}</span>}
+      </span>
+      <span className="sl-split">{split.map(s => <i key={s.cls} className={s.cls} style={{ width: `${s.pct}%` }} />)}</span>
+      <span className="foot">{foot}</span>
+    </button>
+  )
+}
+
+// The team's current batch is a global setting, not a filter, so it lives in a popover off
+// the header instead of sitting in the filter bar.
+function CurrentBatchMenu({ value, options, failed, onChange }: {
+  value: string | null; options: string[]; failed: boolean; onChange: (v: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => { if (failed) setOpen(true) }, [failed])
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Element
+      // StyledSelect portals its menu to <body>, so it is outside `ref` but not outside the popover.
+      if (ref.current?.contains(t) || t.closest?.('.ssel-menu')) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  return (
+    <div className="sl-cur" ref={ref}>
+      <button type="button" className="btn sl-cur-btn" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        <span className="k">Current batch</span>
+        <b>{value || '— none —'}</b>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--faint)' }}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div className="sl-pop">
+          <h4>Current batch</h4>
+          <p>Applies to all categories. Evaluators auto-fill it for List_Idea.</p>
+          <StyledSelect
+            value={value || ''}
+            onChange={onChange}
+            placeholder="Not set"
+            options={[{ value: '', label: '— none —' }, ...options.map(b => ({ value: b, label: b }))]}
+          />
+          {failed && <span role="alert" className="alert">Couldn&apos;t save the batch. Try again.</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ShortListEvalTab() {
   const { data: session, status } = useSession()
   const role = session?.user?.role
@@ -531,6 +624,12 @@ function ShortListEvalTab() {
   const [loading, setLoading] = useState(true)
   const [availableEvaluators, setAvailableEvaluators] = useState<string[]>([])
   const [filterCategory, setFilterCategory] = useState('puzzle')
+  // Short List reviews one batch; Monthly lists the Insight / Priority IV games of every
+  // batch of one month. Same table, same row handlers -- only the scope changes.
+  const [view, setView] = useState<'shortlist' | 'monthly'>('shortlist')
+  const [monthKey, setMonthKey] = useState('')
+  const [breakdown, setBreakdown] = useState<BreakdownRow[] | null>(null)
+  const shortListScope = useRef<{ category: string; conclusions: string[]; finals: string[]; batch: string } | null>(null)
   const [filterConclusions, setFilterConclusions] = useState<string[]>(['List_Idea'])
   const [availableConclusions, setAvailableConclusions] = useState<string[]>(CONCLUSION_OPTIONS)
   const [filterFinalConclusions, setFilterFinalConclusions] = useState<string[]>([])
@@ -586,9 +685,12 @@ function ShortListEvalTab() {
     // useSession() having resolved, which duplicated both first-load requests the moment
     // it did. Managers still send whatever they picked.
     if (filterEvaluator) params.set('evaluator', filterEvaluator)
+    // Monthly is sliced by batch label. The date picker still narrows it (all time by
+    // default), but it never decides which month you are looking at.
+    if (view === 'monthly' && monthKey) params.set('batch_month', monthKey)
     for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
     return params
-  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, df.value, df.autoMonth])
+  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, df.value, df.autoMonth, view, monthKey])
 
   // Dropdown contents. Deliberately NOT dependent on batch or sort: `available_batches`
   // and `default_batch` ignore the batch filter by design, and nothing here depends on
@@ -628,6 +730,8 @@ function ShortListEvalTab() {
       params.set('sort', sortAsc ? 'asc' : 'desc')
       // Dropdowns come from /facets now; this request only pays for its own rows.
       params.set('meta', '0')
+      // Counts for the stat cards ride along with the rows: one request, one round trip.
+      params.set('breakdown', '1')
       // Filter batch server-side: doing it client-side over the 500-row page meant
       // batch rows outside the loaded window vanished (and the count flipped with
       // sort direction). Let the DB filter before LIMIT instead.
@@ -637,6 +741,7 @@ function ShortListEvalTab() {
       if (seq !== fetchSeqRef.current) return
       setData(json.data || [])
       setTotal(json.total || 0)
+      if (json.breakdown) setBreakdown(json.breakdown)
       if (df.autoMonth && json.applied_month !== undefined) {
         const ap = json.applied_month as YearMonth | null
         // Suppress the redundant refetch after resolving month=auto. The batch default
@@ -666,7 +771,13 @@ function ShortListEvalTab() {
   // (category, any filter, the date range) drops the selection.
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, filterBatch, df.value])
+  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, filterBatch, df.value, view, monthKey])
+
+  // The card counts do not depend on batch or final conclusion, but they do on everything
+  // else. Until the matching response lands show a dash, not the previous scope's numbers.
+  useEffect(() => {
+    setBreakdown(null)
+  }, [filterCategory, filterConclusions, filterEvaluator, df.value, view, monthKey])
 
   const handleFinalConclusionSaved = (id: number, value: string) => {
     setData(prev => prev.map(d => d.id === id ? { ...d, final_conclusion: value } : d))
@@ -732,121 +843,224 @@ function ShortListEvalTab() {
   const moveTargetOptions = Array.from(new Set([...currentBatchOptions, ...batchOptions]))
     .sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a))
 
+  // Months that have games to list: from the batch labels the facets report, plus the
+  // one being viewed so the select never shows a blank.
+  const monthOptions = (() => {
+    const keys = new Set<string>()
+    for (const b of availableBatches) { const k = monthKeyOfBatch(b); if (k) keys.add(k) }
+    if (monthKey) keys.add(monthKey)
+    return Array.from(keys).sort().reverse()
+  })()
+
+  // Switching view swaps the whole scope. Short List's own filters are parked and put back,
+  // so a round trip to Monthly does not cost the manager their batch and category.
+  const switchView = (next: 'shortlist' | 'monthly') => {
+    if (next === view) return
+    exitSelectMode()
+    if (next === 'monthly') {
+      shortListScope.current = { category: filterCategory, conclusions: filterConclusions, finals: filterFinalConclusions, batch: filterBatch }
+      setFilterCategory('all')
+      setFilterConclusions([])
+      setFilterFinalConclusions(MONTHLY_FINALS)
+      setFilterBatch('')
+      setMonthKey(monthKeyOfBatch(currentBatch) ?? vnMonthKey())
+    } else {
+      const s = shortListScope.current
+      setFilterCategory(s?.category ?? 'puzzle')
+      setFilterConclusions(s?.conclusions ?? ['List_Idea'])
+      setFilterFinalConclusions(s?.finals ?? [])
+      setFilterBatch(s?.batch ?? '')
+    }
+    setView(next)
+  }
+
+  const categoryChoices = view === 'monthly'
+    ? [{ value: 'all', label: 'All' }, { value: 'puzzle', label: 'Puzzle' }, { value: 'arcade', label: 'Arcade' }, { value: 'simulation', label: 'Simulation' }]
+    : [{ value: 'puzzle', label: 'Puzzle' }, { value: 'arcade', label: 'Arcade' }, { value: 'simulation', label: 'Simulation' }]
+
+  // ---- Stat cards: the filter on final conclusion (Short List) or on batch (Monthly) ----
+  const otherFinals = finalConclusionOptions.filter(c => !MONTHLY_FINALS.includes(c))
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every(x => b.includes(x))
+  const statCards = (() => {
+    const loaded = breakdown !== null
+    const rows = breakdown || []
+    if (view === 'monthly') {
+      // Cards follow the Final conclusion filter: pick only Insight and only Insight is counted.
+      const shown = filterFinalConclusions.length > 0 ? filterFinalConclusions : MONTHLY_FINALS
+      const inMonth = rows.filter(r => shown.includes(r.final_conclusion))
+      const total = sumN(inMonth)
+      const mk = (key: string, label: string, scope: BreakdownRow[], isCurrent: boolean) => {
+        const ins = shown.includes('Insight') ? sumN(scope.filter(r => r.final_conclusion === 'Insight')) : 0
+        const p4 = shown.includes('Priority IV') ? sumN(scope.filter(r => r.final_conclusion === 'Priority IV')) : 0
+        const n = ins + p4
+        const isMonth = key === ''
+        const pair = [
+          ...(shown.includes('Insight') ? [{ n: fmtN(ins), label: 'Insight' }] : []),
+          ...(shown.includes('Priority IV') ? [{ n: fmtN(p4), label: 'Priority IV' }] : []),
+        ]
+        return (
+          <StatCard key={key || 'month'} label={label} current={isCurrent}
+            pct={isMonth ? 'all batches' : pctOf(n, total)}
+            value={loaded ? fmtN(n) : '–'} pair={loaded ? pair : undefined}
+            split={[{ cls: 'i1', pct: sharePct(ins, n) }, { cls: 'i2', pct: sharePct(p4, n) }]}
+            foot={loaded ? categoryLine(scope) : ''}
+            on={filterBatch === key}
+            onClick={() => setFilterBatch(isMonth || filterBatch === key ? '' : key)} />
+        )
+      }
+      return [
+        mk('', monthKey ? monthKeyLabel(monthKey) : 'Month', inMonth, false),
+        ...batchLabelsOfMonth(monthKey).map(b => mk(b, b.split(' ')[0], inMonth.filter(r => r.batch === b), b === currentBatch)),
+      ]
+    }
+    const scope = filterBatch ? rows.filter(r => r.batch === filterBatch) : rows
+    const all = sumN(scope)
+    const none = sumN(scope.filter(r => r.final_conclusion === FINAL_CONCLUSION_NONE))
+    const ins = sumN(scope.filter(r => r.final_conclusion === 'Insight'))
+    const p4 = sumN(scope.filter(r => r.final_conclusion === 'Priority IV'))
+    const other = all - none - ins - p4
+    const f = filterFinalConclusions
+    const active = f.length === 0 ? 'all'
+      : sameSet(f, [FINAL_CONCLUSION_NONE]) ? 'none'
+      : sameSet(f, ['Insight']) ? 'Insight'
+      : sameSet(f, ['Priority IV']) ? 'Priority IV'
+      : sameSet(f, otherFinals) ? 'other' : ''
+    const pick = (key: string, values: string[]) => setFilterFinalConclusions(active === key ? [] : values)
+    const mk = (key: string, label: string, n: number, foot: string, values: string[]) => (
+      <StatCard key={key} label={label} pct={key === 'all' ? (filterBatch ? 'this batch' : 'all batches') : pctOf(n, all)}
+        value={loaded ? fmtN(n) : '–'} split={[{ cls: 'i1', pct: sharePct(n, all) }]} foot={foot}
+        on={active === key} onClick={() => key === 'all' ? setFilterFinalConclusions([]) : pick(key, values)} />
+    )
+    return [
+      mk('all', 'All', all, `${filterCategory}${filterBatch ? ` · ${filterBatch}` : ''}`, []),
+      mk('none', 'Not set', none, 'waiting for a final call', [FINAL_CONCLUSION_NONE]),
+      mk('Insight', 'Insight', ins, '5 min record', ['Insight']),
+      mk('Priority IV', 'Priority IV', p4, '20 min record', ['Priority IV']),
+      mk('other', 'Other', other, 'all other calls', otherFinals),
+    ]
+  })()
+
+  const subtitle = view === 'monthly'
+    ? `${filterCategory === 'all' ? 'All categories' : filterCategory} · ${monthKey ? monthKeyLabel(monthKey) : ''}`
+    : `${filterCategory}${filterBatch ? ` · ${filterBatch}` : ''}`
+  const countLabel = loading
+    ? 'Loading...'
+    : total > data.length ? `Showing ${fmtN(data.length)} of ${fmtN(total)} games` : `${fmtN(total)} games`
+  const detailCategory = data.find(d => d.game_id === detailGameId)?.category_group
+    ?? (filterCategory === 'all' ? undefined : filterCategory)
+
   return (
-    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div className="page-head" style={{ marginBottom: 10, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="page-head" style={{ gap: 16, flexShrink: 0 }}>
         <div>
-          <h1 className="h-title">Short List</h1>
-          <p className="h-sub">{total} games · {filterCategory}{filterBatch ? ` · ${filterBatch}` : ''}</p>
+          <h1 className="h-title">{view === 'monthly' ? 'Monthly' : 'Short List'}</h1>
+          <p className="h-sub">{subtitle}</p>
         </div>
-        {isManager && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Current batch</span>
-              <span style={{ fontSize: 10.5, color: 'var(--faint)' }}>all categories · evaluators auto-fill this for List_Idea</span>
-              {currentBatchSaveFailed && (
-                <span role="alert" style={{ fontSize: 11, fontWeight: 600, color: 'var(--bad)' }}>
-                  Couldn&apos;t save the batch. Try again.
-                </span>
-              )}
-            </div>
-            <div style={{ width: 170 }}>
-              <StyledSelect
-                value={currentBatch || ''}
-                onChange={handleCurrentBatchChange}
-                placeholder="Not set"
-                options={[{ value: '', label: '— none —' }, ...currentBatchOptions.map(b => ({ value: b, label: b }))]}
-              />
-            </div>
+        <div className="sl-head-actions">
+          <div className="sl-seg" role="group" aria-label="View">
+            <button type="button" className={'sl-seg-btn' + (view === 'shortlist' ? ' active' : '')}
+              aria-pressed={view === 'shortlist'} onClick={() => switchView('shortlist')}>Short List</button>
+            <button type="button" className={'sl-seg-btn' + (view === 'monthly' ? ' active' : '')}
+              aria-pressed={view === 'monthly'} onClick={() => switchView('monthly')}>Monthly</button>
           </div>
-        )}
+          {isManager && (
+            <CurrentBatchMenu value={currentBatch} options={currentBatchOptions}
+              failed={currentBatchSaveFailed} onChange={handleCurrentBatchChange} />
+          )}
+        </div>
       </div>
 
-      <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
-        <DateFilter value={df.value}
-          onChange={v => { df.setAutoMonth(false); df.setValue(v) }} />
+      <div className="sl-stats" style={{ flexShrink: 0 }}>{statCards}</div>
 
-        <div style={{ width: 140 }}>
-          <StyledSelect
-            value={filterCategory}
-            onChange={setFilterCategory}
-            placeholder="Category"
-            options={[
-              { value: 'puzzle', label: 'Puzzle' },
-              { value: 'arcade', label: 'Arcade' },
-              { value: 'simulation', label: 'Simulation' },
-            ]}
-          />
-        </div>
-
-        {isManager && (
-          <div style={{ width: 180 }}>
-            <StyledSelect
-              value={filterEvaluator}
-              onChange={setFilterEvaluator}
-              placeholder="All evaluators"
-              options={[{ value: '', label: 'All evaluators' }, ...availableEvaluators.map(e => ({ value: e, label: e }))]}
-            />
+      <div className="filter-row sl" style={{ position: 'relative', zIndex: 30, flexShrink: 0 }}>
+        <div className="sl-grp">
+          <div className="sl-seg" role="group" aria-label="Category">
+            {categoryChoices.map(c => (
+              <button key={c.value} type="button" className={'sl-seg-btn' + (filterCategory === c.value ? ' active' : '')}
+                aria-pressed={filterCategory === c.value} onClick={() => setFilterCategory(c.value)}>{c.label}</button>
+            ))}
           </div>
-        )}
 
-        <div style={{ width: 160 }}>
-          <StyledSelect
-            value={filterBatch}
-            onChange={setFilterBatch}
-            placeholder="All batches"
-            options={[{ value: '', label: 'All batches' }, ...batchOptions.map(b => ({ value: b, label: b }))]}
-          />
-        </div>
-
-        <div style={{ width: 200 }}>
-          <MultiSelect
-            value={filterConclusions}
-            onChange={setFilterConclusions}
-            placeholder="Conclusions"
-            options={availableConclusions.map(c => ({ value: c, label: prettyConclusion(c) }))}
-          />
-        </div>
-
-        <div style={{ width: 200 }}>
-          <MultiSelect
-            value={filterFinalConclusions}
-            onChange={setFilterFinalConclusions}
-            placeholder="Final conclusions"
-            options={[
-              { value: FINAL_CONCLUSION_NONE, label: '— Not set —' },
-              ...finalConclusionOptions.map(c => ({ value: c, label: c })),
-            ]}
-          />
-        </div>
-
-        <button
-          className="btn btn-sm"
-          title={sortAsc ? 'Sorted oldest first — click to sort newest first' : 'Sorted newest first — click to sort oldest first'}
-          onClick={() => setSortAsc(v => !v)}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
-          {sortAsc ? (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 19V5M5 12l7-7 7 7" />
-            </svg>
+          {view === 'monthly' ? (
+            <div style={{ width: 130 }}>
+              <StyledSelect
+                value={monthKey}
+                onChange={k => { setMonthKey(k); setFilterBatch('') }}
+                placeholder="Month"
+                options={monthOptions.map(k => ({ value: k, label: monthKeyLabel(k) }))}
+              />
+            </div>
           ) : (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12l7 7 7-7" />
-            </svg>
+            <div style={{ width: 160 }}>
+              <StyledSelect
+                value={filterBatch}
+                onChange={setFilterBatch}
+                placeholder="All batches"
+                options={[{ value: '', label: 'All batches' }, ...batchOptions.map(b => ({ value: b, label: b }))]}
+              />
+            </div>
           )}
-          {sortAsc ? 'Oldest first' : 'Newest first'}
-        </button>
+          <DateFilter value={df.value}
+            onChange={v => { df.setAutoMonth(false); df.setValue(v) }} />
 
-        {isManager && (selecting
-          ? <button className="btn btn-sm" onClick={exitSelectMode}>Cancel</button>
-          : <button className="btn btn-sm" onClick={() => setSelectMode(true)}>Select</button>)}
+          {isManager && (
+            <div style={{ width: 150 }}>
+              <StyledSelect
+                value={filterEvaluator}
+                onChange={setFilterEvaluator}
+                placeholder="All evaluators"
+                options={[{ value: '', label: 'All evaluators' }, ...availableEvaluators.map(e => ({ value: e, label: e }))]}
+              />
+            </div>
+          )}
 
-        <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>
-          {loading ? 'Loading...' : `${data.length} results`}
-        </span>
+          <div style={{ width: 170 }}>
+            {view === 'monthly' ? (
+              // Never empty: clearing both falls back to both, so Monthly can only ever list
+              // the two calls that put a game into Record.
+              <MultiSelect
+                value={filterFinalConclusions}
+                onChange={v => setFilterFinalConclusions(v.length > 0 ? v : MONTHLY_FINALS)}
+                placeholder="Final conclusions"
+                options={MONTHLY_FINALS.map(c => ({ value: c, label: c }))}
+              />
+            ) : (
+              <MultiSelect
+                value={filterConclusions}
+                onChange={setFilterConclusions}
+                placeholder="Initial conclusions"
+                options={availableConclusions.map(c => ({ value: c, label: prettyConclusion(c) }))}
+              />
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="sl-list-bar">
+          <span className="count">{countLabel}</span>
+          <div className="right">
+            <button
+              className="btn btn-sm"
+              title={sortAsc ? 'Sorted oldest first — click to sort newest first' : 'Sorted newest first — click to sort oldest first'}
+              onClick={() => setSortAsc(v => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+              {sortAsc ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12l7 7 7-7" />
+                </svg>
+              )}
+              {sortAsc ? 'Oldest first' : 'Newest first'}
+            </button>
+            {isManager && (selecting
+              ? <button className="btn btn-sm" onClick={exitSelectMode}>Cancel</button>
+              : <button className="btn btn-sm" onClick={() => setSelectMode(true)}>Select</button>)}
+          </div>
+        </div>
         <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           <table className="tbl">
             <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
@@ -907,6 +1121,9 @@ function ShortListEvalTab() {
                           )}
                           {item.initial_evaluator && (
                             <span className="pill muted" style={{ padding: '1px 7px', fontSize: 9.5, fontWeight: 700 }}>{item.initial_evaluator}</span>
+                          )}
+                          {view === 'monthly' && (
+                            <span className="pill muted" style={{ padding: '1px 7px', fontSize: 9.5, fontWeight: 700 }}>{item.category_group}</span>
                           )}
                         </div>
                         {item.publisher_name && (
@@ -994,7 +1211,7 @@ function ShortListEvalTab() {
               logContext="shortlist"
               initialGameId={detailGameId}
               gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
-              category={filterCategory}
+              category={detailCategory}
               role={role}
               userName={userName}
               hideRecordSections

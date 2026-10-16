@@ -158,11 +158,12 @@ describe('Short List select mode', () => {
   // Every control that changes what the table lists must drop the selection, so a move
   // can never cover a game the manager can no longer see.
   it.each([
-    ['category', () => fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'arcade' } })],
+    ['category', () => fireEvent.click(screen.getByRole('button', { name: 'Arcade' }))],
     ['evaluator', () => fireEvent.change(screen.getByLabelText('All evaluators'), { target: { value: 'PhuongNT1' } })],
     ['batch', () => fireEvent.change(screen.getByLabelText('All batches'), { target: { value: 'W4 Sep, 2026' } })],
     ['conclusion', () => toggleMulti('List Idea', 'List Idea')],
-    ['final conclusion', () => toggleMulti('Final conclusions', 'Good')],
+    // Final conclusion is filtered from the stat cards now, not a select.
+    ['final conclusion', () => fireEvent.click(screen.getByRole('button', { name: /^Insight/ }))],
     ['date range', () => {
       fireEvent.click(screen.getByRole('button', { name: /Evaluated/ }))
       fireEvent.click(screen.getByRole('button', { name: 'Last 30 days' }))
@@ -296,7 +297,11 @@ describe('Short List select mode', () => {
 
   describe('current batch picker', () => {
     const post = (calls: { url: string }[]) => calls.filter(c => c.url === '/api/evaluations/current-batch')
-    const picker = () => screen.getByLabelText('Not set') as HTMLSelectElement
+    // The picker lives in a popover off the header: open it the first time it is needed.
+    const picker = () => {
+      if (!screen.queryByLabelText('Not set')) fireEvent.click(screen.getByRole('button', { name: /Current batch/ }))
+      return screen.getByLabelText('Not set') as HTMLSelectElement
+    }
     const ALERT = "Couldn't save the batch. Try again."
 
     it('puts the old value back and says so when the save fails', async () => {
