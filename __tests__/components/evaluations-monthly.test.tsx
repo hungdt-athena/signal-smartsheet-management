@@ -96,6 +96,23 @@ describe('Short List / Monthly views', () => {
     expect((screen.getByLabelText('Starts at') as HTMLInputElement).value).toBe('2026-10-06T11:28')
   })
 
+  it('Batch view: the final-conclusion filter reads All, and names every call plus Not set and Other', async () => {
+    const urls = stubFetch()
+    render(<EvaluationsPage />)
+    await screen.findByText('Alpha')
+    expect(screen.getByRole('button', { name: 'Batch' })).toHaveAttribute('aria-pressed', 'true')
+
+    const select = screen.getByLabelText('Final conclusions') as HTMLSelectElement
+    expect(select.value).toBe('all')
+    expect(Array.from(select.options).map(o => o.textContent).filter(x => x && x !== 'Final conclusions')).toEqual(
+      ['All final conclusions', 'Not set', 'Insight', 'Priority IV', 'Bypass', 'Other (all except Insight, Priority IV)'])
+
+    fireEvent.change(select, { target: { value: 'Priority IV' } })
+    await waitFor(() => expect(lastRows(urls).get('final_conclusions')).toBe('Priority IV'))
+    fireEvent.change(select, { target: { value: 'all' } })
+    await waitFor(() => expect(lastRows(urls).get('final_conclusions')).toBeNull())
+  })
+
   it('Monthly: lists Insight + Priority IV of every category for one month, by batch label, not by date', async () => {
     const urls = stubFetch()
     render(<EvaluationsPage />)
@@ -153,7 +170,7 @@ describe('Short List / Monthly views', () => {
     await waitFor(() => expect(lastRows(urls).get('batch')).toBe('W2 Oct, 2026'))
     fireEvent.click(view('Monthly'))
     await waitFor(() => expect(lastRows(urls).get('category')).toBe('all'))
-    fireEvent.click(view('Short List'))
+    fireEvent.click(view('Batch'))
     await waitFor(() => expect(lastRows(urls).get('category')).toBe('puzzle'))
     const q = lastRows(urls)
     expect(q.get('batch')).toBe('W2 Oct, 2026')

@@ -152,11 +152,6 @@ describe('Short List select mode', () => {
     fireEvent.click(screen.getByLabelText('Select all shown'))
     expect(screen.getByText('2 selected')).toBeInTheDocument()
   }
-  // MultiSelect renders its menu in a portal: open it by its button, click an option in the menu.
-  const toggleMulti = (buttonName: string, option: string) => {
-    fireEvent.click(screen.getByRole('button', { name: buttonName }))
-    fireEvent.click(within(document.querySelector('.ssel-menu') as HTMLElement).getByText(option))
-  }
 
   // Every control that changes what the table lists must drop the selection, so a move
   // can never cover a game the manager can no longer see.
@@ -165,7 +160,7 @@ describe('Short List select mode', () => {
     ['evaluator', () => fireEvent.change(screen.getByLabelText('All evaluators'), { target: { value: 'PhuongNT1' } })],
     ['batch', () => fireEvent.change(screen.getByLabelText('All batches'), { target: { value: 'W4 Sep, 2026' } })],
     // The bar's multi-select is Final conclusions; the cards are shortcuts into the same filter.
-    ['final conclusion (menu)', () => toggleMulti('Final conclusions', 'Good')],
+    ['final conclusion (menu)', () => fireEvent.change(screen.getByLabelText('Final conclusions'), { target: { value: 'Good' } })],
     // Final conclusion is filtered from the stat cards now, not a select.
     ['final conclusion (card)', () => fireEvent.click(screen.getByRole('button', { name: /^Not set/ }))],
     ['date range', () => {

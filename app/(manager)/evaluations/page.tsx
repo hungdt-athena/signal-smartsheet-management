@@ -5,7 +5,6 @@ import { createPortal } from 'react-dom'
 import { useSession } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import { StyledSelect } from '@/components/StyledSelect'
-import { MultiSelect } from '@/components/MultiSelect'
 import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth, valueLabel } from '@/components/DateFilter'
 import type { YearMonth } from '@/components/DateFilter'
 import { useDateFilter } from '@/hooks/useDateFilter'
@@ -914,6 +913,11 @@ function ShortListEvalTab() {
   // ---- Stat cards: the filter on final conclusion (Short List) or on batch (Monthly) ----
   const otherFinals = finalConclusionOptions.filter(c => !MONTHLY_FINALS.includes(c))
   const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every(x => b.includes(x))
+  // What the Final conclusions select shows. Cards can also set "everything but Insight and
+  // Priority IV", which the select names Other.
+  const finalFilterValue = filterFinalConclusions.length === 0 ? 'all'
+    : filterFinalConclusions.length === 1 ? filterFinalConclusions[0]
+    : sameSet(filterFinalConclusions, otherFinals) ? 'other' : 'all'
   const statCards = (() => {
     const loaded = breakdown !== null
     const rows = breakdown || []
@@ -994,7 +998,7 @@ function ShortListEvalTab() {
         <div className="sl-head-actions">
           <div className="sl-seg" role="group" aria-label="View">
             <button type="button" className={'sl-seg-btn' + (view === 'shortlist' ? ' active' : '')}
-              aria-pressed={view === 'shortlist'} onClick={() => switchView('shortlist')}>Short List</button>
+              aria-pressed={view === 'shortlist'} onClick={() => switchView('shortlist')}>Batch</button>
             <button type="button" className={'sl-seg-btn' + (view === 'monthly' ? ' active' : '')}
               aria-pressed={view === 'monthly'} onClick={() => switchView('monthly')}>Monthly</button>
           </div>
@@ -1049,7 +1053,7 @@ function ShortListEvalTab() {
             </div>
           )}
 
-          <div style={{ width: view === 'monthly' ? 190 : 170 }}>
+          <div style={{ width: 190 }}>
             {view === 'monthly' ? (
               // All = both calls that put a game into Record; Monthly never lists any other.
               <StyledSelect
@@ -1061,13 +1065,15 @@ function ShortListEvalTab() {
             ) : (
               // The initial conclusion is fixed to List_Idea here (that is what Short List is);
               // the stat cards above are shortcuts into this same filter.
-              <MultiSelect
-                value={filterFinalConclusions}
-                onChange={setFilterFinalConclusions}
+              <StyledSelect
+                value={finalFilterValue}
+                onChange={v => setFilterFinalConclusions(v === 'all' ? [] : v === 'other' ? otherFinals : [v])}
                 placeholder="Final conclusions"
                 options={[
-                  { value: FINAL_CONCLUSION_NONE, label: '— Not set —' },
+                  { value: 'all', label: 'All final conclusions' },
+                  { value: FINAL_CONCLUSION_NONE, label: 'Not set' },
                   ...finalConclusionOptions.map(c => ({ value: c, label: c })),
+                  { value: 'other', label: 'Other (all except Insight, Priority IV)' },
                 ]}
               />
             )}
