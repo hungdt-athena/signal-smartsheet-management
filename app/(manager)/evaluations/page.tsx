@@ -1048,6 +1048,7 @@ function ShortListEvalTab() {
                 value={filterFinalConclusions}
                 onChange={v => setFilterFinalConclusions(v.length > 0 ? v : MONTHLY_FINALS)}
                 placeholder="Final conclusions"
+                nameUpTo={2}
                 options={MONTHLY_FINALS.map(c => ({ value: c, label: c }))}
               />
             ) : (

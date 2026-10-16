@@ -120,7 +120,7 @@ describe('Short List / Monthly views', () => {
     await waitFor(() => expect(lastRows(urls).get('batch_month')).toBe('2026-10'))
 
     // Both are on by default; the menu holds exactly those two values.
-    fireEvent.click(screen.getByRole('button', { name: '2 selected' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Insight, Priority IV' }))
     const menu = document.querySelector('.ssel-menu') as HTMLElement
     expect(Array.from(menu.querySelectorAll('.ssel-opt')).map(o => o.textContent)).toEqual(['Insight', 'Priority IV'])
 
