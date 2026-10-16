@@ -530,10 +530,11 @@ function vnMonthKey() {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-// Two calls that must be told apart at a glance, so blue and amber -- not the table badge's
-// green and teal, which sit too close together on a bar.
+// Insight is the table's own chip colour, so a card and the rows it lists read as one thing.
+// Priority IV is amber rather than the table's teal: teal sits too close to that green on a
+// two-colour bar.
 const FINAL_TONE: Record<string, string> = {
-  'Insight': '#2455c9',
+  'Insight': FINAL_CONCLUSION_STYLES['Insight'].bg,
   'Priority IV': '#b45309',
 }
 const toneOf = (c: string) => FINAL_TONE[c] || 'var(--muted)'
