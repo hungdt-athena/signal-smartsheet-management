@@ -530,18 +530,40 @@ function vnMonthKey() {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-function StatCard({ label, current, value, pair, on, onClick }: {
+// Two calls that must be told apart at a glance, so blue and amber -- not the table badge's
+// green and teal, which sit too close together on a bar.
+const FINAL_TONE: Record<string, string> = {
+  'Insight': '#2455c9',
+  'Priority IV': '#b45309',
+}
+const toneOf = (c: string) => FINAL_TONE[c] || 'var(--muted)'
+
+function StatCard({ label, current, value, pair, tone, bar, on, onClick }: {
   label: string; current?: boolean; value: string
-  pair?: { n: string; label: string }[]
+  pair?: { n: string; label: string; color: string }[]
+  tone?: string
+  // Segments of the bar, as a share of the card; the bar's length itself is `bar.fill` of the track.
+  bar?: { fill: number; parts: { color: string; pct: number }[] }
   on: boolean; onClick: () => void
 }) {
   return (
     <button type="button" className={'sl-stat' + (on ? ' on' : '')} aria-pressed={on} onClick={onClick}>
       <span className="top">
-        <span className="k">{label}{current && <span className="cur">current</span>}</span>
+        <span className="k">{tone && <i className="dot" style={{ background: tone }} />}{label}{current && <span className="cur">current</span>}</span>
         <span className="v">{value}</span>
       </span>
-      {pair && <span className="pair">{pair.map(p => <span key={p.label}><b>{p.n}</b>{p.label}</span>)}</span>}
+      {pair && (
+        <span className="pair">
+          {pair.map(p => <span key={p.label} className="chip" style={{ background: p.color }}><b>{p.n}</b>{p.label}</span>)}
+        </span>
+      )}
+      {bar && (
+        <span className="bar" aria-hidden="true">
+          <span className="fill" style={{ width: `${bar.fill}%` }}>
+            {bar.parts.map((s, i) => <i key={i} style={{ background: s.color, width: `${s.pct}%` }} />)}
+          </span>
+        </span>
+      )}
     </button>
   )
 }
@@ -899,25 +921,31 @@ function ShortListEvalTab() {
       // Cards follow the Final conclusion filter: pick only Insight and only Insight is counted.
       const shown = filterFinalConclusions.length > 0 ? filterFinalConclusions : MONTHLY_FINALS
       const inMonth = rows.filter(r => shown.includes(r.final_conclusion))
+      const monthLabels = batchLabelsOfMonth(monthKey)
+      const biggest = Math.max(0, ...monthLabels.map(b => sumN(inMonth.filter(r => r.batch === b))))
       const mk = (key: string, label: string, scope: BreakdownRow[], isCurrent: boolean) => {
         const ins = shown.includes('Insight') ? sumN(scope.filter(r => r.final_conclusion === 'Insight')) : 0
         const p4 = shown.includes('Priority IV') ? sumN(scope.filter(r => r.final_conclusion === 'Priority IV')) : 0
         const n = ins + p4
         const isMonth = key === ''
         const pair = [
-          ...(shown.includes('Insight') ? [{ n: fmtN(ins), label: 'Insight' }] : []),
-          ...(shown.includes('Priority IV') ? [{ n: fmtN(p4), label: 'Priority IV' }] : []),
+          ...(shown.includes('Insight') ? [{ n: fmtN(ins), label: 'Insight', color: toneOf('Insight') }] : []),
+          ...(shown.includes('Priority IV') ? [{ n: fmtN(p4), label: 'Priority IV', color: toneOf('Priority IV') }] : []),
         ]
+        // Batch bars share one scale (the biggest batch), so W1..W4 can be compared by eye;
+        // the month card is the whole track.
+        const fill = isMonth ? 100 : (biggest ? (n / biggest) * 100 : 0)
         return (
           <StatCard key={key || 'month'} label={label} current={isCurrent}
             value={loaded ? fmtN(n) : '–'} pair={loaded ? pair : undefined}
+            bar={loaded ? { fill, parts: [{ color: toneOf('Insight'), pct: n ? (ins / n) * 100 : 0 }, { color: toneOf('Priority IV'), pct: n ? (p4 / n) * 100 : 0 }] } : undefined}
             on={filterBatch === key}
             onClick={() => setFilterBatch(isMonth || filterBatch === key ? '' : key)} />
         )
       }
       return [
         mk('', monthKey ? monthKeyLabel(monthKey) : 'Month', inMonth, false),
-        ...batchLabelsOfMonth(monthKey).map(b => mk(b, b.split(' ')[0], inMonth.filter(r => r.batch === b), b === currentBatch)),
+        ...monthLabels.map(b => mk(b, b.split(' ')[0], inMonth.filter(r => r.batch === b), b === currentBatch)),
       ]
     }
     const scope = filterBatch ? rows.filter(r => r.batch === filterBatch) : rows
@@ -933,16 +961,17 @@ function ShortListEvalTab() {
       : sameSet(f, ['Priority IV']) ? 'Priority IV'
       : sameSet(f, otherFinals) ? 'other' : ''
     const pick = (key: string, values: string[]) => setFilterFinalConclusions(active === key ? [] : values)
-    const mk = (key: string, label: string, n: number, values: string[]) => (
-      <StatCard key={key} label={label} value={loaded ? fmtN(n) : '–'}
+    const mk = (key: string, label: string, n: number, tone: string, values: string[]) => (
+      <StatCard key={key} label={label} value={loaded ? fmtN(n) : '–'} tone={tone}
+        bar={loaded ? { fill: 100, parts: [{ color: tone, pct: all ? (n / all) * 100 : 0 }] } : undefined}
         on={active === key} onClick={() => key === 'all' ? setFilterFinalConclusions([]) : pick(key, values)} />
     )
     return [
-      mk('all', 'All', all, []),
-      mk('none', 'Not set', none, [FINAL_CONCLUSION_NONE]),
-      mk('Insight', 'Insight', ins, ['Insight']),
-      mk('Priority IV', 'Priority IV', p4, ['Priority IV']),
-      mk('other', 'Other', other, otherFinals),
+      mk('all', 'All', all, 'var(--accent)', []),
+      mk('none', 'Not set', none, 'var(--faint)', [FINAL_CONCLUSION_NONE]),
+      mk('Insight', 'Insight', ins, toneOf('Insight'), ['Insight']),
+      mk('Priority IV', 'Priority IV', p4, toneOf('Priority IV'), ['Priority IV']),
+      mk('other', 'Other', other, 'var(--muted)', otherFinals),
     ]
   })()
 
