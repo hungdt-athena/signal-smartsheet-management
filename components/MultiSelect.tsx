@@ -9,13 +9,11 @@ interface MultiSelectProps {
   placeholder?: string
   disabled?: boolean
   style?: React.CSSProperties
-  /** Name the picks instead of counting them while there are this many or fewer. */
-  nameUpTo?: number
 }
 
 interface MenuPos { top?: number; bottom?: number; left: number; width: number; maxHeight: number }
 
-export function MultiSelect({ value, onChange, options, placeholder = 'Select', disabled, style, nameUpTo = 1 }: MultiSelectProps) {
+export function MultiSelect({ value, onChange, options, placeholder = 'Select', disabled, style }: MultiSelectProps) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<MenuPos | null>(null)
   const ref = useRef<HTMLDivElement>(null)
@@ -58,8 +56,8 @@ export function MultiSelect({ value, onChange, options, placeholder = 'Select', 
 
   const label = value.length === 0
     ? placeholder
-    : value.length <= nameUpTo
-      ? value.map(v => options.find(o => o.value === v)?.label ?? v).join(', ')
+    : value.length === 1
+      ? options.find(o => o.value === value[0])?.label ?? '1 selected'
       : `${value.length} selected`
 
   return (

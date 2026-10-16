@@ -167,7 +167,7 @@ describe('Short List select mode', () => {
     // The bar's multi-select is Final conclusions; the cards are shortcuts into the same filter.
     ['final conclusion (menu)', () => toggleMulti('Final conclusions', 'Good')],
     // Final conclusion is filtered from the stat cards now, not a select.
-    ['final conclusion', () => fireEvent.click(screen.getByRole('button', { name: /^Insight/ }))],
+    ['final conclusion (card)', () => fireEvent.click(screen.getByRole('button', { name: /^Not set/ }))],
     ['date range', () => {
       fireEvent.click(screen.getByRole('button', { name: /Evaluated/ }))
       fireEvent.click(screen.getByRole('button', { name: 'Last 30 days' }))

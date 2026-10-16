@@ -530,12 +530,11 @@ function vnMonthKey() {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-// Insight is the table's own chip colour, so a card and the rows it lists read as one thing.
-// Priority IV is amber rather than the table's teal: teal sits too close to that green on a
-// two-colour bar.
+// The same colours as the Final Conclusion chip in the table, so a card and the rows it lists
+// read as one thing.
 const FINAL_TONE: Record<string, string> = {
   'Insight': FINAL_CONCLUSION_STYLES['Insight'].bg,
-  'Priority IV': '#b45309',
+  'Priority IV': FINAL_CONCLUSION_STYLES['Priority IV'].bg,
 }
 const toneOf = (c: string) => FINAL_TONE[c] || 'var(--muted)'
 
@@ -1050,16 +1049,14 @@ function ShortListEvalTab() {
             </div>
           )}
 
-          <div style={{ width: 170 }}>
+          <div style={{ width: view === 'monthly' ? 190 : 170 }}>
             {view === 'monthly' ? (
-              // Never empty: clearing both falls back to both, so Monthly can only ever list
-              // the two calls that put a game into Record.
-              <MultiSelect
-                value={filterFinalConclusions}
-                onChange={v => setFilterFinalConclusions(v.length > 0 ? v : MONTHLY_FINALS)}
+              // All = both calls that put a game into Record; Monthly never lists any other.
+              <StyledSelect
+                value={filterFinalConclusions.length === 1 ? filterFinalConclusions[0] : 'all'}
+                onChange={v => setFilterFinalConclusions(v === 'all' ? MONTHLY_FINALS : [v])}
                 placeholder="Final conclusions"
-                nameUpTo={2}
-                options={MONTHLY_FINALS.map(c => ({ value: c, label: c }))}
+                options={[{ value: 'all', label: 'All final conclusions' }, ...MONTHLY_FINALS.map(c => ({ value: c, label: c }))]}
               />
             ) : (
               // The initial conclusion is fixed to List_Idea here (that is what Short List is);

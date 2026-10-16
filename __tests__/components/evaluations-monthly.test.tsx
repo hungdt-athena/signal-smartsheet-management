@@ -125,25 +125,24 @@ describe('Short List / Monthly views', () => {
     await waitFor(() => expect(lastRows(urls).get('batch')).toBeNull())
   })
 
-  it('Monthly: the filter bar offers only Insight and Priority IV, never empty, and the cards follow it', async () => {
+  it('Monthly: the final-conclusion filter reads All, offers only Insight and Priority IV, and the cards follow it', async () => {
     const urls = stubFetch()
     render(<EvaluationsPage />)
     await screen.findByText('Alpha')
     fireEvent.click(view('Monthly'))
     await waitFor(() => expect(lastRows(urls).get('batch_month')).toBe('2026-10'))
 
-    // Both are on by default; the menu holds exactly those two values.
-    fireEvent.click(screen.getByRole('button', { name: 'Insight, Priority IV' }))
-    const menu = document.querySelector('.ssel-menu') as HTMLElement
-    expect(Array.from(menu.querySelectorAll('.ssel-opt')).map(o => o.textContent)).toEqual(['Insight', 'Priority IV'])
+    const select = screen.getByLabelText('Final conclusions') as HTMLSelectElement
+    expect(select.value).toBe('all')
+    expect(Array.from(select.options).map(o => o.textContent).filter(x => x && x !== 'Final conclusions')).toEqual(['All final conclusions', 'Insight', 'Priority IV'])
+    expect(lastRows(urls).get('final_conclusions')).toBe('Insight,Priority IV')
 
-    fireEvent.click(menu.querySelectorAll('.ssel-opt')[1]) // untick Priority IV
+    fireEvent.change(select, { target: { value: 'Insight' } })
     await waitFor(() => expect(lastRows(urls).get('final_conclusions')).toBe('Insight'))
     await waitFor(() => expect(view(/^W1/)).toHaveTextContent('3'))
     expect(view(/^W1/)).not.toHaveTextContent('Priority IV')
 
-    // The menu stays open: untick the last one left and it falls back to both.
-    fireEvent.click((document.querySelector('.ssel-menu') as HTMLElement).querySelectorAll('.ssel-opt')[0])
+    fireEvent.change(select, { target: { value: 'all' } })
     await waitFor(() => expect(lastRows(urls).get('final_conclusions')).toBe('Insight,Priority IV'))
   })
 
