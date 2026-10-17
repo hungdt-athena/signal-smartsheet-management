@@ -6,6 +6,8 @@
 // the drag version never was.
 'use client'
 import { useState } from 'react'
+import { Switch } from '@/components/ui/Switch'
+import { IconX } from '@/components/ui/SearchInput'
 
 export interface OptionItem {
   id: number
@@ -55,14 +57,11 @@ export function OptionRows({
 
           {it.usage && <span className="opt-usage">{it.usage}</span>}
 
-          <button
-            type="button"
-            className="opt-sw"
-            role="switch"
-            aria-checked={it.active}
-            aria-label={`${it.active ? 'Turn off' : 'Turn on'} ${it.label}`}
+          <Switch
+            checked={it.active}
+            ariaLabel={`${it.active ? 'Turn off' : 'Turn on'} ${it.label}`}
             title={it.active ? 'On — shows in the dropdown' : 'Off — hidden from the dropdown'}
-            onClick={() => onToggle(it.id, !it.active)}
+            onChange={next => onToggle(it.id, next)}
           />
           <DeleteButton label={it.label} onDelete={() => onDelete(it.id)} />
         </div>
@@ -84,7 +83,7 @@ function DeleteButton({ label, onDelete }: { label: string; onDelete: () => void
   }
   return (
     <button type="button" className="opt-del" aria-label={`Delete ${label}`} title="Delete"
-      onClick={() => setArmed(true)}>✕</button>
+      onClick={() => setArmed(true)}><IconX size={14} /></button>
   )
 }
 

@@ -12,10 +12,12 @@
 // is the same pure function the server used, over the same platform tally — so
 // the numbers move without a round trip and cannot disagree with the server's.
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { BUCKET_LABELS } from '@/components/RosterTable'
+import { Modal } from '@/components/ui/Modal'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
+import { toast } from '@/lib/toast'
 import { DEFAULT_PUSH_WINDOW, PUSH_WINDOW_NOTE } from '@/lib/push-window'
 import { splitAmong, type GenrePreview, type PushPreview as Preview } from '@/lib/push-preview'
 
@@ -97,7 +99,7 @@ export function PushPreview({ preview, loading, canRun, onRan }: {
 
           <div className="pp-fill" aria-hidden="true" />
 
-          <button type="button" className="pp-toggle" onClick={() => setOpen(true)}>
+          <button type="button" className="btn btn-sm pp-open" onClick={() => setOpen(true)}>
             Breakdown
             <span className="pp-chev" aria-hidden="true">▸</span>
           </button>
@@ -124,22 +126,17 @@ function BreakdownModal({ preview, canRun, onRan, onClose }: {
   const [tab, setTab] = useState<Bucket>(() =>
     preview.genres.find(g => g.status === 'ready')?.bucket ?? 'puzzle')
   const [running, setRunning] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
 
-  // Esc closes — except while the confirmation is up, where it backs out of the
-  // confirmation instead. A stray keypress must not dismiss the warning and the
-  // modal together, leaving the operator unsure whether the run went ahead. It
-  // is ignored entirely mid-run, which is not cancellable.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || running) return
-      if (confirming) setConfirming(false)
-      else onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [confirming, running, onClose])
+  // Esc (and the X and the backdrop) close — except while the confirmation is up,
+  // where they back out of the confirmation instead. A stray keypress must not
+  // dismiss the warning and the modal together, leaving the operator unsure
+  // whether the run went ahead. Mid-run they do nothing (Modal `busy`): the run
+  // is not cancellable.
+  const close = useCallback(() => {
+    if (confirming) setConfirming(false)
+    else onClose()
+  }, [confirming, onClose])
 
   const toggle = useCallback((bucket: Bucket, name: string) => {
     setExcluded(prev => {
@@ -147,7 +144,6 @@ function BreakdownModal({ preview, canRun, onRan, onClose }: {
       if (!next.delete(name)) next.add(name)
       return { ...prev, [bucket]: next }
     })
-    setResult(null)
   }, [])
 
   // The live recomputation. Same function, same tally, so what is on screen is
@@ -170,7 +166,7 @@ function BreakdownModal({ preview, canRun, onRan, onClose }: {
   const anyExcluded = runnable.some(g => (excluded[g.bucket]?.size ?? 0) > 0)
 
   async function run() {
-    setRunning(true); setResult(null); setConfirming(false)
+    setRunning(true); setConfirming(false)
     try {
       // Exclusions go per genre, exactly as the tabs hold them: someone
       // unticked under Puzzle must not vanish from Arcade as well.
@@ -185,11 +181,11 @@ function BreakdownModal({ preview, canRun, onRan, onClose }: {
         }),
       })
       const json = await res.json()
-      if (!res.ok) { setResult(json.error ? `Failed: ${json.error}` : 'Failed.'); return }
-      setResult(`Pushed ${json.pushed}, assigned ${json.assigned}.`)
+      if (!res.ok) { toast.error(json.error ? `Run failed: ${json.error}` : 'Run failed.'); return }
+      toast.success(`Pushed ${json.pushed}, assigned ${json.assigned}.`)
       onRan()
     } catch {
-      setResult('Failed to reach the server.')
+      toast.error('Could not reach the server.')
     } finally {
       setRunning(false)
     }
@@ -200,21 +196,53 @@ function BreakdownModal({ preview, canRun, onRan, onClose }: {
   const currentDays = current ? preview.windows?.[current.bucket] : undefined
 
   return (
-    <div className="modal-backdrop" onClick={() => { if (!running) onClose() }}>
-      <div className="modal pp-modal" role="dialog" aria-modal="true" aria-label="Next run breakdown"
-        onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <span className="modal-title">Next run · breakdown</span>
-          <div className="pp-head-acts">
-            {/* The window is the lever behind every number in here, and it
-                lives on another page. Say so, and take them there. */}
-            <Link className="btn btn-sm" href={CONFIG_HREF}>Push window…</Link>
-            <button type="button" className="x-btn" aria-label="Close" disabled={running}
-              onClick={onClose}>✕</button>
+    <Modal title="Next run breakdown" width={620} className="pp-modal" busy={running} onClose={close}
+      sub={
+        // The window is the lever behind every number in here, and it lives on
+        // another page. Say so, and take them there.
+        <Link className="btn btn-sm btn-link pp-win-link" href={CONFIG_HREF}>Change push window</Link>
+      }
+      footer={runnable.length > 0 ? (
+        <div className="pp-foot-inner">
+          <div className="pp-foot-msg">
+            {anyExcluded && (
+              <p className="pp-note">
+                {n(liveTotal)} with your selection. Unticking here changes this run only.
+                The roster is not edited.
+              </p>
+            )}
+            {allExcluded.length > 0 && (
+              <p className="pp-warn">
+                {allExcluded.map(g => BUCKET_LABELS[g.bucket]).join(', ')}: everyone is unticked,
+                so nothing would be assigned there.
+              </p>
+            )}
+            {!canRun && <p className="pp-note">Only an admin can run this.</p>}
           </div>
-        </div>
 
-        <div className="modal-body pp-modal-body">
+          {canRun && (confirming ? (
+            <div className="pp-confirm" role="alertdialog" aria-label="Confirm run">
+              <p>
+                Push and assign <strong>{runnable.map(g => BUCKET_LABELS[g.bucket]).join(', ')}</strong> now?
+                This hands out about {n(liveTotal)} games to real people and cannot be undone from here.
+              </p>
+              <div className="pp-confirm-acts">
+                <button type="button" className="btn btn-sm" disabled={running}
+                  onClick={() => setConfirming(false)}>Cancel</button>
+                <button type="button" className="btn btn-sm btn-primary" disabled={running} onClick={run}>
+                  {running ? 'Running…' : 'Run push'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" className="btn btn-sm btn-primary pp-go" disabled={running}
+              onClick={() => setConfirming(true)}>
+              Push &amp; assign now
+            </button>
+          ))}
+        </div>
+      ) : undefined}>
+        <div className="pp-modal-body">
           {runnable.length === 0 ? (
             <p className="pp-empty">No category group would run, so nothing would be handed out.</p>
           ) : (
@@ -285,53 +313,6 @@ function BreakdownModal({ preview, canRun, onRan, onClose }: {
             </>
           )}
         </div>
-
-        {runnable.length > 0 && (
-          <div className="modal-foot pp-foot">
-            <div className="pp-foot-msg">
-              {anyExcluded && (
-                <p className="pp-note">
-                  {n(liveTotal)} with your selection. Unticking here changes this run only —
-                  the roster is not edited.
-                </p>
-              )}
-              {allExcluded.length > 0 && (
-                <p className="pp-warn">
-                  {allExcluded.map(g => BUCKET_LABELS[g.bucket]).join(', ')}: everyone is unticked,
-                  so nothing would be assigned there.
-                </p>
-              )}
-              {result && (
-                <p className={`pp-note${result.startsWith('Failed') ? ' pp-warn' : ''}`} role="status">
-                  {result}
-                </p>
-              )}
-              {!canRun && <p className="pp-note">Only an admin can run this.</p>}
-            </div>
-
-            {canRun && (confirming ? (
-              <div className="pp-confirm" role="alertdialog" aria-label="Confirm run">
-                <p>
-                  Push and assign <strong>{runnable.map(g => BUCKET_LABELS[g.bucket]).join(', ')}</strong> now?
-                  This hands out about {n(liveTotal)} games to real people and cannot be undone from here.
-                </p>
-                <div className="pp-confirm-acts">
-                  <button type="button" className="btn btn-sm btn-primary" disabled={running} onClick={run}>
-                    {running ? 'Running…' : 'Yes, run it'}
-                  </button>
-                  <button type="button" className="btn btn-sm" disabled={running}
-                    onClick={() => setConfirming(false)}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <button type="button" className="btn btn-sm btn-primary pp-go" disabled={running}
-                onClick={() => setConfirming(true)}>
-                Push &amp; assign now
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+    </Modal>
   )
 }

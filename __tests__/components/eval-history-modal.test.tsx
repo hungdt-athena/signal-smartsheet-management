@@ -39,7 +39,7 @@ describe('EvalHistoryModal', () => {
     const row = screen.getAllByTestId('history-row')[0]
     const badges = Array.from(row.querySelectorAll('.badge')).map(b => [b.textContent, b.className])
     expect(badges).toEqual([
-      ['Bypass', 'badge error'],
+      ['Bypass', 'badge neutral'], // initial Bypass is grey: red is kept for Link_dead
       ['List Idea', 'badge success'],
       ['Priority IV', 'badge neutral'], // final conclusions carry no colour meaning here
     ])

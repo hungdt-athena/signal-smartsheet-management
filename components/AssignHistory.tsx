@@ -5,6 +5,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AssignHistoryMatrix } from '@/components/AssignHistoryMatrix'
 import { buildMatrix, shiftWindow, type HistoryRow } from '@/lib/assign-history-matrix'
+import { RefreshButton } from '@/components/ui/PageHeader'
+import { ErrorState } from '@/components/ui/States'
+import { fmtDateVN } from '@/lib/format-date'
 
 const WINDOW_DAYS = 14
 
@@ -21,6 +24,9 @@ export function AssignHistory({ rosterNames }: { rosterNames: string[] }) {
   const [win, setWin] = useState(defaultWindow)
   const [rows, setRows] = useState<HistoryRow[]>([])
   const [loading, setLoading] = useState(false)
+  // Until the first reply, the grid would draw the roster with empty cells, which
+  // reads as "nobody got anything". Say it is loading instead.
+  const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // No `category`: one read covers all three genres; the grid shows them together.
@@ -31,7 +37,8 @@ export function AssignHistory({ rosterNames }: { rosterNames: string[] }) {
       const res = await fetch(`/api/admin/assignment-history?${qs}`, { cache: 'no-store' })
       if (!res.ok) throw new Error()
       setRows((await res.json()).rows ?? [])
-    } catch { setError('Failed to load history.') }
+      setLoaded(true)
+    } catch { setError('Could not load the history.') }
     finally { setLoading(false) }
   }, [win])
 
@@ -44,21 +51,22 @@ export function AssignHistory({ rosterNames }: { rosterNames: string[] }) {
 
   return (
     <div className="card hist-card">
-      <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+      <div className="card-head" style={{ alignItems: 'center' }}>
         <span className="card-label">History</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button className="btn btn-sm" aria-label="Earlier"
+        <div className="hist-nav">
+          <button className="btn btn-sm" aria-label="Earlier 14 days"
             onClick={() => setWin(w => shiftWindow(w.from, w.to, -WINDOW_DAYS))}>◀</button>
-          <span className="hist-sub">{win.from} → {win.to}</span>
-          <button className="btn btn-sm" aria-label="Later"
+          <span className="hist-sub">{fmtDateVN(win.from)} → {fmtDateVN(win.to)}</span>
+          <button className="btn btn-sm" aria-label="Later 14 days"
             onClick={() => setWin(w => shiftWindow(w.from, w.to, WINDOW_DAYS))}>▶</button>
-          <button className="btn btn-sm" onClick={refresh} disabled={loading}>
-            <span className={loading ? 'spin' : ''}>↻</span>{loading ? '...' : 'Refresh'}
-          </button>
+          <RefreshButton onClick={refresh} loading={loading} />
         </div>
       </div>
-      {error && <p className="msg-err" style={{ margin: '8px 0' }}>{error}</p>}
-      <AssignHistoryMatrix matrix={matrix} />
+      {error
+        ? <ErrorState onRetry={refresh}>{error}</ErrorState>
+        : !loaded
+          ? <div className="state-empty" aria-live="polite">Loading…</div>
+          : <AssignHistoryMatrix matrix={matrix} />}
     </div>
   )
 }

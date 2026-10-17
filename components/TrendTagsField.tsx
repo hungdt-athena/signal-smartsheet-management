@@ -54,7 +54,7 @@ interface Props {
 // Trend values are catalog identifiers owned by Signal Sense, not prose, so they
 // are set in the utility face wherever they appear — here and in the dialog.
 const CHIP_LABEL: React.CSSProperties = {
-  fontSize: 10.5, fontWeight: 600, color: 'var(--faint)',
+  fontSize: 11, fontWeight: 600, color: 'var(--faint)',
   textTransform: 'uppercase', letterSpacing: '0.04em',
 }
 const CHIP_ROW: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }
@@ -63,7 +63,7 @@ const CHIP: React.CSSProperties = {
   padding: '4px 9px', borderRadius: 7, background: 'var(--surface-2)',
   border: '1px solid var(--border)', fontSize: 12, fontFamily: 'var(--num)',
 }
-const CHIP_SUB: React.CSSProperties = { fontSize: 10.5, color: 'var(--faint)', fontFamily: 'var(--font)' }
+const CHIP_SUB: React.CSSProperties = { fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--font)' }
 
 // Trends tagging for one game: a summary of what is tagged plus a button that
 // opens the editor. Proposals only — nothing here reaches Signal Sense until an
@@ -92,7 +92,7 @@ export function TrendTagsField({
             This game&apos;s tags failed to load — nothing is shown below and saving will leave
             the existing proposals untouched
           </span>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={onRetryLoad}>Retry</button>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={onRetryLoad}>Try again</button>
         </div>
       )}
 
@@ -149,7 +149,7 @@ export function TrendTagsField({
       {!ro && (
         <button type="button" className="btn btn-sm" style={{ alignSelf: 'flex-start' }}
           onClick={() => setOpen(true)}>
-          {tags.length > 0 ? `Manage Trends Tags (${tags.length})` : 'Manage Trends Tags'}
+          {tags.length > 0 ? `Manage Trends tags (${tags.length})` : 'Manage Trends tags'}
         </button>
       )}
 

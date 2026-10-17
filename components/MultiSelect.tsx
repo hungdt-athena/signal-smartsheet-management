@@ -9,11 +9,13 @@ interface MultiSelectProps {
   placeholder?: string
   disabled?: boolean
   style?: React.CSSProperties
+  /** Accessible name when there is no visible label; read as "name: current value". */
+  ariaLabel?: string
 }
 
 interface MenuPos { top?: number; bottom?: number; left: number; width: number; maxHeight: number }
 
-export function MultiSelect({ value, onChange, options, placeholder = 'Select', disabled, style }: MultiSelectProps) {
+export function MultiSelect({ value, onChange, options, placeholder = 'Select', disabled, style, ariaLabel }: MultiSelectProps) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<MenuPos | null>(null)
   const ref = useRef<HTMLDivElement>(null)
@@ -67,6 +69,8 @@ export function MultiSelect({ value, onChange, options, placeholder = 'Select', 
         type="button"
         className="ssel-btn"
         aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={ariaLabel ? `${ariaLabel}: ${label}` : undefined}
         disabled={disabled}
         onClick={() => !disabled && setOpen(!open)}
       >
@@ -98,7 +102,7 @@ export function MultiSelect({ value, onChange, options, placeholder = 'Select', 
                 }}>
                   {checked && (
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-                      stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      style={{ stroke: 'var(--accent-contrast)' }} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M20 6L9 17l-5-5" />
                     </svg>
                   )}

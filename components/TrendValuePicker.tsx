@@ -140,7 +140,7 @@ export function TrendValuePicker({
           color: placeholder ? 'var(--faint)' : undefined,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{label}</span>
-        <span aria-hidden style={{ color: 'var(--faint)', fontSize: 10, flexShrink: 0 }}>▾</span>
+        <span aria-hidden style={{ color: 'var(--faint)', fontSize: 11, flexShrink: 0 }}>▾</span>
       </button>
 
       {open && pos && createPortal(
@@ -164,11 +164,9 @@ export function TrendValuePicker({
             {canFilter && (
               <button
                 type="button"
+                className="btn btn-sm btn-link"
                 onClick={() => { setShowAll(a => !a); setActive(0) }}
-                style={{
-                  marginTop: 6, padding: 0, border: 0, background: 'transparent',
-                  color: 'var(--accent)', fontSize: 11.5, fontWeight: 500, cursor: 'pointer',
-                }}
+                style={{ marginTop: 6 }}
               >{showAll ? `Show ${categoryGroup} only` : 'Show all category groups'}</button>
             )}
           </div>
@@ -197,7 +195,7 @@ export function TrendValuePicker({
                       style={{
                         display: 'block', width: '100%', textAlign: 'left',
                         padding: '7px 9px', border: 0, borderRadius: 7, cursor: 'pointer',
-                        fontFamily: 'var(--num)', fontSize: 12.5,
+                        fontFamily: 'var(--num)', fontSize: 13,
                         background: i === active ? 'var(--accent-weak)' : 'transparent',
                         color: i === active ? 'var(--accent-strong)' : 'var(--text)',
                       }}
@@ -207,7 +205,7 @@ export function TrendValuePicker({
                           category group, shown because the reader asked for everything. */}
                       {canFilter && !inCategoryGroup(h) && (
                         <span style={{
-                          marginLeft: 8, fontFamily: 'var(--font)', fontSize: 10.5,
+                          marginLeft: 8, fontFamily: 'var(--font)', fontSize: 11,
                           color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '0.04em',
                         }}>{(categoryGroups?.[h] ?? []).join(' / ') || 'no category group'}</span>
                       )}

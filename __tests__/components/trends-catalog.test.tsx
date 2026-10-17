@@ -7,6 +7,24 @@ jest.mock('next-auth/react', () => ({
     data: { user: { role: 'evaluator', name: 'Mitt', email: 'mitt@athena.studio' } },
   }),
 }))
+
+// View and filters live in the URL. A stand-in router that writes to jsdom's
+// location and re-renders every reader, the way the real one does.
+jest.mock('next/navigation', () => {
+  const React = jest.requireActual('react')
+  const subs = new Set<() => void>()
+  const read = () => window.location.search
+  const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f) } }
+  return {
+    useSearchParams: () => {
+      const qs = React.useSyncExternalStore(subscribe, read, read)
+      return React.useMemo(() => new URLSearchParams(qs), [qs])
+    },
+    useRouter: () => ({ replace: (url: string) => { window.history.replaceState(null, '', url); subs.forEach(f => f()) } }),
+    usePathname: () => '/evaluations',
+  }
+})
+beforeEach(() => { window.history.replaceState(null, '', '/evaluations') })
 jest.mock('@/components/EvalDetailPanel', () => ({
   __esModule: true,
   default: () => <div data-testid="eval-panel" />,
@@ -60,7 +78,8 @@ describe('Trends catalog', () => {
   it('sorts by total games when asked', async () => {
     render(<TrendsCatalog onOpenGame={jest.fn()} />)
     await waitFor(() => expect(trendRows().length).toBe(3))
-    fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'total' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Sort: Busiest 30 days' }))
+    fireEvent.click(within(document.querySelector('.ssel-menu') as HTMLElement).getByText('Most games'))
     expect(within(trendRows()[0]).getByRole('button')).toHaveTextContent('Block Puzzle')
   })
 

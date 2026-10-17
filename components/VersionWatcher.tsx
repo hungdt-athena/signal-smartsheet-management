@@ -128,7 +128,7 @@ export default function VersionWatcher() {
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '11px 14px', borderRadius: 12,
         background: 'var(--surface)', border: '1px solid var(--border)',
-        boxShadow: 'var(--shadow-lg)', fontSize: 13.5, lineHeight: 1.4,
+        boxShadow: 'var(--shadow-lg)', fontSize: 'var(--fs-14)', lineHeight: 1.4,
       }}
     >
       <span aria-hidden style={{ display: 'flex', flexShrink: 0, color: 'var(--accent)' }}>
@@ -149,14 +149,14 @@ export default function VersionWatcher() {
         <div style={{ fontWeight: 600, color: 'var(--text)' }}>
           {showUpdate ? 'Update available' : 'Announcement'}
         </div>
-        <div style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 1 }}>
+        <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-13)', marginTop: 1 }}>
           {notice || 'Reload to get the latest version — your work is saved first.'}
         </div>
       </div>
       {showUpdate ? (
         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
           {!reloading && (
-            <button className="btn" onClick={snoozeUpdate} style={{ fontSize: 12.5, padding: '6px 11px' }}>
+            <button className="btn btn-ghost" onClick={snoozeUpdate}>
               Later
             </button>
           )}
@@ -164,13 +164,12 @@ export default function VersionWatcher() {
             className="btn btn-primary"
             onClick={reloadNow}
             disabled={reloading}
-            style={{ fontSize: 12.5, padding: '6px 13px' }}
           >
             {reloading ? 'Reloading…' : 'Reload now'}
           </button>
         </div>
       ) : (
-        <button className="btn" onClick={dismissNotice} style={{ fontSize: 12.5, padding: '6px 13px', flexShrink: 0 }}>
+        <button className="btn" onClick={dismissNotice} style={{ flexShrink: 0 }}>
           Got it
         </button>
       )}

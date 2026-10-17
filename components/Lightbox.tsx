@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { CloseButton } from '@/components/ui/CloseButton'
 
 // The full-size zoom that used to live only inside EvalDetailPanel (a useState +
 // inline createPortal block, wired to ManualScreenshotsCard through an onExpand
@@ -72,10 +73,11 @@ export function Lightbox({ url, onClose, images }: LightboxProps): JSX.Element |
           ))
         )}
       </div>
-      <button onClick={onClose}
-        style={{ position: 'fixed', top: 20, right: 20, background: 'rgba(0,0,0,.5)', border: 'none', color: '#fff', width: 40, height: 40, borderRadius: 20, fontSize: 20, cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
-        ✕
-      </button>
+      {/* Its own wrapper stops the click here, so one press closes once (the backdrop
+          would otherwise take the same click as a second close). */}
+      <div className="lightbox-close" onClick={e => e.stopPropagation()}>
+        <CloseButton onClick={onClose} />
+      </div>
     </div>,
     document.body
   )

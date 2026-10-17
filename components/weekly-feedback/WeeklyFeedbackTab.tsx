@@ -2,7 +2,16 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { Seg, type SegOption } from '@/components/ui/Seg'
+import { FilterBar, FilterSpacer, ClearFilters, FilterCount } from '@/components/ui/FilterBar'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { Switch } from '@/components/ui/Switch'
+import { CloseButton } from '@/components/ui/CloseButton'
+import { EmptyState, ErrorState, SkeletonRows } from '@/components/ui/States'
 import { registerUnsavedGuard } from '@/lib/unsaved-guard'
+import { useUrlState, useSetUrlParams } from '@/lib/use-url-state'
+import { fmtDateTimeVN } from '@/lib/format-date'
 import { SectionEditor } from './SectionEditor'
 import { FeedbackView, FeedbackCell, AlikeCell } from './FeedbackView'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
@@ -77,14 +86,25 @@ function groupByCalendar(labels: string[]) {
   return { years, other }
 }
 
+type View = 'overview' | 'editor'
+const VIEWS: SegOption<View>[] = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'editor', label: 'Editor' },
+]
+
 export function WeeklyFeedbackTab() {
   const { data: session } = useSession()
   const role = session?.user?.role
   const isManager = isManagerRole(role)
   const userName = session?.user?.name || ''
 
-  // Overview / Editor toggle is local state only — NO url params.
-  const [view, setView] = useState<'list' | 'week'>('list')
+  // The view and the filters live in the URL, so a reload or a shared link opens
+  // the same view. Overview filters (batch, ev, q) and the Editor's picks (edit,
+  // who) use separate keys: opening one evaluator's batch in the Editor must not
+  // narrow the Overview the reader comes back to.
+  const [viewParam, setView] = useUrlState('view', 'overview')
+  const view: View = viewParam === 'editor' ? 'editor' : 'overview'
+  const setUrlParams = useSetUrlParams()
 
   const [batches, setBatches] = useState<string[]>([])      // weeks that HAVE feedback (Overview filter)
   const [allBatches, setAllBatches] = useState<string[]>([]) // full universe (Editor cards + week picker)
@@ -92,18 +112,37 @@ export function WeeklyFeedbackTab() {
   const [filledBatches, setFilledBatches] = useState<Set<string>>(new Set()) // batches the editor's evaluator has non-empty feedback for
 
   // Editor picks (managers can view another evaluator's week).
-  const [evaluator, setEvaluator] = useState('') // '' = my own
-  const [selectedBatch, setSelectedBatch] = useState('')
+  const [whoParam, setEvaluator] = useUrlState('who', '') // '' = my own
+  const evaluator = isManager ? whoParam : ''
+  const [selectedBatch, setSelectedBatch] = useUrlState('edit', '')
 
   // Overview filters + view options.
-  const [listBatch, setListBatch] = useState('')
-  const [listEvaluator, setListEvaluator] = useState('')
-  const [query, setQuery] = useState('')
+  const [listBatch, setListBatch] = useUrlState('batch', '')
+  const [evParam, setListEvaluator] = useUrlState('ev', '')
+  const listEvaluator = isManager ? evParam : ''
+  // Search keeps its own text while typing and writes ?q= once typing pauses.
+  const [qParam, setQParam] = useUrlState('q', '')
+  const [query, setQuery] = useState(qParam)
+  const qWritten = useRef(qParam)
+  useEffect(() => {
+    // The URL changed under the box (Clear filters, Back). Our own write is skipped.
+    if (qParam === qWritten.current) return
+    qWritten.current = qParam
+    setQuery(qParam)
+  }, [qParam])
+  useEffect(() => {
+    if (query === qWritten.current) return
+    const t = setTimeout(() => { qWritten.current = query; setQParam(query) }, 300)
+    return () => clearTimeout(t)
+  }, [query, setQParam])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({}) // collapsed weeks (Overview)
   const [collapsedSecs, setCollapsedSecs] = useState<Record<string, boolean>>({}) // collapsed sections (Editor)
 
   const [sections, setSections] = useState<Section[]>([])
   const [records, setRecords] = useState<WeeklyRecord[]>([])
+  const [listLoading, setListLoading] = useState(true)
+  const [listFailed, setListFailed] = useState(false)
+  const [listReload, setListReload] = useState(0)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(false)
@@ -137,7 +176,7 @@ export function WeeklyFeedbackTab() {
   useEffect(() => {
     // Only on the landing (no week selected). Refetches each time the picker is
     // cleared back to cards, so a just-saved batch flips from faint to bold.
-    if (view !== 'week' || selectedBatch) return
+    if (view !== 'editor' || selectedBatch) return
     const qs = new URLSearchParams({ list: '1' })
     // Scope to the editor's evaluator: a chosen evaluator (manager), else self.
     const who = (isManager && evaluator) ? evaluator : userName
@@ -150,7 +189,7 @@ export function WeeklyFeedbackTab() {
 
   // Editor: load the record for the selected batch — unless seeded from a row.
   useEffect(() => {
-    if (view !== 'week' || !selectedBatch) return
+    if (view !== 'editor' || !selectedBatch) return
     const self = !isManager || !evaluator || evaluator.toLowerCase() === userName.toLowerCase()
     const key = `${selectedBatch}::${(isManager && evaluator) ? evaluator : ''}`
     if (preseeded.current === key) { preseeded.current = null; return }
@@ -163,14 +202,22 @@ export function WeeklyFeedbackTab() {
     })
   }, [view, selectedBatch, evaluator, isManager, userName])
 
-  // Overview: load records for the resolved batch + evaluator filters.
+  // Overview: load records for the resolved batch + evaluator filters. A failed
+  // read shows as an error with Try again, never as "no feedback".
   useEffect(() => {
-    if (view !== 'list') return
+    if (view !== 'overview') return
+    let live = true
     const qs = new URLSearchParams({ list: '1' })
     if (listBatch) qs.set('batch', listBatch)
     if (isManager && listEvaluator) qs.set('evaluator', listEvaluator)
-    fetch(`/api/weekly-feedback?${qs}`).then(r => r.json()).then(d => setRecords(d.records || []))
-  }, [view, listBatch, listEvaluator, isManager])
+    setListLoading(true); setListFailed(false)
+    fetch(`/api/weekly-feedback?${qs}`)
+      .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
+      .then(d => { if (live) setRecords(d.records || []) })
+      .catch(() => { if (live) { setRecords([]); setListFailed(true) } })
+      .finally(() => { if (live) setListLoading(false) })
+    return () => { live = false }
+  }, [view, listBatch, listEvaluator, isManager, listReload])
 
   // Default week-collapse: keep the newest week open, collapse the rest.
   useEffect(() => {
@@ -237,10 +284,9 @@ export function WeeklyFeedbackTab() {
     const secs = Array.isArray(rec.sections) ? rec.sections : []
     // Opening own empty week (a "Tap to add" row) seeds a blank section to type into.
     setSections(secs.length ? secs : (who === '' ? [newSection()] : []))
-    setSelectedBatch(rec.batch)
-    if (isManager) setEvaluator(who)
     setCollapsedSecs({}); setDirty(false); setSaveError(false); dirtyRef.current = false; setHistoryOpen(false)
-    setView('week')
+    // One navigation for all three keys: separate setters would drop each other.
+    setUrlParams({ view: 'editor', edit: rec.batch, ...(isManager ? { who: who || null } : {}) })
   }
 
   const loadHistory = () => {
@@ -292,75 +338,75 @@ export function WeeklyFeedbackTab() {
     openRecord(rec)
   }
 
-  const who = viewingSelf ? (userName || 'my own') : evaluator
-  const listWho = isManager ? (listEvaluator || 'All evaluators') : (userName || 'my own')
-  const sub = view === 'week'
-    ? `${who}${selectedBatch ? ` · ${selectedBatch}` : ''}`
-    : `${listWho} · ${listBatch || 'all weeks'} · ${real.length} record${real.length === 1 ? '' : 's'}`
+  const nonEmptyCount = records.filter(r => !isEmptyRecord(r)).length
+  const filtered = !!listBatch || !!listEvaluator || q !== ''
+  const clearFilters = () => { setQuery(''); setUrlParams({ batch: null, ev: null, q: null }) }
+
+  // Switching to the Editor opens its batch cards, as it always has. Switching to
+  // the Overview leaves ?edit= alone: the Editor's auto-save timer is keyed on the
+  // open batch, and clearing it here would drop an unsaved change.
+  const switchView = (v: View) => {
+    if (v === 'editor') setUrlParams({ view: 'editor', edit: null })
+    else setView(v)
+  }
 
   return (
-    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div className="page-head" style={{ marginBottom: 10 }}>
-        <div>
-          <h1 className="h-title">Weekly Feedback</h1>
-          <p className="h-sub">{sub}</p>
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button className={`seg-btn-premium${view === 'list' ? ' active' : ''}`} onClick={() => setView('list')}>Overview</button>
-          <button className={`seg-btn-premium${view === 'week' ? ' active' : ''}`} onClick={() => { setSelectedBatch(''); setView('week') }}>Editor</button>
-        </div>
-      </div>
+    <div className="page wf-page">
+      <PageHeader
+        title="Weekly Feedback"
+        sub="Each evaluator's notes on a batch, with the games alike."
+        actions={<Seg value={view} onChange={switchView} options={VIEWS} ariaLabel="View" />}
+      />
 
-      <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
-        {view === 'list' ? (
-            <>
-              <div style={{ width: 180 }}>
-                <StyledSelect value={listBatch} onChange={setListBatch} placeholder="All weeks"
-                  options={[{ value: '', label: 'All weeks' }, ...batches.map(b => ({ value: b, label: b }))]} />
-              </div>
-              {isManager && (
-                <div style={{ width: 180 }}>
-                  <StyledSelect value={listEvaluator} onChange={setListEvaluator} placeholder="All evaluators"
-                    options={[{ value: '', label: 'All evaluators' }, ...evaluators.map(e => ({ value: e, label: e }))]} />
-                </div>
-              )}
-              <input className="wf-search" value={query} onChange={e => setQuery(e.target.value)}
-                placeholder="Search feedback or games…" />
-              {query && <button type="button" className="wf-clear" onClick={() => setQuery('')} title="Clear search">✕</button>}
-              <div style={{ flex: 1 }} />
-              <button type="button" className="wf-collapse-all"
-                onClick={() => setCollapsed(c => { const all = groups.every(g => c[g.batch]); const n: Record<string, boolean> = {}; groups.forEach(g => { n[g.batch] = !all }); return n })}>
-                {groups.length > 0 && groups.every(g => collapsed[g.batch]) ? 'Expand all' : 'Collapse all'}
-              </button>
-            </>
-          ) : (
-            <>
-              {selectedBatch && (
-                <button type="button" className="wf-back"
-                  onClick={() => { if (dirtyRef.current && viewingSelf) void save(); setSelectedBatch('') }}
-                  title="Back to all weeks">
-                  <span aria-hidden="true">←</span> All weeks
-                </button>
-              )}
-              {isManager && (
-                <div style={{ width: 200 }}>
-                  <StyledSelect value={evaluator} onChange={setEvaluator} placeholder="My own"
-                    options={[{ value: '', label: 'My own' }, ...evaluators.map(e => ({ value: e, label: e }))]} />
-                </div>
-              )}
-              <div style={{ width: 200 }}>
-                <StyledSelect value={selectedBatch} onChange={setSelectedBatch} placeholder="Select a week…"
-                  options={allBatches.map(b => ({ value: b, label: b }))} />
-              </div>
-            </>
+      {view === 'overview' ? (
+        <FilterBar>
+          <div style={{ width: 180 }}>
+            <StyledSelect filter ariaLabel="Batch" value={listBatch} onChange={setListBatch} placeholder="All batches"
+              options={[{ value: '', label: 'All batches' }, ...batches.map(b => ({ value: b, label: b }))]} />
+          </div>
+          {isManager && (
+            <div style={{ width: 180 }}>
+              <StyledSelect filter ariaLabel="Evaluator" value={listEvaluator} onChange={setListEvaluator} placeholder="All evaluators"
+                options={[{ value: '', label: 'All evaluators' }, ...evaluators.map(e => ({ value: e, label: e }))]} />
+            </div>
           )}
-        </div>
+          <SearchInput value={query} onChange={setQuery} placeholder="Search feedback or games" width={240} />
+          <FilterSpacer />
+          <ClearFilters visible={filtered} onClear={clearFilters} />
+          <FilterCount loading={listLoading && records.length === 0} shown={real.length} total={nonEmptyCount}
+            noun={nonEmptyCount === 1 ? 'record' : 'records'} />
+          <button type="button" className="btn"
+            onClick={() => setCollapsed(c => { const all = groups.every(g => c[g.batch]); const n: Record<string, boolean> = {}; groups.forEach(g => { n[g.batch] = !all }); return n })}>
+            {groups.length > 0 && groups.every(g => collapsed[g.batch]) ? 'Expand all' : 'Collapse all'}
+          </button>
+        </FilterBar>
+      ) : (
+        <FilterBar ariaLabel="Batch to edit">
+          {selectedBatch && (
+            <button type="button" className="btn"
+              onClick={() => { if (dirtyRef.current && viewingSelf) void save(); setSelectedBatch('') }}
+              title="Back to all batches">
+              <span aria-hidden="true">←</span> All batches
+            </button>
+          )}
+          {isManager && (
+            <div style={{ width: 200 }}>
+              <StyledSelect ariaLabel="Evaluator" value={evaluator} onChange={setEvaluator} placeholder="My own"
+                options={[{ value: '', label: 'My own' }, ...evaluators.map(e => ({ value: e, label: e }))]} />
+            </div>
+          )}
+          <div style={{ width: 200 }}>
+            <StyledSelect ariaLabel="Batch" value={selectedBatch} onChange={setSelectedBatch} placeholder="Select a batch"
+              options={allBatches.map(b => ({ value: b, label: b }))} />
+          </div>
+        </FilterBar>
+      )}
 
       <div className="card wf-scroll" style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        {view === 'week' ? (
+        {view === 'editor' ? (
           !selectedBatch ? (
             allBatches.length === 0 ? (
-              <p className="h-sub" style={{ padding: 8 }}>No weeks yet. Batches appear here once games are assigned to a week.</p>
+              <EmptyState>No batches yet. They show up here once games are assigned to a batch.</EmptyState>
             ) : (() => {
               const renderCard = (b: string) => {
                 const filled = filledBatches.has(b)
@@ -408,18 +454,16 @@ export function WeeklyFeedbackTab() {
                   {sections.length > 1 && (
                     <div className="wf-outline">
                       {sections.map((s, i) => (
-                        <button key={s.id} type="button" title={firstLine(s)} onClick={() => jumpToSec(s.id)}>{i + 1}</button>
+                        <button key={s.id} type="button" title={firstLine(s)} aria-label={`Go to section ${i + 1}`} onClick={() => jumpToSec(s.id)}>{i + 1}</button>
                       ))}
                     </div>
                   )}
                 </div>
                 <div className="wf-label-actions">
                   <span className={`wf-savestate${saveError && !saving ? ' err' : ''}`} role="status">{saving ? 'Saving…' : saveError ? 'Not saved. Try again.' : dirty ? 'Unsaved changes' : 'All changes saved'}</span>
-                  <button type="button" className={`wf-autosave${autoSave ? ' on' : ''}`} onClick={() => setAutoSave(v => !v)} title="Toggle auto-save (off = save manually)">
-                    <span className="wf-autosave-dot" />Auto-save {autoSave ? 'On' : 'Off'}
-                  </button>
-                  <button type="button" className="wf-save-btn" disabled={saving || !dirty} onClick={() => save()}>{saving ? 'Saving…' : 'Save'}</button>
-                  <button type="button" className="wf-history-btn" onClick={loadHistory}>History</button>
+                  <Switch checked={autoSave} onChange={setAutoSave} label="Auto-save" title="Off: save with the Save button" />
+                  <button type="button" className="btn btn-sm btn-primary" disabled={saving || !dirty} onClick={() => save()}>{saving ? 'Saving…' : 'Save'}</button>
+                  <button type="button" className="btn btn-sm" aria-pressed={historyOpen} onClick={loadHistory}>History</button>
                 </div>
               </div>
               {historyOpen && (
@@ -434,15 +478,16 @@ export function WeeklyFeedbackTab() {
                     }}
                   >
                     {snapshots.slice(0, historyVisible).map(s => (
-                      <div key={s.id} className={`wf-history-item${previewSnap?.id === s.id ? ' is-active' : ''}`}>
-                        <span className="wf-history-when">{new Date(s.saved_at).toLocaleString()}</span>
+                      <div key={s.id} className={`wf-hist-item${previewSnap?.id === s.id ? ' is-active' : ''}`}>
+                        <span className="wf-history-when">{fmtDateTimeVN(s.saved_at)}</span>
                         <span className="wf-history-meta">{s.sections?.length || 0} section{(s.sections?.length || 0) === 1 ? '' : 's'}</span>
                         <span className="wf-history-ttl">{ttlText(s.saved_at)}</span>
                         <span style={{ flex: 1 }} />
-                        <button type="button" onClick={() => setPreviewSnap(previewSnap?.id === s.id ? null : s)}>
+                        <button type="button" className="btn btn-sm btn-ghost" aria-pressed={previewSnap?.id === s.id}
+                          onClick={() => setPreviewSnap(previewSnap?.id === s.id ? null : s)}>
                           {previewSnap?.id === s.id ? 'Hide' : 'Preview'}
                         </button>
-                        <button type="button" className="wf-history-restore" onClick={() => restore(s)}>Restore</button>
+                        <button type="button" className="btn btn-sm" onClick={() => restore(s)}>Restore</button>
                       </div>
                     ))}
                     {historyVisible < snapshots.length && (
@@ -451,11 +496,11 @@ export function WeeklyFeedbackTab() {
                   </div>
                   {previewSnap && (
                     <div className="wf-history-preview">
-                      <div className="wf-history-preview-head">
-                        <span>Preview · {new Date(previewSnap.saved_at).toLocaleString()}</span>
+                      <div className="wf-hist-preview-head">
+                        <span>Preview · {fmtDateTimeVN(previewSnap.saved_at)}</span>
                         <span style={{ flex: 1 }} />
-                        <button type="button" className="wf-save-btn" onClick={() => restore(previewSnap)}>Restore this version</button>
-                        <button type="button" onClick={() => setPreviewSnap(null)}>Close</button>
+                        <button type="button" className="btn btn-sm btn-primary" onClick={() => restore(previewSnap)}>Restore this version</button>
+                        <CloseButton onClick={() => setPreviewSnap(null)} label="Close preview" />
                       </div>
                       <div className="wf-history-preview-body">
                         <FeedbackView sections={Array.isArray(previewSnap.sections) ? previewSnap.sections : []} />
@@ -488,17 +533,25 @@ export function WeeklyFeedbackTab() {
                   )
                 ))}
               </div>
-              <button type="button" className="wf-addsection" onClick={addSection}>+ Add section</button>
+              <button type="button" className="btn btn-sm" onClick={addSection}>+ Add section</button>
             </>
           ) : (
             <FeedbackView sections={sections} />
           )
         ) : (
-          <table className="wf-list" style={{ width: '100%' }}>
-            <thead><tr><th>Evaluator</th><th>Feedback</th><th>Game Alike</th></tr></thead>
+          listFailed ? (
+            <ErrorState onRetry={() => setListReload(k => k + 1)}>Could not load the feedback.</ErrorState>
+          ) : (
+          <table className="wf-list tbl tbl-sticky">
+            <thead><tr><th>Evaluator</th><th>Feedback</th><th>Game alike</th></tr></thead>
             <tbody>
-              {groups.length === 0 && (
-                <tr><td colSpan={3}><span className="h-sub">{query ? 'No matches.' : 'No feedback recorded yet.'}</span></td></tr>
+              {listLoading && records.length === 0 && <SkeletonRows widths={[100, 360, 260]} />}
+              {groups.length === 0 && !listLoading && (
+                <tr><td colSpan={3}>
+                  <EmptyState action={filtered ? { label: 'Clear filters', onClick: clearFilters } : undefined}>
+                    {filtered ? 'No feedback matches these filters.' : 'No feedback recorded yet.'}
+                  </EmptyState>
+                </td></tr>
               )}
               {groups.map(g => {
                 const expanded = q ? true : !collapsed[g.batch]
@@ -540,6 +593,7 @@ export function WeeklyFeedbackTab() {
               })}
             </tbody>
           </table>
+          )
         )}
       </div>
     </div>

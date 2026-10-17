@@ -1,1 +1,39 @@
 /* teamops — area styles for the UI cleanup. Owned by one area; shared rules live in globals.css. */
+
+/* ===== Team Operations: Reassign / Rescue / Handover forms ===== */
+/* The form sits straight in its .card (the card already pads), so no inner wrapper. */
+.ops-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.ops-knobs { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+.ops-actions { display: flex; gap: 8px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
+/* One-line helper text under or beside a control. */
+.ops-hint { font-size: var(--fs-12); color: var(--faint); margin: 0; line-height: 1.45; }
+.ops-warn { color: var(--warn); margin: -6px 0 12px; }
+/* The sentence in a confirm modal that states what will move. */
+.ops-confirm { font-size: var(--fs-13); line-height: 1.5; margin: 0; }
+
+/* ===== Operation history ===== */
+.ophist-head { align-items: center; }
+.ophist-acts { margin-left: 6px; display: inline-flex; gap: 4px; vertical-align: middle; }
+.ophist-own { margin-left: 6px; font-size: var(--fs-11); color: var(--faint); font-style: italic; }
+.ophist-confirm { font-size: var(--fs-13); line-height: 1.5; margin: 0; }
+
+/* Details modal: status, genre, window and who/when on one wrapping line. */
+.opdet-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.opdet-note { font-size: var(--fs-12); color: var(--faint); margin: 0; }
+
+/* ===== Assign: history matrix + roster ===== */
+.hist-nav { display: flex; align-items: center; gap: 6px; }
+.hm-pop-head .x-btn { margin-left: auto; }
+.hm-pop-row .badge { justify-self: start; }
+.gpanel-acts .x-btn { margin-left: 4px; }
+/* "+ Add evaluator" under the roster: a normal button, left-aligned in the card. */
+.roster-add { align-self: flex-start; margin-top: 8px; }
+
+/* ===== Next run (PushPreview) ===== */
+/* Breakdown fills the card's width, on its bottom edge. */
+.pp-card .pp-open { width: 100%; justify-content: center; }
+.pp-win-link { margin-top: 4px; padding-left: 0; }
+/* Modal's footer is a right-aligned row; the notes and the confirm stack instead. */
+.pp-foot-inner { display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 100%; }
+.pp-foot-inner .pp-go { align-self: flex-end; }
+.pp-confirm-acts { justify-content: flex-end; }

@@ -8,15 +8,37 @@ import { ReassignPanel } from '@/components/ReassignPanel'
 import { RescuePanel } from '@/components/RescuePanel'
 import { HandoverPanel } from '@/components/HandoverPanel'
 import { ReportView } from '@/components/report/ReportView'
-import { isBucket } from '@/lib/buckets'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { isBucket, type Bucket } from '@/lib/buckets'
+import { useSetUrlParams } from '@/lib/use-url-state'
 
 type Tab = 'assign' | 'reassign' | 'rescue' | 'handover' | 'performance'
-const TABS: { value: Tab; pageTitle: string }[] = [
-  { value: 'assign', pageTitle: 'Assign' },
-  { value: 'reassign', pageTitle: 'Reassign' },
-  { value: 'rescue', pageTitle: 'Rescue' },
-  { value: 'handover', pageTitle: 'Handover' },
-]
+type OpsTab = Exclude<Tab, 'performance'>
+
+// Title = the sidebar label. One line under it says what the tab is for; an
+// evaluator reads a different line where their view is history only.
+const HEADERS: Record<OpsTab, { title: string; sub: string; subEvaluator: string }> = {
+  assign: {
+    title: 'Assign',
+    sub: 'Who receives new games, and what the next run would hand out.',
+    subEvaluator: 'Your roster rows: category groups, weight and availability.',
+  },
+  reassign: {
+    title: 'Reassign',
+    sub: 'Move pending games from one evaluator to others.',
+    subEvaluator: 'Reassign runs that moved games to or from you.',
+  },
+  rescue: {
+    title: 'Rescue',
+    sub: 'Move games that waited too long to evaluators who keep up.',
+    subEvaluator: 'Rescue runs that moved games to or from you.',
+  },
+  handover: {
+    title: 'Handover',
+    sub: 'Send an evaluator\'s pending games to the team while they are away.',
+    subEvaluator: 'Send your pending games to the team while you are away.',
+  },
+}
 
 export default function TeamOpsPage() {
   return (
@@ -28,22 +50,20 @@ export default function TeamOpsPage() {
 
 function TeamOpsInner() {
   const searchParams = useSearchParams()
+  const setUrl = useSetUrlParams()
   const { data: session } = useSession()
-  // Every role that reaches this page sees these tabs. Reassign is read-only for
-  // evaluators (history scoped to runs they're involved in — see ReassignPanel), and
-  // Performance is self-scoped for them: /api/report returns only their own row for
-  // that role and ReportView then shows the Individual tab alone. No role check is
-  // needed for those — and none should be added, it would only be a third copy of a
-  // rule the API already enforces.
-  //
-  // Rescue is the exception: its whole screen is a side-by-side comparison of every
-  // teammate's backlog, so there is no scoped version of it to show an evaluator. The
-  // API is admin-only, and the tab is dropped here so they get the default tab rather
-  // than a wall of 403s.
+  // Every role that reaches this page sees every tab. For evaluators the views are
+  // scoped, and the scoping lives in the APIs, not here:
+  //   Assign      → their own roster rows (see AssignTab).
+  //   Reassign    → history only: runs they were in, as source or receiver.
+  //   Rescue      → the same, for rescue runs. The scan and its actions stay
+  //                 admin-only in /api/operations/rescue; the panel never calls them.
+  //   Handover    → their own requests.
+  //   Performance → /api/report returns only their own row, so ReportView shows
+  //                 the Individual tab alone.
+  // Keep in step with evaluatorTabs in middleware.ts and the sidebar in layout.tsx.
   const isEvaluator = session?.user?.role === 'evaluator'
-  const allowed: Tab[] = isEvaluator
-    ? ['assign', 'reassign', 'handover', 'performance']
-    : ['assign', 'reassign', 'rescue', 'handover', 'performance']
+  const allowed: Tab[] = ['assign', 'reassign', 'rescue', 'handover', 'performance']
   const tab = (searchParams.get('tab') as Tab) || 'assign'
   const active: Tab = allowed.includes(tab) ? tab : 'assign'
 
@@ -51,27 +71,33 @@ function TeamOpsInner() {
   // link may say WHICH rows it meant, never what the tool's settings should be.
   const flash = (searchParams.get('flash') || '').split(',').map(s => s.trim()).filter(Boolean)
   const fromParam = searchParams.get('from') || undefined
-  // Which genre the sentence that linked here was read on. A category picks the view,
-  // the way `tab` does, and is never written back to app_config — so it may travel in
-  // a URL where a Rescue THRESHOLD may not. Validated against the bucket list, and
-  // anything else is dropped so the panel keeps its own default rather than opening
-  // on a genre nobody asked for.
+  // The category group on screen lives in ?cat=, so reload, Back and a link from
+  // the Report all open the same genre. A category picks the view, the way `tab`
+  // does, and is never written back to app_config — so it may travel in a URL where
+  // a Rescue THRESHOLD may not. Anything that is not a bucket falls back to Puzzle
+  // rather than opening on a genre nobody asked for.
   const catParam = searchParams.get('cat')
-  const initialCategory = isBucket(catParam) ? catParam : undefined
+  const category: Bucket = isBucket(catParam) ? catParam : 'puzzle'
+  // Switching genre also drops ?from= and ?flash=: both named people in the genre
+  // the link was about, and would preselect or ring them in the new one.
+  const setCategory = useCallback((b: Bucket) => {
+    setUrl({ cat: b === 'puzzle' ? null : b, from: null, flash: null })
+  }, [setUrl])
 
   // Performance renders its own page chrome (header, filters, sub-tabs)
   if (active === 'performance') return <ReportView />
 
+  const head = HEADERS[active]
   return (
     <div className="page">
-      <div className="page-head">
-        <h1 className="h-title">{TABS.find(t => t.value === active)?.pageTitle ?? 'Team Operations'}</h1>
-      </div>
+      <PageHeader title={head.title} sub={isEvaluator ? head.subEvaluator : head.sub} />
 
       {active === 'assign' && <AssignTab />}
-      {active === 'reassign' && <ReassignPanel initialFrom={fromParam} initialCategory={initialCategory} />}
-      {active === 'rescue' && <RescuePanel flash={flash} initialCategory={initialCategory} />}
-      {active === 'handover' && <HandoverPanel />}
+      {active === 'reassign' && (
+        <ReassignPanel initialFrom={fromParam} category={category} onCategoryChange={setCategory} />
+      )}
+      {active === 'rescue' && <RescuePanel flash={flash} category={category} onCategoryChange={setCategory} />}
+      {active === 'handover' && <HandoverPanel category={category} onCategoryChange={setCategory} />}
     </div>
   )
 }
@@ -91,11 +117,11 @@ function AssignTab() {
     setRosterNames(prev => (prev.join('|') === names.join('|') ? prev : names))
   }, [])
 
+  // A fragment, not a wrapper: .page's gap spaces the two.
   return (
-    <div>
+    <>
       <AssignSetup isEvaluator={isEvaluator} userName={userName} onRosterNames={onRosterNames} />
-      <div style={{ height: 18 }} />
       <AssignHistory rosterNames={rosterNames} />
-    </div>
+    </>
   )
 }

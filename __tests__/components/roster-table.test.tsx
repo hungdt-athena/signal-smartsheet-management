@@ -217,11 +217,15 @@ describe('RosterTable', () => {
     expect(within(puzzle).getByRole('button', { name: 'Select all' })).toBeDisabled()
   })
 
-  it('Remove category group removes that row alone', () => {
+  it('Remove category group asks once, then removes that row alone', () => {
     const { onRemoveRow } = setup()
     const panel = openPanel('NhiLV', 'Arcade')
+    // First click arms the button; nothing is removed yet.
     fireEvent.click(within(panel).getByRole('button', { name: 'Remove category group' }))
+    expect(onRemoveRow).not.toHaveBeenCalled()
+    fireEvent.click(within(panel).getByRole('button', { name: 'Remove Arcade?' }))
     expect(onRemoveRow).toHaveBeenCalledWith(2)
+    expect(onRemoveRow).toHaveBeenCalledTimes(1)
   })
 
   it('+ category group only offers the groups that person is missing', () => {

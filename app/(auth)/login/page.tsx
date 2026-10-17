@@ -22,27 +22,22 @@ function LoginForm() {
       background: 'var(--bg)',
     }}>
       <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16,
+        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
         padding: 32, width: '100%', maxWidth: 380,
         boxShadow: 'var(--shadow-md)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 9, background: 'var(--accent)',
-            display: 'grid', placeItems: 'center', flexShrink: 0,
-            boxShadow: '0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent)',
-          }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fff' }} />
-          </div>
+        {/* Same brand block as the sidebar, so the app looks the same before and after sign-in. */}
+        <div className="sb-brand login-brand">
+          <div className="sb-mark"><span /></div>
           <div>
-            <h1 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Signal</h1>
-            <p style={{ fontSize: 12, color: 'var(--faint)', margin: 0, marginTop: 2 }}>Playtest Management</p>
+            <h1 className="sb-name" style={{ margin: 0 }}>Signal</h1>
+            <p className="sb-tag" style={{ margin: 0 }}>Playtest Management</p>
           </div>
         </div>
 
         {errorMsg && (
           <div style={{
-            fontSize: 13, color: 'var(--bad)', background: 'var(--bad-weak)',
+            fontSize: 'var(--fs-13)', color: 'var(--bad)', background: 'var(--bad-weak)',
             border: '1px solid color-mix(in srgb, var(--bad) 25%, transparent)',
             padding: '10px 12px', borderRadius: 8, marginBottom: 16, fontWeight: 500,
           }}>
@@ -53,7 +48,7 @@ function LoginForm() {
         <button
           className="btn btn-primary"
           onClick={() => signIn('google', { callbackUrl: '/' })}
-          style={{ width: '100%', justifyContent: 'center', padding: '10px 16px', fontSize: 13 }}
+          style={{ width: '100%', justifyContent: 'center' }}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
             <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" opacity=".9"/>
@@ -70,7 +65,7 @@ function LoginForm() {
             href="/evaluator-guide.html#vi"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ flex: 1, justifyContent: 'center', padding: '10px 16px', fontSize: 13, textDecoration: 'none' }}
+            style={{ flex: 1, justifyContent: 'center', textDecoration: 'none' }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
@@ -83,7 +78,7 @@ function LoginForm() {
             href="/evaluator-guide.html#en"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ flex: 1, justifyContent: 'center', padding: '10px 16px', fontSize: 13, textDecoration: 'none' }}
+            style={{ flex: 1, justifyContent: 'center', textDecoration: 'none' }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
@@ -93,7 +88,7 @@ function LoginForm() {
           </a>
         </div>
 
-        <p style={{ fontSize: 11, color: 'var(--faint)', textAlign: 'center', marginTop: 14 }}>
+        <p style={{ fontSize: 'var(--fs-11)', color: 'var(--faint)', textAlign: 'center', marginTop: 14 }}>
           Only @athena.studio accounts
         </p>
       </div>

@@ -66,3 +66,32 @@ describe('middleware: evaluations tabs by role', () => {
     expect(wentTo('/evaluations?cat=arcade', 'admin')).toBeNull()
   })
 })
+
+// Q5: evaluators read Reassign and Rescue (history of the runs they were in,
+// scoped by /api/operations/runs) and Record (their own rows). The sidebar in
+// app/(manager)/layout.tsx shows those links to them, so none may bounce.
+describe('middleware: evaluator access to Team Operations and Record', () => {
+  const realSkip = process.env.SKIP_AUTH
+  beforeAll(() => { process.env.SKIP_AUTH = undefined })
+  afterAll(() => { process.env.SKIP_AUTH = realSkip })
+
+  it.each(['assign', 'reassign', 'rescue', 'handover', 'performance'])('lets an evaluator reach tab=%s', tab => {
+    expect(wentTo(`/team-ops?tab=${tab}`, 'evaluator')).toBeNull()
+  })
+
+  it('sends an evaluator on an unknown tab back to Assign', () => {
+    expect(wentTo('/team-ops?tab=nonsense', 'evaluator')).toContain('/team-ops?tab=assign')
+  })
+
+  it('lets an evaluator reach Record', () => {
+    expect(wentTo('/youtube?tab=record_video', 'evaluator')).toBeNull()
+  })
+
+  it('still keeps the YouTube Short List tab from evaluators', () => {
+    expect(wentTo('/youtube?tab=short_list', 'evaluator')).toContain('/youtube?tab=youtube')
+  })
+
+  it('keeps Team Operations from a role with no access', () => {
+    expect(wentTo('/team-ops?tab=reassign', 'recorder')).toContain('/evaluations')
+  })
+})

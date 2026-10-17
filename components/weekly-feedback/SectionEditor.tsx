@@ -30,11 +30,11 @@ export function SectionEditor({ section, index, onChange, onRemove, onDuplicate,
   return (
     <div className="wf-section-row" onDragOver={e => e.preventDefault()} onDrop={onDrop}>
       <div className="wf-section-rail">
-        {onDragStart && <button type="button" className="wf-drag" title="Drag to reorder" draggable onDragStart={onDragStart}>⠿</button>}
+        {onDragStart && <button type="button" className="wf-drag" title="Drag to reorder" aria-label="Drag to reorder" draggable onDragStart={onDragStart}>⠿</button>}
         <span className="wf-sec-idx">{index + 1}</span>
-        {onCollapse && <button type="button" title="Collapse section" onClick={onCollapse}>–</button>}
-        {onDuplicate && <button type="button" title="Duplicate section" onClick={onDuplicate}>⧉</button>}
-        <button type="button" className="wf-section-del" title="Remove section" onClick={onRemove}>✕</button>
+        {onCollapse && <button type="button" title="Collapse section" aria-label="Collapse section" onClick={onCollapse}>–</button>}
+        {onDuplicate && <button type="button" title="Duplicate section" aria-label="Duplicate section" onClick={onDuplicate}>⧉</button>}
+        <button type="button" className="wf-section-del" title="Remove section" aria-label="Remove section" onClick={onRemove}>✕</button>
       </div>
 
       <div className="wf-section-feedback">
@@ -51,7 +51,7 @@ export function SectionEditor({ section, index, onChange, onRemove, onDuplicate,
                 onChange={e => patchBlock(bi, { name: e.target.value })}
                 placeholder="Game alike group name (optional)"
               />
-              <button type="button" className="wf-alike-del" title="Remove game alike group" onClick={() => removeBlock(bi)}>✕</button>
+              <button type="button" className="wf-alike-del" title="Remove game alike group" aria-label="Remove game alike group" onClick={() => removeBlock(bi)}>✕</button>
             </div>
             <ul className="wf-chips">
               {block.games.map((g, gi) => (
@@ -62,14 +62,14 @@ export function SectionEditor({ section, index, onChange, onRemove, onDuplicate,
                     : <span>{g.title}</span>}
                   <PlatformIcon link={g.app_link} />
                   {g.manual && <span className="wf-manual" title="Not in DB">·manual</span>}
-                  <button type="button" title="Remove game" onClick={() => removeGame(bi, gi)}>✕</button>
+                  <button type="button" title="Remove game" aria-label={`Remove ${g.title}`} onClick={() => removeGame(bi, gi)}>✕</button>
                 </li>
               ))}
             </ul>
             <GameSearch onPick={g => addGame(bi, g)} />
           </div>
         ))}
-        <button type="button" className="wf-addgroup" onClick={addBlock}>+ Add game alike group</button>
+        <button type="button" className="btn btn-sm btn-ghost wf-addgroup-btn" onClick={addBlock}>+ Add game alike group</button>
       </div>
     </div>
   )

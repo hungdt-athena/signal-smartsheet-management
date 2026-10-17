@@ -81,6 +81,27 @@ beforeEach(() => {
   installObserver('noop')
 })
 
+// The Initial conclusion filter is the shared StyledSelect: a button named
+// "Initial conclusion: <current>" that opens a menu of .ssel-opt rows. These read and
+// pick from it the way a reader does. The menu shows LABELS (prettyConclusion), so the
+// raw value a pick sends is checked on the request instead.
+const conclusionButton = () => screen.getByRole('button', { name: /^Initial conclusion:/ })
+function conclusionLabels(): string[] {
+  fireEvent.click(conclusionButton())
+  const labels = Array.from(document.querySelectorAll('.ssel-menu .ssel-opt')).map(o => o.textContent!.trim())
+  fireEvent.click(conclusionButton())
+  return labels
+}
+function pickConclusion(label: string) {
+  fireEvent.click(conclusionButton())
+  const opt = Array.from(document.querySelectorAll('.ssel-menu .ssel-opt')).find(o => o.textContent!.trim() === label)
+  if (!opt) throw new Error(`no "${label}" in the Initial conclusion menu`)
+  fireEvent.click(opt)
+}
+// Category is a segmented control (role=group named Category).
+const pickCategory = (label: string) =>
+  fireEvent.click(within(screen.getByRole('group', { name: 'Category' })).getByRole('button', { name: label }))
+
 describe('ReviewTable', () => {
   it('shows the note and the final conclusion on each row, and filters to rows that have one', async () => {
     const fetchMock = mockApi({ list: [
@@ -104,9 +125,9 @@ describe('ReviewTable', () => {
     fireEvent.click(note)
     expect(note.className).toContain('open')
 
-    // the checkbox is local to this table and travels as has_final=1
+    // the switch is local to this table and travels as has_final=1
     expect(parseCalls(fetchMock).filter(c => c.limit === '20').every(c => c.has_final === undefined)).toBe(true)
-    fireEvent.click(screen.getByLabelText('Has final conclusion'))
+    fireEvent.click(screen.getByRole('switch', { name: 'Has final conclusion' }))
     await waitFor(() => expect(parseCalls(fetchMock).some(c => c.limit === '20' && c.has_final === '1')).toBe(true))
   })
 
@@ -167,7 +188,7 @@ describe('ReviewTable', () => {
     await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
     fetchMock.mockClear()
 
-    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'arcade' } })
+    pickCategory('Arcade')
 
     // Changing category also re-fetches the conclusion facets (they're scoped by
     // category), so wait for the list refetch specifically rather than any count.
@@ -433,11 +454,8 @@ describe('ReviewTable', () => {
     global.fetch = fetchMock as unknown as typeof fetch
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
-    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
-    await waitFor(() => {
-      expect(Array.from(select.options).map(o => o.value)).toContain('Bypass')
-    })
-    const values = Array.from(select.options).map(o => o.value)
+    await waitFor(() => expect(conclusionLabels()).toContain('Bypass'))
+    const values = conclusionLabels()
     expect(values).not.toContain('Link_dead')
     expect(values).not.toContain('Stale_release')
   })
@@ -450,12 +468,12 @@ describe('ReviewTable', () => {
     global.fetch = fetchMock as unknown as typeof fetch
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
-    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
-    expect(select.value).toBe('__all__')
-    expect(within(select).getByText('All')).toBeInTheDocument()
-    await waitFor(() => expect(Array.from(select.options).map(o => o.value)).toContain('Bypass'))
+    expect(conclusionButton().getAttribute('aria-label')).toBe('Initial conclusion: All')
+    expect(conclusionButton().className).not.toContain('is-active')
+    await waitFor(() => expect(conclusionLabels()).toContain('Bypass'))
 
-    fireEvent.change(select, { target: { value: 'Bypass' } })
+    pickConclusion('Bypass')
+    expect(conclusionButton().className).toContain('is-active')
     await waitFor(() => {
       const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
       expect(last.conclusion).toBe('Bypass')
@@ -469,7 +487,7 @@ describe('ReviewTable', () => {
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(document.querySelector('.rp-review-empty')).not.toBeNull())
-    fireEvent.change(screen.getByLabelText('Initial conclusion'), { target: { value: '__all__' } })
+    pickConclusion('All')
 
     await waitFor(() => {
       const text = document.querySelector('.rp-review-empty')!.textContent!
@@ -490,10 +508,7 @@ describe('ReviewTable', () => {
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
-    await waitFor(() => {
-      const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
-      expect(Array.from(select.options).map(o => o.value)).toContain('Bypass')
-    })
+    await waitFor(() => expect(conclusionLabels()).toContain('Bypass'))
 
     const pageOnes = parseCalls(fetchMock).filter(c => c.limit === '20' && c.page === '1')
     expect(pageOnes.length).toBe(1)
@@ -518,15 +533,17 @@ describe('ReviewTable', () => {
     const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(screen.getByText('A')).toBeInTheDocument())
 
+    // The app's one initial-conclusion map (lib/conclusion-badge.ts), the same badge
+    // the Evaluate list draws: Bypass is the normal outcome and grey, not red.
     const tone = (i: number) =>
-      (container.querySelectorAll('.rp-review-verdict .pill')[i] as HTMLElement).className
-    expect(tone(0)).toContain('rp-tone-good')  // List Idea - kept
-    expect(tone(1)).toContain('rp-tone-bad')   // Bypass - dropped
-    expect(tone(2)).toContain('rp-tone-bad')   // Playtest & Bypass - dropped
-    expect(tone(3)).toContain('rp-tone-bad')   // M_ByPass - dropped
-    expect(tone(4)).toContain('rp-tone-hold')  // Need deeper testing - not decided
-    expect(tone(5)).toContain('rp-tone-good')  // a Priority - kept
-    expect(tone(6)).toContain('rp-tone-none')  // no call at all
+      (container.querySelectorAll('.rp-review-verdict .badge')[i] as HTMLElement).className
+    expect(tone(0)).toBe('badge success')         // List Idea
+    expect(tone(1)).toBe('badge neutral')         // Bypass
+    expect(tone(2)).toBe('badge neutral-strong')  // Playtest & Bypass
+    expect(tone(3)).toBe('badge neutral')         // M_ByPass
+    expect(tone(4)).toBe('badge running')         // Need deeper testing - not decided
+    expect(tone(5)).toBe('badge running')         // Priority IV: Idea - not decided
+    expect(tone(6)).toBe('badge neutral')         // no call at all
   })
 
   // ---- images ----
@@ -635,7 +652,7 @@ describe('ReviewTable', () => {
 
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(document.querySelector('.rp-review-empty')).not.toBeNull())
-    fireEvent.change(screen.getByLabelText('Initial conclusion'), { target: { value: 'List_Idea' } })
+    pickConclusion('List Idea')
 
     // Pretty label, not the raw stored/transmitted value -- see prettyConclusion.
     await waitFor(() => expect(document.querySelector('.rp-review-empty')!.textContent).toMatch(/List Idea/))
@@ -693,17 +710,15 @@ describe('ReviewTable', () => {
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
 
-    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
+    await waitFor(() => expect(conclusionLabels()).toEqual(expect.arrayContaining(['Good', 'List Idea'])))
+    expect(conclusionLabels()).not.toContain('Skip')
+    // Pretty label in the menu, raw value sent back to the server: only the label
+    // changes.
+    pickConclusion('List Idea')
     await waitFor(() => {
-      const values = Array.from(select.options).map(o => o.value)
-      expect(values).toEqual(expect.arrayContaining(['Good', 'List_Idea']))
+      const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
+      expect(last.conclusion).toBe('List_Idea')
     })
-    const values = Array.from(select.options).map(o => o.value)
-    expect(values).not.toContain('Skip')
-    // Pretty label in the option text, raw value preserved on the option itself
-    // (the value is what gets sent back to the server; only the label changes).
-    const goodOption = Array.from(select.options).find(o => o.value === 'List_Idea')!
-    expect(goodOption.textContent).toBe('List Idea')
   })
 
   it('keeps the full canonical conclusion list when the facets fetch fails, instead of collapsing to just the current selection', async () => {
@@ -715,9 +730,8 @@ describe('ReviewTable', () => {
 
     // Give the (failing) facets fetch a turn to resolve and, if the bug were
     // still present, narrow the dropdown down to just ['List_Idea'].
-    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
     await waitFor(() => {
-      const values = Array.from(select.options).map(o => o.value)
+      const values = conclusionLabels()
       // A manager who hits a transient network error must still be able to
       // change the filter -- the canonical floor, not a single option.
       expect(values).toContain('Bypass')
@@ -733,9 +747,8 @@ describe('ReviewTable', () => {
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
 
-    const select = screen.getByLabelText('Initial conclusion') as HTMLSelectElement
     await waitFor(() => {
-      const values = Array.from(select.options).map(o => o.value)
+      const values = conclusionLabels()
       expect(values).toContain('Bypass')
       expect(values).toContain('Skip')
       expect(values).toContain('Playtest & Bypass')
@@ -749,12 +762,11 @@ describe('ReviewTable', () => {
     const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
 
-    const pill = container.querySelector('.rp-review-verdict .pill')
+    const pill = container.querySelector('.rp-review-verdict .badge')
     expect(pill).not.toBeNull()
     expect(pill!.textContent).toBe('List Idea')
-    // The raw underscored value must not leak into any rendered TEXT (the <option
-    // value="List_Idea"> attribute is fine -- that's the value sent back to the
-    // server, not text a reader sees).
+    // The raw underscored value must not leak into any rendered TEXT (the value sent
+    // back to the server is not text a reader sees).
     expect(container.textContent).not.toMatch(/List_Idea/)
   })
   // ---- The newest-days probe is BOUNDED ----------------------------------------
@@ -850,7 +862,7 @@ describe('ReviewTable', () => {
     render(<ReviewTable evaluator="NhiLV" canSeeTeam={false} />)
     await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
 
-    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'arcade' } })
+    pickCategory('Arcade')
     await waitFor(() => expect(screen.getByText('Arcade Run')).toBeInTheDocument())
 
     const arcadeProbe = parseCalls(fetchMock).find(c => c.limit === '100' && c.category === 'arcade')
@@ -1046,5 +1058,50 @@ describe('ReviewTable', () => {
     expect(shot.tabIndex).toBe(0)
     fireEvent.keyDown(shot, { key: 'Enter' })
     expect(document.querySelectorAll('.lightbox-backdrop img').length).toBe(2)
+  })
+})
+
+describe('ReviewTable colours and filter bar', () => {
+  it('draws the final conclusion as the Short List chip, so Not Found is never green', async () => {
+    const fetchMock = mockApi({ list: [
+      row({ id: 1, title: 'A', final_conclusion: 'Not Found' }),
+      row({ id: 2, title: 'B', final_conclusion: 'Priority IV' }),
+    ] })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const { container } = render(<ReviewTable evaluator="NhiLV" canSeeTeam windowFrom="2026-09-21" windowTo="2026-09-24" />)
+    await waitFor(() => expect(screen.getByText('A')).toBeInTheDocument())
+    const chips = Array.from(container.querySelectorAll('.rp-review-final .badge')) as HTMLElement[]
+    expect(chips.map(c => c.textContent)).toEqual(['Not Found', 'Priority IV'])
+    expect(chips[0].style.background).toBe('var(--fc-notfound)')
+    expect(chips[1].style.background).toBe('var(--fc-p4)')
+    expect(container.querySelector('.rp-tone-good, .rp-tone-bad, .rp-tone-hold, .rp-tone-none')).toBeNull()
+  })
+
+  it('labels the category group Simulation, and Clear filters puts every filter back', async () => {
+    const fetchMock = mockApi({ facets: ['List_Idea', 'Bypass'], list: [row()] })
+    global.fetch = fetchMock as unknown as typeof fetch
+    render(<ReviewTable evaluator="NhiLV" canSeeTeam windowFrom="2026-09-01" windowTo="2026-09-30" />)
+    await waitFor(() => expect(screen.getByText('Merge Puzzle')).toBeInTheDocument())
+
+    const seg = screen.getByRole('group', { name: 'Category' })
+    expect(within(seg).getAllByRole('button').map(b => b.textContent)).toEqual(['Puzzle', 'Arcade', 'Simulation'])
+    // nothing narrowed yet, so there is nothing to clear
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+
+    await waitFor(() => expect(conclusionLabels()).toContain('Bypass'))
+    pickConclusion('Bypass')
+    fireEvent.click(screen.getByRole('switch', { name: 'Has final conclusion' }))
+    fireEvent.change(screen.getByLabelText('From date'), { target: { value: '2026-09-10' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear filters' }))
+
+    await waitFor(() => {
+      const last = parseCalls(fetchMock).filter(c => c.limit === '20').pop()!
+      expect(last.conclusion).toBeUndefined()
+      expect(last.exclude_conclusions).toBe('Link_dead,Stale_release')
+      expect(last.has_final).toBeUndefined()
+      expect(last.from).toBe('2026-09-01')
+      expect(last.to).toBe('2026-09-30')
+    })
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
   })
 })

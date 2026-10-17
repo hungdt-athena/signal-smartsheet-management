@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 jest.mock('@/components/StyledSelect', () => ({
   StyledSelect: ({ value, onChange, options, placeholder }: {
@@ -25,6 +25,8 @@ function mount(selected: React.ComponentProps<typeof BatchMoveBar>['selected'] =
   render(<BatchMoveBar selected={selected} batchOptions={OPTIONS} onCancel={onCancel} onMoved={onMoved} {...over} />)
   return { onCancel, onMoved }
 }
+// The dialog's main button names the count: "Move 2 games".
+const confirmBtn = () => within(screen.getByRole('dialog')).getByRole('button', { name: /^Move \d+ games?$/ })
 const pick = (v: string) => fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: v } })
 
 let moveBody: unknown
@@ -50,6 +52,7 @@ describe('BatchMoveBar', () => {
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('Move 2 games to W2 Oct, 2026?')
+    expect(confirmBtn()).toHaveTextContent('Move 2 games')
   })
 
   it('lists every game that will move, with its title and when it was initially evaluated', () => {
@@ -64,9 +67,9 @@ describe('BatchMoveBar', () => {
     const rows = Array.from(screen.getByRole('dialog').querySelectorAll('[data-move-row]'))
     expect(rows).toHaveLength(4)
     expect(rows[0]).toHaveTextContent('Alpha Quest')
-    expect(rows[0]).toHaveTextContent('Evaluated 07 Oct, 13:40')       // Vietnam time, UTC+7
+    expect(rows[0]).toHaveTextContent('Evaluated 07/10/26 - 13:40')    // Vietnam time, UTC+7
     expect(rows[0]).not.toHaveTextContent('→')
-    expect(rows[1]).toHaveTextContent('Evaluated 09 Oct, 03:05')       // crosses midnight in UTC+7
+    expect(rows[1]).toHaveTextContent('Evaluated 09/10/26 - 03:05')    // crosses midnight in UTC+7
     expect(rows[1]).toHaveTextContent('Priority IV')
     expect(rows[2]).toHaveTextContent('Untitled game')
     expect(rows[2]).toHaveTextContent('Not evaluated yet')
@@ -113,7 +116,7 @@ describe('BatchMoveBar', () => {
     const { onMoved } = mount()
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(global.fetch).not.toHaveBeenCalled()
     expect(onMoved).not.toHaveBeenCalled()
@@ -124,7 +127,7 @@ describe('BatchMoveBar', () => {
     const { onMoved } = mount()
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    fireEvent.click(confirmBtn())
     await waitFor(() => expect(onMoved).toHaveBeenCalledWith(2))
     expect(moveBody).toEqual({ ids: [1, 2], batch: 'W2 Oct, 2026' })
   })
@@ -134,7 +137,7 @@ describe('BatchMoveBar', () => {
     const { onMoved } = mount()
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    fireEvent.click(confirmBtn())
     await screen.findByText(/Couldn.t move: Forbidden/)
     expect(onMoved).not.toHaveBeenCalled()
   })
@@ -158,7 +161,7 @@ describe('BatchMoveBar', () => {
     const { rerender } = render(<BatchMoveBar {...props} onMoved={first} />)
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    fireEvent.click(confirmBtn())
     rerender(<BatchMoveBar {...props} onMoved={second} />)
     await act(async () => { finish() })
     await waitFor(() => expect(second).toHaveBeenCalledWith(2))
@@ -170,7 +173,7 @@ describe('BatchMoveBar', () => {
     const { onMoved } = mount()
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    fireEvent.click(confirmBtn())
     await screen.findByText('No games were moved. Reload the list and try again.')
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(onMoved).not.toHaveBeenCalled()
@@ -181,7 +184,7 @@ describe('BatchMoveBar', () => {
     const { onMoved } = mount()
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    fireEvent.click(confirmBtn())
     await waitFor(() => expect(onMoved).toHaveBeenCalledWith(1))
   })
 
@@ -190,7 +193,7 @@ describe('BatchMoveBar', () => {
     const { onMoved } = mount()
     pick('W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+    fireEvent.click(confirmBtn())
     await waitFor(() => expect(onMoved).toHaveBeenCalledWith(0))
     expect(screen.queryByText(/No games were moved/)).toBeNull()
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -205,7 +208,7 @@ describe('BatchMoveBar', () => {
       const { onMoved } = mount()
       pick('W2 Oct, 2026')
       fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-      fireEvent.click(screen.getByRole('button', { name: 'Confirm move' }))
+      fireEvent.click(confirmBtn())
       await act(async () => { await jest.advanceTimersByTimeAsync(30_001) })
       expect(screen.getByRole('dialog')).toHaveTextContent(
         "Couldn't move: Timed out. The move may have gone through. Reload the list to check.")
@@ -239,7 +242,7 @@ describe('BatchMoveBar', () => {
       pick('W2 Oct, 2026')
       fireEvent.click(screen.getByRole('button', { name: 'Move' }))
       rerender(<BatchMoveBar {...props} selected={many(MAX_MOVE + 1)} />)
-      expect(screen.getByRole('button', { name: 'Confirm move' })).toBeDisabled()
+      expect(confirmBtn()).toBeDisabled()
       expect(screen.getByText('You can move at most 500 games at a time. Select fewer.')).toBeInTheDocument()
     })
 
@@ -250,7 +253,7 @@ describe('BatchMoveBar', () => {
       pick('W2 Oct, 2026')
       fireEvent.click(screen.getByRole('button', { name: 'Move' }))
       rerender(<BatchMoveBar {...props} selected={[]} />)
-      const confirm = screen.getByRole('button', { name: 'Confirm move' })
+      const confirm = confirmBtn()
       expect(confirm).toBeDisabled()
       fireEvent.click(confirm)
       expect(global.fetch).not.toHaveBeenCalled()

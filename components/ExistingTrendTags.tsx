@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { IconX } from '@/components/ui/SearchInput'
 
 /** A Trends tag this game already carries in Signal Sense, as
  *  `GET /api/playtest-tags` returns it. `created_by` is Signal Sense's own
@@ -45,7 +46,7 @@ interface Props {
 const SYNC_USER = 'playtest_sync'
 
 const LABEL: React.CSSProperties = {
-  fontSize: 10.5, fontWeight: 600, color: 'var(--faint)',
+  fontSize: 11, fontWeight: 600, color: 'var(--faint)',
   textTransform: 'uppercase', letterSpacing: '0.04em',
 }
 const CHIP: React.CSSProperties = {
@@ -54,7 +55,7 @@ const CHIP: React.CSSProperties = {
   border: '1px solid var(--border)', fontSize: 12, fontFamily: 'var(--num)',
 }
 const CHIP_EDITABLE: React.CSSProperties = { ...CHIP, padding: '3px 4px 3px 9px' }
-const SUB: React.CSSProperties = { fontSize: 10.5, color: 'var(--faint)', fontFamily: 'var(--font)' }
+const SUB: React.CSSProperties = { fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--font)' }
 const ICON: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   width: 20, height: 20, padding: 0, borderRadius: 5, lineHeight: 1,
@@ -66,7 +67,7 @@ const PANEL: React.CSSProperties = {
   border: '1px solid var(--border)', background: 'var(--surface)',
   display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 460,
 }
-const CTL: React.CSSProperties = { fontSize: 12.5, padding: '6px 9px', width: '100%' }
+const CTL: React.CSSProperties = { fontSize: 13, padding: '6px 9px', width: '100%' }
 
 /** Which panel a chip has open. `null` = just the chip. */
 type Open = 'sub' | 'remove'
@@ -176,7 +177,7 @@ export function ExistingTrendTags({ gameId, tags, subValues, canEdit, onChanged 
                   title="Take this tag out of Signal Sense"
                   aria-label={`Remove ${t.field_value} from Signal Sense`}
                   style={{ ...ICON, color: 'var(--faint)' }}
-                  onClick={() => openPanel(t.field_value, 'remove')}>✕</button>
+                  onClick={() => openPanel(t.field_value, 'remove')}><IconX size={12} /></button>
               </span>
 
               {panel === 'sub' && (
@@ -205,11 +206,12 @@ export function ExistingTrendTags({ gameId, tags, subValues, canEdit, onChanged 
                     {author ? ` ${author} tagged it there.` : ''} The removal is recorded in
                     both apps&apos; history.
                   </span>
+                  {/* Cancel first, the removal last; red because it takes the tag out of the other app. */}
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <button type="button" className="btn btn-sm btn-primary" disabled={working}
-                      onClick={() => remove(t)}>Remove</button>
                     <button type="button" className="btn btn-sm btn-ghost" disabled={working}
                       onClick={() => setOpen(null)}>Cancel</button>
+                    <button type="button" className="btn btn-sm btn-danger" disabled={working}
+                      onClick={() => remove(t)}>Remove</button>
                   </div>
                 </div>
               )}

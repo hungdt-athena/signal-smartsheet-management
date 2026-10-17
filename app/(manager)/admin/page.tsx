@@ -2,7 +2,11 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
-import { useEscapeToClose } from '@/lib/use-escape-to-close'
+import { Modal } from '@/components/ui/Modal'
+import { PageHeader, RefreshButton } from '@/components/ui/PageHeader'
+import { ErrorState, SkeletonRows } from '@/components/ui/States'
+import { toast } from '@/lib/toast'
+import { fmtDateVN } from '@/lib/format-date'
 
 type Role = 'admin' | 'moderator' | 'evaluator'
 
@@ -15,8 +19,6 @@ interface User {
   active: boolean
   created_at: string
 }
-
-interface Notice { ok: boolean; text: string }
 
 interface Orphan { key: string; name: string; total: number; last_eval: string | null }
 
@@ -51,15 +53,13 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
-  // Results carry their kind, so a failure is shown in red and not as a success line.
-  const [syncResult, setSyncResult] = useState<Notice | null>(null)
+
   // Evaluator audit: preview first (GET), then apply (POST). Nothing is written
   // until the admin has seen the list.
   const [orphans, setOrphans] = useState<Orphan[] | null>(null)
   const [auditing, setAuditing] = useState(false)
-  const [auditResult, setAuditResult] = useState<Notice | null>(null)
-  // A failed row update (role, title, name, active) or a failed list load.
-  const [tableError, setTableError] = useState<string | null>(null)
+  // The user list could not be loaded. Row updates report through toasts instead.
+  const [loadFailed, setLoadFailed] = useState(false)
   // The account waiting for the Deactivate confirmation.
   const [confirmDeactivate, setConfirmDeactivate] = useState<User | null>(null)
 
@@ -67,7 +67,6 @@ export default function AdminPage() {
   const [newName, setNewName] = useState('')
   const [newRole, setNewRole] = useState<Role>('evaluator')
   const [adding, setAdding] = useState(false)
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   // Inline display-name editing: id of the row being edited + its draft value.
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -75,11 +74,12 @@ export default function AdminPage() {
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
+    setLoadFailed(false)
     try {
       const res = await fetch('/api/admin/users', { cache: 'no-store' })
       if (res.ok) setUsers(await res.json())
-      else setTableError('Could not load users. Click Refresh to try again.')
-    } catch { setTableError('Could not load users. Network error.') }
+      else setLoadFailed(true)
+    } catch { setLoadFailed(true) }
     finally { setLoading(false) }
   }, [])
 
@@ -89,7 +89,6 @@ export default function AdminPage() {
     e.preventDefault()
     if (!newEmail) return
     setAdding(true)
-    setMessage(null)
     try {
       const email = newEmail.endsWith('@athena.studio') ? newEmail : `${newEmail}@athena.studio`
       const res = await fetch('/api/admin/users', {
@@ -98,24 +97,23 @@ export default function AdminPage() {
         body: JSON.stringify({ email: email.toLowerCase(), name: newName || email.split('@')[0], role: newRole }),
       })
       if (res.ok) {
-        setMessage({ type: 'success', text: `Added ${email}` })
+        toast.success(`Added ${email}`)
         setNewEmail('')
         setNewName('')
         setNewRole('evaluator')
         fetchUsers()
       } else {
-        const body = await res.json()
-        setMessage({ type: 'error', text: body.error ?? 'Failed' })
+        const body = await res.json().catch(() => ({}))
+        toast.error(`Not added. ${body.error ?? 'Failed'}`)
       }
     } catch {
-      setMessage({ type: 'error', text: 'Network error' })
+      toast.error('Not added. Network error.')
     } finally {
       setAdding(false)
     }
   }
 
   async function updateUser(id: number, patch: { role?: string; name?: string; title?: string; active?: boolean }) {
-    setTableError(null)
     try {
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
@@ -125,10 +123,10 @@ export default function AdminPage() {
       if (res.ok) fetchUsers()
       else {
         const body = await res.json().catch(() => ({}))
-        setTableError(`Not saved. ${body.error ?? 'Failed to update'}`)
+        toast.error(`Not saved. ${body.error ?? 'Failed to update'}`)
       }
     } catch {
-      setTableError('Not saved. Network error.')
+      toast.error('Not saved. Network error.')
     }
   }
 
@@ -151,23 +149,22 @@ export default function AdminPage() {
 
   async function runAudit(apply: boolean) {
     setAuditing(true)
-    setAuditResult(null)
     try {
       const res = await fetch('/api/admin/users/audit-evaluators', { method: apply ? 'POST' : 'GET' })
       const body = await res.json()
-      if (!res.ok) { setAuditResult({ ok: false, text: body.error ?? 'Audit failed' }); return }
+      if (!res.ok) { toast.error(body.error ?? 'Audit failed'); return }
       if (apply) {
         setOrphans(null)
-        setAuditResult({ ok: true, text: body.created.length
+        toast.success(body.created.length
           ? `Created ${body.created.length} deactivated account(s): ${body.created.join(', ')}`
-          : 'Nothing to create' })
+          : 'Nothing to create')
         fetchUsers()
       } else {
         setOrphans(body.orphans)
-        if (body.orphans.length === 0) setAuditResult({ ok: true, text: 'Every evaluator already has an account' })
+        if (body.orphans.length === 0) toast.success('Every evaluator already has an account')
       }
     } catch {
-      setAuditResult({ ok: false, text: 'Audit failed. Network error.' })
+      toast.error('Audit failed. Network error.')
     } finally {
       setAuditing(false)
     }
@@ -175,57 +172,47 @@ export default function AdminPage() {
 
   async function handleSync() {
     setSyncing(true)
-    setSyncResult(null)
     try {
       const res = await fetch('/api/admin/sync-evaluators', { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
-        setSyncResult({ ok: true, text: `Synced: ${data.added} new evaluators added (${data.total} total in sheets)` })
+        toast.success(`Synced. ${data.added} new evaluators added, ${data.total} in the sheets.`)
         fetchUsers()
       } else {
-        setSyncResult({ ok: false, text: 'Sync failed' })
+        toast.error('Sync failed', { label: 'Try again', run: () => { void handleSync() } })
       }
     } catch {
-      setSyncResult({ ok: false, text: 'Sync failed. Network error.' })
+      toast.error('Sync failed. Network error.', { label: 'Try again', run: () => { void handleSync() } })
     } finally {
       setSyncing(false)
     }
   }
-
-  useEscapeToClose(() => setConfirmDeactivate(null), confirmDeactivate !== null)
 
   const active = users.filter(u => u.active !== false)
   const inactive = users.filter(u => u.active === false)
 
   return (
     <div className="page">
-      <div className="page-head">
-        <h1 className="h-title">Admin</h1>
-      </div>
+      <PageHeader
+        title="Users Management"
+        sub="Who can sign in, and what each person can do."
+        actions={<>
+          {isAdmin && (
+            <button className="btn btn-sm" onClick={() => runAudit(false)} disabled={auditing}>
+              {auditing ? 'Auditing…' : 'Audit evaluators'}
+            </button>
+          )}
+          <button className="btn btn-sm" onClick={handleSync} disabled={syncing}>
+            <span className={syncing ? 'spin' : ''} aria-hidden="true">↻</span>
+            {syncing ? 'Syncing…' : 'Sync evaluators'}
+          </button>
+        </>}
+      />
 
-      {/* Add User + Sync */}
       <div className="card">
         <div className="card-head">
-          <span className="card-label">Add User</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {isAdmin && (
-              <button className="btn btn-sm" onClick={() => runAudit(false)} disabled={auditing}>
-                {auditing ? '...' : 'Audit evaluators'}
-              </button>
-            )}
-            <button className="btn btn-sm btn-primary" onClick={handleSync} disabled={syncing}>
-              <span className={syncing ? 'spin' : ''}>↻</span>
-              {syncing ? 'Syncing...' : 'Sync Evaluators'}
-            </button>
-          </div>
+          <span className="card-label">Add user</span>
         </div>
-
-        {syncResult && (
-          <p className={syncResult.ok ? 'msg-ok' : 'msg-err'} style={{ marginBottom: 10 }}>{syncResult.text}</p>
-        )}
-        {auditResult && (
-          <p className={auditResult.ok ? 'msg-ok' : 'msg-err'} style={{ marginBottom: 10 }}>{auditResult.text}</p>
-        )}
         {orphans && orphans.length > 0 && (
           <div className="audit-box">
             <p>
@@ -239,16 +226,16 @@ export default function AdminPage() {
                   <span>{o.name}</span>
                   <span className="audit-meta">
                     {o.total.toLocaleString('en-US')} games · last{' '}
-                    {o.last_eval ? new Date(o.last_eval).toLocaleDateString('en-CA') : 'never'}
+                    {o.last_eval ? fmtDateVN(o.last_eval) : 'never'}
                   </span>
                 </li>
               ))}
             </ul>
             <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-sm btn-ghost" onClick={() => setOrphans(null)}>Cancel</button>
               <button className="btn btn-sm btn-primary" onClick={() => runAudit(true)} disabled={auditing}>
-                {auditing ? '...' : `Create ${orphans.length} deactivated account(s)`}
+                {auditing ? 'Creating…' : `Create ${orphans.length} deactivated account(s)`}
               </button>
-              <button className="btn btn-sm" onClick={() => setOrphans(null)}>Cancel</button>
             </div>
           </div>
         )}
@@ -278,27 +265,18 @@ export default function AdminPage() {
             />
           </div>
           <button type="submit" className="btn btn-primary" disabled={adding || !newEmail}>
-            {adding ? '...' : 'Add'}
+            {adding ? 'Adding…' : 'Add user'}
           </button>
         </form>
-
-        {message && (
-          <p className={message.type === 'success' ? 'msg-ok' : 'msg-err'} style={{ marginTop: 8 }}>
-            {message.text}
-          </p>
-        )}
       </div>
 
       {/* User List */}
       <div className="card">
         <div className="card-head">
           <span className="card-label">Users ({active.length})</span>
-          <button className="btn btn-sm" onClick={() => { setTableError(null); fetchUsers() }} disabled={loading}>
-            <span className={loading ? 'spin' : ''}>↻</span>
-            {loading ? '...' : 'Refresh'}
-          </button>
+          <RefreshButton onClick={fetchUsers} loading={loading} />
         </div>
-        {tableError && <p className="msg-err" role="alert" style={{ marginBottom: 10 }}>{tableError}</p>}
+        {loadFailed && !loading && <ErrorState onRetry={fetchUsers}>Could not load users.</ErrorState>}
 
         <div className="tbl-wrap">
           <table className="tbl">
@@ -313,20 +291,18 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {active.length === 0 && !loading && (
-                <tr><td colSpan={6} className="empty">No users</td></tr>
+              {active.length === 0 && !loading && !loadFailed && (
+                <tr><td colSpan={6} className="empty">No users yet. Add one above.</td></tr>
               )}
-              {loading && (
-                <tr><td colSpan={6} className="empty">Loading...</td></tr>
-              )}
-              {!loading && active.map(u => {
+              {loading && users.length === 0 && <SkeletonRows widths={[200, 110, 120, 120, 70, 80]} rows={4} />}
+              {active.map(u => {
                 const isSuper = u.email === SUPER_ADMIN
                 return (
                   <tr key={u.id}>
                     <td>
                       <span className="cell-name">{u.email}</span>
                       {isSuper && (
-                        <span className="badge running" style={{ fontSize: 9, padding: '1px 5px', marginLeft: 6 }}>SUPER</span>
+                        <span className="badge running" style={{ marginLeft: 6 }}>Super admin</span>
                       )}
                     </td>
                     <td>
@@ -339,7 +315,7 @@ export default function AdminPage() {
                             if (e.key === 'Enter') commitEditName(u)
                             if (e.key === 'Escape') setEditingId(null)
                           }}
-                          style={{ minWidth: 100, padding: '3px 6px' }}
+                          style={{ minWidth: 100 }}
                         />
                       ) : (
                         <span onClick={() => startEditName(u)} title="Click to edit display name"
@@ -363,8 +339,8 @@ export default function AdminPage() {
                         options={TITLE_OPTIONS}
                       />
                     </td>
-                    <td style={{ color: 'var(--faint)', fontSize: 12 }}>
-                      {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
+                    <td style={{ color: 'var(--faint)', fontSize: 'var(--fs-12)' }}>
+                      {fmtDateVN(u.created_at)}
                     </td>
                     <td>
                       {!isSuper && isAdmin && (
@@ -410,9 +386,9 @@ export default function AdminPage() {
                   <tr key={u.id}>
                     <td><span className="cell-name">{u.email}</span></td>
                     <td>{u.name}</td>
-                    <td style={{ color: 'var(--faint)', fontSize: 12 }}>{u.title || '—'}</td>
-                    <td style={{ color: 'var(--faint)', fontSize: 12 }}>
-                      {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
+                    <td style={{ color: 'var(--faint)', fontSize: 'var(--fs-12)' }}>{u.title || '—'}</td>
+                    <td style={{ color: 'var(--faint)', fontSize: 'var(--fs-12)' }}>
+                      {fmtDateVN(u.created_at)}
                     </td>
                     <td>
                       {isAdmin && (
@@ -430,26 +406,25 @@ export default function AdminPage() {
       )}
 
       {confirmDeactivate && (
-        <div className="modal-backdrop" onClick={() => setConfirmDeactivate(null)}>
-          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="deact-title"
-            style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-head">
-              <div className="modal-title" id="deact-title">Deactivate {confirmDeactivate.name || confirmDeactivate.email}?</div>
-            </div>
-            <div className="modal-body" style={{ gap: 6, fontSize: 13 }}>
-              <div>{confirmDeactivate.email} will not be able to sign in.</div>
-              <div style={{ color: 'var(--muted)' }}>Their evaluations stay. You can activate the account again later.</div>
-            </div>
-            <div className="modal-foot">
-              <button className="btn btn-sm btn-ghost" onClick={() => setConfirmDeactivate(null)} autoFocus>Cancel</button>
-              <button className="btn btn-sm btn-danger" onClick={() => {
-                const u = confirmDeactivate
-                setConfirmDeactivate(null)
-                updateUser(u.id, { active: false })
-              }}>Deactivate</button>
-            </div>
+        <Modal
+          role="alertdialog"
+          width={440}
+          title={`Deactivate ${confirmDeactivate.name || confirmDeactivate.email}?`}
+          onClose={() => setConfirmDeactivate(null)}
+          footer={<>
+            <button className="btn btn-sm btn-ghost" onClick={() => setConfirmDeactivate(null)}>Cancel</button>
+            <button className="btn btn-sm btn-danger" onClick={() => {
+              const u = confirmDeactivate
+              setConfirmDeactivate(null)
+              updateUser(u.id, { active: false })
+            }}>Deactivate</button>
+          </>}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--fs-13)' }}>
+            <div>{confirmDeactivate.email} will not be able to sign in.</div>
+            <div style={{ color: 'var(--muted)' }}>Their evaluations stay. You can activate the account again later.</div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

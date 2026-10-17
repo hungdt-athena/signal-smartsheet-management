@@ -12,6 +12,9 @@ import { groupRosterByPerson, type RosterRow } from '@/lib/assign-roster'
 import type { Bucket } from '@/lib/buckets'
 import type { GenreTarget } from '@/lib/genre-config'
 import { isPushPreview, type PushPreview as Preview } from '@/lib/push-preview'
+import { RefreshButton } from '@/components/ui/PageHeader'
+import { ErrorState } from '@/components/ui/States'
+import { toast } from '@/lib/toast'
 
 type ListType = 'initial' | 'final'
 
@@ -30,7 +33,12 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
   // "Not available." — the panel has not failed, it has not been asked yet.
   const [previewing, setPreviewing] = useState(!isEvaluator)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Only a failed LOAD shows in the page (with a retry). A failed write is a toast:
+  // the roster on screen is still the last good one.
+  const [loadError, setLoadError] = useState(false)
+  // False until the roster has answered once, so the tables show placeholder rows
+  // instead of "No evaluators yet" while the first load runs.
+  const [loaded, setLoaded] = useState(false)
 
   // The preview is fetched on its own, NOT alongside the roster. Counting
   // eligible games is a ~9s scan of game_info (see the route's COST note), and
@@ -59,7 +67,7 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
   // genre row says, so showing one without the other would misreport the
   // pipeline. The preview follows separately, for the reason above.
   const refresh = useCallback(async (fresh = false) => {
-    setLoading(true); setError(null)
+    setLoading(true); setLoadError(false)
     try {
       const [rosterRes, genreRes] = await Promise.all([
         fetch('/api/assign-setup', { cache: 'no-store' }),
@@ -67,12 +75,12 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
       ])
       if (!rosterRes.ok) throw new Error()
       const json = await rosterRes.json()
-      setInitial(json.initial ?? []); setFinal(json.final ?? [])
+      setInitial(json.initial ?? []); setFinal(json.final ?? []); setLoaded(true)
       if (genreRes.ok) {
         const g = await genreRes.json()
         setGenres(g.genres ?? []); setCanEditGenres(g.canEdit === true)
       }
-    } catch { setError('Failed to load roster.') }
+    } catch { setLoadError(true) }
     finally { setLoading(false) }
     refreshPreview(fresh)
   }, [refreshPreview])
@@ -91,23 +99,29 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
   ), [isEvaluator, initial, userName])
   const finalGroups = useMemo(() => groupRosterByPerson(final), [final])
 
-  const send = useCallback(async (method: string, body: unknown, msg: string) => {
-    const res = await fetch('/api/assign-setup', {
-      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    })
-    if (res.ok) refresh(); else setError(msg)
+  // Inline edits (weight, availability, platform, sub-genre) show their result in
+  // the row itself, so only a failure toasts. Adding and removing say so on success.
+  const send = useCallback(async (method: string, body: unknown, errMsg: string, okMsg?: string) => {
+    try {
+      const res = await fetch('/api/assign-setup', {
+        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      if (!res.ok) { toast.error(errMsg); return }
+      if (okMsg) toast.success(okMsg)
+      refresh()
+    } catch { toast.error('Could not reach the server.') }
   }, [refresh])
 
   // Sub-genre and weight both vary by genre, so they are written by row id.
   const patchRow = (id: number, field: string, value: unknown) =>
-    send('PATCH', { id, field, value }, 'Update failed.')
+    send('PATCH', { id, field, value }, 'Could not save the change.')
   const patchAvailable = (list_type: ListType) => (name: string, value: boolean) =>
-    send('PATCH', { field: 'today_available', list_type, name, value }, 'Update failed.')
+    send('PATCH', { field: 'today_available', list_type, name, value }, 'Could not save the change.')
   // Platform is person-level, so it goes by name like availability — one write
   // covers every genre that person holds.
   const patchPerson = (list_type: ListType) => (name: string, field: string, value: unknown) =>
-    send('PATCH', { field, list_type, name, value }, 'Update failed.')
-  const removeRow = (id: number) => send('DELETE', { id }, 'Delete failed.')
+    send('PATCH', { field, list_type, name, value }, 'Could not save the change.')
+  const removeRow = (id: number) => send('DELETE', { id }, 'Could not remove the category group.', 'Category group removed.')
   // The reply carries the recomputed genre list, so the chips update without a
   // second round trip -- and without the UI deciding for itself what `active` means.
   const toggleGenre = useCallback(async (bucket: Bucket, enabled: boolean) => {
@@ -116,23 +130,22 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
       body: JSON.stringify({ bucket, enabled }),
     })
     if (res.ok) { const json = await res.json(); setGenres(json.genres ?? []) }
-    else setError('Could not change that category group.')
+    else toast.error('Could not change that category group.')
   }, [])
   const addGenre = (list_type: ListType) => (name: string, g: Bucket) =>
-    send('POST', { list_type, name, category_groups: [g] }, 'Add failed.')
+    send('POST', { list_type, name, category_groups: [g] }, 'Could not add the category group.', `Added to ${name}.`)
   const addEvaluator = (list_type: ListType) => (p: { name: string; provision: boolean; genres: Bucket[] }) =>
-    send('POST', { list_type, name: p.name, provision: p.provision, category_groups: p.genres }, 'Add failed.')
+    send('POST', { list_type, name: p.name, provision: p.provision, category_groups: p.genres },
+      'Could not add the evaluator.', `Added ${p.name}.`)
 
   return (
     <div className="assign-setup">
       <div className="roster-head">
         <span className="card-label">Roster</span>
-        <button className="btn btn-sm" onClick={() => refresh(true)} disabled={loading}>
-          <span className={loading ? 'spin' : ''}>↻</span>{loading ? '...' : 'Refresh'}
-        </button>
+        <RefreshButton onClick={() => refresh(true)} loading={loading} />
       </div>
 
-      {error && <p className="msg-err">{error}</p>}
+      {loadError && <ErrorState onRetry={() => refresh(true)}>Could not load the roster.</ErrorState>}
 
       {/* The Initial roster and the pipeline panel sit side by side because
           they are two halves of one question: who is taking games today, and
@@ -141,7 +154,7 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
           Below 1280px they stack instead. */}
       <div className="assign-grid">
         <RosterTable title="Initial Evaluator" groups={initialGroups} subGenres={subGenres}
-          readOnly={isEvaluator}
+          readOnly={isEvaluator} loading={!loaded && !loadError}
           onPatchRow={patchRow} onPatchAvailable={patchAvailable('initial')} onPatchPerson={patchPerson('initial')}
           onRemoveRow={removeRow}
           onAddGenre={addGenre('initial')} onAddEvaluator={addEvaluator('initial')} />
@@ -161,6 +174,7 @@ export function AssignSetup({ isEvaluator = false, userName = '', onRosterNames 
 
       {!isEvaluator && (
         <RosterTable title="Final Evaluator" groups={finalGroups} subGenres={subGenres}
+          loading={!loaded && !loadError}
           onPatchRow={patchRow} onPatchAvailable={patchAvailable('final')} onPatchPerson={patchPerson('final')}
           onRemoveRow={removeRow}
           onAddGenre={addGenre('final')} onAddEvaluator={addEvaluator('final')} />

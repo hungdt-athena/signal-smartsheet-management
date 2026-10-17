@@ -5,6 +5,8 @@ import { BUCKETS, type Bucket } from '@/lib/buckets'
 import { OptionRows } from '@/components/OptionRows'
 import { PeopleSection } from '@/components/config/PeopleSection'
 import { PushWindowSection } from '@/components/config/PushWindowSection'
+import { PageHeader, RefreshButton } from '@/components/ui/PageHeader'
+import { toast } from '@/lib/toast'
 
 // Another screen can send the reader straight to one setting — the Assign tab's
 // next-run panel links here to change how many days get pushed. ?highlight=<id>
@@ -51,7 +53,6 @@ function ConfigBody({ highlight }: { highlight: string | null }) {
   const [data, setData] = useState<Record<Field, OptionRow[]>>({ conclusion: [], final_conclusion: [] })
   const [usage, setUsage] = useState<UsageMap>({})
   const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -69,7 +70,6 @@ function ConfigBody({ highlight }: { highlight: string | null }) {
   useEffect(() => { fetchData() }, [fetchData])
 
   const send = useCallback(async (method: string, body: unknown): Promise<boolean> => {
-    setMessage(null)
     try {
       const res = await fetch('/api/config', {
         method,
@@ -78,29 +78,21 @@ function ConfigBody({ highlight }: { highlight: string | null }) {
       })
       if (res.ok) { await fetchData(); return true }
       const j = await res.json().catch(() => ({}))
-      setMessage({ type: 'error', text: j.error ?? 'Request failed' })
+      toast.error(`Not saved. ${j.error ?? 'Request failed'}`)
       return false
     } catch {
-      setMessage({ type: 'error', text: 'Network error' })
+      toast.error('Not saved. Network error.')
       return false
     }
   }, [fetchData])
 
   return (
     <div className="page">
-      <div className="page-head">
-        <h1 className="h-title">Config</h1>
-        <button className="btn btn-sm" onClick={fetchData} disabled={loading}>
-          <span className={loading ? 'spin' : ''}>↻</span>
-          {loading ? '...' : 'Refresh'}
-        </button>
-      </div>
-
-      {message && (
-        <p className={message.type === 'success' ? 'msg-ok' : 'msg-err'} style={{ marginBottom: 10 }}>
-          {message.text}
-        </p>
-      )}
+      <PageHeader
+        title="Config"
+        sub="Push window, who shows in filters, and the dropdown lists."
+        actions={<RefreshButton onClick={fetchData} loading={loading} />}
+      />
 
       <PushWindowSection highlight={highlight === 'push-window'} />
 
@@ -192,7 +184,7 @@ function ConfigSection({
           placeholder={`Add ${label.toLowerCase()} option…`}
         />
         <button type="submit" className="btn btn-primary btn-sm" disabled={adding || !newValue.trim()}>
-          {adding ? '...' : 'Add'}
+          {adding ? 'Adding…' : 'Add'}
         </button>
       </form>
     </div>
@@ -226,10 +218,16 @@ function CategorySection() {
   useEffect(() => { fetchData() }, [fetchData])
 
   async function send(method: string, body: unknown): Promise<boolean> {
-    const res = await fetch('/api/config/categories', {
-      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    })
-    if (res.ok) { await fetchData(); return true }
+    try {
+      const res = await fetch('/api/config/categories', {
+        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      if (res.ok) { await fetchData(); return true }
+      const j = await res.json().catch(() => ({}))
+      toast.error(`Not saved. ${j.error ?? 'Request failed'}`)
+    } catch {
+      toast.error('Not saved. Network error.')
+    }
     return false
   }
 

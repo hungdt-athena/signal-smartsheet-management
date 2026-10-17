@@ -1,11 +1,20 @@
 'use client'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSession } from 'next-auth/react'
 import EvalDetailPanel, { type EvalListItem } from './EvalDetailPanel'
 import { TrendValuePicker } from './TrendValuePicker'
-import { TrendsCatalog } from './TrendsCatalog'
-import { BUCKETS, type Bucket } from '@/lib/buckets'
+import { TrendsCatalog, CATEGORY_KEY } from './TrendsCatalog'
+import { StyledSelect } from './StyledSelect'
+import { PageHeader } from './ui/PageHeader'
+import { Seg, type SegOption } from './ui/Seg'
+import { FilterBar, FilterSpacer, ClearFilters, FilterCount } from './ui/FilterBar'
+import { EmptyState, ErrorState, SkeletonRows } from './ui/States'
+import { IconX } from './ui/SearchInput'
+import { BUCKETS, isBucket, type Bucket } from '@/lib/buckets'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
+import { useUrlState, useSetUrlParams } from '@/lib/use-url-state'
+import { fmtDateVN } from '@/lib/format-date'
+import { toast } from '@/lib/toast'
 
 /** The tab-wide Category group filter: puzzle / arcade / simulation, or all. This
  *  is the game's `category_group` (Signal Sense calls it `genre`); a game's own
@@ -75,8 +84,21 @@ interface HistoryRow {
   sub_changed_by: string | null
 }
 
-const fmt = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+type View = 'pending' | 'history' | 'trends'
+const VIEWS: SegOption<View>[] = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'history', label: 'History' },
+  { value: 'trends', label: 'Trends' },
+]
+const isView = (v: string): v is View => v === 'pending' || v === 'history' || v === 'trends'
+
+const CATEGORY_OPTIONS: SegOption<CategoryGroupFilter>[] = [
+  { value: 'all', label: 'All' },
+  ...BUCKETS.map(b => ({ value: b, label: b[0].toUpperCase() + b.slice(1) })),
+]
+
+/** Proposed-by filter in the URL. Holds an email, not a name: see HistoryView. */
+const TAGGER_KEY = 'by'
 
 // Today and the first of this month as YYYY-MM-DD in UTC+7, the only timezone
 // this dashboard reckons dates in. en-CA formats as ISO, which is what a
@@ -86,10 +108,10 @@ const todayLocal = () =>
 const monthStartLocal = () => `${todayLocal().slice(0, 7)}-01`
 
 // Written into Signal Sense → green; already there or deliberately left alone →
-// muted; refused because the value is retired → red.
-const RESULT_PILL: Record<string, string> = {
-  inserted: 'on', enriched: 'on', overwritten: 'on',
-  duplicate: 'muted', kept: 'muted', inactive: 'off',
+// grey; refused because the value is retired → red. A status, so a .badge.
+const RESULT_BADGE: Record<string, string> = {
+  inserted: 'success', enriched: 'success', overwritten: 'success',
+  duplicate: 'neutral', kept: 'neutral', inactive: 'error',
 }
 
 /** Opens a game's evaluation panel. Both views pass the games they are showing,
@@ -119,11 +141,15 @@ function GameButton({ title, gameId, onOpen, list }: {
 // proposed. Every write path is admin-only both here and in its route, so this
 // component's `isAdmin` decides what is worth rendering, never what is allowed.
 export function TaggingTab() {
-  const [view, setView] = useState<'pending' | 'history' | 'trends'>('pending')
+  // View and category group live in the URL, so a reload or a shared link opens
+  // the same view on the same group.
+  const [viewParam, setView] = useUrlState('view', 'pending')
+  const view: View = isView(viewParam) ? viewParam : 'pending'
   const [detail, setDetail] = useState<{ gameId: string; list: EvalListItem[] } | null>(null)
-  // One filter for all three views, held here so it survives switching between
-  // them (each view remounts on switch and would otherwise forget it).
-  const [categoryGroup, setCategoryGroup] = useState<CategoryGroupFilter>('all')
+  // One filter for all three views. Each view puts it first in its own filter
+  // bar; the URL keeps it when switching between them.
+  const [groupParam, setCategoryGroup] = useUrlState(CATEGORY_KEY, 'all')
+  const categoryGroup: CategoryGroupFilter = isBucket(groupParam) ? groupParam : 'all'
   const { data: session } = useSession()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
@@ -131,40 +157,25 @@ export function TaggingTab() {
 
   const openGame: OpenGame = (gameId, list) => setDetail({ gameId, list })
 
+  const groupSeg = (
+    <Seg value={categoryGroup} onChange={v => setCategoryGroup(v)} options={CATEGORY_OPTIONS} ariaLabel="Category group" />
+  )
+
   return (
     <div className="page tag-page">
-      <div className="page-head">
-        <div>
-          <h1 className="h-title">Tagging</h1>
-          <p className="h-sub">
-            {view === 'trends'
-              ? 'Every trend you can tag, and how much the team is using each one.'
-              : isAdmin
-                ? 'Trends proposed while playtesting. Confirming writes them into Signal Sense.'
-                : 'Trends you proposed while playtesting, and what the review made of them.'}
-          </p>
-        </div>
-        <div className="seg">
-          <button className={'seg-btn' + (view === 'pending' ? ' active' : '')} onClick={() => setView('pending')}>Pending</button>
-          <button className={'seg-btn' + (view === 'history' ? ' active' : '')} onClick={() => setView('history')}>History</button>
-          <button className={'seg-btn' + (view === 'trends' ? ' active' : '')} onClick={() => setView('trends')}>Trends</button>
-        </div>
-      </div>
+      <PageHeader
+        title="Tagging"
+        sub={view === 'trends'
+          ? 'Every trend you can tag, and how much the team is using each one.'
+          : isAdmin
+            ? 'Trends proposed while playtesting. Confirming writes them into Signal Sense.'
+            : 'Trends you proposed while playtesting, and what the review made of them.'}
+        actions={<Seg value={view} onChange={v => setView(v)} options={VIEWS} ariaLabel="View" />}
+      />
 
-      <div role="group" aria-label="Category group" style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 12px' }}>
-        <span className="label" aria-hidden>Category group</span>
-        <div className="seg">
-          {(['all', ...BUCKETS] as CategoryGroupFilter[]).map(g => (
-            <button key={g} type="button" aria-pressed={categoryGroup === g}
-              className={'seg-btn' + (categoryGroup === g ? ' active' : '')}
-              onClick={() => setCategoryGroup(g)}>{g === 'all' ? 'All' : g}</button>
-          ))}
-        </div>
-      </div>
-
-      {view === 'pending' && <PendingView onOpenGame={openGame} isAdmin={isAdmin} categoryGroup={categoryGroup} />}
-      {view === 'history' && <HistoryView onOpenGame={openGame} isAdmin={isAdmin} categoryGroup={categoryGroup} />}
-      {view === 'trends' && <TrendsCatalog onOpenGame={openGame} categoryGroup={categoryGroup} />}
+      {view === 'pending' && <PendingView onOpenGame={openGame} isAdmin={isAdmin} categoryGroup={categoryGroup} lead={groupSeg} />}
+      {view === 'history' && <HistoryView onOpenGame={openGame} isAdmin={isAdmin} categoryGroup={categoryGroup} lead={groupSeg} />}
+      {view === 'trends' && <TrendsCatalog onOpenGame={openGame} categoryGroup={categoryGroup} lead={groupSeg} />}
 
       {detail && (
         <div className="eval-modal-backdrop" onClick={() => requestLeaveUnsaved(() => setDetail(null))}>
@@ -208,7 +219,8 @@ function TriCheckbox({ checked, indeterminate, onChange, title, disabled }: {
   )
 }
 
-function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenGame; isAdmin: boolean; categoryGroup: CategoryGroupFilter }) {
+function PendingView({ onOpenGame, isAdmin, categoryGroup, lead }: { onOpenGame: OpenGame; isAdmin: boolean; categoryGroup: CategoryGroupFilter; lead: ReactNode }) {
+  const setUrlParams = useSetUrlParams()
   // One row per proposed tag. Every action edits this list in place — nothing in
   // this view refetches the queue on a change, so the admin keeps their scroll
   // position, their selection and their place in a long list of games.
@@ -225,7 +237,8 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
   const [working, setWorking] = useState(false)
   /** Rows mid-flight on their own, so only they show as busy. */
   const [rowBusy, setRowBusy] = useState<Set<number>>(new Set())
-  const [msg, setMsg] = useState<{ text: string; err: boolean } | null>(null)
+  /** The first page failed to load. Shown as an error, never as an empty queue. */
+  const [failed, setFailed] = useState(false)
   // Catalog for the inline value/sub-value editors. A failed load leaves the
   // rows readable but not editable, rather than offering an empty picker.
   const [options, setOptions] = useState<string[]>([])
@@ -244,9 +257,11 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
   // cannot make the next page skip anything.
   const load = useCallback(async (offset: number, append: boolean) => {
     setLoading(true)
+    if (!append) setFailed(false)
     try {
       const gq = categoryGroup === 'all' ? '' : `&category_group=${categoryGroup}`
       const r = await fetch(`/api/playtest-tags/pending?offset=${offset}&limit=${limit}${gq}`)
+      if (!r.ok && !append) throw new Error('failed')
       const d = r.ok ? await r.json() : { tags: [], total: 0 }
       const next = (d.tags || []) as PendingRow[]
       if (append && next.length === 0) {
@@ -264,7 +279,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         setTotal(d.total || 0)
       }
     } catch {
-      if (!append) { setRows([]); setTotal(0) }
+      if (!append) { setRows([]); setTotal(0); setFailed(true) }
     }
     setLoading(false)
   }, [categoryGroup])
@@ -338,8 +353,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         body: JSON.stringify(patch),
       })
       const d = await r.json().catch(() => ({}))
-      if (!r.ok) { setMsg({ text: d.error || 'Could not update that tag', err: true }); return }
-      setMsg(null)
+      if (!r.ok) { toast.error(d.error || 'Could not update that tag.'); return }
       const tag = d.tag as PendingRow | undefined
       if (tag && typeof tag.conflict === 'boolean') {
         setRows(prev => prev.map(row => (row.id === id ? { ...row, ...tag } : row)))
@@ -353,9 +367,9 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         // The row was resolved underneath the edit and no longer reads back as
         // pending. Drop it rather than leaving a row that is not in the queue.
         dropRows([id])
-        setMsg({ text: 'That tag was reviewed elsewhere — removed it from the queue.', err: false })
+        toast.success('That tag was reviewed elsewhere. Removed it from the queue.')
       }
-    } catch { setMsg({ text: 'Network error', err: true }) }
+    } catch { toast.error('Network error. The tag was not changed.') }
     finally { setEditing(null) }
   }
 
@@ -439,7 +453,9 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
     }
     if (skipped.length) parts.push(`not written: ${skipped.join('; ')}`)
     if (failed.length) parts.push(`failed — ${failed.join('; ')}`)
-    setMsg({ text: parts.join(' · ') || 'Nothing to confirm', err: failed.length > 0 })
+    const text = parts.join(' · ') || 'Nothing to confirm'
+    if (failed.length > 0) toast.error(text)
+    else toast.success(text)
   }
 
   const rejectTags = async (ids: number[]) => {
@@ -451,10 +467,10 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, notes: notesFor(ids) }),
       })
-      if (!r.ok) { setMsg({ text: 'Reject failed', err: true }); markBusy(ids, false); return }
+      if (!r.ok) { toast.error('Reject failed. Nothing was changed.'); markBusy(ids, false); return }
       dropRows(ids)
-      setMsg({ text: `Rejected ${ids.length} tag${ids.length === 1 ? '' : 's'} — nothing was written to Signal Sense.`, err: false })
-    } catch { setMsg({ text: 'Network error', err: true }) }
+      toast.success(`Rejected ${ids.length} tag${ids.length === 1 ? '' : 's'}. Nothing was written to Signal Sense.`)
+    } catch { toast.error('Network error. Nothing was changed.') }
     markBusy(ids, false)
   }
 
@@ -499,17 +515,33 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
     return () => io.disconnect()
   }, [hasMore, loading, working, rows.length, load])
 
-  if (loading && rows.length === 0) return <div className="card"><p className="empty">Loading…</p></div>
-  if (rows.length === 0) {
+  // Pending has no filters of its own: the bar holds the category group, and the
+  // count says how big the queue is.
+  const filterBar = (
+    <FilterBar>
+      {lead}
+      <FilterSpacer />
+      <ClearFilters visible={categoryGroup !== 'all'} onClear={() => setUrlParams({ [CATEGORY_KEY]: null })} />
+      <FilterCount loading={loading && rows.length === 0} shown={total}
+        noun={`tag${total === 1 ? '' : 's'}${hasMore ? '' : ` · ${gameCount} game${gameCount === 1 ? '' : 's'}`}`} />
+    </FilterBar>
+  )
+
+  if (failed) {
+    return <>{filterBar}<div className="card"><ErrorState onRetry={() => void load(0, false)}>Could not load the pending tags.</ErrorState></div></>
+  }
+  if (rows.length === 0 && !loading) {
     return (
-      <div className="card">
-        {msg && <p role={msg.err ? 'alert' : 'status'} style={{ margin: '0 0 10px', fontSize: 12.5, color: msg.err ? 'var(--bad)' : 'var(--muted)' }}>{msg.text}</p>}
-        <p className="empty">
-          {isAdmin
-            ? 'Nothing waiting for review. Trends tagged during playtest show up here.'
-            : 'None of your tags are waiting for review. Reviewed ones are in History.'}
-        </p>
-      </div>
+      <>
+        {filterBar}
+        <div className="card">
+          <EmptyState action={categoryGroup !== 'all' ? { label: 'Clear filters', onClick: () => setUrlParams({ [CATEGORY_KEY]: null }) } : undefined}>
+            {isAdmin
+              ? 'Nothing waiting for review. Trends tagged during playtest show up here.'
+              : 'None of your tags are waiting for review. Reviewed ones are in History.'}
+          </EmptyState>
+        </div>
+      </>
     )
   }
 
@@ -523,16 +555,14 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
   // say so before the click rather than in the result summary.
   const keptCount = selectedRows.filter(r => r.conflict && !overwrite.has(r.id)).length
 
+  const firstLoad = loading && rows.length === 0
+
   return (
+    <>
+    {filterBar}
     <div className="card">
       <div className="card-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-        <span className="card-label">
-          {isAdmin ? 'Pending' : 'Your pending tags'}
-          <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>
-            {hasMore ? `${rows.length} of ${total}` : `${total} tag${total === 1 ? '' : 's'}`}
-            {' '}· {gameCount} game{gameCount === 1 ? '' : 's'}{hasMore ? ' loaded' : ''}
-          </span>
-        </span>
+        <span className="card-label">{isAdmin ? 'Pending' : 'Your pending tags'}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {!isAdmin ? (
             <span style={{ fontSize: 12, color: 'var(--faint)' }}>
@@ -561,13 +591,13 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                 onClick={confirmSelected}>
                 {working ? 'Confirming…' : `Confirm ${selected.size} tag${selected.size === 1 ? '' : 's'}`}
               </button>
-              <button className="btn btn-sm" disabled={working}
+              <button className="btn btn-sm btn-ghost" disabled={working}
+                onClick={() => setSelected(new Set())}>Clear selection</button>
+              <button className="btn btn-sm btn-danger" disabled={working}
                 title="Discard these proposals without writing anything to Signal Sense"
                 onClick={() => rejectTags(Array.from(selected))}>
                 Reject
               </button>
-              <button className="btn btn-sm btn-ghost" disabled={working}
-                onClick={() => setSelected(new Set())}>Clear</button>
             </>
           )}
         </div>
@@ -575,23 +605,21 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
 
       {isAdmin && optionsError && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <span style={{ fontSize: 12.5, color: 'var(--warn)' }}>
+          <span style={{ fontSize: 13, color: 'var(--warn)' }}>
             The trends list didn&apos;t load, so tags can be confirmed or rejected but not edited.
           </span>
           <button className="btn btn-sm" onClick={loadOptions}>Try again</button>
         </div>
       )}
 
-      {msg && <p role={msg.err ? 'alert' : 'status'} style={{ margin: '0 0 10px', fontSize: 12.5, color: msg.err ? 'var(--bad)' : 'var(--muted)' }}>{msg.text}</p>}
-
       <div className="tbl-wrap tag-scroll">
-        <table className="tbl">
+        <table className="tbl tbl-sticky">
           <thead>
             <tr>
               {isAdmin && (
                 <th style={{ width: 34 }}>
                   <TriCheckbox
-                    checked={selected.size === rows.length}
+                    checked={rows.length > 0 && selected.size === rows.length}
                     indeterminate={selected.size > 0}
                     onChange={() => toggleMany(allIds)}
                     title="Select all loaded tags"
@@ -608,6 +636,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
             </tr>
           </thead>
           <tbody>
+            {firstLoad && <SkeletonRows widths={isAdmin ? [14, 160, 110, 110, 80, 130, 24] : [160, 110, 110, 80]} />}
             {rows.map(t => (
               <tr key={t.id} style={rowBusy.has(t.id) ? { opacity: 0.5 } : undefined}>
                 {isAdmin && (
@@ -645,7 +674,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                       label={t.field_value}
                       title="Change the trend value"
                       triggerClassName="input"
-                      triggerStyle={{ fontSize: 12.5, padding: '6px 9px', width: '100%' }}
+                      triggerStyle={{ fontSize: 13, padding: '6px 9px', width: '100%' }}
                       disabled={editing === t.id || working || rowBusy.has(t.id)}
                       onPick={v => patchTag(t.id, { field_value: v })}
                     />
@@ -657,7 +686,8 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                   ) : (
                     <select
                       className="input"
-                      style={{ fontSize: 12.5, padding: '6px 9px', width: '100%' }}
+                      style={{ fontSize: 13, padding: '6px 9px', width: '100%' }}
+                      aria-label={`Sub-value for ${t.field_value} on ${t.title}`}
                       value={t.sub_value_id ?? ''}
                       disabled={editing === t.id || working || rowBusy.has(t.id)}
                       onChange={e => patchTag(t.id, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
@@ -686,7 +716,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                 <td style={{ fontSize: 12, color: 'var(--muted)' }}>
                   {t.tagged_by_name || 'unknown'}
                   <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)' }}>
-                    {fmt(t.tagged_at)}
+                    {fmtDateVN(t.tagged_at)}
                   </span>
                 </td>
                 {/* The note travels with whichever request resolves this row,
@@ -709,17 +739,17 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                 )}
                 {isAdmin && (
                   <td>
-                    <button className="btn btn-sm btn-ghost" title="Reject this tag"
+                    <button type="button" className="btn btn-sm btn-danger" title="Reject this tag"
+                      aria-label={`Reject ${t.field_value} on ${t.title}`}
                       disabled={working || rowBusy.has(t.id)}
-                      onClick={() => rejectTags([t.id])}
-                      style={{ color: 'var(--faint)' }}>✕</button>
+                      onClick={() => rejectTags([t.id])}><IconX size={14} /></button>
                   </td>
                 )}
               </tr>
             ))}
             {/* Watched by the observer above: crossing into view loads the next
                 page. Kept inside the table so it scrolls with the rows. */}
-            {(hasMore || loading) && (
+            {(hasMore || loading) && !firstLoad && (
               <tr ref={sentinelRef}>
                 <td colSpan={cols} className="tag-sentinel">
                   {loading ? 'Loading…' : `${rows.length} of ${total} — scroll for more`}
@@ -733,34 +763,38 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         </table>
       </div>
     </div>
+    </>
   )
 }
 
 // Everything that left the queue, for admins and evaluators alike. Deliberately
 // not scoped to the reader: an evaluator learns as much from how the same trend
 // was judged on someone else's game as from their own corrections.
-function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenGame; isAdmin: boolean; categoryGroup: CategoryGroupFilter }) {
+function HistoryView({ onOpenGame, isAdmin, categoryGroup, lead }: { onOpenGame: OpenGame; isAdmin: boolean; categoryGroup: CategoryGroupFilter; lead: ReactNode }) {
   const { data: session } = useSession()
+  const setUrlParams = useSetUrlParams()
   const myEmail = session?.user?.email || ''
   const [rows, setRows] = useState<HistoryRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   // Defaults to this month: the queue is reviewed continuously, so the useful
-  // question is "what did we do lately", not "everything ever".
+  // question is "what did we do lately", not "everything ever". Kept in state,
+  // not the URL: the default moves with the calendar, so a link that froze it
+  // would open on the wrong month.
   const [from, setFrom] = useState(monthStartLocal)
   const [to, setTo] = useState(todayLocal)
   /** Email of the person whose proposals to show, '' for everyone. Email rather
    *  than name because tagged_by is what the API filters on and two people can
-   *  share a display name. */
-  const [tagger, setTagger] = useState('')
+   *  share a display name. In the URL (?by=). */
+  const [tagger, setTagger] = useUrlState(TAGGER_KEY, '')
   /** Everyone who has ever had a tag reviewed, for the filter's options. Sent
    *  with every page, so it survives a filter that empties the table. */
   const [taggers, setTaggers] = useState<{ email: string; name: string | null }[]>([])
-  const [msg, setMsg] = useState<{ text: string; err: boolean } | null>(null)
+  const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState<number | null>(null)
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const sentinelRef = useRef<HTMLTableRowElement>(null)
   const limit = 50
 
@@ -773,8 +807,10 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
     if (tagger) qs.set('tagger', tagger)
     if (categoryGroup !== 'all') qs.set('category_group', categoryGroup)
     setLoading(true)
+    if (!append) setFailed(false)
     try {
       const r = await fetch(`/api/playtest-tags/history?${qs}`)
+      if (!r.ok && !append) throw new Error('failed')
       const d = r.ok ? await r.json() : { rows: [], total: 0 }
       const next = (d.rows || []) as HistoryRow[]
       if (append && next.length === 0) {
@@ -788,7 +824,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
       setPage(p)
       if (d.taggers) setTaggers(d.taggers as { email: string; name: string | null }[])
     } catch {
-      if (!append) { setRows([]); setTotal(0) }
+      if (!append) { setRows([]); setTotal(0); setFailed(true) }
     }
     setLoading(false)
   }, [from, to, tagger, categoryGroup])
@@ -808,7 +844,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
     if (!isAdmin) { void fetchPage(1, false); return }
     fetch('/api/playtest-tags/reconcile', { method: 'POST' })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (live && d?.removed > 0) setMsg({ text: `${d.removed} tag${d.removed === 1 ? '' : 's'} no longer in Signal Sense — recorded as removed.`, err: false }) })
+      .then(d => { if (live && d?.removed > 0) toast.success(`${d.removed} tag${d.removed === 1 ? ' is' : 's are'} no longer in Signal Sense. Marked as removed.`) })
       .catch(() => {})
       .finally(() => { if (live) void fetchPage(1, false) })
     return () => { live = false }
@@ -847,12 +883,12 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         body: JSON.stringify({ id: r.id }),
       })
       const d = await res.json().catch(() => ({}))
-      if (!res.ok) setMsg({ text: d.error || 'Could not remove that tag', err: true })
-      else setMsg({ err: false, text: d.outcome === 'deleted'
+      if (!res.ok) toast.error(d.error || 'Could not remove that tag.')
+      else toast.success(d.outcome === 'deleted'
         ? `Removed ${r.field_value} from Signal Sense.`
-        : `${r.field_value} was already gone from Signal Sense — recorded as removed.` })
+        : `${r.field_value} was already gone from Signal Sense. Marked as removed.`)
       setReloadKey(k => k + 1)
-    } catch { setMsg({ text: 'Network error', err: true }) }
+    } catch { toast.error('Network error. The tag was not removed.') }
     setBusy(null)
   }
 
@@ -892,59 +928,57 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
   // The Remove column exists only for admins, so footer rows span one fewer.
   const cols = isAdmin ? 8 : 7
 
+  const isThisMonth = from === monthStartLocal() && to === todayLocal()
+  const filtered = categoryGroup !== 'all' || !!tagger || !isThisMonth
+  const clearFilters = () => {
+    setUrlParams({ [CATEGORY_KEY]: null, [TAGGER_KEY]: null })
+    setFrom(monthStartLocal()); setTo(todayLocal())
+  }
+  const firstLoad = loading && rows.length === 0
+
   return (
+    <>
+    {/* Order: category group, dates, person, then the count. Options come from
+        the API rather than the loaded page: a name that only appears on page 3
+        still has to be pickable from page 1. */}
+    <FilterBar>
+      {lead}
+      <input className="input" type="date" style={{ width: 150 }} aria-label="Proposed from"
+        title="Proposed on or after" value={from} onChange={e => setFrom(e.target.value)} />
+      <span aria-hidden="true" style={{ color: 'var(--faint)' }}>–</span>
+      <input className="input" type="date" style={{ width: 150 }} aria-label="Proposed to"
+        title="Proposed on or before" value={to} onChange={e => setTo(e.target.value)} />
+      {/* The range starts at this month, so "Clear" would be a lie — name what
+          each button actually selects. */}
+      {(from || to) && (
+        <button type="button" className="btn btn-ghost" onClick={() => { setFrom(''); setTo('') }}>All time</button>
+      )}
+      {!isThisMonth && (
+        <button type="button" className="btn btn-ghost"
+          onClick={() => { setFrom(monthStartLocal()); setTo(todayLocal()) }}>This month</button>
+      )}
+      <div style={{ width: 170 }}>
+        <StyledSelect filter ariaLabel="Proposed by" value={tagger} onChange={setTagger}
+          options={[
+            { value: '', label: 'Everyone' },
+            ...taggers.map(t => ({ value: t.email, label: `${t.name || t.email}${t.email === myEmail ? ' (you)' : ''}` })),
+          ]} />
+      </div>
+      <FilterSpacer />
+      <ClearFilters visible={filtered} onClear={clearFilters} />
+      <FilterCount loading={firstLoad} shown={total} noun={total === 1 ? 'tag' : 'tags'} />
+    </FilterBar>
+
     <div className="card">
-      <div className="card-head" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <span className="card-label">
-          Reviewed
-          <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>{total}</span>
-        </span>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
-          {/* Options come from the API rather than the loaded page: a name that
-              only appears on page 3 still has to be pickable from page 1. */}
-          <div className="field">
-            <span className="label">Proposed by</span>
-            <select className="input" style={{ width: 170 }}
-              value={tagger} onChange={e => setTagger(e.target.value)}>
-              <option value="">Everyone</option>
-              {taggers.map(t => (
-                <option key={t.email} value={t.email}>
-                  {t.name || t.email}{t.email === myEmail ? ' (you)' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <span className="label">From</span>
-            <input className="input" type="date" style={{ width: 150 }}
-              value={from} onChange={e => setFrom(e.target.value)} />
-          </div>
-          <div className="field">
-            <span className="label">To</span>
-            <input className="input" type="date" style={{ width: 150 }}
-              value={to} onChange={e => setTo(e.target.value)} />
-          </div>
-          {/* The range starts at this month, so "Clear" would be a lie — name what
-              each button actually selects. */}
-          {(from || to) && (
-            <button className="btn btn-sm btn-ghost" onClick={() => { setFrom(''); setTo('') }}>All time</button>
-          )}
-          {(from !== monthStartLocal() || to !== todayLocal()) && (
-            <button className="btn btn-sm btn-ghost"
-              onClick={() => { setFrom(monthStartLocal()); setTo(todayLocal()) }}>This month</button>
-          )}
-          {/* The person is cleared on its own: someone narrowing to one name and
-              then widening the dates is still asking about that name. */}
-          {tagger && (
-            <button className="btn btn-sm btn-ghost" onClick={() => setTagger('')}>Everyone</button>
-          )}
-        </div>
+      <div className="card-head">
+        <span className="card-label">Reviewed</span>
       </div>
 
-      {msg && <p role={msg.err ? 'alert' : 'status'} style={{ margin: '0 0 10px', fontSize: 12.5, color: msg.err ? 'var(--bad)' : 'var(--muted)' }}>{msg.text}</p>}
-
+      {failed ? (
+        <ErrorState onRetry={() => setReloadKey(k => k + 1)}>Could not load the review history.</ErrorState>
+      ) : (
       <div className="tbl-wrap tag-scroll">
-        <table className="tbl">
+        <table className="tbl tbl-sticky">
           <thead>
             <tr>
               <th style={{ width: 172 }}>Game</th>
@@ -958,8 +992,13 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
-              <tr><td colSpan={cols} className="empty">Nothing reviewed yet.</td></tr>
+            {firstLoad && <SkeletonRows widths={isAdmin ? [150, 110, 90, 90, 90, 60, 160, 60] : [150, 110, 90, 90, 90, 60, 160]} />}
+            {rows.length === 0 && !loading && (
+              <tr><td colSpan={cols}>
+                <EmptyState action={filtered ? { label: 'Clear filters', onClick: clearFilters } : undefined}>
+                  {filtered ? 'Nothing reviewed matches these filters.' : 'Nothing reviewed this month.'}
+                </EmptyState>
+              </td></tr>
             )}
             {groups.map(g => g.rows.map((r, i) => (
               <tr key={r.id}>
@@ -1002,7 +1041,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                 <td>
                   {r.tagged_by_name || '—'}
                   <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)' }}>
-                    {fmt(r.tagged_at)}
+                    {fmtDateVN(r.tagged_at)}
                   </span>
                   {/* Sits under the proposer because it reads as one sentence:
                       X proposed this, Y edited it. */}
@@ -1015,17 +1054,17 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                 <td>
                   {r.confirmed_by_name || '—'}
                   <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)' }}>
-                    {fmt(r.confirmed_at)}
+                    {fmtDateVN(r.confirmed_at)}
                   </span>
                 </td>
                 <td>
-                  <span className={`pill ${r.removed_at ? 'off' : RESULT_PILL[r.sync_result ?? ''] ?? 'tag'}`} style={{ fontSize: 10 }}>
+                  <span className={`badge ${r.removed_at ? 'error' : RESULT_BADGE[r.sync_result ?? ''] ?? 'info'}`}>
                     {r.removed_at ? 'removed' : (r.sync_result || r.status)}
                   </span>
                 </td>
                 {/* What happened to the tag after it was reviewed. Empty for a tag
                     still sitting in Signal Sense exactly as it was synced. */}
-                <td style={{ fontSize: 11.5, lineHeight: 1.5 }}>
+                <td style={{ fontSize: 12, lineHeight: 1.5 }}>
                   {/* The admin's own words come first: the columns to the left
                       say what changed, this says why. */}
                   {r.review_note && (
@@ -1037,7 +1076,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                   )}
                   {r.removed_at && (
                     <span style={{ display: 'block', color: 'var(--muted)' }}>
-                      was {r.sync_result || r.status}, removed {fmt(r.removed_at)}
+                      was {r.sync_result || r.status}, removed {fmtDateVN(r.removed_at)}
                       {r.removed_by === 'signal_sense'
                         ? ' in Signal Sense'
                         : r.removed_by_name ? ` by ${r.removed_by_name}` : ''}
@@ -1046,7 +1085,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                   {r.sub_changed_at && (
                     <span style={{ display: 'block', color: 'var(--warn)' }}>
                       sub-value now {r.sub_changed_to || 'None'}
-                      {r.sub_changed_from ? ` (was ${r.sub_changed_from})` : ''}, {fmt(r.sub_changed_at)}
+                      {r.sub_changed_from ? ` (was ${r.sub_changed_from})` : ''}, {fmtDateVN(r.sub_changed_at)}
                       {r.sub_changed_by ? ` by ${r.sub_changed_by}` : ''}
                     </span>
                   )}
@@ -1058,18 +1097,15 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
                 <td>
                   {r.status === 'synced' && r.in_signal_sense && (
                     r.ours ? (
-                      <button className="btn btn-sm btn-ghost" disabled={busy === r.id}
+                      <button type="button" className="btn btn-sm btn-danger" disabled={busy === r.id}
                         title={confirmRemove === r.id
-                          ? `Deletes ${r.field_value} from Signal Sense — click again to confirm`
+                          ? `Deletes ${r.field_value} from Signal Sense. Click again to confirm.`
                           : 'Delete this tag from Signal Sense and record the removal'}
-                        onClick={() => askRemove(r)}
-                        style={confirmRemove === r.id
-                          ? { color: 'var(--bad)', borderColor: 'var(--bad)', background: 'var(--bad-weak)', fontWeight: 600 }
-                          : { color: 'var(--bad)' }}>
-                        {busy === r.id ? '…' : confirmRemove === r.id ? 'Confirm?' : 'Remove'}
+                        onClick={() => askRemove(r)}>
+                        {busy === r.id ? 'Removing…' : confirmRemove === r.id ? 'Remove?' : 'Remove'}
                       </button>
                     ) : (
-                      <span style={{ fontSize: 10.5, color: 'var(--faint)' }} title="playtest sync did not create this row, so it cannot be removed from here">
+                      <span style={{ fontSize: 11, color: 'var(--faint)' }} title="playtest sync did not create this row, so it cannot be removed from here">
                         added in Signal Sense
                       </span>
                     )
@@ -1080,7 +1116,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
             )))}
             {/* Watched by the observer above: crossing into view loads the next
                 page. Kept inside the table so it scrolls with the rows. */}
-            {(hasMore || loading) && (
+            {(hasMore || loading) && !firstLoad && (
               <tr ref={sentinelRef}>
                 <td colSpan={cols} className="tag-sentinel">
                   {loading ? 'Loading…' : `${rows.length} of ${total} — scroll for more`}
@@ -1093,6 +1129,8 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
           </tbody>
         </table>
       </div>
+      )}
     </div>
+    </>
   )
 }

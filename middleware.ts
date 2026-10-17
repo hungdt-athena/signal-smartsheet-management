@@ -23,13 +23,16 @@ export default withAuth(
       return NextResponse.redirect(new URL(canHandover ? '/team-ops?tab=handover' : NON_MANAGER_HOME, req.url))
     }
 
-    // Team Operations: managers get every tab. Evaluators get the (scoped) Assign
-    // and Handover tabs, plus Performance — which renders ONLY their own Individual
-    // view, because /api/report strips every other person's row for that role.
-    // Reassign redirects to Assign. Mirrors the sidebar child gating and the
-    // per-role API scoping. Non-evaluators → home.
+    // Team Operations: managers get every tab. Evaluators get scoped versions of
+    // Assign (their own roster rows), Reassign and Rescue (history of the runs they
+    // were in, as source or receiver; /api/operations/runs does the scoping and the
+    // action APIs stay manager-only), Handover (their own requests) and Performance
+    // (only their own Individual view, because /api/report strips every other
+    // person's row for that role). Mirrors the sidebar child gating in
+    // app/(manager)/layout.tsx and the `allowed` list in team-ops/page.tsx.
+    // Non-evaluators → home.
     const isEvaluator = role === 'evaluator'
-    const evaluatorTabs = ['assign', 'handover', 'performance']
+    const evaluatorTabs = ['assign', 'reassign', 'rescue', 'handover', 'performance']
     if (pathname === '/team-ops' || pathname.startsWith('/team-ops/')) {
       if (!isManager) {
         if (!isEvaluator) return NextResponse.redirect(new URL(NON_MANAGER_HOME, req.url))
@@ -58,7 +61,9 @@ export default withAuth(
       if (pathname.startsWith('/evaluations') && (cat === 'arcade' || cat === 'simulation')) {
         return NextResponse.redirect(new URL('/evaluations?cat=puzzle', req.url))
       }
-      if (pathname.startsWith('/youtube') && (tab === 'short_list' || tab === 'record_video')) {
+      // Record (tab=record_video) is open to evaluators: the page shows them only
+      // the rows where they are the recorder.
+      if (pathname.startsWith('/youtube') && tab === 'short_list') {
         return NextResponse.redirect(new URL('/youtube?tab=youtube', req.url))
       }
     }

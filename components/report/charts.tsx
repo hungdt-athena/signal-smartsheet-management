@@ -5,6 +5,7 @@
 
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { PALETTES, resolvePalette, type Palette } from '@/lib/report-palette'
+import { INITIAL_CHART_COLORS, FINAL_CHART_COLORS } from '@/lib/conclusion-badge'
 
 // The categorical slots of the DEFAULT preset, for code outside the Report (Team Ops
 // panels) that has no palette context. Inside the Report every chart reads the
@@ -18,19 +19,15 @@ export const CAT = PALETTES.standard.slots
 export const PaletteContext = createContext<Palette>(resolvePalette('standard'))
 export const usePalette = () => useContext(PaletteContext)
 
-// Semantic colors per conclusion / record bucket. Falls back to the categorical
-// ramp for anything unmapped so new config values still render distinctly.
-const CONCLUSION_COLORS: Record<string, string> = {
-  'Priority V': '#6d28d9', 'Priority IV': '#0f766e', 'Priority III': '#0891b2',
-  'Priority II': '#0ea5e9', 'Priority I': '#38bdf8',
-  'Bypass': '#d23b3b', 'Playtest & Bypass': '#b45309',
-  'Theme/Art': '#2563eb', 'Insight': '#15803d', 'Watch List': '#16a34a',
-  'List_Idea': '#7c3aed', 'Not Found': '#374151', 'Link_dead': '#9ca3af',
-  'Stale_release': '#9ca3af',
-  '5min': '#2a78d6', '20min': '#eb6834', 'none': '#9ca3af',
-}
-export function conclusionColor(name: string, i = 0, slots: string[] = CAT): string {
-  return CONCLUSION_COLORS[name] || slots[i % slots.length]
+// Conclusion colours come from the app's one map (lib/conclusion-badge.ts), so a
+// chart and a badge never disagree. Initial and final conclusions are two fields that
+// share a word ("Bypass": grey as an evaluator's call, red as the moderator's), so the
+// caller says which one it is drawing. Anything unmapped falls back to the preset's
+// categorical slots so a new Config value still renders distinctly.
+export type ConclusionKind = 'initial' | 'final'
+export function conclusionColor(name: string, kind: ConclusionKind, i = 0, slots: string[] = CAT): string {
+  const map = kind === 'initial' ? INITIAL_CHART_COLORS : FINAL_CHART_COLORS
+  return map[name] || slots[i % slots.length]
 }
 
 // White or ink for a label set INSIDE a coloured fill, by the fill's luminance (the one
@@ -1344,7 +1341,8 @@ export function DivergingBars({ rows, leftKeys, rightKeys, colors, leftLabel, ri
   leftLabel: string; rightLabel: string
 }) {
   const P = usePalette()
-  const colorOf = (k: string, i: number) => colors?.[k] || conclusionColor(k, i, P.slots)
+  // Keys here are age bands, never conclusions: an unmapped key takes a preset slot.
+  const colorOf = (k: string, i: number) => colors?.[k] || P.slots[i % P.slots.length]
   const [hover, setHover] = useState<string | null>(null)
   const [seg, setSeg] = useState<{ name: string; k: string; v: number; side: string } | null>(null)
   if (rows.length === 0) return <Empty />
@@ -1395,14 +1393,16 @@ export function DivergingBars({ rows, leftKeys, rightKeys, colors, leftLabel, ri
   )
 }
 
-export function StackedBars({ rows, keys, colors, unit }: {
+export function StackedBars({ rows, keys, colors, kind, unit }: {
   rows: Array<{ name: string; parts: Record<string, number> }>
   keys: string[] // conclusion names in stack order
   colors?: Record<string, string> // override the conclusion palette (e.g. age bands)
+  kind?: ConclusionKind // which conclusion map the keys read from; none = preset slots
   unit?: string // noun for the hover line, default "their"
 }) {
   const P = usePalette()
-  const colorOf = (k: string, i: number) => colors?.[k] || conclusionColor(k, i, P.slots)
+  const colorOf = (k: string, i: number) => colors?.[k]
+    || (kind ? conclusionColor(k, kind, i, P.slots) : P.slots[i % P.slots.length])
   const [hover, setHover] = useState<string | null>(null)
   const [seg, setSeg] = useState<{ name: string; k: string; v: number; total: number } | null>(null)
   if (rows.length === 0) return <Empty />

@@ -1,1 +1,52 @@
 /* record — area styles for the UI cleanup. Owned by one area; shared rules live in globals.css. */
+
+/* ===== YouTube tab ===== */
+/* The table scrolls inside the card, so the page itself is one screen tall. */
+.yt-page { height: 100vh; box-sizing: border-box; overflow: hidden; padding-bottom: 16px; }
+.yt-card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* Day header: a full-width row button that opens or closes the day's videos. */
+.yt-day {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  background: var(--surface-2); padding: 7px 12px; border: none;
+  border-bottom: 1px solid var(--border); cursor: pointer; text-align: left;
+  font: inherit; color: var(--text);
+}
+.yt-day.is-today { background: var(--accent-weak); border-bottom-color: var(--accent-border); }
+.yt-day-caret { font-size: 11px; color: var(--faint); }
+.yt-day.is-today .yt-day-caret { color: var(--accent); }
+.yt-day-label { font-size: 12px; font-weight: 700; }
+.yt-day.is-today .yt-day-label { color: var(--accent-strong); }
+.yt-day-count { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--faint); }
+
+/* ===== Record tab ===== */
+.rec-page { height: 100vh; box-sizing: border-box; overflow: hidden; padding-bottom: 16px; }
+/* Above the tables so the batch dropdown opens over them. */
+.rec-filters { position: relative; z-index: 30; }
+
+.rec-table {
+  padding: 0; overflow: hidden; flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  transition: background .1s, border-color .1s;
+}
+/* Drop target while a row is dragged over this bucket. */
+.rec-table.is-drop { border: 2px solid var(--accent-strong); background: var(--accent-weak); }
+.rec-table-head {
+  padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  display: flex; justify-content: space-between; align-items: center;
+}
+
+/* Second line under a game title: evaluator, conclusions, platform. Badges are
+   tighter here than the default so a row stays two lines tall. */
+.rec-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 3px; }
+.rec-meta .badge { padding: 1px 6px; }
+.rec-meta-name { font-size: 11px; font-weight: 600; color: var(--faint); }
+
+/* Add game modal: one row button per game. */
+.rec-add-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 12px; border: none; border-bottom: 1px solid var(--border);
+  background: transparent; cursor: pointer; text-align: left; color: var(--text); font: inherit;
+}
+.rec-add-row:last-child { border-bottom: none; }
+.rec-add-row:hover { background: var(--surface-2); }

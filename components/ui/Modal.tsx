@@ -39,7 +39,9 @@ let titleSeq = 0
 export function Modal({ title, sub, onClose, children, footer, width = 540, busy = false, closeOnBackdrop = true, hideClose = false, zIndex, role = 'dialog', className = '' }: ModalProps) {
   const boxRef = useRef<HTMLDivElement>(null)
   const titleId = useRef(`modal-title-${++titleSeq}`).current
-  useEscapeToClose(onClose, !busy && !hideClose)
+  // Stay registered while busy or when there is no X: this dialog is still the top one,
+  // so Esc must do nothing rather than fall through and close the dialog underneath.
+  useEscapeToClose(() => { if (!busy && !hideClose) onClose() })
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null

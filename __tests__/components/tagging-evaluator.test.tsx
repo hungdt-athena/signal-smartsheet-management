@@ -7,6 +7,24 @@ jest.mock('next-auth/react', () => ({
     data: { user: { role: 'evaluator', name: 'Mitt', email: 'mitt@athena.studio' } },
   }),
 }))
+
+// View and filters live in the URL. A stand-in router that writes to jsdom's
+// location and re-renders every reader, the way the real one does.
+jest.mock('next/navigation', () => {
+  const React = jest.requireActual('react')
+  const subs = new Set<() => void>()
+  const read = () => window.location.search
+  const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f) } }
+  return {
+    useSearchParams: () => {
+      const qs = React.useSyncExternalStore(subscribe, read, read)
+      return React.useMemo(() => new URLSearchParams(qs), [qs])
+    },
+    useRouter: () => ({ replace: (url: string) => { window.history.replaceState(null, '', url); subs.forEach(f => f()) } }),
+    usePathname: () => '/evaluations',
+  }
+})
+beforeEach(() => { window.history.replaceState(null, '', '/evaluations') })
 jest.mock('@/components/EvalDetailPanel', () => ({
   __esModule: true,
   default: () => <div data-testid="eval-panel" />,
@@ -99,12 +117,13 @@ describe('Tagging tab as an evaluator', () => {
     fireEvent.click(screen.getByRole('button', { name: 'History' }))
     await waitFor(() => expect(screen.getByText('Merge')).toBeInTheDocument())
 
-    const pick = screen.getByRole('combobox') as HTMLSelectElement
+    fireEvent.click(screen.getByRole('button', { name: 'Proposed by: Everyone' }))
+    const menu = within(document.querySelector('.ssel-menu') as HTMLElement)
     // The reader's own entry is marked, since it is the one they want most.
-    expect(within(pick).getByText('Mitt (you)')).toBeInTheDocument()
-    expect(within(pick).getByText('VinhTD')).toBeInTheDocument()
+    expect(menu.getByText('Mitt (you)')).toBeInTheDocument()
+    expect(menu.getByText('VinhTD')).toBeInTheDocument()
 
-    fireEvent.change(pick, { target: { value: 'mitt@athena.studio' } })
+    fireEvent.click(menu.getByText('Mitt (you)'))
     await waitFor(() =>
       expect(hits.some(u => u.includes('tagger=mitt%40athena.studio'))).toBe(true))
     // Back to page 1 rather than appending onto the previous person's rows.

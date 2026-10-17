@@ -2,6 +2,7 @@
 import { GameAlikeGame } from './weekly-feedback/types'
 import { GameSearch } from './weekly-feedback/GameSearch'
 import { PlatformIcon } from './weekly-feedback/PlatformIcon'
+import { IconX } from './ui/SearchInput'
 
 // Flat "Game Alike" list for an evaluation. Mirrors the weekly-feedback chip +
 // GameSearch UX, but a single ungrouped list. Read-only when `disabled`.
@@ -27,7 +28,7 @@ export function GameAlikeField({ value, onChange, disabled }: {
               : <span>{g.title}</span>}
             <PlatformIcon link={g.app_link} />
             {g.manual && <span className="wf-manual" title="Not in DB">·manual</span>}
-            <button type="button" title="Remove game" onClick={() => removeGame(gi)}>✕</button>
+            <button type="button" title="Remove game" aria-label={`Remove ${g.title}`} onClick={() => removeGame(gi)}><IconX size={12} /></button>
           </li>
         ))}
       </ul>

@@ -1,1 +1,33 @@
 /* evaluations — area styles for the UI cleanup. Owned by one area; shared rules live in globals.css. */
+
+/* Evaluate and Short List fill the window: header, filter bar and stat cards keep their
+   height, and only the table scrolls. */
+.page.ev-page { padding-bottom: 16px; height: 100vh; box-sizing: border-box; overflow: hidden; }
+.ev-page > * { flex-shrink: 0; }
+.ev-page > .ev-table-card { flex: 1 1 auto; min-height: 0; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.ev-table-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.ev-expand-row { display: flex; justify-content: flex-end; padding: 4px 8px 0; flex-shrink: 0; }
+
+/* Above the table, below the popovers that open from the header. */
+.ev-filters { position: relative; z-index: 30; }
+
+/* A control a live search overrides: greyed out, not hidden, so it is clear it comes back. */
+.ev-inert { opacity: .45; }
+
+/* The fixed "Assigned · All time" scope shown in place of the date picker (Pending, search). */
+.ev-date-fixed { cursor: default; min-width: 200px; justify-content: flex-start; opacity: .7; }
+.ev-date-fixed:hover { background: var(--surface); }
+
+/* DateFilter: the chip in the filter bar, and the picker in its modal. */
+.df-chip { gap: 8px; min-width: 200px; justify-content: space-between; }
+.df-chip-text { flex: 1; text-align: left; }
+.df-body { display: flex; gap: 14px; }
+.df-presets { display: flex; flex-direction: column; gap: 2px; min-width: 116px; border-right: 1px solid var(--border); padding-right: 12px; }
+.df-preset {
+  text-align: left; padding: 6px 10px; border: none; border-radius: 6px; cursor: pointer;
+  font-family: var(--font); font-size: 13px; background: transparent; color: var(--text);
+}
+.df-preset:hover { background: var(--surface-2); }
+.df-preset.on { background: var(--surface-3); color: var(--accent); font-weight: 600; }
+.df-summary { margin-right: auto; font-size: 12px; color: var(--muted); }
+.df-summary.picking { color: var(--accent); }

@@ -19,9 +19,26 @@ jest.mock('next-auth/react', () => ({
     status: mockStatus,
   }),
 }))
-jest.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams('cat=short_list'),
-}))
+// The page keeps its view and filters in the URL (lib/use-url-state). This stand-in for
+// next/navigation keeps the query string in jsdom's location, so changing a filter
+// re-renders the page the way the real router does.
+jest.mock('next/navigation', () => {
+  const React = jest.requireActual('react')
+  const listeners = new Set<() => void>()
+  const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
+  const read = () => window.location.search
+  const router = {
+    replace: (url: string) => { window.history.replaceState(null, '', url); listeners.forEach(l => l()) },
+  }
+  return {
+    useSearchParams: () => {
+      const qs = React.useSyncExternalStore(subscribe, read, read)
+      return React.useMemo(() => new URLSearchParams(qs), [qs])
+    },
+    useRouter: () => router,
+    usePathname: () => window.location.pathname,
+  }
+})
 jest.mock('@/hooks/useConfig', () => ({ useConfig: () => ({ conclusion: [], final_conclusion: ['Good'] }) }))
 jest.mock('@/components/EvalDetailPanel', () => ({
   __esModule: true,
@@ -45,6 +62,9 @@ jest.mock('@/components/weekly-feedback/WeeklyFeedbackTab', () => ({ WeeklyFeedb
 jest.mock('@/components/TaggingTab', () => ({ TaggingTab: () => null }))
 
 import EvaluationsPage from '@/app/(manager)/evaluations/page'
+import { toast } from '@/lib/toast'
+
+beforeEach(() => { window.history.replaceState(null, '', '/evaluations?cat=short_list') })
 
 const row = (over: Record<string, unknown>) => ({
   id: 1, game_id: 'g1', title: 'Alpha', icon_url: null, os: 'ios', app_link: null,
@@ -195,7 +215,7 @@ describe('Short List select mode', () => {
 
     fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: 'W2 Oct, 2026' } })
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Confirm move' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Move 1 game' })) })
 
     const move = calls.find(c => c.url === '/api/evaluations/batch-move')!
     expect(JSON.parse(String(move.init?.body))).toEqual({ ids: [1], batch: 'W2 Oct, 2026' })
@@ -219,7 +239,7 @@ describe('Short List select mode', () => {
     fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: 'W2 Oct, 2026' } })
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('1 of them already has a final conclusion and will move too')
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Confirm move' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Move 2 games' })) })
 
     const move = calls.find(c => c.url === '/api/evaluations/batch-move')!
     expect(JSON.parse(String(move.init?.body))).toEqual({ ids: [1, 2], batch: 'W2 Oct, 2026' })
@@ -302,6 +322,14 @@ describe('Short List select mode', () => {
     }
     const picker = () => { openPopover(); return screen.getByLabelText('Not set') as HTMLSelectElement }
     const ALERT = "Couldn't save the batch. Try again."
+    // A failed save is reported as a toast (the Toaster itself is mounted in the root layout).
+    let toastError: jest.SpyInstance
+    let toastSuccess: jest.SpyInstance
+    beforeEach(() => {
+      toastError = jest.spyOn(toast, 'error').mockImplementation(() => 0)
+      toastSuccess = jest.spyOn(toast, 'success').mockImplementation(() => 0)
+    })
+    afterEach(() => { toastError.mockRestore(); toastSuccess.mockRestore() })
 
     it('shows the moment the batch starts and saves a changed time with the batch', async () => {
       const calls = await open()
@@ -320,18 +348,20 @@ describe('Short List select mode', () => {
       await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
       expect(post(calls)).toHaveLength(1)
       await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
-      expect(screen.getByRole('alert')).toHaveTextContent(ALERT)
+      expect(toastError).toHaveBeenCalledTimes(1)
+      expect(toastError).toHaveBeenCalledWith(ALERT)
     })
 
-    it('clears the message after the next successful change', async () => {
+    it('says so when the next change succeeds', async () => {
       const calls = await open()
       await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
       currentBatchOk = false
       await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
-      await screen.findByRole('alert')
+      await waitFor(() => expect(toastError).toHaveBeenCalledWith(ALERT))
       currentBatchOk = true
       await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
-      await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+      await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Current batch set to W3 Oct, 2026'))
+      expect(toastError).toHaveBeenCalledTimes(1)
       expect(picker().value).toBe('W3 Oct, 2026')
       expect(post(calls)).toHaveLength(2)
     })
@@ -350,7 +380,7 @@ describe('Short List select mode', () => {
         await answer(1, true)
         await answer(0, false)
         expect(picker().value).toBe('')
-        expect(screen.queryByRole('alert')).toBeNull()
+        expect(toastError).not.toHaveBeenCalled()
       })
 
       it('second save fails after the first succeeded: the picker goes back to the first pick, with the message', async () => {
@@ -362,7 +392,7 @@ describe('Short List select mode', () => {
         await answer(0, true)
         await answer(1, false)
         expect(picker().value).toBe('W3 Oct, 2026')
-        expect(screen.getByRole('alert')).toHaveTextContent(ALERT)
+        expect(toastError).toHaveBeenCalledWith(ALERT)
       })
 
       it('a single failed save still goes back to the value the server confirmed on load', async () => {
@@ -372,7 +402,7 @@ describe('Short List select mode', () => {
         await change('W3 Oct, 2026')
         await answer(0, false)
         expect(picker().value).toBe('W2 Oct, 2026')
-        expect(screen.getByRole('alert')).toHaveTextContent(ALERT)
+        expect(toastError).toHaveBeenCalledWith(ALERT)
       })
     })
 
@@ -381,7 +411,7 @@ describe('Short List select mode', () => {
       await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
       await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
       expect(picker().value).toBe('W3 Oct, 2026')
-      expect(screen.queryByRole('alert')).toBeNull()
+      expect(toastError).not.toHaveBeenCalled()
     })
   })
 

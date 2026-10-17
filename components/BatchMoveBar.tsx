@@ -3,7 +3,10 @@ import { useRef, useState } from 'react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { moveBatch, MAX_MOVE } from '@/lib/batch-move-client'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
-import { useEscapeToClose } from '@/lib/use-escape-to-close'
+import { toast } from '@/lib/toast'
+import { fmtDateTimeVN } from '@/lib/format-date'
+import { finalConclusionStyle } from '@/lib/conclusion-badge'
+import { Modal } from '@/components/ui/Modal'
 
 export interface SelectedGame {
   id: number
@@ -19,21 +22,17 @@ export interface SelectedGame {
  *  evaluated longer ago than this stretches the window of the batch it moves into. */
 const OLD_EVALUATION_DAYS = 8
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/** "07 Oct, 13:40" in Vietnam time, like the rest of the app; null for a missing or bad date. */
+/** dd/MM/yy - HH:mm in Vietnam time, like the rest of the app; null for a missing or bad date. */
 function evaluatedAt(iso: string | null): string | null {
-  if (!iso) return null
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return null
-  const d = new Date(t + 7 * 3600 * 1000)
-  const p2 = (n: number) => String(n).padStart(2, '0')
-  return `${p2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]}, ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`
+  const at = fmtDateTimeVN(iso)
+  return at === '—' ? null : at
 }
 
 const MSG_TOO_MANY = `You can move at most ${MAX_MOVE} games at a time. Select fewer.`
 const MSG_NOTHING_MOVED = 'No games were moved. Reload the list and try again.'
 const MSG_ALREADY_THERE = 'They are already in this batch.'
+
+const gamesWord = (k: number) => `${k} ${k === 1 ? 'game' : 'games'}`
 
 /** Bottom bar of Short List's select mode: pick a batch, Move, confirm.
  *  Moving a game that already has a final conclusion is allowed (ticking it means the
@@ -74,10 +73,12 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
     // count is a 2xx whose body could not be read: the move happened, only the number is unknown.
     if (res.moved === 0) { setError(MSG_NOTHING_MOVED); return }
     setConfirming(false)
+    toast.success(res.moved ? `Moved ${gamesWord(res.moved)} to ${batch}` : `Moved to ${batch}`)
     onMovedRef.current(res.moved ?? 0)
   }
 
-  useEscapeToClose(() => setConfirming(false), confirming && !busy)
+  // Errors from the move stay inside the dialog: it stays open so the manager can try
+  // again or cancel, and the reason sits next to the button that failed.
   return (
     <>
       <div className="bmb" role="region" aria-label="Move games to another batch">
@@ -91,61 +92,61 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
             options={batchOptions.map(b => ({ value: b, label: b }))}
           />
         </div>
-        <button className="btn btn-primary btn-sm" disabled={!batch || n === 0 || tooMany || alreadyThere}
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn btn-primary btn-sm" disabled={!batch || n === 0 || tooMany || alreadyThere}
           onClick={() => { setError(null); setConfirming(true) }}>
           Move
         </button>
-        <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
         {/* While the dialog is open the same message is shown inside it, not twice. */}
         {!confirming && tooMany && <span className="bmb-err">{MSG_TOO_MANY}</span>}
         {!confirming && !tooMany && alreadyThere && <span className="bmb-note">{MSG_ALREADY_THERE}</span>}
       </div>
 
       {confirming && (
-        <div className="modal-backdrop">
-          <div className="modal bmb-dialog" role="dialog" aria-modal="true" aria-labelledby="bmb-title">
-            <div className="modal-head">
-              <div className="modal-title" id="bmb-title" style={{ whiteSpace: 'normal' }}>
-                Move {n} {n === 1 ? 'game' : 'games'} to {batch}?
-              </div>
-            </div>
-            <div className="modal-body">
-              <ul className="bmb-list" aria-label="Games to move">
-                {selected.map(g => (
-                  <li key={g.id} className="bmb-row" data-move-row>
-                    <div className="bmb-icon" style={g.icon_url ? { backgroundImage: `url(${g.icon_url})` } : undefined} />
-                    <div className="bmb-info">
-                      <div className="bmb-t" title={g.title?.trim() || undefined}>{g.title?.trim() || 'Untitled game'}</div>
-                      <div className="bmb-m">
-                        {evaluatedAt(g.evaluate_date) ? `Evaluated ${evaluatedAt(g.evaluate_date)}` : 'Not evaluated yet'}
-                        {g.final_conclusion && <span className="badge success">{g.final_conclusion}</span>}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              {locked > 0 && (
-                <p className="bmb-note">
-                  {locked} of them already {locked === 1 ? 'has' : 'have'} a final conclusion and will move too.
-                </p>
-              )}
-              {oldForward > 0 && (
-                <p className="bmb-note">
-                  {oldForward} of them {oldForward === 1 ? 'was' : 'were'} evaluated more than {OLD_EVALUATION_DAYS} days ago.
-                  {' '}Moving them to a newer batch can change the date range the Report uses for that batch.
-                </p>
-              )}
-              {tooMany && <p className="bmb-err">{MSG_TOO_MANY}</p>}
-              {error && <p className="bmb-err">{error}</p>}
-            </div>
-            <div className="modal-foot">
-              <button className="btn" onClick={() => setConfirming(false)} disabled={busy}>Back</button>
-              <button className="btn btn-primary" onClick={confirm} disabled={busy || n === 0 || tooMany}>
-                {busy ? 'Moving…' : 'Confirm move'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal
+          title={`Move ${gamesWord(n)} to ${batch}?`}
+          width={440}
+          busy={busy}
+          onClose={() => setConfirming(false)}
+          footer={<>
+            <button type="button" className="btn" onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
+            <button type="button" className="btn btn-primary" onClick={confirm} disabled={busy || n === 0 || tooMany}>
+              {busy ? 'Moving…' : `Move ${gamesWord(n)}`}
+            </button>
+          </>}
+        >
+          <ul className="bmb-list" aria-label="Games to move">
+            {selected.map(g => (
+              <li key={g.id} className="bmb-row" data-move-row>
+                <div className="bmb-icon" style={g.icon_url ? { backgroundImage: `url(${g.icon_url})` } : undefined} />
+                <div className="bmb-info">
+                  <div className="bmb-t" title={g.title?.trim() || undefined}>{g.title?.trim() || 'Untitled game'}</div>
+                  <div className="bmb-m">
+                    {evaluatedAt(g.evaluate_date) ? `Evaluated ${evaluatedAt(g.evaluate_date)}` : 'Not evaluated yet'}
+                    {g.final_conclusion && (
+                      <span className="badge" style={{ background: finalConclusionStyle(g.final_conclusion).bg, color: finalConclusionStyle(g.final_conclusion).color }}>
+                        {g.final_conclusion}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {locked > 0 && (
+            <p className="bmb-note">
+              {locked} of them already {locked === 1 ? 'has' : 'have'} a final conclusion and will move too.
+            </p>
+          )}
+          {oldForward > 0 && (
+            <p className="bmb-note">
+              {oldForward} of them {oldForward === 1 ? 'was' : 'were'} evaluated more than {OLD_EVALUATION_DAYS} days ago.
+              {' '}Moving them to a newer batch can change the date range the Report uses for that batch.
+            </p>
+          )}
+          {tooMany && <p className="bmb-err">{MSG_TOO_MANY}</p>}
+          {error && <p className="bmb-err" role="alert">{error}</p>}
+        </Modal>
       )}
     </>
   )

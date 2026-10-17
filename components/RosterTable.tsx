@@ -7,12 +7,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { MultiSelect } from '@/components/MultiSelect'
+import { CloseButton } from '@/components/ui/CloseButton'
+import { EmptyState, SkeletonRows } from '@/components/ui/States'
 import { BUCKETS, WEIGHTS, type Bucket } from '@/lib/buckets'
 import type { PersonGroup, RosterRow } from '@/lib/assign-roster'
 
 export const BUCKET_LABELS: Record<Bucket, string> = {
   puzzle: 'Puzzle', arcade: 'Arcade', simulation: 'Simulation',
 }
+/** Options for the category group <Seg> on Reassign, Rescue and Handover. */
+export const BUCKET_OPTS: { value: Bucket; label: string }[] = BUCKETS.map(b => ({ value: b, label: BUCKET_LABELS[b] }))
 
 const PLATFORM_OPTS = ['all', 'ios', 'android'].map(p => ({ value: p, label: p }))
 const AVAIL_OPTS = [{ value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }]
@@ -37,6 +41,8 @@ export interface RosterTableProps {
   groups: PersonGroup[]
   subGenres: Record<Bucket, string[]>
   readOnly?: boolean
+  /** First load still running: show placeholder rows, not "No evaluators yet". */
+  loading?: boolean
   onPatchRow: (id: number, field: 'game_category' | 'weight', value: unknown) => void
   onPatchAvailable: (name: string, value: boolean) => void
   onPatchPerson: (name: string, field: 'game_platform', value: unknown) => void
@@ -46,7 +52,7 @@ export interface RosterTableProps {
 }
 
 export function RosterTable({
-  title, groups, subGenres, readOnly = false,
+  title, groups, subGenres, readOnly = false, loading = false,
   onPatchRow, onPatchAvailable, onPatchPerson, onRemoveRow, onAddGenre, onAddEvaluator,
 }: RosterTableProps) {
   // Which genre panels are expanded, keyed by roster row id. Several may be
@@ -85,14 +91,15 @@ export function RosterTable({
                 Genres is the only column without a width, so the table's slack
                 collects in the pills instead of stretching the name. */}
             <tr>
-              <th style={{ width: 170 }}>Evaluator Name</th>
+              <th style={{ width: 170 }}>Evaluator</th>
               <th style={{ width: 92 }}>Available</th>
               <th style={{ width: 96 }}>Platform</th>
               <th className="col-split">Category groups</th>
             </tr>
           </thead>
           <tbody>
-            {groups.length === 0 && <tr><td colSpan={4} className="empty">No evaluators yet</td></tr>}
+            {groups.length === 0 && loading && <SkeletonRows widths={[110, 60, 60, 220]} rows={4} />}
+            {groups.length === 0 && !loading && <tr><td colSpan={4}><EmptyState>No evaluators yet</EmptyState></td></tr>}
             {groups.map((g, gi) => (
               <PersonRow key={g.name} group={g} alt={gi % 2 === 1} subGenres={subGenres} readOnly={readOnly}
                 openIds={openIds} onToggleOpen={toggleOpen}
@@ -131,10 +138,12 @@ function PersonRow({ group, alt, subGenres, readOnly, openIds, onToggleOpen, onP
         <td className="cell-name">{group.name}</td>
         <td data-testid="avail-cell">
           <StyledSelect value={group.today_available ? 'Yes' : 'No'} options={AVAIL_OPTS} disabled={readOnly}
+            ariaLabel={`${group.name} available today`}
             onChange={v => onPatchAvailable(group.name, v === 'Yes')} />
         </td>
         <td data-testid="platform-cell">
           <StyledSelect value={group.game_platform || 'all'} options={PLATFORM_OPTS} disabled={readOnly}
+            ariaLabel={`${group.name} platform`}
             onChange={v => onPatchPerson(group.name, 'game_platform', v)} />
         </td>
         <td className="col-split">
@@ -146,7 +155,7 @@ function PersonRow({ group, alt, subGenres, readOnly, openIds, onToggleOpen, onP
             ))}
             {!readOnly && group.missingGenres.length > 0 && (
               <span className="gpill-add" data-testid={`add-genre-${group.name}`}>
-                <StyledSelect value="" placeholder="+ category group"
+                <StyledSelect value="" placeholder="+ category group" ariaLabel={`Add a category group for ${group.name}`}
                   options={group.missingGenres.map(b => ({ value: b, label: BUCKET_LABELS[b] }))}
                   onChange={v => onAddGenre(group.name, v as Bucket)} />
               </span>
@@ -215,6 +224,15 @@ function GenrePanel({ row, options, readOnly, onPatchRow, onRemove, onClose }: {
   const picked = useMemo(() => pickedSubGenres(row.game_category, options), [row.game_category, options])
   const genre = BUCKET_LABELS[row.category_group]
   const allOn = picked.length >= options.length
+  // Removing a category group takes one roster row away, so it costs two clicks:
+  // the first arms the button ("Remove Arcade?"), the second removes. It disarms
+  // by itself after a few seconds, so a stray first click does not linger.
+  const [arming, setArming] = useState(false)
+  useEffect(() => {
+    if (!arming) return
+    const t = setTimeout(() => setArming(false), 4000)
+    return () => clearTimeout(t)
+  }, [arming])
 
   // Unticking the last remaining box is refused at the control rather than
   // here: an empty list normalizes back to 'All' on the server and would
@@ -261,13 +279,16 @@ function GenrePanel({ row, options, readOnly, onPatchRow, onRemove, onClose }: {
 
       <div className="gpanel-acts">
         {!readOnly && (
-          <button type="button" className="glink" disabled={allOn}
+          <button type="button" className="btn btn-sm btn-link" disabled={allOn}
             onClick={() => onPatchRow(row.id, 'game_category', 'All')}>Select all</button>
         )}
         {!readOnly && (
-          <button type="button" className="glink glink-danger" onClick={onRemove}>Remove category group</button>
+          <button type="button" className="btn btn-sm btn-danger"
+            onClick={() => { if (arming) { setArming(false); onRemove() } else setArming(true) }}>
+            {arming ? `Remove ${genre}?` : 'Remove category group'}
+          </button>
         )}
-        <button type="button" className="glink glink-quiet" onClick={onClose}>Close</button>
+        <CloseButton onClick={onClose} label={`Close ${genre} panel`} />
       </div>
     </div>
   )
@@ -301,23 +322,23 @@ function AddEvalRow({ onAdd }: { onAdd: RosterTableProps['onAddEvaluator'] }) {
 
   const isKnown = sugg.some(s => s.name.toLowerCase() === name.trim().toLowerCase())
 
-  if (!open) return <button className="add-row-btn" onClick={() => setOpen(true)}>+ Add evaluator</button>
+  if (!open) return <button type="button" className="btn btn-sm roster-add" onClick={() => setOpen(true)}>+ Add evaluator</button>
 
   return (
     <div style={{ marginTop: 8, position: 'relative' }}>
       <div style={{ display: 'flex', gap: 8 }}>
-        <input className="input" style={{ flex: 1 }} autoFocus value={name}
+        <input className="input" style={{ flex: 1 }} autoFocus value={name} aria-label="Evaluator name or id"
           onChange={e => setName(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') submit(!isKnown) }}
           placeholder="Type a name to search, or a new id (auto @athena.studio)…" />
-        <MultiSelect value={genres} placeholder="Category group" style={{ width: 190 }}
+        <MultiSelect value={genres} placeholder="Category group" style={{ width: 190 }} ariaLabel="Category groups"
           options={BUCKETS.map(b => ({ value: b, label: BUCKET_LABELS[b] }))}
           onChange={vals => setGenres(vals.filter((v): v is Bucket => (BUCKETS as readonly string[]).includes(v)))} />
-        <button className="btn btn-primary btn-sm" disabled={!name.trim() || genres.length === 0}
+        <button type="button" className="btn btn-sm" onClick={() => { setOpen(false); setName(''); setSugg([]) }}>Cancel</button>
+        <button type="button" className="btn btn-primary btn-sm" disabled={!name.trim() || genres.length === 0}
           onClick={() => submit(!isKnown)}>
-          {isKnown ? 'Add' : 'Add + create user'}
+          {isKnown ? 'Add' : 'Add and create user'}
         </button>
-        <button className="btn btn-sm" onClick={() => { setOpen(false); setName(''); setSugg([]) }}>✕</button>
       </div>
       {sugg.length > 0 && (
         <div className="ssel-menu" style={{ position: 'absolute', zIndex: 50, top: '100%', left: 0, right: 0, maxHeight: 200, overflowY: 'auto' }}>

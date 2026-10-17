@@ -12,6 +12,8 @@
 // deactivating is the way to drop someone from this table for good.
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { fmtDateVN } from '@/lib/format-date'
+import { SearchInput } from '@/components/ui/SearchInput'
 
 interface Person {
   key: string
@@ -31,7 +33,7 @@ const TITLE_CLASS: Record<string, string> = {
 
 function shortDate(iso: string | null): string {
   if (!iso) return 'never'
-  return new Date(iso).toLocaleDateString('en-CA')   // YYYY-MM-DD, locale-proof
+  return fmtDateVN(iso)
 }
 
 export function PeopleSection() {
@@ -104,8 +106,7 @@ export function PeopleSection() {
       {error && <p className="msg-err" style={{ marginBottom: 8 }}>{error}</p>}
 
       <div className="ppl-tools">
-        <input className="input ppl-search" value={q} onChange={e => setQ(e.target.value)}
-          placeholder="Find someone…" aria-label="Find someone" />
+        <SearchInput value={q} onChange={setQ} placeholder="Find someone" width={200} />
         {visible.length < people.length && (
           <button className="btn btn-sm" disabled={!!saving}
             onClick={() => patch({ keys: people.map(p => p.key), inFilters: true }, 'all')}>

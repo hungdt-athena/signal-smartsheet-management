@@ -1,5 +1,5 @@
 'use client'
-import { createPortal } from 'react-dom'
+import { Modal } from '@/components/ui/Modal'
 import { prettyConclusion } from '@/lib/buckets'
 import { conclusionBadgeClass } from '@/lib/conclusion-badge'
 import { fmtClock, fmtDuration, groupByDay, summarize, type Change, type EventType, type HistoryEvent } from '@/lib/evaluation-history'
@@ -86,7 +86,6 @@ function Skeleton() {
 
 /** The panel's History: saves and hand-overs of one game as a timeline, newest first. */
 export function EvalHistoryModal({ events, logReady, error, onClose, onRetry }: EvalHistoryModalProps) {
-  if (typeof document === 'undefined') return null
   const sum = events && events.length > 0 ? summarize(events) : null
 
   let content
@@ -117,28 +116,19 @@ export function EvalHistoryModal({ events, logReady, error, onClose, onRetry }: 
     ))
   }
 
-  // Portalled like the Lightbox: the panel sits in an animated container that would trap
+  // Modal portals to <body>: the panel sits in an animated container that would trap
   // position: fixed. z-index: above the panel's backdrop (900), below the Lightbox (2000).
-  return createPortal(
-    <div className="modal-backdrop" style={{ zIndex: 1500 }} onClick={onClose}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="eval-history-title"
-        style={{ maxWidth: 600 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <div style={{ display: 'grid', gap: 4 }}>
-            <div className="modal-title" id="eval-history-title">History</div>
-            {sum && (
-              <div className="hx-sum">
-                <span><b>{sum.events}</b> {sum.events === 1 ? 'event' : 'events'}</span>
-                {sum.seconds > 0 && <span><b>{fmtDuration(sum.seconds)}</b> panel time</span>}
-                {sum.people > 0 && <span><b>{sum.people}</b> {sum.people === 1 ? 'person' : 'people'}</span>}
-              </div>
-            )}
-          </div>
-          <button className="btn btn-sm btn-ghost" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-        <div className="modal-body" style={{ gap: 0, paddingTop: 0, paddingBottom: 12 }}>{content}</div>
-      </div>
-    </div>,
-    document.body,
+  // Esc is Modal's; the panel's own key handler sees it marked handled and leaves it.
+  return (
+    <Modal title="History" onClose={onClose} width={600} zIndex={1500} className="hx-modal"
+      sub={sum && (
+        <span className="hx-sum">
+          <span><b>{sum.events}</b> {sum.events === 1 ? 'event' : 'events'}</span>
+          {sum.seconds > 0 && <span><b>{fmtDuration(sum.seconds)}</b> panel time</span>}
+          {sum.people > 0 && <span><b>{sum.people}</b> {sum.people === 1 ? 'person' : 'people'}</span>}
+        </span>
+      )}>
+      {content}
+    </Modal>
   )
 }

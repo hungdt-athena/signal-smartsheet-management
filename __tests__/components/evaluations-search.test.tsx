@@ -26,9 +26,26 @@ jest.mock('next-auth/react', () => ({
   }),
 }))
 
-jest.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(''),
-}))
+// The page keeps its view and filters in the URL (lib/use-url-state). This stand-in for
+// next/navigation keeps the query string in jsdom's location, so changing a filter
+// re-renders the page the way the real router does.
+jest.mock('next/navigation', () => {
+  const React = jest.requireActual('react')
+  const listeners = new Set<() => void>()
+  const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
+  const read = () => window.location.search
+  const router = {
+    replace: (url: string) => { window.history.replaceState(null, '', url); listeners.forEach(l => l()) },
+  }
+  return {
+    useSearchParams: () => {
+      const qs = React.useSyncExternalStore(subscribe, read, read)
+      return React.useMemo(() => new URLSearchParams(qs), [qs])
+    },
+    useRouter: () => router,
+    usePathname: () => window.location.pathname,
+  }
+})
 
 jest.mock('@/hooks/useConfig', () => ({
   useConfig: () => ({ conclusion: [], final_conclusion: [] }),
@@ -44,6 +61,8 @@ jest.mock('@/components/weekly-feedback/WeeklyFeedbackTab', () => ({ WeeklyFeedb
 jest.mock('@/components/TaggingTab', () => ({ TaggingTab: () => null }))
 
 import EvaluationsPage from '@/app/(manager)/evaluations/page'
+
+beforeEach(() => { window.history.replaceState(null, '', '/evaluations') })
 
 const APPLIED_MONTH = { year: 2026, month: 9 }
 
@@ -80,7 +99,7 @@ function stubFetch(
 const rowCalls = (calls: string[]) => calls.filter(u => u.startsWith('/api/evaluations?'))
 const facetCalls = (calls: string[]) => calls.filter(u => u.startsWith('/api/evaluations/facets'))
 
-const box = () => screen.getByPlaceholderText('Search games...')
+const box = () => screen.getByPlaceholderText('Search games')
 
 /** The filter row's text, which is where the date pill lives. Read as a whole because
  *  the pill splits its label across text nodes, and the page subtitle mentions the
@@ -182,7 +201,7 @@ describe('searching on the Evaluate tab', () => {
     await open(calls)
     await typeSearch('merge')
     await waitFor(() => expect(rowCalls(calls).length).toBe(2))
-    expect(await screen.findByText(/500\+ results/)).toBeTruthy()
+    expect(await screen.findByText('500+ games')).toBeTruthy()
   })
 })
 

@@ -144,15 +144,15 @@ export function FeedbackEditor({ value, onChange }: { value: unknown; onChange: 
   return (
     <div className="wf-editor">
       <div className="wf-toolbar">
-        <button type="button" title={`Bold (${MOD}+B)`} className={cls(editor.isActive('bold'))} onClick={() => editor.chain().focus().toggleBold().run()}><b>B</b></button>
-        <button type="button" title={`Italic (${MOD}+I)`} className={cls(editor.isActive('italic'))} onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></button>
-        <button type="button" title={`Underline (${MOD}+U)`} className={cls(editor.isActive('underline'))} onClick={() => editor.chain().focus().toggleUnderline().run()}><u>U</u></button>
-        <button type="button" title="Bullet list" className={cls(editor.isActive('bulletList'))} onClick={() => editor.chain().focus().toggleBulletList().run()}>• List</button>
-        <button type="button" title={`Link (${MOD}+K)`} className={cls(editor.isActive('link'))} onClick={openLink}>Link</button>
+        <button type="button" title={`Bold (${MOD}+B)`} aria-label="Bold" aria-pressed={editor.isActive('bold')} className={cls(editor.isActive('bold'))} onClick={() => editor.chain().focus().toggleBold().run()}><b>B</b></button>
+        <button type="button" title={`Italic (${MOD}+I)`} aria-label="Italic" aria-pressed={editor.isActive('italic')} className={cls(editor.isActive('italic'))} onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></button>
+        <button type="button" title={`Underline (${MOD}+U)`} aria-label="Underline" aria-pressed={editor.isActive('underline')} className={cls(editor.isActive('underline'))} onClick={() => editor.chain().focus().toggleUnderline().run()}><u>U</u></button>
+        <button type="button" title="Bullet list" aria-pressed={editor.isActive('bulletList')} className={cls(editor.isActive('bulletList'))} onClick={() => editor.chain().focus().toggleBulletList().run()}>• List</button>
+        <button type="button" title={`Link (${MOD}+K)`} aria-pressed={editor.isActive('link')} className={cls(editor.isActive('link'))} onClick={openLink}>Link</button>
         <button type="button" title="Insert a game (paste a store link or search by name)" onClick={() => editor.chain().focus().insertContent('@').run()}>+ Game</button>
       </div>
       {linkOpen && linkPos && createPortal(
-        <div ref={popRef} className="wf-linkpop" style={{ left: linkPos.left, top: linkPos.top }}>
+        <div ref={popRef} className="wf-linkbar" style={{ left: linkPos.left, top: linkPos.top }}>
           <input
             autoFocus={!focusUrl}
             type="text"
@@ -164,7 +164,7 @@ export function FeedbackEditor({ value, onChange }: { value: unknown; onChange: 
               if (e.key === 'Escape') { e.preventDefault(); setLinkOpen(false) }
             }}
           />
-          <div className="wf-linkpop-row">
+          <div className="wf-linkbar-row">
             <input
               autoFocus={focusUrl}
               type="text"
@@ -176,8 +176,8 @@ export function FeedbackEditor({ value, onChange }: { value: unknown; onChange: 
                 if (e.key === 'Escape') { e.preventDefault(); setLinkOpen(false) }
               }}
             />
-            <button type="button" className="wf-linkpop-apply" onClick={applyLink}>Apply</button>
-            {isEdit && <button type="button" className="wf-linkpop-remove" onClick={removeLink} title="Remove link">Remove</button>}
+            {isEdit && <button type="button" className="btn btn-sm btn-danger" onClick={removeLink} title="Remove link">Remove</button>}
+            <button type="button" className="btn btn-sm btn-primary" onClick={applyLink}>Apply</button>
           </div>
         </div>,
         document.body,

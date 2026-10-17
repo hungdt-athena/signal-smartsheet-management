@@ -167,7 +167,7 @@ describe('AssignSetup next-run panel', () => {
     expect(calls.some(c => c.url === '/api/assign-setup/run')).toBe(false)
     expect(screen.getByRole('alertdialog')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /yes, run it/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^run push$/i }))
     await waitFor(() => expect(calls.some(c => c.url === '/api/assign-setup/run')).toBe(true))
     const run = calls.find(c => c.url === '/api/assign-setup/run')!
     // Off for Puzzle says nothing about the other genres.

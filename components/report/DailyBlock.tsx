@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BUCKETS } from '@/lib/buckets'
+import { ErrorState } from '@/components/ui/States'
 
 // The Leaderboard's daily block: one day at a time, with a strip of the days in the
 // period so the reader can jump between them.
@@ -109,39 +110,39 @@ function BucketTable({ b }: { b: DailyBucket }): JSX.Element {
           {int(b.evaluators)} {b.evaluators === 1 ? 'evaluator' : 'evaluators'} · {int(b.total)} evaluated
         </span>
       </div>
-      <table className="rp-daily-table">
+      <table className="tbl rp-daily-table">
         <thead>
           <tr>
             <th scope="col">Name</th>
-            <th scope="col" className="num">Total</th>
-            <th scope="col" className="num">Idea</th>
-            <th scope="col" className="num">P&amp;BP</th>
-            <th scope="col" className="num">Bypass</th>
-            {showOther && <th scope="col" className="num">Other</th>}
-            {showTags && <th scope="col" className="num">&sum;Tag/&sum;Game</th>}
+            <th scope="col" className="num tnum">Total</th>
+            <th scope="col" className="num tnum">Idea</th>
+            <th scope="col" className="num tnum">P&amp;BP</th>
+            <th scope="col" className="num tnum">Bypass</th>
+            {showOther && <th scope="col" className="num tnum">Other</th>}
+            {showTags && <th scope="col" className="num tnum">&sum;Tag/&sum;Game</th>}
           </tr>
         </thead>
         <tbody>
           {b.rows.map((r) => (
             <tr key={r.name}>
               <th scope="row">{r.name}</th>
-              <td className="num strong">{int(r.total)}</td>
-              <td className="num">{int(r.idea)}</td>
-              <td className="num">{int(r.pbp)}</td>
-              <td className="num">{int(r.bypass)}</td>
-              {showOther && <td className="num">{int(r.other)}</td>}
-              {showTags && <td className="num">{tagCell(r)}</td>}
+              <td className="num tnum strong">{int(r.total)}</td>
+              <td className="num tnum">{int(r.idea)}</td>
+              <td className="num tnum">{int(r.pbp)}</td>
+              <td className="num tnum">{int(r.bypass)}</td>
+              {showOther && <td className="num tnum">{int(r.other)}</td>}
+              {showTags && <td className="num tnum">{tagCell(r)}</td>}
             </tr>
           ))}
           <tr className="rp-daily-total">
             <th scope="row">Total</th>
-            <td className="num strong">{int(b.total)}</td>
-            <td className="num">{int(sum(b.rows, (r) => r.idea))}</td>
-            <td className="num">{int(sum(b.rows, (r) => r.pbp))}</td>
-            <td className="num">{int(sum(b.rows, (r) => r.bypass))}</td>
-            {showOther && <td className="num">{int(sum(b.rows, (r) => r.other))}</td>}
+            <td className="num tnum strong">{int(b.total)}</td>
+            <td className="num tnum">{int(sum(b.rows, (r) => r.idea))}</td>
+            <td className="num tnum">{int(sum(b.rows, (r) => r.pbp))}</td>
+            <td className="num tnum">{int(sum(b.rows, (r) => r.bypass))}</td>
+            {showOther && <td className="num tnum">{int(sum(b.rows, (r) => r.other))}</td>}
             {showTags && (
-              <td className="num">
+              <td className="num tnum">
                 {int(sum(b.rows, (r) => r.tagRows))}/{int(sum(b.rows, (r) => r.tagged))}
               </td>
             )}
@@ -220,9 +221,9 @@ export function DailyBlock({ windowFrom, windowTo, category }: {
   const span = range ? eachDay(range.from, range.to) : []
   const strip = span.length > 0 && span.length <= FULL_STRIP_DAYS ? span : worked.slice().reverse()
 
-  if (loading) return <div className="card"><div className="rp-daily-note">Loading...</div></div>
+  if (loading) return <div className="card"><div className="rp-daily-note">Loading…</div></div>
   if (failed) {
-    return <div className="card"><div className="rp-daily-note">Could not load the daily tables. Try again in a moment.</div></div>
+    return <div className="card"><ErrorState onRetry={() => load('')}>Could not load the daily tables.</ErrorState></div>
   }
   if (!day) {
     return (
@@ -300,6 +301,8 @@ export function DayBreakdown({ evaluator, windowFrom, windowTo, category }: {
   const [range, setRange] = useState<{ from: string; to: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
+  // Bumped by Try again: the fetch below lives in an effect, so a retry is a re-run.
+  const [retry, setRetry] = useState(0)
   const seqRef = useRef(0)
 
   useEffect(() => {
@@ -324,11 +327,11 @@ export function DayBreakdown({ evaluator, windowFrom, windowTo, category }: {
       }
       if (seq === seqRef.current) setLoading(false)
     })()
-  }, [evaluator, windowFrom, windowTo, category])
+  }, [evaluator, windowFrom, windowTo, category, retry])
 
-  if (loading) return <div className="card"><div className="rp-daily-note">Loading...</div></div>
+  if (loading) return <div className="card"><div className="rp-daily-note">Loading…</div></div>
   if (failed) {
-    return <div className="card"><div className="rp-daily-note">Could not load the day breakdown. Try again in a moment.</div></div>
+    return <div className="card"><ErrorState onRetry={() => setRetry((n) => n + 1)}>Could not load the day breakdown.</ErrorState></div>
   }
   if (rows.length === 0) {
     return <div className="card"><div className="rp-daily-note">No evaluation work on any day in this period.</div></div>
@@ -353,16 +356,16 @@ export function DayBreakdown({ evaluator, windowFrom, windowTo, category }: {
 
   return (
     <div className="card rp-daily">
-      <table className="rp-daily-table">
+      <table className="tbl rp-daily-table">
         <thead>
           <tr>
             <th scope="col">Day</th>
-            <th scope="col" className="num">Total</th>
-            <th scope="col" className="num">Idea</th>
-            <th scope="col" className="num">P&amp;BP</th>
-            <th scope="col" className="num">Bypass</th>
-            {showOther && <th scope="col" className="num">Other</th>}
-            {showTags && <th scope="col" className="num">&sum;Tag/&sum;Game</th>}
+            <th scope="col" className="num tnum">Total</th>
+            <th scope="col" className="num tnum">Idea</th>
+            <th scope="col" className="num tnum">P&amp;BP</th>
+            <th scope="col" className="num tnum">Bypass</th>
+            {showOther && <th scope="col" className="num tnum">Other</th>}
+            {showTags && <th scope="col" className="num tnum">&sum;Tag/&sum;Game</th>}
           </tr>
         </thead>
         <tbody>
@@ -373,24 +376,24 @@ export function DayBreakdown({ evaluator, windowFrom, windowTo, category }: {
             return (
               <tr key={d} className={r ? undefined : 'rp-daily-quiet-row'}>
                 <th scope="row"><DayCell iso={d} /></th>
-                <td className="num strong">{int(r?.total ?? 0)}</td>
-                <td className="num">{int(r?.idea ?? 0)}</td>
-                <td className="num">{int(r?.pbp ?? 0)}</td>
-                <td className="num">{int(r?.bypass ?? 0)}</td>
-                {showOther && <td className="num">{int(r?.other ?? 0)}</td>}
-                {showTags && <td className="num">{r ? tagCell(r) : '—'}</td>}
+                <td className="num tnum strong">{int(r?.total ?? 0)}</td>
+                <td className="num tnum">{int(r?.idea ?? 0)}</td>
+                <td className="num tnum">{int(r?.pbp ?? 0)}</td>
+                <td className="num tnum">{int(r?.bypass ?? 0)}</td>
+                {showOther && <td className="num tnum">{int(r?.other ?? 0)}</td>}
+                {showTags && <td className="num tnum">{r ? tagCell(r) : '—'}</td>}
               </tr>
             )
           })}
           <tr className="rp-daily-total">
             <th scope="row">Total</th>
-            <td className="num strong">{int(add((r) => r.total))}</td>
-            <td className="num">{int(add((r) => r.idea))}</td>
-            <td className="num">{int(add((r) => r.pbp))}</td>
-            <td className="num">{int(add((r) => r.bypass))}</td>
-            {showOther && <td className="num">{int(add((r) => r.other))}</td>}
+            <td className="num tnum strong">{int(add((r) => r.total))}</td>
+            <td className="num tnum">{int(add((r) => r.idea))}</td>
+            <td className="num tnum">{int(add((r) => r.pbp))}</td>
+            <td className="num tnum">{int(add((r) => r.bypass))}</td>
+            {showOther && <td className="num tnum">{int(add((r) => r.other))}</td>}
             {showTags && (
-              <td className="num">{int(add((r) => r.tagRows))}/{int(add((r) => r.tagged))}</td>
+              <td className="num tnum">{int(add((r) => r.tagRows))}/{int(add((r) => r.tagged))}</td>
             )}
           </tr>
         </tbody>

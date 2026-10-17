@@ -20,10 +20,23 @@ export function ClearFilters({ visible, onClear }: { visible: boolean; onClear: 
   return <button type="button" className="btn btn-sm btn-link" onClick={onClear}>Clear filters</button>
 }
 
-/** "214 games" when nothing narrows the list, "38 of 214 games" when something does. */
-export function FilterCount({ shown, total, noun = 'games', loading = false }: { shown: number; total?: number | null; noun?: string; loading?: boolean }) {
+/** "214 games" when nothing narrows the list, "38 of 214 games" when something does,
+ *  "1 game" for one, and "500+ games" when the server stopped counting (`capped`). */
+export function FilterCount({ shown, total, noun = 'games', loading = false, capped = false }: {
+  shown: number
+  total?: number | null
+  /** Plural noun; the singular drops a trailing "s". */
+  noun?: string
+  loading?: boolean
+  capped?: boolean
+}) {
   if (loading) return <span className="filter-count" aria-live="polite">Loading…</span>
   const n = (x: number) => x.toLocaleString('en-US')
-  const text = total != null && total !== shown ? `${n(shown)} of ${n(total)} ${noun}` : `${n(shown)} ${noun}`
+  const word = (x: number) => (x === 1 && noun.endsWith('s') ? noun.slice(0, -1) : noun)
+  const text = capped
+    ? `${n(shown)}+ ${noun}`
+    : total != null && total !== shown
+      ? `${n(shown)} of ${n(total)} ${word(total)}`
+      : `${n(shown)} ${word(shown)}`
   return <span className="filter-count" aria-live="polite">{text}</span>
 }

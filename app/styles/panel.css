@@ -1,1 +1,51 @@
 /* panel — area styles for the UI cleanup. Owned by one area; shared rules live in globals.css. */
+
+/* History (EvalHistoryModal): the timeline runs edge to edge under the head, its day
+   headings carry their own top space, so the body drops Modal's gap and top padding. */
+.hx-modal .modal-body { gap: 0; padding-top: 0; padding-bottom: 12px; }
+
+/* Trends tags (TrendTagsDialog) sits on top of the evaluation panel. No scrim: a second
+   layer of dimming made the panel read as another container behind this one. The layer
+   stays to catch click-outside, so it is transparent rather than absent. A real border
+   and a deep shadow do the separating against the white panel behind it. */
+.modal-backdrop:has(> .trend-dialog) { background: transparent; backdrop-filter: none; }
+.modal.trend-dialog { border-color: var(--border-strong); box-shadow: 0 30px 70px rgba(20, 24, 40, 0.28); }
+.trend-dialog .modal-foot { align-items: center; }
+
+/* Lightbox close: same spot and look as before (a 40px dark circle, top right), so
+   it stays visible on the blurred dark backdrop where the plain X would vanish. */
+.lightbox-close { position: fixed; top: 20px; right: 20px; }
+.lightbox-close .x-btn { width: 40px; height: 40px; border-radius: 20px; background: rgba(0, 0, 0, .5); color: #fff; }
+.lightbox-close .x-btn:hover { background: rgba(0, 0, 0, .7); color: #fff; }
+.lightbox-close .x-btn svg { width: 20px; height: 20px; }
+
+/* Panel top bar: the close X is the last thing on the right. */
+.eval-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+
+/* Photo overlay buttons on manual screenshots (delete / unstage): a small dark
+   circle over the picture. */
+.shot-x {
+  position: absolute; display: grid; place-items: center; padding: 0;
+  border: none; border-radius: 50%; cursor: pointer;
+  background: rgba(0, 0, 0, .55); color: #fff;
+}
+.shot-x:disabled { opacity: .5; cursor: not-allowed; }
+.shot-x.lg { top: 6px; right: 6px; width: 24px; height: 24px; }
+.shot-x.sm { top: 4px; right: 4px; width: 20px; height: 20px; }
+
+/* Icon-only copy button next to a value (title, game id, publisher). */
+.copy-btn {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+  background: none; border: none; cursor: pointer; padding: 0 2px; color: var(--faint);
+}
+.copy-btn.done { color: var(--good); }
+.copy-btn:not(.done):hover { color: var(--text); }
+
+/* "Clear" inside a field's label row: text-sized, so the row does not grow when the
+   field gets a value and the action appears. */
+.field-clear {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: none; border: none; cursor: pointer; padding: 0 2px;
+  font-size: 11px; font-weight: 600; color: var(--faint);
+}
+.field-clear:hover { color: var(--text); }

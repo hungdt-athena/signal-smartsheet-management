@@ -63,7 +63,7 @@ export function GameSearch({ onPick }: { onPick: (g: GameAlikeGame) => void }) {
         placeholder="Paste a store link or type a game name…"
         style={{ width: '100%' }}
       />
-      {loading && <span className="wf-hint">searching…</span>}
+      {loading && <span className="wf-hint">Searching…</span>}
 
       {manual ? (
         <div className="wf-manual-form">
@@ -82,12 +82,12 @@ export function GameSearch({ onPick }: { onPick: (g: GameAlikeGame) => void }) {
             placeholder="Link (optional)"
           />
           <div className="wf-manual-form-actions">
-            <button type="button" className="wf-manual-add" disabled={!manual.name.trim()} onClick={submitManual}>Add</button>
-            <button type="button" className="wf-manual-cancel" onClick={() => setManual(null)}>Cancel</button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setManual(null)}>Cancel</button>
+            <button type="button" className="btn btn-sm btn-primary" disabled={!manual.name.trim()} onClick={submitManual}>Add</button>
           </div>
         </div>
       ) : noResults && !loading && (
-        <button type="button" onClick={openManual} className="wf-addmanual">
+        <button type="button" onClick={openManual} className="btn btn-sm wf-addmanual-btn">
           + Add &quot;{text.trim()}&quot; as a link
         </button>
       )}

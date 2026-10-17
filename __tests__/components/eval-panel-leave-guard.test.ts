@@ -51,3 +51,17 @@ describe('EvalDetailPanel unsaved-changes guard', () => {
     expect(panel).toMatch(/saveBlockedReason=\{noteTooShort \? noteError : null\}/)
   })
 })
+
+describe('EvalDetailPanel top bar and toasts', () => {
+  it('puts the close X last in the top bar, as the shared CloseButton', () => {
+    const bar = panel.slice(panel.indexOf('<div className="eval-topbar">'), panel.indexOf('<ProgressTracker'))
+    const close = bar.indexOf("<CloseButton onClick={() => requestLeaveRef.current('close', onClose)} />")
+    expect(close).toBeGreaterThan(-1)
+    expect(close).toBeGreaterThan(bar.indexOf('setFullscreen'))
+    expect(close).toBeGreaterThan(bar.indexOf('goNext'))
+  })
+  it('reports results through the app toaster, with no toast markup of its own', () => {
+    expect(panel).toMatch(/import \{ toast \} from '@\/lib\/toast'/)
+    expect(panel).not.toMatch(/toast-wrap/)
+  })
+})

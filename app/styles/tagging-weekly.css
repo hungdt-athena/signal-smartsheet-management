@@ -1,1 +1,48 @@
 /* tagging-weekly — area styles for the UI cleanup. Owned by one area; shared rules live in globals.css. */
+
+/* ===== Weekly Feedback ===== */
+
+/* The page fills the window: header and filter bar keep their height, and only
+   the card below scrolls (the Editor's sticky bar and the list's sticky header
+   need that scroll box). Was an inline style on the page. */
+.page.wf-page { padding-bottom: 16px; height: 100vh; box-sizing: border-box; overflow: hidden; }
+
+/* The list table takes the .tbl header look like every other table. Its own
+   gridlines, row bands and column widths stay in globals.css. The z-index keeps
+   the sticky header above the rowspanned Evaluator cells. */
+.wf-list.tbl th {
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--faint); background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.wf-list.tbl-sticky thead th { z-index: 6; }
+
+/* History rows and the preview head. New class names because the old ones style
+   every <button> inside them, which would undo .btn. Layout is unchanged. */
+.wf-hist-item { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 6px; font-size: 13px; }
+.wf-hist-item:hover { background: var(--surface); }
+.wf-hist-item.is-active { background: var(--accent-weak); }
+.wf-hist-preview-head {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-bottom: 1px solid var(--border); background: var(--surface-2);
+  font-size: 12px; font-weight: 600; color: var(--muted);
+}
+
+/* Floating link popover under the text selection. Renamed from .wf-linkpop for
+   the same reason: .wf-linkpop button would override .btn. */
+.wf-linkbar {
+  position: fixed; z-index: 1100;
+  display: flex; flex-direction: column; gap: 6px;
+  width: 320px; max-width: calc(100vw - 16px);
+  padding: 7px;
+  border: 1px solid var(--border-strong); border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md, var(--shadow-sm));
+}
+.wf-linkbar-row { display: flex; gap: 6px; align-items: center; }
+.wf-linkbar input { flex: 1; min-width: 0; padding: 6px 9px; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.wf-linkbar input:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
+.wf-linkbar .btn { flex: none; }
+
+/* "Add" buttons sit at their natural width inside the column layouts. */
+.wf-addgroup-btn, .wf-addmanual-btn { align-self: flex-start; }
+.wf-addmanual-btn { margin-top: 6px; }

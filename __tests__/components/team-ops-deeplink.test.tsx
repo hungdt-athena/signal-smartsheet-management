@@ -22,15 +22,21 @@ Element.prototype.scrollIntoView = jest.fn()
 
 let params = new URLSearchParams('')
 
+let mockRole = 'admin'
 jest.mock('next-auth/react', () => ({
   useSession: () => ({
-    data: { user: { id: 1, role: 'admin', name: 'HungDT', email: 'hungdt@athena.studio' } },
+    data: { user: { id: 1, role: mockRole, name: 'HungDT', email: 'hungdt@athena.studio' } },
     status: 'authenticated',
   }),
 }))
 
+// The page keeps the category group in ?cat= (useSetUrlParams), so it needs the
+// router too. replace() is a spy: these tests drive the page through `params`.
+const replace = jest.fn()
 jest.mock('next/navigation', () => ({
   useSearchParams: () => params,
+  useRouter: () => ({ replace }),
+  usePathname: () => '/team-ops',
 }))
 
 import TeamOpsPage from '@/app/(manager)/team-ops/page'
@@ -68,6 +74,7 @@ function scanBody() {
 
 beforeEach(() => {
   params = new URLSearchParams('')
+  mockRole = 'admin'
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input)
     if (url.startsWith('/api/operations/rescue')) {
@@ -174,4 +181,37 @@ describe('team-ops deep links', () => {
     expect(scanBody()).not.toHaveProperty('config.staleDays', 3)
     expect(scanBody()).toHaveProperty('config.staleDays', 30)
   })
+
+  it('switching category group writes ?cat= and drops ?from= and ?flash=', async () => {
+    params = new URLSearchParams('tab=reassign&from=PhuongNT1&flash=X')
+    render(<TeamOpsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Arcade' }))
+    expect(replace).toHaveBeenCalledWith('/team-ops?tab=reassign&cat=arcade', { scroll: false })
+  })
 })
+
+// Q5: an evaluator reads Rescue as history only. The scan is admin-only, so the
+// panel must not call it at all, and there is nothing to run.
+describe('team-ops for an evaluator', () => {
+  it('Rescue shows History alone and never calls the scan', async () => {
+    mockRole = 'evaluator'
+    params = new URLSearchParams('tab=rescue')
+    render(<TeamOpsPage />)
+    await waitFor(() => expect(fetched('/api/operations/runs?kind=rescue&category=puzzle&limit=200')).toBe(true))
+    expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u).startsWith('/api/operations/rescue'))).toBe(false)
+    expect(screen.queryByRole('button', { name: /^Scan$/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Rescue' })).toBeInTheDocument()
+  })
+
+  it('Reassign shows History alone, with no form', async () => {
+    mockRole = 'evaluator'
+    params = new URLSearchParams('tab=reassign')
+    render(<TeamOpsPage />)
+    await waitFor(() => expect(fetched('/api/operations/runs?kind=reassign&category=puzzle&limit=200')).toBe(true))
+    expect(screen.queryByRole('button', { name: /^Preview$/ })).not.toBeInTheDocument()
+  })
+})
+
+function fetched(url: string) {
+  return (global.fetch as jest.Mock).mock.calls.some(([input]) => String(input) === url)
+}

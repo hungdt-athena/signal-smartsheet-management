@@ -1,30 +1,38 @@
 // components/HandoverPanel.tsx — DB-native handover (migration 025 / Plan A).
 // A leaving evaluator's still-pending games in a date window are redistributed to
-// everyone currently available in the bucket. Preview (dryRun) before commit.
+// everyone currently available in the bucket. Preview (dryRun) before submit; the
+// submit creates a request another manager approves or rejects in History.
+//
+// Layout: category group, then the form and its preview, then History below.
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
-import { BUCKETS, type Bucket } from '@/lib/buckets'
+import { BUCKET_OPTS } from '@/components/RosterTable'
+import { FilterBar } from '@/components/ui/FilterBar'
+import { Seg } from '@/components/ui/Seg'
+import type { Bucket } from '@/lib/buckets'
+import { toast } from '@/lib/toast'
 import { DistributionResult, type DistResult } from '@/components/DistributionResult'
 import { OperationHistory } from '@/components/OperationHistory'
 import { usePendingHolders } from '@/hooks/usePendingHolders'
 
 interface RosterRow { id: number; name: string; today_available: boolean }
-const BUCKET_LABELS: Record<Bucket, string> = { puzzle: 'Puzzle', arcade: 'Arcade', simulation: 'Simulation' }
 
-export function HandoverPanel() {
+// category: which bucket is on screen; the page keeps it in ?cat=.
+export function HandoverPanel({ category, onCategoryChange }: {
+  category: Bucket
+  onCategoryChange: (b: Bucket) => void
+}) {
   const { data: session } = useSession()
   const isEvaluator = session?.user?.role === 'evaluator'
   const selfName = session?.user?.name || ''
-  const [category, setCategory] = useState<Bucket>('puzzle')
   const [roster, setRoster] = useState<RosterRow[]>([])
   const [from, setFrom] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [busy, setBusy] = useState<'preview' | 'commit' | null>(null)
   const [result, setResult] = useState<DistResult | null>(null)
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [histToken, setHistToken] = useState(0) // bump to reload the history container
 
   // ?group= matters: without it the API hands back every genre, so anyone on two
@@ -50,7 +58,7 @@ export function HandoverPanel() {
   useEffect(() => {
     loadRoster()
     // Evaluators can only hand over their own games — lock the source to themselves.
-    setFrom(isEvaluator ? selfName : ''); setResult(null); setMsg(null)
+    setFrom(isEvaluator ? selfName : ''); setResult(null)
   }, [loadRoster, isEvaluator, selfName])
 
   const canRun = !!from && !!startDate && !!endDate
@@ -58,76 +66,68 @@ export function HandoverPanel() {
 
   async function run(dryRun: boolean) {
     if (!canRun) return
-    setBusy(dryRun ? 'preview' : 'commit'); setMsg(null)
+    setBusy(dryRun ? 'preview' : 'commit')
     try {
       const res = await fetch('/api/operations/handover', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category, evaluator_name: from, start_date: startDate, end_date: endDate, dryRun }),
       })
       const json = await res.json()
-      if (!res.ok) { setMsg({ type: 'err', text: json.error ?? 'Failed' }); return }
+      if (!res.ok) { toast.error(json.error ?? (dryRun ? 'Preview failed.' : 'Could not submit the request.')); return }
       setResult(json as DistResult)
       if (!dryRun) {
-        setMsg({ type: 'ok', text: `Handover request submitted for a manager to approve (${json.assignable ?? 0} games would move from ${from}).` })
+        toast.success(`Request sent for a manager to approve: ${json.assignable ?? 0} games from ${from}.`)
         setHistToken(t => t + 1)
       }
-    } catch { setMsg({ type: 'err', text: 'Network error' }) }
+    } catch { toast.error('Could not reach the server.') }
     finally { setBusy(null) }
   }
 
   return (
-    <div>
-      <div className="seg-wrapper" style={{ display: 'inline-flex', gap: 4, marginBottom: 14 }}>
-        {BUCKETS.map(b => (
-          <button key={b} className={`seg-btn-premium${category === b ? ' active' : ''}`} onClick={() => setCategory(b)}>
-            {BUCKET_LABELS[b]}
-          </button>
-        ))}
-      </div>
-
-      <OperationHistory kind="handover" category={category} reloadToken={histToken} />
+    <>
+      <FilterBar ariaLabel="Category group">
+        <Seg value={category} onChange={onCategoryChange} options={BUCKET_OPTS} ariaLabel="Category group" />
+      </FilterBar>
 
       <div className="card">
-        <div style={{ padding: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-            <div className="field">
-              <span className="label">Evaluator on leave</span>
-              <StyledSelect value={from} onChange={setFrom} disabled={isEvaluator || fromOptions.length === 0}
-                placeholder={isEvaluator ? selfName
-                  : holdersLoading ? 'Loading…'
-                  : fromOptions.length === 0 ? '-- Nobody holds pending games here --'
-                  : '-- Select evaluator --'}
-                options={isEvaluator ? [{ value: selfName, label: selfName }] : fromOptions} />
-            </div>
-            <div className="field">
-              <span className="label">Start date</span>
-              <input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
-            </div>
-            <div className="field">
-              <span className="label">End date</span>
-              <input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
-            </div>
+        <div className="ops-form-grid">
+          <div className="field">
+            <span className="label">Evaluator on leave</span>
+            <StyledSelect value={from} onChange={setFrom} disabled={isEvaluator || fromOptions.length === 0}
+              placeholder={isEvaluator ? selfName
+                : holdersLoading ? 'Loading…'
+                : fromOptions.length === 0 ? 'Nobody holds pending games here'
+                : 'Select evaluator'}
+              options={isEvaluator ? [{ value: selfName, label: selfName }] : fromOptions} />
           </div>
-          <p style={{ fontSize: 12, color: 'var(--faint)', marginTop: 10 }}>
-            {isEvaluator
-              ? 'Your pending games assigned in this window are redistributed to the available evaluators in this bucket. Preview to see the split; submitting creates a request a manager must approve.'
-              : `Their pending games assigned in this window go to the ${available} currently-available evaluator${available === 1 ? '' : 's'} in this bucket. Submitting creates a request another manager must approve — the split is recomputed at approval time.`}
-          </p>
-
-          {msg && <p className={msg.type === 'ok' ? 'msg-ok' : 'msg-err'} style={{ marginTop: 10 }}>{msg.text}</p>}
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <button className="btn" disabled={!canRun || busy !== null} onClick={() => run(true)}>
-              {busy === 'preview' ? 'Previewing…' : 'Preview'}
-            </button>
-            <button className="btn btn-primary" disabled={!canRun || busy !== null} onClick={() => run(false)}>
-              {busy === 'commit' ? 'Submitting…' : 'Submit request'}
-            </button>
+          <div className="field">
+            <span className="label">Start date</span>
+            <input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
           </div>
+          <div className="field">
+            <span className="label">End date</span>
+            <input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
+          </div>
+        </div>
+        <p className="ops-hint" style={{ marginTop: 10 }}>
+          {isEvaluator
+            ? 'Your pending games assigned in these dates go to the available evaluators in this category group. Preview shows the split. Submitting sends a request that a manager must approve.'
+            : `Their pending games assigned in these dates go to the ${available} available evaluator${available === 1 ? '' : 's'} in this category group. Submitting sends a request that another manager must approve. The split is worked out again at approval.`}
+        </p>
+
+        <div className="ops-actions">
+          <button className="btn" disabled={!canRun || busy !== null} onClick={() => run(true)}>
+            {busy === 'preview' ? 'Previewing…' : 'Preview'}
+          </button>
+          <button className="btn btn-primary" disabled={!canRun || busy !== null} onClick={() => run(false)}>
+            {busy === 'commit' ? 'Submitting…' : 'Submit request'}
+          </button>
         </div>
       </div>
 
       {result && <DistributionResult result={result} />}
-    </div>
+
+      <OperationHistory kind="handover" category={category} reloadToken={histToken} />
+    </>
   )
 }

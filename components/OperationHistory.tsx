@@ -1,14 +1,20 @@
 // components/OperationHistory.tsx — per-bucket history of reassign/handover runs
-// (operation_runs, migration 028). Mounted above the form in ReassignPanel and
-// HandoverPanel. One row per operation; "Details" opens the snapshot popup. Handover
-// rows carry a status pill; pending ones show Approve/Reject to any manager who is
-// NOT the submitter.
+// (operation_runs, migration 028). Mounted below the form in ReassignPanel,
+// RescuePanel and HandoverPanel (the action first, its record after), and alone for
+// an evaluator. One row per operation; "Details" opens the snapshot popup. Handover
+// rows carry a status badge; pending ones show Approve/Reject to any manager who is
+// NOT the submitter, and each asks once, with the game count, before it runs.
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import type { Bucket } from '@/lib/buckets'
 import type { DistResult } from '@/components/DistributionResult'
-import { OperationDetailModal } from '@/components/OperationDetailModal'
+import { OperationDetailModal, STATUS_BADGE } from '@/components/OperationDetailModal'
+import { Modal } from '@/components/ui/Modal'
+import { RefreshButton } from '@/components/ui/PageHeader'
+import { EmptyState, ErrorState, SkeletonRows } from '@/components/ui/States'
+import { fmtDateVN } from '@/lib/format-date'
+import { toast } from '@/lib/toast'
 
 export interface OperationRun {
   id: number
@@ -30,15 +36,6 @@ export interface OperationRun {
   review_note: string | null
 }
 
-const STATUS_PILL: Record<string, string> = {
-  committed: 'on', approved: 'on', pending: 'tag', rejected: 'off',
-}
-
-function fmtDate(d?: string | null): string {
-  if (!d) return '—'
-  const [y, m, day] = d.slice(0, 10).split('-')
-  return `${day}/${m}/${y.slice(2)}`
-}
 
 function targetCount(run: OperationRun): number {
   const dist = run.result ?? run.snapshot
@@ -66,7 +63,7 @@ const MODE_LABEL: Record<ReturnType<typeof runMode>, string> = {
 
 function modeValue(r: OperationRun): string {
   const mode = runMode(r)
-  const window = `${fmtDate(r.params?.start_date)} → ${fmtDate(r.params?.end_date)}`
+  const window = `${fmtDateVN(r.params?.start_date)} → ${fmtDateVN(r.params?.end_date)}`
   const qty = r.params?.count != null ? String(r.params.count) : '—'
   // Rescue: the rule that selected the games, plus the backlog the source held then.
   if (mode === 'stale') {
@@ -95,6 +92,9 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<OperationRun | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  // Approve and Reject both move (or settle) a whole batch of games, so each asks
+  // once in a modal that states the count.
+  const [confirm, setConfirm] = useState<{ run: OperationRun; action: 'approve' | 'reject' } | null>(null)
   // Client-side infinite scroll: the API returns the whole window (≤200 rows);
   // only `visible` of them render, and scrolling the wrap reveals PAGE more.
   const [visible, setVisible] = useState(PAGE)
@@ -109,7 +109,7 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
       const json = await res.json()
       setRows(json.rows ?? [])
       setViewer(json.viewer ?? null)
-    } catch { setError('Failed to load history.') }
+    } catch { setError('Could not load the history.') }
     finally { setLoading(false) }
   }, [kind, category])
 
@@ -128,18 +128,23 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
     return () => io.disconnect()
   }, [hasMore, rows.length])
 
-  async function resolve(id: number, action: 'approve' | 'reject') {
-    setBusyId(id); setError(null)
+  async function resolve(run: OperationRun, action: 'approve' | 'reject') {
+    const id = run.id
+    setBusyId(id)
     try {
       const res = await fetch('/api/operations/handover/resolve', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, action }),
       })
       const json = await res.json()
-      if (!res.ok) { setError(json.error ?? `Failed to ${action}.`); return }
+      if (!res.ok) { toast.error(json.error ?? `Could not ${action} the handover.`); return }
+      toast.success(action === 'approve'
+        ? `Approved the handover from ${run.from_evaluator}.`
+        : `Rejected the handover from ${run.from_evaluator}.`)
+      setConfirm(null)
       await refresh()
       onChanged?.()
-    } catch { setError('Network error.') }
+    } catch { toast.error('Could not reach the server.') }
     finally { setBusyId(null) }
   }
 
@@ -148,36 +153,33 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
   const shown = rows.slice(0, visible)
 
   return (
-    <div className="card" style={{ marginBottom: 18 }}>
-      <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span className="card-label">
-          History
-          {rows.length > 0 && <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>{rows.length}</span>}
-        </span>
-        <button className="btn btn-sm" onClick={refresh} disabled={loading}>
-          <span className={loading ? 'spin' : ''}>↻</span>{loading ? '...' : 'Refresh'}
-        </button>
+    <div className="card">
+      <div className="card-head ophist-head">
+        <span className="card-label">History</span>
+        <RefreshButton onClick={refresh} loading={loading} />
       </div>
 
-      {error && <p className="msg-err" style={{ margin: '8px 0' }}>{error}</p>}
-
+      {error ? <ErrorState onRetry={refresh}>{error}</ErrorState> : (
       <div className="tbl-wrap ophist-scroll" ref={scrollRef}>
-        <table className="tbl">
+        <table className="tbl tbl-sticky">
           <thead>
             <tr>
               <th style={{ width: 90 }}>Date</th>
               <th>From</th>
               <th style={{ width: 90 }}>Mode</th>
               <th style={{ width: 160 }}>Value</th>
-              {!isHandover && <th style={{ width: 70 }}>Targets</th>}
-              <th style={{ width: 70 }}>Games</th>
-              {isHandover && <th style={{ width: 170 }}>Status</th>}
-              <th style={{ width: 90 }}></th>
+              {!isHandover && <th className="tnum" style={{ width: 70 }}>Targets</th>}
+              <th className="tnum" style={{ width: 70 }}>Games</th>
+              {isHandover && <th style={{ width: 200 }}>Status</th>}
+              <th style={{ width: 90 }} />
             </tr>
           </thead>
           <tbody>
+            {loading && rows.length === 0 && (
+              <SkeletonRows widths={isHandover ? [60, 90, 50, 110, 30, 70, 50] : [60, 90, 50, 110, 30, 30, 50]} />
+            )}
             {rows.length === 0 && !loading && (
-              <tr><td colSpan={cols} className="empty">No history yet</td></tr>
+              <tr><td colSpan={cols}><EmptyState>No {kind} runs in this category group yet.</EmptyState></td></tr>
             )}
             {shown.map(r => {
               // Only managers resolve; evaluators never see Approve/Reject.
@@ -185,24 +187,24 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
               const isOwn = isHandover && r.status === 'pending' && !!r.submitted_by && r.submitted_by === viewer
               return (
                 <tr key={r.id}>
-                  <td>{fmtDate(r.submitted_at)}</td>
+                  <td>{fmtDateVN(r.submitted_at)}</td>
                   <td className="cell-name">{r.from_evaluator}</td>
-                  <td><span className="pill muted" style={{ fontSize: 10 }}>{MODE_LABEL[runMode(r)]}</span></td>
+                  <td><span className="badge neutral">{MODE_LABEL[runMode(r)]}</span></td>
                   <td style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{modeValue(r)}</td>
-                  {!isHandover && <td style={{ fontWeight: 600 }}>{targetCount(r)}</td>}
-                  <td style={{ fontWeight: 600 }}>{r.game_count}</td>
+                  {!isHandover && <td className="tnum" style={{ fontWeight: 600 }}>{targetCount(r)}</td>}
+                  <td className="tnum" style={{ fontWeight: 600 }}>{r.game_count}</td>
                   {isHandover && (
                     <td>
-                      <span className={`pill ${STATUS_PILL[r.status] ?? 'tag'}`} style={{ fontSize: 10 }}>{r.status}</span>
+                      <span className={`badge ${STATUS_BADGE[r.status] ?? 'neutral'}`}>{r.status}</span>
                       {canResolve && (
-                        <span style={{ marginLeft: 6, display: 'inline-flex', gap: 4 }}>
-                          <button className="btn btn-primary btn-sm" disabled={busyId === r.id} onClick={() => resolve(r.id, 'approve')}>
-                            {busyId === r.id ? '…' : 'Approve'}
-                          </button>
-                          <button className="btn btn-sm" disabled={busyId === r.id} onClick={() => resolve(r.id, 'reject')}>Reject</button>
+                        <span className="ophist-acts">
+                          <button className="btn btn-sm btn-danger" disabled={busyId === r.id}
+                            onClick={() => setConfirm({ run: r, action: 'reject' })}>Reject</button>
+                          <button className="btn btn-sm btn-primary" disabled={busyId === r.id}
+                            onClick={() => setConfirm({ run: r, action: 'approve' })}>Approve</button>
                         </span>
                       )}
-                      {isOwn && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--faint)', fontStyle: 'italic' }}>your request</span>}
+                      {isOwn && <span className="ophist-own">your request</span>}
                     </td>
                   )}
                   <td style={{ textAlign: 'right' }}>
@@ -219,8 +221,34 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
           </tbody>
         </table>
       </div>
+      )}
 
       {detail && <OperationDetailModal run={detail} onClose={() => setDetail(null)} />}
+
+      {confirm && (() => {
+        const { run, action } = confirm
+        const busy = busyId === run.id
+        const games = `${run.game_count} ${run.game_count === 1 ? 'game' : 'games'}`
+        return (
+          <Modal title={action === 'approve' ? `Approve handover from ${run.from_evaluator}?` : `Reject handover from ${run.from_evaluator}?`}
+            width={440} busy={busy} onClose={() => setConfirm(null)}
+            footer={<>
+              <button type="button" className="btn" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>
+              <button type="button" className={`btn ${action === 'approve' ? 'btn-primary' : 'btn-danger'}`} disabled={busy}
+                onClick={() => resolve(run, action)}>
+                {action === 'approve'
+                  ? (busy ? 'Approving…' : `Approve, move ${games}`)
+                  : (busy ? 'Rejecting…' : `Reject ${games}`)}
+              </button>
+            </>}>
+            <p className="ophist-confirm">
+              {action === 'approve'
+                ? `${games} from ${run.from_evaluator} go to the available evaluators in ${run.category_group}. The split is worked out again now, so it can differ from the preview.`
+                : `${games} stay with ${run.from_evaluator}. Nothing moves.`}
+            </p>
+          </Modal>
+        )
+      })()}
     </div>
   )
 }

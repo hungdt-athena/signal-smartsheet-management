@@ -52,6 +52,16 @@ describe('ExistingTrendTags — a manager editing Signal Sense', () => {
     )).toBeInTheDocument()
   })
 
+  it('puts Cancel first and the red Remove last in the confirm', () => {
+    setup(true)
+    fireEvent.click(screen.getByRole('button', { name: /Remove Backpack/i }))
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
+    const remove = screen.getByRole('button', { name: /^Remove$/ })
+    expect(cancel.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(remove.className).toContain('btn-danger')
+    expect(remove.className).not.toContain('btn-primary')
+  })
+
   it('removes the tag once confirmed and reports it to the caller', async () => {
     const onChanged = setup(true)
     fireEvent.click(screen.getByRole('button', { name: /Remove Backpack/i }))

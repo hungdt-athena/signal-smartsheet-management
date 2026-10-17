@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { resolveYtMatches, type YtMatch } from '@/lib/ytb-match'
-import { prettyConclusion } from '@/lib/buckets'
+import { prettyConclusion, BUCKETS } from '@/lib/buckets'
 import { useConfig } from '@/hooks/useConfig'
 import { LockIcon, UserIcon } from '@/components/icons'
 import EvalDetailPanel from '@/components/EvalDetailPanel'
@@ -12,7 +12,16 @@ import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
 import { isManagerRole } from '@/lib/roles'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
-import { useEscapeToClose } from '@/lib/use-escape-to-close'
+import { useUrlState, useSetUrlParams } from '@/lib/use-url-state'
+import { toast } from '@/lib/toast'
+import { conclusionBadgeClass, finalConclusionStyle, RECORD_STATUS_BADGE, type RecordStatus } from '@/lib/conclusion-badge'
+import { Seg } from '@/components/ui/Seg'
+import { FilterBar, FilterSpacer, ClearFilters, FilterCount } from '@/components/ui/FilterBar'
+import { SearchInput, IconX } from '@/components/ui/SearchInput'
+import { Modal } from '@/components/ui/Modal'
+import { PageHeader, RefreshButton } from '@/components/ui/PageHeader'
+import { Switch } from '@/components/ui/Switch'
+import { EmptyState, ErrorState, SkeletonRows } from '@/components/ui/States'
 
 interface YtbRow {
   row_index: number
@@ -30,7 +39,7 @@ interface YtbRow {
 
 const STATUS_STYLES: Record<string, { cls: string; label: string }> = {
   DONE:       { cls: 'success', label: 'Uploaded' },
-  FAILED:     { cls: 'error',   label: 'Failed to Upload' },
+  FAILED:     { cls: 'error',   label: 'Failed to upload' },
   PROCESSING: { cls: 'running', label: 'Processing' },
   IN_BATCH:   { cls: 'running', label: 'Waiting for processing' },
   PENDING:    { cls: 'idle',    label: 'Pending' },
@@ -60,17 +69,12 @@ interface Filters {
   duration: string
 }
 
-function getCurrentMonthFilters(): Filters {
+// The page opens on the current month (VN time). The URL keeps `year` and `month`
+// (1-12) only when they differ from that; 'all' means "any year / any month".
+function currentYearMonth(): { year: string; month: string } {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }))
-  return {
-    year: String(now.getFullYear()),
-    month: String(now.getMonth()),
-    evaluator: '',
-    duration: '',
-  }
+  return { year: String(now.getFullYear()), month: String(now.getMonth() + 1) }
 }
-
-const EMPTY_FILTERS: Filters = { year: '', month: '', evaluator: '', duration: '' }
 
 function normalizeEvaluator(name: string): string {
   const match = name.match(/^(.*?)(\d+)$/)
@@ -174,221 +178,28 @@ function formatDayLabel(dayStr: string) {
   return `${d} ${monthName} ${y}`
 }
 
-// ── Custom Dropdown ───────────────────────────────────────────────────────────
+// ── Time filter (year, then month of that year) ──────────────────────────────
 
-function CustomDropdown({ label, value, options, onChange }: {
-  label: string
-  value: string
-  options: { value: string; label: string }[]
-  onChange: (v: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
-
-  const allOptions = [{ value: '', label: `All ${label}` }, ...options]
-  const selectedLabel = allOptions.find(o => o.value === value)?.label ?? `All ${label}`
-  const isActive = value !== ''
-
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          border: `1.5px solid ${isActive ? 'var(--accent-border)' : 'var(--border-strong)'}`,
-          borderRadius: 8, padding: '5px 10px',
-          fontSize: 12, fontWeight: 600,
-          color: isActive ? 'var(--accent-strong)' : 'var(--text)',
-          background: isActive ? 'var(--accent-weak)' : 'var(--surface)',
-          cursor: 'pointer', whiteSpace: 'nowrap',
-          transition: 'all 0.15s ease',
-          fontFamily: 'var(--font)',
-        }}
-      >
-        {selectedLabel}
-        <span style={{ fontSize: 9, color: 'var(--faint)', marginLeft: 2, transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50,
-          background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 10,
-          padding: '4px', minWidth: 160, maxHeight: 260, overflowY: 'auto',
-          boxShadow: 'var(--shadow-md)',
-        }}>
-          {allOptions.map(opt => {
-            const selected = opt.value === value
-            return (
-              <button
-                key={opt.value}
-                onClick={() => { onChange(opt.value); setOpen(false) }}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '7px 9px', border: 'none', borderRadius: 6,
-                  background: selected ? 'var(--accent-weak)' : 'transparent',
-                  color: selected ? 'var(--accent-strong)' : 'var(--text)',
-                  fontSize: 13, fontWeight: selected ? 700 : 500,
-                  cursor: 'pointer', textAlign: 'left',
-                  fontFamily: 'var(--font)',
-                  transition: 'background 0.1s',
-                }}
-                onMouseEnter={e => { if (!selected) e.currentTarget.style.background = 'var(--surface-2)' }}
-                onMouseLeave={e => { if (!selected) e.currentTarget.style.background = 'transparent' }}
-              >
-                <span style={{ width: 16, flexShrink: 0, fontSize: 11, color: 'var(--accent)' }}>
-                  {selected ? '✓' : ''}
-                </span>
-                {opt.label}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Nested Time Filter ────────────────────────────────────────────────────────
-
-function TimeFilter({ filters, options, onChange }: {
-  filters: Filters
+// Two Segs instead of the old year chips with a ▶ expander: the months row shows
+// only once a year is picked, so the bar stays one 32px line most of the time.
+function TimeFilter({ year, month, options, onYear, onMonth }: {
+  year: string    // '' = any year
+  month: string   // 0-11, '' = any month
   options: ReturnType<typeof getFilterOptions>
-  onChange: (f: Filters) => void
+  onYear: (y: string) => void
+  onMonth: (m: string) => void
 }) {
-  const [expandedYear, setExpandedYear] = useState<string | null>(filters.year || null)
-
-  useEffect(() => {
-    if (filters.year && expandedYear !== filters.year) setExpandedYear(filters.year)
-  }, [filters.year, expandedYear])
-
-  function selectYear(y: string) {
-    if (filters.year === y) { onChange({ ...filters, year: '', month: '' }); setExpandedYear(null) }
-    else { onChange({ ...filters, year: y, month: '' }); setExpandedYear(y) }
-  }
-
-  function selectMonth(m: number) {
-    if (filters.month === String(m)) onChange({ ...filters, month: '' })
-    else onChange({ ...filters, month: String(m) })
-  }
-
-  function toggleExpand(y: string) {
-    setExpandedYear(expandedYear === y ? null : y)
-  }
-
+  const years = options.years.includes(year) || !year ? options.years : [year, ...options.years]
+  const months = year ? Array.from(new Set([...(options.monthsByYear[year] ?? []), ...(month ? [Number(month)] : [])])).sort((a, b) => a - b) : []
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, flexWrap: 'wrap' }}>
-      {options.years.map(year => {
-        const isSelected = filters.year === year
-        const isExpanded = expandedYear === year
-        const months = options.monthsByYear[year] ?? []
-
-        return (
-          <div key={year} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-              <button
-                onClick={() => toggleExpand(year)}
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 20, height: 28, border: 'none', background: 'transparent',
-                  cursor: 'pointer', color: 'var(--faint)', fontSize: 9,
-                  transition: 'transform 0.15s',
-                  transform: isExpanded ? 'rotate(90deg)' : 'none',
-                }}
-              >▶</button>
-              <button
-                onClick={() => selectYear(year)}
-                style={{
-                  border: `1.5px solid ${isSelected ? 'var(--accent)' : 'var(--border-strong)'}`,
-                  borderRadius: 8, padding: '4px 12px',
-                  fontSize: 12, fontWeight: 700,
-                  color: isSelected ? 'var(--accent-contrast)' : 'var(--text)',
-                  background: isSelected ? 'var(--accent)' : 'var(--surface-2)',
-                  cursor: 'pointer', transition: 'all 0.15s ease',
-                  fontFamily: 'var(--font)',
-                }}
-              >{year}</button>
-            </div>
-
-            {isExpanded && months.length > 0 && (
-              <div style={{
-                display: 'flex', gap: 4, flexWrap: 'wrap',
-                marginLeft: 22, paddingLeft: 8,
-                borderLeft: '2px solid var(--border)',
-              }}>
-                {months.map(m => {
-                  const mSelected = isSelected && filters.month === String(m)
-                  return (
-                    <button
-                      key={m}
-                      onClick={() => {
-                        if (!isSelected) onChange({ ...filters, year, month: String(m) })
-                        else selectMonth(m)
-                      }}
-                      style={{
-                        border: `1.5px solid ${mSelected ? 'var(--accent)' : 'transparent'}`,
-                        borderRadius: 6, padding: '3px 10px',
-                        fontSize: 11, fontWeight: 600,
-                        color: mSelected ? 'var(--accent-contrast)' : 'var(--muted)',
-                        background: mSelected ? 'var(--accent)' : 'var(--surface-3)',
-                        cursor: 'pointer', transition: 'all 0.15s ease',
-                        fontFamily: 'var(--font)',
-                      }}
-                    >{MONTH_SHORT[m]}</button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ── Filter bar ────────────────────────────────────────────────────────────────
-
-function FilterBar({ filters, options, onChange, onClear }: {
-  filters: Filters
-  options: ReturnType<typeof getFilterOptions>
-  onChange: (f: Filters) => void
-  onClear: () => void
-}) {
-  const hasAny = filters.year || filters.month || filters.evaluator || filters.duration
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <CustomDropdown
-          label="Evaluators"
-          value={filters.evaluator}
-          options={options.evaluators.map(e => ({ value: e, label: e }))}
-          onChange={v => onChange({ ...filters, evaluator: v })}
-        />
-        <CustomDropdown
-          label="Durations"
-          value={filters.duration}
-          options={options.durations.map(d => ({ value: d, label: d }))}
-          onChange={v => onChange({ ...filters, duration: v })}
-        />
-        {hasAny && (
-          <button className="btn btn-sm" onClick={onClear}
-            style={{ color: 'var(--bad)', borderColor: 'var(--bad-weak)' }}>
-            ✕ Clear all
-          </button>
-        )}
-      </div>
-
-      {options.years.length > 0 && (
-        <TimeFilter filters={filters} options={options} onChange={onChange} />
+    <>
+      <Seg ariaLabel="Year" value={year || 'all'} onChange={v => onYear(v === 'all' ? '' : v)}
+        options={[{ value: 'all', label: 'All time' }, ...years.map(y => ({ value: y, label: y }))]} />
+      {year && months.length > 0 && (
+        <Seg ariaLabel="Month" value={month || 'all'} onChange={v => onMonth(v === 'all' ? '' : v)}
+          options={[{ value: 'all', label: 'All months' }, ...months.map(m => ({ value: String(m), label: MONTH_SHORT[m] }))]} />
       )}
-    </div>
+    </>
   )
 }
 
@@ -420,45 +231,25 @@ function BlockingToggle() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blocking: newVal }),
       })
-      if (res.ok) setBlocking(newVal)
-    } catch { /* silent */ }
+      if (!res.ok) throw new Error()
+      setBlocking(newVal)
+      toast.success(newVal === 'yes' ? 'Auto-upload to YouTube is off' : 'Auto-upload to YouTube is on')
+    } catch {
+      toast.error('Could not change auto-upload.', { label: 'Try again', run: () => { void toggle() } })
+    }
     setSaving(false)
   }
 
   if (blocking === null) {
-    return <span style={{ fontSize: 12, color: 'var(--faint)' }}>Loading...</span>
+    return <span className="sync">Loading…</span>
   }
 
+  // The sheet stores "blocking"; the switch shows the opposite, "auto-upload on".
   const isBlocked = blocking === 'yes'
-
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ fontSize: 12, color: 'var(--muted)' }}>Auto-upload to YouTube</span>
-      <span style={{ fontSize: 12, fontWeight: 600, color: isBlocked ? 'var(--bad)' : 'var(--good)' }}>
-        {isBlocked ? 'Blocked' : 'Active'}
-      </span>
-      <button
-        onClick={toggle}
-        disabled={saving}
-        title={isBlocked ? 'Blocked — click to activate' : 'Active — click to block'}
-        style={{
-          position: 'relative',
-          width: 44, height: 24, borderRadius: 12, border: 'none',
-          background: isBlocked ? 'var(--bad)' : 'var(--good)',
-          cursor: saving ? 'not-allowed' : 'pointer',
-          opacity: saving ? 0.6 : 1,
-          transition: 'background 0.2s ease',
-          flexShrink: 0,
-        }}
-      >
-        <span style={{
-          position: 'absolute', top: 3, left: isBlocked ? 3 : 23,
-          width: 18, height: 18, borderRadius: '50%', background: '#fff',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-          transition: 'left 0.2s ease',
-        }} />
-      </button>
-    </div>
+    <Switch checked={!isBlocked} onChange={() => { void toggle() }} disabled={saving}
+      label="Auto-upload to YouTube"
+      title={isBlocked ? 'Off: new Drive videos are not uploaded' : 'On: new Drive videos are uploaded'} />
   )
 }
 
@@ -473,8 +264,8 @@ function ColGroup() {
       <col style={{ width: '7%' }} />
       <col style={{ width: '14%' }} />
       <col style={{ width: '19%' }} />
-      <col style={{ width: '17%' }} />
-      <col style={{ width: '6%' }} />
+      <col style={{ width: '15%' }} />
+      <col style={{ width: '8%' }} />
     </colgroup>
   )
 }
@@ -487,9 +278,32 @@ function YouTubeTab() {
   const [error, setError]     = useState<string | null>(null)
   const [edits, setEdits]     = useState<Record<number, Partial<YtbRow>>>({})
   const [saving, setSaving]   = useState<Set<number>>(new Set())
-  const [filters, setFilters] = useState<Filters>(getCurrentMonthFilters)
   const [openDays, setOpenDays] = useState<Set<string>>(new Set())
   const initialOpenDone = useRef(false)
+
+  // Filters live in the URL (reload and shared links keep them).
+  const cur = useMemo(currentYearMonth, [])
+  const [yearParam]  = useUrlState('year', cur.year)
+  const [monthParam] = useUrlState('month', cur.month)
+  const [evaluator, setEvaluator] = useUrlState('ev', '')
+  const [duration, setDuration]   = useUrlState('dur', '')
+  const setParams = useSetUrlParams()
+  const filters: Filters = useMemo(() => {
+    const year = yearParam === 'all' ? '' : yearParam
+    const m = Number(monthParam)
+    const month = !year || monthParam === 'all' || !(m >= 1 && m <= 12) ? '' : String(m - 1)
+    return { year, month, evaluator, duration }
+  }, [yearParam, monthParam, evaluator, duration])
+  const filtersOn = yearParam !== cur.year || monthParam !== cur.month || !!evaluator || !!duration
+  const clearFilters = () => setParams({ year: null, month: null, ev: null, dur: null })
+  // Picking a year shows all its months (as before); the month is chosen after.
+  const pickYear = (y: string) => setParams(y
+    ? { year: y === cur.year ? null : y, month: 'all' }
+    : { year: 'all', month: null })
+  const pickMonth = (m: string) => {
+    const v = m === '' ? 'all' : String(Number(m) + 1)
+    setParams({ month: v === cur.month ? null : v })
+  }
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -547,8 +361,9 @@ function YouTubeTab() {
       if (!res.ok) throw new Error()
       setRows(prev => prev.map(r => r.row_index === rowIndex ? { ...r, ...updates } : r))
       setEdits(prev => { const n = { ...prev }; delete n[rowIndex]; return n })
+      toast.success('YouTube ID saved')
     } catch {
-      setError('Failed to save.')
+      toast.error('Could not save the YouTube ID.', { label: 'Try again', run: () => { void saveEdits(rowIndex) } })
     } finally {
       setSaving(s => { const n = new Set(s); n.delete(rowIndex); return n })
     }
@@ -558,45 +373,31 @@ function YouTubeTab() {
     setEdits(prev => { const n = { ...prev }; delete n[rowIndex]; return n })
   }
 
+  const evaluatorOpts = [{ value: '', label: 'All evaluators' }, ...filterOptions.evaluators.map(e => ({ value: e, label: e }))]
+  const durationOpts  = [{ value: '', label: 'All durations' }, ...filterOptions.durations.map(d => ({ value: d, label: d }))]
+
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1 className="h-title">Videos</h1>
-        <div className="head-actions">
-          <BlockingToggle />
-        </div>
-      </div>
+    <div className="page yt-page">
+      <PageHeader title="YouTube" sub="Drive videos and their YouTube upload."
+        actions={<><BlockingToggle /><RefreshButton onClick={refresh} loading={loading} /></>} />
 
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
-        {/* Header */}
-        <div className="card-head" style={{ flexShrink: 0 }}>
-          <span className="card-label">Drive Videos</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="card-note">{filteredRows.length}/{rows.length} videos</span>
-            <button className="btn btn-sm" onClick={refresh} disabled={loading}>
-              <span className={loading ? 'spin' : ''}>↻</span>
-              {loading ? 'Loading...' : 'Refresh'}
-            </button>
-          </div>
-        </div>
+      {rows.length > 0 && (
+        <FilterBar>
+          {filterOptions.years.length > 0 && (
+            <TimeFilter year={filters.year} month={filters.month} options={filterOptions}
+              onYear={pickYear} onMonth={pickMonth} />
+          )}
+          <StyledSelect filter ariaLabel="Evaluator" value={evaluator} onChange={setEvaluator}
+            options={evaluatorOpts} placeholder="All evaluators" style={{ width: 170 }} />
+          <StyledSelect filter ariaLabel="Duration" value={duration} onChange={setDuration}
+            options={durationOpts} placeholder="All durations" style={{ width: 150 }} />
+          <FilterSpacer />
+          <ClearFilters visible={filtersOn} onClear={clearFilters} />
+          <FilterCount shown={filteredRows.length} total={rows.length} noun="videos" />
+        </FilterBar>
+      )}
 
-        {/* Filter bar */}
-        {rows.length > 0 && (
-          <div style={{
-            background: 'var(--surface-2)', borderRadius: 10, padding: '10px 14px',
-            marginBottom: 12, border: '1px solid var(--border)', flexShrink: 0,
-          }}>
-            <FilterBar
-              filters={filters}
-              options={filterOptions}
-              onChange={setFilters}
-              onClear={() => setFilters(EMPTY_FILTERS)}
-            />
-          </div>
-        )}
-
-        {error && <p className="msg-err" style={{ marginBottom: 6, flexShrink: 0 }}>{error}</p>}
-
+      <div className="card yt-card">
         {/* Table header */}
         <div style={{ flexShrink: 0 }}>
           <table className="tbl" style={{ tableLayout: 'fixed' }}>
@@ -604,12 +405,12 @@ function YouTubeTab() {
             <thead>
               <tr>
                 <th>Time</th>
-                <th>Game Title</th>
+                <th>Game title</th>
                 <th>Evaluator</th>
                 <th>Duration</th>
                 <th>Status</th>
-                <th>File Name</th>
-                <th>YouTube Link</th>
+                <th>File name</th>
+                <th>YouTube link</th>
                 <th></th>
               </tr>
             </thead>
@@ -618,18 +419,23 @@ function YouTubeTab() {
 
         {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-          {filteredRows.length === 0 && !loading && (
-            <p className="empty">
-              {rows.length === 0 ? 'No data — click Refresh to load' : 'No rows match the selected filters'}
-            </p>
+          {error && (
+            <ErrorState onRetry={refresh}>Could not load the videos. {error}</ErrorState>
           )}
-          {loading && (
+          {!error && filteredRows.length === 0 && !loading && (
+            rows.length === 0
+              ? <EmptyState>No videos yet.</EmptyState>
+              : <EmptyState action={filtersOn ? { label: 'Clear filters', onClick: clearFilters } : undefined}>
+                  No videos match these filters.
+                </EmptyState>
+          )}
+          {loading && rows.length === 0 && (
             <table className="tbl" style={{ tableLayout: 'fixed' }}>
               <ColGroup />
-              <tbody><SkeletonRows cols={8} rows={4} /></tbody>
+              <tbody><SkeletonRows widths={[40, 160, 80, 50, 90, 140, 110, 40]} rows={4} /></tbody>
             </table>
           )}
-          {!loading && dayGroups.map((group, gi) => {
+          {dayGroups.map((group, gi) => {
             const isOpen  = openDays.has(group.day)
             const isToday = group.label === 'Today'
             return (
@@ -637,26 +443,12 @@ function YouTubeTab() {
                 {gi > 0 && <div style={{ height: 4, background: 'var(--border)' }} />}
 
                 {/* Day header */}
-                <button
-                  onClick={() => toggleDay(group.day)}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                    background: isToday ? 'var(--accent-weak)' : 'var(--surface-2)',
-                    padding: '7px 12px', border: 'none',
-                    borderBottom: `1px solid ${isToday ? 'var(--accent-border)' : 'var(--border)'}`,
-                    cursor: 'pointer', textAlign: 'left',
-                  }}
-                >
-                  <span style={{ fontSize: 9, color: isToday ? 'var(--accent)' : 'var(--faint)' }}>
-                    {isOpen ? '▾' : '▸'}
-                  </span>
-                  <span style={{ fontWeight: 700, color: isToday ? 'var(--accent-strong)' : 'var(--text)', fontSize: 12 }}>
-                    {group.label}
-                  </span>
-                  {isToday && (
-                    <span className="badge running" style={{ fontSize: 9, padding: '1px 6px' }}>live</span>
-                  )}
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--faint)', fontWeight: 600 }}>
+                <button type="button" className={`yt-day${isToday ? ' is-today' : ''}`}
+                  aria-expanded={isOpen} onClick={() => toggleDay(group.day)}>
+                  <span className="yt-day-caret" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+                  <span className="yt-day-label">{group.label}</span>
+                  {isToday && <span className="badge running">live</span>}
+                  <span className="yt-day-count">
                     {group.rows.length} video{group.rows.length !== 1 ? 's' : ''}
                   </span>
                 </button>
@@ -689,15 +481,16 @@ function YouTubeTab() {
                                   value={youtubeId}
                                   onChange={e => setEdit(row.row_index, 'youtubeId', e.target.value)}
                                   placeholder="YouTube ID"
+                                  aria-label="YouTube ID"
                                   autoFocus
                                   className="input"
-                                  style={{ padding: '3px 7px', fontSize: 12, fontFamily: 'var(--num)', width: 160 }}
+                                  style={{ padding: '3px 7px', fontSize: 12, fontFamily: 'var(--num)', width: '100%', maxWidth: 160 }}
                                 />
                               ) : (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                   {ytUrl ? (
                                     <a href={ytUrl} target="_blank" rel="noreferrer"
-                                      style={{ color: 'var(--accent)', fontWeight: 600, fontSize: 12, textDecoration: 'underline', whiteSpace: 'nowrap' }}>
+                                      style={{ color: 'var(--accent)', fontWeight: 600, fontSize: 12, textDecoration: 'underline', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                       youtu.be/{youtubeId}
                                     </a>
                                   ) : (
@@ -705,29 +498,21 @@ function YouTubeTab() {
                                       not synced yet
                                     </span>
                                   )}
-                                  <button
+                                  <button type="button" className="btn btn-sm btn-ghost"
                                     onClick={() => setEdit(row.row_index, 'youtubeId', youtubeId)}
-                                    title="Edit YouTube ID"
-                                    style={{
-                                      background: 'none', border: 'none', cursor: 'pointer',
-                                      color: 'var(--faint)', fontSize: 13, lineHeight: 1,
-                                      padding: '1px 3px', borderRadius: 4, flexShrink: 0,
-                                    }}
-                                    onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
-                                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--faint)')}
-                                  >✎</button>
+                                    title="Edit YouTube ID" aria-label="Edit YouTube ID">✎</button>
                                 </div>
                               )}
                             </td>
-                            <td style={{ width: 90 }}>
+                            <td>
                               {isDirty && (
                                 <div style={{ display: 'flex', gap: 4 }}>
-                                  <button className="btn btn-sm btn-primary"
+                                  <button type="button" className="btn btn-sm btn-ghost" aria-label="Cancel edit" title="Cancel"
+                                    onClick={() => cancelEdits(row.row_index)} disabled={isSaving}><IconX size={12} /></button>
+                                  <button type="button" className="btn btn-sm btn-primary"
                                     onClick={() => saveEdits(row.row_index)} disabled={isSaving}>
-                                    {isSaving ? '...' : 'Save'}
+                                    {isSaving ? 'Saving…' : 'Save'}
                                   </button>
-                                  <button className="btn btn-sm"
-                                    onClick={() => cancelEdits(row.row_index)} disabled={isSaving}>✕</button>
                                 </div>
                               )}
                             </td>
@@ -820,117 +605,82 @@ function ExtractChatModal({ games, onClose }: {
       await navigator.clipboard.writeText(message)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch { /* ignore */ }
+    } catch {
+      toast.error('Could not copy. Select the text and copy it by hand.')
+    }
   }
 
-  useEscapeToClose(onClose)
-
   return (
-    <div className="eval-modal-backdrop" onClick={onClose}>
-      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{ padding: '24px 28px 24px', maxWidth: 980, width: '92vw' }}>
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <div>
-            <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Extract Chat Text</h2>
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
-              {selected.size}/{games.length} game{games.length !== 1 ? 's' : ''} selected
-            </p>
+    <Modal title="Extract chat text" onClose={onClose} width={980}
+      sub={`${selected.size} of ${games.length} game${games.length !== 1 ? 's' : ''} selected`}
+      footer={<>
+        <button type="button" className="btn btn-sm" onClick={onClose}>Close</button>
+        <button type="button" className="btn btn-sm btn-primary" onClick={copy} disabled={!message}>
+          {copied ? 'Copied' : 'Copy message'}
+        </button>
+      </>}>
+      {/* Two columns: selection list + preview */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+        {/* Selection list */}
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span className="card-label">Games</span>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={toggleAll}>
+              {allSelected ? 'Deselect all' : 'Select all'}
+            </button>
           </div>
-          <button className="btn btn-sm btn-ghost" onClick={onClose} style={{ fontSize: 18, padding: '2px 8px' }}>x</button>
-        </div>
-
-        {/* Two columns: selection list + preview */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
-          {/* Selection list */}
-          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <span className="card-label">Games</span>
-              <button className="btn btn-sm btn-ghost" onClick={toggleAll} style={{ fontSize: 11 }}>
-                {allSelected ? 'Deselect all' : 'Select all'}
-              </button>
-            </div>
-            <div style={{ maxHeight: 'calc(80vh - 220px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-              {games.length === 0 ? (
-                <p className="empty">No assigned games</p>
-              ) : games.map(g => {
-                const checked = selected.has(g.id)
-                return (
-                  <label key={g.id}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                      borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                      background: checked ? 'var(--accent-weak)' : 'transparent',
-                    }}>
-                    <input type="checkbox" checked={checked} onChange={() => toggle(g.id)} />
-                    {g.icon_url ? (
-                      <img src={g.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
-                    ) : (
-                      <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
-                    )}
-                    <span className="cell-name" style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
-                    <span style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                      {recorderOf(g) && (effectiveBucket(g) === '20min'
-                        ? <span className="pill tag" style={{ fontSize: 9, padding: '1px 5px' }}>20&apos; {recorderOf(g)}</span>
-                        : <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>5&apos; {recorderOf(g)}</span>)}
-                    </span>
-                  </label>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Preview */}
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span className="card-label" style={{ marginBottom: 8 }}>Message preview</span>
-            <textarea
-              readOnly
-              value={message}
-              placeholder="Select at least one game..."
-              style={{
-                width: '100%', height: 'calc(80vh - 220px)', resize: 'none',
-                fontFamily: 'var(--num, monospace)', fontSize: 12.5, lineHeight: 1.6,
-                padding: '12px 14px', borderRadius: 10, border: '1px solid var(--border)',
-                background: 'var(--surface-2)', color: 'var(--text)', boxSizing: 'border-box',
-              }}
-            />
+          <div style={{ maxHeight: 'calc(80vh - 260px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+            {games.length === 0 ? (
+              <EmptyState>No games have a recorder yet.</EmptyState>
+            ) : games.map(g => {
+              const checked = selected.has(g.id)
+              return (
+                <label key={g.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                    borderBottom: '1px solid var(--border)', cursor: 'pointer',
+                    background: checked ? 'var(--accent-weak)' : 'transparent',
+                  }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggle(g.id)} />
+                  {g.icon_url ? (
+                    <img src={g.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
+                  ) : (
+                    <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
+                  )}
+                  <span className="cell-name" style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
+                  <span className="rec-meta" style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                    {recorderOf(g) && (effectiveBucket(g) === '20min'
+                      ? <span className="badge info">20&apos; {recorderOf(g)}</span>
+                      : <span className="badge neutral">5&apos; {recorderOf(g)}</span>)}
+                  </span>
+                </label>
+              )
+            })}
           </div>
         </div>
 
-        {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          <button className="btn btn-sm" onClick={onClose}>Close</button>
-          <button className="btn btn-sm btn-primary" onClick={copy} disabled={!message}>
-            {copied ? '✓ Copied!' : 'Copy message'}
-          </button>
+        {/* Preview */}
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className="card-label" style={{ marginBottom: 8 }}>Message preview</span>
+          <textarea
+            readOnly
+            value={message}
+            aria-label="Message preview"
+            placeholder="Select at least one game."
+            style={{
+              width: '100%', height: 'calc(80vh - 260px)', resize: 'none',
+              fontFamily: 'var(--num, monospace)', fontSize: 13, lineHeight: 1.6,
+              padding: '12px 14px', borderRadius: 10, border: '1px solid var(--border)',
+              background: 'var(--surface-2)', color: 'var(--text)', boxSizing: 'border-box',
+            }}
+          />
         </div>
       </div>
-    </div>
-  )
-}
-
-// ── Skeleton Rows ────────────────────────────────────────────────────────────
-
-function SkeletonRows({ cols, rows = 5 }: { cols: number; rows?: number }) {
-  const widths = [30, 180, 120, 80, 100, 100]
-  return (
-    <>
-      {Array.from({ length: rows }).map((_, i) => (
-        <tr key={i}>
-          {Array.from({ length: cols }).map((_, c) => (
-            <td key={c}>
-              <span className="skeleton" style={{ width: widths[c % widths.length] || 80, height: 14 }} />
-            </td>
-          ))}
-        </tr>
-      ))}
-    </>
+    </Modal>
   )
 }
 
 // ── Record status helpers ────────────────────────────────────────────────────
-
-type RecordStatus = 'pending' | 'draft' | 'recording' | 'recorded'
 
 // normalizeTitle, buildYtMap, ytLookup live in '@/lib/ytb-match' (shared with
 // the detail panel) so the grid and panel match titles identically.
@@ -955,17 +705,6 @@ function osLabel(os: string | null): string {
   return os ? os.toUpperCase() : '—'
 }
 
-// Badge colors for the few final conclusions surfaced here; others fall back.
-const FINAL_CONC_STYLES: Record<string, { bg: string; color: string }> = {
-  'Priority IV': { bg: '#0f766e', color: '#ffffff' },
-  'Insight':     { bg: '#15803d', color: '#ffffff' },
-  'Priority V':  { bg: '#ede9fe', color: '#6d28d9' },
-  'Bypass':      { bg: '#d23b3b', color: '#ffffff' },
-  'Theme/Art':   { bg: '#dbeafe', color: '#2563eb' },
-  'Watch List':  { bg: '#dcfce7', color: '#16a34a' },
-  'Not Found':   { bg: '#374151', color: '#e5e7eb' },
-}
-
 function recordStatus(item: ShortListItem, ytMap: Map<number | string, YtMatch>): { status: RecordStatus; youtubeId?: string; approx?: string } {
   const bucket = effectiveBucket(item)
   const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
@@ -976,17 +715,8 @@ function recordStatus(item: ShortListItem, ytMap: Map<number | string, YtMatch>)
   return { status: 'draft' }
 }
 
-// Maps to globals.css badge classes. No blue badge class exists, so `recording`
-// gets an inline blue override; `running` is the project's amber badge → draft.
-const RECORD_STATUS_STYLES: Record<RecordStatus, { cls: string; label: string; style?: React.CSSProperties }> = {
-  pending:   { cls: 'idle',    label: 'Pending' },
-  draft:     { cls: 'running', label: 'Draft' },
-  recording: { cls: 'neutral', label: 'Recording', style: { background: 'var(--accent-weak)', color: 'var(--accent-strong)' } },
-  recorded:  { cls: 'success', label: 'Recorded' },
-}
-
 function RecordStatusBadge({ status, youtubeId, approx }: { status: RecordStatus; youtubeId?: string; approx?: string }) {
-  const s = RECORD_STATUS_STYLES[status]
+  const s = RECORD_STATUS_BADGE[status]
   if (status === 'recorded' && youtubeId) {
     return (
       <a
@@ -996,19 +726,19 @@ function RecordStatusBadge({ status, youtubeId, approx }: { status: RecordStatus
         onClick={e => e.stopPropagation()}
         title={approx ? `Matched to upload "${approx}" — open on YouTube` : 'Open on YouTube'}
         className={`badge ${s.cls} yt-link`}
-        style={{ textDecoration: 'none', cursor: 'pointer', ...s.style }}
+        style={{ textDecoration: 'none', cursor: 'pointer' }}
       >
         ▶ {s.label}
       </a>
     )
   }
-  return <span className={`badge ${s.cls}`} style={s.style}>{s.label}</span>
+  return <span className={`badge ${s.cls}`}>{s.label}</span>
 }
 
 // ── Record Table ─────────────────────────────────────────────────────────────
 
 function RecordTable({
-  label, items, loading, isManager, recorders, onAssign, onReset, ytMap, onClickGame,
+  label, items, loading, isManager, recorders, onAssign, onReset, ytMap, onClickGame, activeGameId,
   dragOver, onHeaderAdd, onRowDragStart, confirmRemoveId,
   onRemoveRequest, onConfirmRemove, onCancelRemove,
 }: {
@@ -1021,6 +751,8 @@ function RecordTable({
   onReset: (id: number) => void
   ytMap: Map<number | string, YtMatch>
   onClickGame: (gameId: string) => void
+  /** The game open in the panel; its row is highlighted. */
+  activeGameId: string | null
   dragOver: boolean
   onHeaderAdd?: () => void
   onRowDragStart?: (e: React.DragEvent, item: ShortListItem) => void
@@ -1032,39 +764,35 @@ function RecordTable({
   const recOpts = [{ value: '', label: '—' }, ...recorders.map(r => ({ value: r, label: r }))]
   const cols = isManager ? 5 : 4
   return (
-    <div className="card"
-      style={{
-        padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
-        border: dragOver ? '2px solid var(--accent-strong)' : undefined,
-        background: dragOver ? 'var(--accent-weak)' : undefined,
-        transition: 'background .1s, border-color .1s',
-      }}>
-      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+    <div className={`card rec-table${dragOver ? ' is-drop' : ''}`}>
+      <div className="rec-table-head">
         <span className="card-label">{label}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 600 }}>{items.length} game{items.length !== 1 ? 's' : ''}</span>
+          {/* Per-bucket split; the list total is in the filter bar. */}
+          <span className="sync">{items.length} game{items.length !== 1 ? 's' : ''}</span>
           {isManager && onHeaderAdd && (
-            <button className="btn btn-sm btn-ghost" onClick={onHeaderAdd}
-              style={{ fontSize: 11, padding: '2px 8px' }}>+ Add</button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={onHeaderAdd}>+ Add game</button>
           )}
         </div>
       </div>
       <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-        <table className="tbl">
-          <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
+        <table className="tbl tbl-sticky">
+          <thead>
             <tr>
               <th style={{ width: 36 }}>#</th>
               <th>Game</th>
               <th style={{ width: 160 }}>Recorder</th>
               <th style={{ width: 130 }}>Status</th>
-              {isManager && <th style={{ width: 36 }}></th>}
+              {isManager && <th style={{ width: 36 }} aria-label="Remove" />}
             </tr>
           </thead>
           <tbody>
             {items.length === 0 && !loading && (
-              <tr><td colSpan={cols} className="empty">No games</td></tr>
+              <tr><td colSpan={cols}><EmptyState>No games.</EmptyState></td></tr>
             )}
-            {loading && <SkeletonRows cols={cols} />}
+            {loading && items.length === 0 && (
+              <SkeletonRows widths={isManager ? [16, 200, 120, 80, 16] : [16, 200, 120, 80]} />
+            )}
             {items.map((item, idx) => {
               const eb = effectiveBucket(item)
               const assignee = eb === '20min' ? item.record_20min_assignee : item.record_5min_assignee
@@ -1073,8 +801,9 @@ function RecordTable({
               // is locked; no reassigning.
               const assignLocked = status === 'recording' || status === 'recorded'
               const confirming = confirmRemoveId === item.id
+              const fc = item.final_conclusion ? finalConclusionStyle(item.final_conclusion) : null
               return (
-                <tr key={item.id} className="tbl-row-premium"
+                <tr key={item.id} className={`tbl-row-premium${item.game_id === activeGameId ? ' tbl-row-active' : ''}`}
                   style={{ cursor: isManager ? 'grab' : 'pointer' }}
                   draggable={isManager}
                   onDragStart={isManager && onRowDragStart ? e => onRowDragStart(e, item) : undefined}
@@ -1083,33 +812,25 @@ function RecordTable({
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 160 }}>
                       {item.icon_url ? (
-                        <img src={item.icon_url} alt="" width={28} height={28} style={{ borderRadius: 6, flexShrink: 0 }} />
+                        <img src={item.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
                       ) : (
-                        <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
+                        <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
                       )}
                       <div style={{ minWidth: 0 }}>
                         {/* Row 1: title */}
                         <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
-                        {/* Row 2: evaluator · initial conclusion · final conclusion */}
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 3 }}>
+                        {/* Row 2: evaluator · initial conclusion · final conclusion · platform */}
+                        <div className="rec-meta">
                           {item.initial_evaluator && (
-                            <span style={{ fontSize: 10.5, color: 'var(--faint)', fontWeight: 600 }}>{item.initial_evaluator}</span>
+                            <span className="rec-meta-name">{item.initial_evaluator}</span>
                           )}
                           {item.initial_conclusion && (
-                            <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>{prettyConclusion(item.initial_conclusion)}</span>
+                            <span className={`badge ${conclusionBadgeClass(item.initial_conclusion)}`}>{prettyConclusion(item.initial_conclusion)}</span>
                           )}
-                          {item.final_conclusion && (() => {
-                            const fc = FINAL_CONC_STYLES[item.final_conclusion] || { bg: 'var(--surface-3)', color: 'var(--muted)' }
-                            return (
-                              <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 999, background: fc.bg, color: fc.color, whiteSpace: 'nowrap' }}>
-                                {item.final_conclusion}
-                              </span>
-                            )
-                          })()}
-                        </div>
-                        {/* Row 3: platform */}
-                        <div style={{ marginTop: 3 }}>
-                          <span className="pill muted" style={{ fontSize: 9, padding: '1px 5px' }}>{osLabel(item.os)}</span>
+                          {fc && (
+                            <span className="badge" style={{ background: fc.bg, color: fc.color }}>{item.final_conclusion}</span>
+                          )}
+                          <span className="badge neutral">{osLabel(item.os)}</span>
                         </div>
                       </div>
                     </div>
@@ -1117,11 +838,9 @@ function RecordTable({
                   {confirming ? (
                     <td colSpan={isManager ? 3 : 2} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
-                        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Remove from list? (clears recorder)</span>
-                        <button className="btn btn-sm btn-danger" onClick={() => onConfirmRemove && onConfirmRemove(item.id)}
-                          style={{ fontSize: 11, padding: '2px 10px' }}>Remove</button>
-                        <button className="btn btn-sm btn-ghost" onClick={() => onCancelRemove && onCancelRemove()}
-                          style={{ fontSize: 11, padding: '2px 8px' }}>Cancel</button>
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>Remove from list? The recorder is cleared.</span>
+                        <button type="button" className="btn btn-sm" onClick={() => onCancelRemove && onCancelRemove()}>Cancel</button>
+                        <button type="button" className="btn btn-sm btn-danger" onClick={() => onConfirmRemove && onConfirmRemove(item.id)}>Remove</button>
                       </div>
                     </td>
                   ) : (
@@ -1133,18 +852,18 @@ function RecordTable({
                             onChange={v => onAssign(item, v)}
                             placeholder="—"
                             options={recOpts}
+                            ariaLabel="Recorder"
                             style={{ fontSize: 12 }}
                           />
                         ) : (
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontSize: 12.5, color: assignee ? 'var(--text)' : 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ fontSize: 13, color: assignee ? 'var(--text)' : 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                               {assignLocked && <LockIcon />}{assignee || '—'}
                             </span>
                             {/* Recording (confirmed, not yet recorded): allow un-confirm → reassign. */}
                             {isManager && status === 'recording' && (
-                              <button className="btn btn-sm btn-ghost" title="Reset — un-confirm to reassign"
-                                onClick={e => { e.stopPropagation(); onReset(item.id) }}
-                                style={{ fontSize: 11, padding: '1px 7px', color: 'var(--muted)', lineHeight: 1.4 }}>↺ Reset</button>
+                              <button type="button" className="btn btn-sm btn-ghost" title="Back to draft so you can change the recorder"
+                                onClick={e => { e.stopPropagation(); onReset(item.id) }}>↺ Reset</button>
                             )}
                           </div>
                         )}
@@ -1155,11 +874,10 @@ function RecordTable({
                       {isManager && (
                         <td onClick={e => e.stopPropagation()} style={{ textAlign: 'center' }}>
                           {status === 'recorded' ? (
-                            <span title="Recorded — cannot remove" style={{ color: 'var(--faint)', display: 'inline-flex' }}><LockIcon /></span>
+                            <span title="Recorded, cannot remove" style={{ color: 'var(--faint)', display: 'inline-flex' }}><LockIcon /></span>
                           ) : (
-                            <button className="btn btn-sm btn-ghost" title="Remove from list"
-                              onClick={() => onRemoveRequest && onRemoveRequest(item.id)}
-                              style={{ fontSize: 14, padding: '0 6px', color: 'var(--faint)', lineHeight: 1 }}>×</button>
+                            <button type="button" className="btn btn-sm btn-ghost" title="Remove from list" aria-label="Remove from list"
+                              onClick={() => onRemoveRequest && onRemoveRequest(item.id)}><IconX size={14} /></button>
                           )}
                         </td>
                       )}
@@ -1218,8 +936,6 @@ function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onCon
   const [orig, setOrig] = useState<OriginalEval | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
   const [initEvaluator, setInitEvaluator] = useState('')
   const [initConclusion, setInitConclusion] = useState('')
   const [finalConclusion, setFinalConclusion] = useState('')
@@ -1265,7 +981,6 @@ function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onCon
 
   async function confirm() {
     setSaving(true)
-    setError(null)
     try {
       const res = await fetch('/api/evaluations/add-to-record', {
         method: 'POST',
@@ -1278,99 +993,89 @@ function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onCon
       })
       if (!res.ok) {
         const j = await res.json().catch(() => null)
-        setError(j?.error ?? 'Failed to add')
+        toast.error(`Could not add the game. ${j?.error ?? ''}`.trim())
         setSaving(false)
         return
       }
-    } catch { setError('Network error'); setSaving(false); return }
+    } catch { toast.error('Could not add the game. Check your connection.'); setSaving(false); return }
+    toast.success(`Added ${game.title} to ${resolvedBucket === '20min' ? '20 min' : '5 min'}`)
     onConfirmed()
   }
 
   const nameListId = `confirm-add-names-${game.game_id}`
   const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.3 }
-  const origStyle: React.CSSProperties = { fontSize: 12.5, color: 'var(--faint)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+  const origStyle: React.CSSProperties = { fontSize: 13, color: 'var(--faint)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
   const fieldStyle: React.CSSProperties = {
     width: '100%', boxSizing: 'border-box', padding: '6px 9px', borderRadius: 8,
-    border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: 12.5,
+    border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: 13,
   }
 
-  useEscapeToClose(onCancel, !saving)
-
   return (
-    <div className="eval-modal-backdrop" onClick={e => { e.stopPropagation(); if (!saving) onCancel() }} style={{ zIndex: 60 }}>
-      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{ padding: '20px 22px 20px', maxWidth: 560, width: '92vw' }}>
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+    <Modal onClose={onCancel} busy={saving} width={560} zIndex={1010}
+      title={
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           {game.icon_url ? (
-            <img src={game.icon_url} alt="" width={30} height={30} style={{ borderRadius: 7, flexShrink: 0 }} />
+            <img src={game.icon_url} alt="" width={32} height={32} style={{ borderRadius: 7, flexShrink: 0 }} />
           ) : (
-            <div style={{ width: 30, height: 30, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
+            <span style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
           )}
-          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{game.title}</h2>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{game.title}</span>
+        </span>
+      }
+      sub={`Add to Record · ${category} · ${batch || 'no batch'}`}
+      footer={<>
+        <button type="button" className="btn btn-sm" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button type="button" className="btn btn-sm btn-primary" onClick={confirm} disabled={loading || saving}>
+          {saving ? 'Adding…' : 'Add game'}
+        </button>
+      </>}>
+      {loading ? (
+        <p className="empty">Loading…</p>
+      ) : (
+        <div>
+          {/* Column headers */}
+          <div style={{ display: 'grid', gridTemplateColumns: '116px 1fr 1fr', gap: '6px 10px', alignItems: 'center', marginBottom: 4 }}>
+            <span />
+            <span style={labelStyle}>Original</span>
+            <span style={labelStyle}>New (applied)</span>
+
+            {/* Initial evaluator */}
+            <span style={labelStyle}>Init. evaluator</span>
+            <span style={origStyle}>{orig?.initial_evaluator || '—'}</span>
+            <input list={nameListId} value={initEvaluator} onChange={e => setInitEvaluator(e.target.value)} style={fieldStyle} placeholder="evaluator" aria-label="Initial evaluator" />
+
+            {/* Initial conclusion */}
+            <span style={labelStyle}>Init. conclusion</span>
+            <span style={origStyle}>{orig?.initial_conclusion ? prettyConclusion(orig.initial_conclusion) : '—'}</span>
+            <select value={initConclusion} onChange={e => setInitConclusion(e.target.value)} style={fieldStyle} aria-label="Initial conclusion">
+              <option value="">(none)</option>
+              {conclusionOptions.map(c => <option key={c} value={c}>{prettyConclusion(c)}</option>)}
+            </select>
+
+            {/* Final conclusion */}
+            <span style={labelStyle}>Final conclusion</span>
+            <span style={origStyle}>{orig?.final_conclusion ? prettyConclusion(orig.final_conclusion) : '—'}</span>
+            <select value={finalConclusion} onChange={e => setFinalConclusion(e.target.value)} style={fieldStyle} aria-label="Final conclusion">
+              <option value="">(none)</option>
+              {finalOptions.map(c => <option key={c} value={c}>{prettyConclusion(c)}</option>)}
+            </select>
+
+            {/* Final evaluator */}
+            <span style={labelStyle}>Final evaluator</span>
+            <span style={origStyle}>{orig?.final_evaluator || '—'}</span>
+            <input list={nameListId} value={finalEvaluator} onChange={e => setFinalEvaluator(e.target.value)} style={fieldStyle} placeholder="evaluator" aria-label="Final evaluator" />
+          </div>
+          <datalist id={nameListId}>
+            {nameOptions.map(n => <option key={n} value={n} />)}
+          </datalist>
+
+          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0 0' }}>
+            Goes to <b style={{ color: 'var(--text)' }}>{resolvedBucket === '20min' ? '20 MIN' : '5 MIN'}</b>
+            {resolvedBucket !== targetBucket && <span style={{ color: 'var(--accent)' }}> (moved by the final conclusion)</span>}
+          </p>
         </div>
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 14px 40px' }}>
-          Confirm add · {category} · {batch || 'no batch'}
-        </p>
-
-        {loading ? (
-          <p className="empty">Loading…</p>
-        ) : (
-          <>
-            {/* Column headers */}
-            <div style={{ display: 'grid', gridTemplateColumns: '116px 1fr 1fr', gap: '6px 10px', alignItems: 'center', marginBottom: 4 }}>
-              <span />
-              <span style={labelStyle}>Original</span>
-              <span style={labelStyle}>New (applied)</span>
-
-              {/* Initial evaluator */}
-              <span style={labelStyle}>Init. evaluator</span>
-              <span style={origStyle}>{orig?.initial_evaluator || '—'}</span>
-              <input list={nameListId} value={initEvaluator} onChange={e => setInitEvaluator(e.target.value)} style={fieldStyle} placeholder="evaluator" />
-
-              {/* Initial conclusion */}
-              <span style={labelStyle}>Init. conclusion</span>
-              <span style={origStyle}>{orig?.initial_conclusion ? prettyConclusion(orig.initial_conclusion) : '—'}</span>
-              <select value={initConclusion} onChange={e => setInitConclusion(e.target.value)} style={fieldStyle}>
-                <option value="">(none)</option>
-                {conclusionOptions.map(c => <option key={c} value={c}>{prettyConclusion(c)}</option>)}
-              </select>
-
-              {/* Final conclusion */}
-              <span style={labelStyle}>Final conclusion</span>
-              <span style={origStyle}>{orig?.final_conclusion ? prettyConclusion(orig.final_conclusion) : '—'}</span>
-              <select value={finalConclusion} onChange={e => setFinalConclusion(e.target.value)} style={fieldStyle}>
-                <option value="">(none)</option>
-                {finalOptions.map(c => <option key={c} value={c}>{prettyConclusion(c)}</option>)}
-              </select>
-
-              {/* Final evaluator */}
-              <span style={labelStyle}>Final evaluator</span>
-              <span style={origStyle}>{orig?.final_evaluator || '—'}</span>
-              <input list={nameListId} value={finalEvaluator} onChange={e => setFinalEvaluator(e.target.value)} style={fieldStyle} placeholder="evaluator" />
-            </div>
-            <datalist id={nameListId}>
-              {nameOptions.map(n => <option key={n} value={n} />)}
-            </datalist>
-
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0 0' }}>
-              → Lands in <b style={{ color: 'var(--text)' }}>{resolvedBucket === '20min' ? '20 MIN' : '5 MIN'}</b>
-              {resolvedBucket !== targetBucket && <span style={{ color: 'var(--accent)' }}> (moved by final conclusion)</span>}
-            </p>
-
-            {error && <p style={{ fontSize: 12, color: 'var(--bad)', margin: '8px 0 0' }}>{error}</p>}
-          </>
-        )}
-
-        {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          <button className="btn btn-sm" onClick={onCancel} disabled={saving}>Cancel</button>
-          <button className="btn btn-sm btn-primary" onClick={confirm} disabled={loading || saving}>
-            {saving ? 'Adding…' : 'Confirm add'}
-          </button>
-        </div>
-      </div>
-    </div>
+      )}
+    </Modal>
   )
 }
 
@@ -1434,59 +1139,35 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, recorders
     [searching, results, batchGames, excludeGameIds]
   )
 
-  useEscapeToClose(onClose)
-
   return (
-    <div className="eval-modal-backdrop" onClick={onClose}>
-      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{ padding: '22px 24px 22px', maxWidth: 520, width: '92vw' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <div>
-            <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Add game to {targetBucket === '20min' ? '20 MIN' : '5 MIN'}</h2>
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
-              {searching ? `Search all games · ${category}` : `${batch || 'all batches'} · ${category}`}
-            </p>
-          </div>
-          <button className="btn btn-sm btn-ghost" onClick={onClose} style={{ fontSize: 18, padding: '2px 8px' }}>x</button>
+    <>
+      <Modal title={`Add a game to ${targetBucket === '20min' ? '20 MIN' : '5 MIN'}`} onClose={onClose} width={520}
+        sub={searching ? `Search all games · ${category}` : `${batch || 'All batches'} · ${category}`}>
+        <div className="rec-add-search">
+          <SearchInput value={query} onChange={setQuery} autoFocus width="100%"
+            placeholder="Search by name or paste a store link" ariaLabel="Search games" />
         </div>
-
-        <input
-          autoFocus
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Search by name or paste a store link…"
-          style={{
-            width: '100%', boxSizing: 'border-box', marginBottom: 12,
-            padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)',
-            background: 'var(--surface-2)', color: 'var(--text)', fontSize: 13,
-          }}
-        />
 
         <div style={{ maxHeight: 'calc(70vh - 180px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
           {(searching ? loading : batchLoading) ? (
             <p className="empty">{searching ? 'Searching…' : 'Loading…'}</p>
           ) : candidates.length === 0 ? (
-            <p className="empty">{searching ? 'Không tìm thấy game trong DB' : 'No games in this batch'}</p>
+            <EmptyState>{searching ? 'No game found.' : 'No games in this batch.'}</EmptyState>
           ) : candidates.map(g => (
-            <button key={g.game_id}
-              onClick={() => setPending(g)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                padding: '8px 12px', borderBottom: '1px solid var(--border)',
-                background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
-                color: 'var(--text)',
-              }}>
+            <button key={g.game_id} type="button" className="rec-add-row"
+              onClick={() => setPending(g)}>
               {g.icon_url ? (
                 <img src={g.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
               ) : (
-                <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
+                <span style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
               )}
-              <span className="cell-name" style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
+              <span className="cell-name" style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
             </button>
           ))}
         </div>
-      </div>
+      </Modal>
 
+      {/* Stacked on top; its own Cancel / Esc / backdrop close only this step. */}
       {pending && (
         <ConfirmAddModal
           game={pending}
@@ -1498,7 +1179,7 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, recorders
           onCancel={() => setPending(null)}
         />
       )}
-    </div>
+    </>
   )
 }
 
@@ -1511,29 +1192,38 @@ function RecordTab() {
   const isManager = isManagerRole(role)
 
   const [data, setData] = useState<ShortListItem[]>([])
-  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [filterCategory, setFilterCategory] = useState('puzzle')
-  const [filterBatch, setFilterBatch] = useState('')
+  // View and filters live in the URL: cat, batch, status, group.
+  const [catParam, setCatParam] = useUrlState('cat', 'puzzle')
+  const filterCategory = (BUCKETS as readonly string[]).includes(catParam) ? catParam : 'puzzle'
+  // batch: absent = the server's default batch (once known), 'all' = All batches.
+  const [batchParam, setBatchParam] = useUrlState('batch', '')
+  const [defaultBatch, setDefaultBatch] = useState<string | null>(null)
+  const filterBatch = batchParam === 'all' ? '' : (batchParam || defaultBatch || '')
+  const setFilterBatch = (v: string) => setBatchParam(v === '' ? 'all' : v === defaultBatch ? '' : v)
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
-  const [filterStatus, setFilterStatus] = useState<'' | RecordStatus>('')
+  const [statusParam, setStatusParam] = useUrlState('status', '')
+  const filterStatus: '' | RecordStatus = statusParam in RECORD_STATUS_BADGE ? statusParam as RecordStatus : ''
   // Cluster games by recorder within each container (same person adjacent),
   // matching how Extract Chat groups them. Default on; toggle back to date order.
-  const [groupByRecorder, setGroupByRecorder] = useState(true)
+  const [groupParam, setGroupParam] = useUrlState('group', '1')
+  const groupByRecorder = groupParam !== '0'
+  const setParams = useSetUrlParams()
+  const filtersOn = filterCategory !== 'puzzle' || batchParam !== '' || filterStatus !== ''
+  const clearFilters = () => setParams({ cat: null, batch: null, status: null })
   const [recorders, setRecorders] = useState<string[]>([])
   const [ytRows, setYtRows] = useState<YtbRow[]>([])
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
   const [showExtract, setShowExtract] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
-  useEscapeToClose(() => setShowConfirm(false), showConfirm && !confirming)
   // Manual bucket override: drag/drop, add-game modal, inline remove-confirm.
   const [dragOverBucket, setDragOverBucket] = useState<'5min' | '20min' | null>(null)
   const [addBucket, setAddBucket] = useState<'5min' | '20min' | null>(null)
   const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null)
   const dragRef = useRef<{ id: number; from: '5min' | '20min' } | null>(null)
   const [availableBatches, setAvailableBatches] = useState<string[]>([])
-  const [syncToast, setSyncToast] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState(false)
 
   const fetchSeqRef = useRef(0)
   // One recorder auto-sync per (category, batch) view — see the sync effect.
@@ -1551,10 +1241,11 @@ function RecordTab() {
       if (filterBatch) params.set('batch', filterBatch)
       if (!isManager && userName) params.set('recorder', userName)
       const res = await fetch(`/api/evaluations?${params}`)
+      if (!res.ok) throw new Error()
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return
+      setLoadError(false)
       setData(json.data || [])
-      setTotal(json.total || 0)
       if (json.available_batches) setAvailableBatches(json.available_batches)
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
@@ -1563,10 +1254,12 @@ function RecordTab() {
           // Pre-select the team's current batch, but fall back to the most recent
           // batch with games (server-resolved default_batch) when current is empty.
           const def = json.default_batch !== undefined ? json.default_batch : json.current_batch
-          if (def) setFilterBatch(def)
+          if (def) setDefaultBatch(def)
         }
       }
-    } catch { /* ignore */ }
+    } catch {
+      if (seq === fetchSeqRef.current) setLoadError(true)
+    }
     setLoading(false)
   }, [filterCategory, filterBatch, isManager, userName])
 
@@ -1604,11 +1297,10 @@ function RecordTab() {
         const json = await res.json()
         if (cancelled || (!json.applied && !json.links_applied)) return
         const parts = []
-        if (json.applied) parts.push(`${json.applied} recorder`)
-        if (json.links_applied) parts.push(`${json.links_applied} link YouTube`)
-        setSyncToast(`Đã đồng bộ ${parts.join(' + ')} từ YouTube`)
+        if (json.applied) parts.push(`${json.applied} recorder${json.applied === 1 ? '' : 's'}`)
+        if (json.links_applied) parts.push(`${json.links_applied} YouTube link${json.links_applied === 1 ? '' : 's'}`)
+        toast.success(`Updated ${parts.join(' and ')} from YouTube`)
         if (json.applied) fetchData()
-        setTimeout(() => { if (!cancelled) setSyncToast(null) }, 6000)
       } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
@@ -1747,14 +1439,19 @@ function RecordTab() {
   const confirmAssign = useCallback(async () => {
     if (visibleDraftIds.length === 0) return
     setConfirming(true)
+    const n = visibleDraftIds.length
     try {
-      await fetch('/api/evaluations/confirm-records', {
+      const res = await fetch('/api/evaluations/confirm-records', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: visibleDraftIds }),
       })
+      if (!res.ok) throw new Error()
+      toast.success(`Confirmed ${n} game${n === 1 ? '' : 's'}: now Recording`)
       await fetchData()
-    } catch { /* ignore */ }
+    } catch {
+      toast.error('Could not confirm the games.')
+    }
     setConfirming(false)
     setShowConfirm(false)
   }, [visibleDraftIds, fetchData])
@@ -1767,91 +1464,62 @@ function RecordTab() {
 
   const totalShown = shown5.length + shown20.length
 
+  // Status counts for the Seg: across both buckets, before the status filter.
+  const statusCounts = useMemo(() => {
+    const c: Record<RecordStatus, number> = { pending: 0, draft: 0, recording: 0, recorded: 0 }
+    for (const d of data) c[recordStatus(d, ytMap).status]++
+    return c
+  }, [data, ytMap])
+  const nDraft = visibleDraftGames.length
+  const gamesWord = (n: number) => `${n} game${n === 1 ? '' : 's'}`
+
+  const tableProps = {
+    loading, isManager, recorders, onAssign: assignRecorder, onReset: resetRecording,
+    ytMap, onClickGame: setDetailGameId, activeGameId: detailGameId,
+    onRowDragStart: handleRowDragStart, confirmRemoveId,
+    onRemoveRequest: setConfirmRemoveId, onConfirmRemove: removeGame,
+    onCancelRemove: () => setConfirmRemoveId(null),
+  }
+
   return (
-    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div className="page-head" style={{ marginBottom: 10 }}>
-        <div>
-          <h1 className="h-title">Record</h1>
-          <p className="h-sub">{total} games · {filterBatch || 'all batches'} · {filterCategory}{!isManager && userName ? ` · ${userName}` : ''}</p>
-        </div>
-      </div>
+    <div className="page rec-page">
+      <PageHeader title="Record" sub="Assign recorders to games and follow each video to YouTube."
+        actions={isManager ? <>
+          <button type="button" className="btn btn-sm" onClick={() => setShowExtract(true)} disabled={assignedGames.length === 0}>
+            Extract chat
+          </button>
+          <button type="button" className="btn btn-sm btn-primary" onClick={() => setShowConfirm(true)}
+            disabled={confirming || nDraft === 0}
+            title={nDraft === 0 ? 'No draft games in this view' : 'Draft → Recording'}>
+            {confirming ? 'Confirming…' : `Confirm ${gamesWord(nDraft)}`}
+          </button>
+        </> : undefined} />
 
-      {syncToast && (
-        <div style={{
-          position: 'fixed', bottom: 20, right: 20, zIndex: 100,
-          background: 'var(--accent, #2563eb)', color: '#fff',
-          padding: '10px 16px', borderRadius: 10, fontSize: 12.5, fontWeight: 600,
-          boxShadow: '0 6px 20px rgba(0,0,0,.25)',
-        }}>
-          ✓ {syncToast}
-        </div>
-      )}
-
-      <div className="filter-row" style={{ position: 'relative', zIndex: 30 }}>
-        <div style={{ width: 140 }}>
-          <StyledSelect
-            value={filterCategory}
-            onChange={setFilterCategory}
-            placeholder="Category"
-            options={[
-              { value: 'puzzle', label: 'Puzzle' },
-              { value: 'arcade', label: 'Arcade' },
-              { value: 'simulation', label: 'Simulation' },
-            ]}
-          />
-        </div>
-
-        <div style={{ width: 160 }}>
-          <StyledSelect
-            value={filterBatch}
-            onChange={setFilterBatch}
-            placeholder="All batches"
-            options={[{ value: '', label: 'All batches' }, ...batchOptions.map(b => ({ value: b, label: b }))]}
-          />
-        </div>
-
-        <div className="seg-wrapper">
-          {([
-            { value: '', label: 'All' },
-            { value: 'pending', label: 'Pending' },
-            { value: 'draft', label: 'Draft' },
-            { value: 'recording', label: 'Recording' },
-            { value: 'recorded', label: 'Recorded' },
-          ] as const).map(s => (
-            <button key={s.value}
-              className={`seg-btn-premium${filterStatus === s.value ? ' active' : ''}`}
-              onClick={() => setFilterStatus(s.value)}>
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        <button
-          className={`btn btn-sm${groupByRecorder ? ' btn-primary' : ''}`}
-          title={groupByRecorder ? 'Grouped by recorder — click for date order' : 'Date order — click to group by recorder'}
-          onClick={() => setGroupByRecorder(v => !v)}
-          style={{ whiteSpace: 'nowrap' }}>
-          {groupByRecorder ? '☰ Grouped' : '☰ Group by recorder'}
+      <FilterBar className="rec-filters">
+        <Seg ariaLabel="Category group" value={filterCategory} onChange={setCatParam}
+          options={BUCKETS.map(b => ({ value: b, label: b[0].toUpperCase() + b.slice(1) }))} />
+        <StyledSelect filter ariaLabel="Batch" value={filterBatch} onChange={setFilterBatch}
+          inactiveValue={defaultBatch ?? ''} placeholder="All batches" style={{ width: 160 }}
+          options={[{ value: '', label: 'All batches' }, ...batchOptions.map(b => ({ value: b, label: b }))]} />
+        <Seg ariaLabel="Record status" value={filterStatus || 'all'}
+          onChange={v => setStatusParam(v === 'all' ? '' : v)}
+          options={[
+            { value: 'all', label: 'All', count: data.length },
+            ...(Object.keys(RECORD_STATUS_BADGE) as RecordStatus[]).map(k => ({
+              value: k, label: RECORD_STATUS_BADGE[k].label, count: statusCounts[k],
+            })),
+          ]} />
+        <button type="button" className="btn btn-sm" aria-pressed={groupByRecorder}
+          title={groupByRecorder ? 'Grouped by recorder. Click for date order.' : 'Date order. Click to group by recorder.'}
+          onClick={() => setGroupParam(groupByRecorder ? '0' : '1')}>
+          Group by recorder
         </button>
+        <FilterSpacer />
+        <ClearFilters visible={filtersOn} onClear={clearFilters} />
+        <FilterCount shown={totalShown} total={data.length} loading={loading && data.length === 0} />
+      </FilterBar>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="sync" style={{ fontSize: 12.5, fontWeight: 600 }}>
-            {loading ? 'Loading...' : `${totalShown} results`}
-          </span>
-          {isManager && (
-            <>
-              <button className="btn btn-sm btn-primary" onClick={() => setShowConfirm(true)}
-                disabled={confirming || visibleDraftIds.length === 0}>
-                {confirming ? 'Confirming...' : 'Confirm Assign'}
-                {visibleDraftIds.length > 0 && <span className="badge-count">{visibleDraftIds.length}</span>}
-              </button>
-              <button className="btn btn-sm" onClick={() => setShowExtract(true)} disabled={assignedGames.length === 0}>
-                Extract Chat
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+      {loadError && <ErrorState onRetry={fetchData}>Could not load the games.</ErrorState>}
 
       {/* Split tables: 5 MIN and 20 MIN (effective bucket) */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16, overflow: 'hidden' }}>
@@ -1859,31 +1527,17 @@ function RecordTab() {
           onDragOver={isManager ? (e => { e.preventDefault(); if (dragOverBucket !== '5min') setDragOverBucket('5min') }) : undefined}
           onDragLeave={isManager ? (e => { if (e.currentTarget === e.target) setDragOverBucket(null) }) : undefined}
           onDrop={isManager ? (e => { e.preventDefault(); handleDrop('5min') }) : undefined}>
-          <RecordTable label="5 MIN" items={shown5} loading={loading}
-            isManager={isManager} recorders={recorders} onAssign={assignRecorder} onReset={resetRecording}
-            ytMap={ytMap} onClickGame={setDetailGameId}
+          <RecordTable label="5 MIN" items={shown5} {...tableProps}
             dragOver={dragOverBucket === '5min'}
-            onHeaderAdd={() => setAddBucket('5min')}
-            onRowDragStart={handleRowDragStart}
-            confirmRemoveId={confirmRemoveId}
-            onRemoveRequest={setConfirmRemoveId}
-            onConfirmRemove={removeGame}
-            onCancelRemove={() => setConfirmRemoveId(null)} />
+            onHeaderAdd={() => setAddBucket('5min')} />
         </div>
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}
           onDragOver={isManager ? (e => { e.preventDefault(); if (dragOverBucket !== '20min') setDragOverBucket('20min') }) : undefined}
           onDragLeave={isManager ? (e => { if (e.currentTarget === e.target) setDragOverBucket(null) }) : undefined}
           onDrop={isManager ? (e => { e.preventDefault(); handleDrop('20min') }) : undefined}>
-          <RecordTable label="20 MIN" items={shown20} loading={loading}
-            isManager={isManager} recorders={recorders} onAssign={assignRecorder} onReset={resetRecording}
-            ytMap={ytMap} onClickGame={setDetailGameId}
+          <RecordTable label="20 MIN" items={shown20} {...tableProps}
             dragOver={dragOverBucket === '20min'}
-            onHeaderAdd={() => setAddBucket('20min')}
-            onRowDragStart={handleRowDragStart}
-            confirmRemoveId={confirmRemoveId}
-            onRemoveRequest={setConfirmRemoveId}
-            onConfirmRemove={removeGame}
-            onCancelRemove={() => setConfirmRemoveId(null)} />
+            onHeaderAdd={() => setAddBucket('20min')} />
         </div>
       </div>
 
@@ -1926,37 +1580,27 @@ function RecordTab() {
       )}
 
       {showConfirm && (
-        <div className="eval-modal-backdrop" onClick={() => !confirming && setShowConfirm(false)}>
-          <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-            style={{ padding: '22px 24px 22px', maxWidth: 480, width: '92vw' }}>
-            <div style={{ marginBottom: 14 }}>
-              <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Confirm Assign</h2>
-              <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '4px 0 0' }}>
-                {visibleDraftGames.length} game{visibleDraftGames.length === 1 ? '' : 's'} · Draft → Recording
-              </p>
-            </div>
-
-            <div style={{ maxHeight: 'calc(70vh - 200px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-              {visibleDraftGames.map(g => (
-                <div key={g.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
-                  borderBottom: '1px solid var(--border)',
-                }}>
-                  <span style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
-                  <span className="badge idle" style={{ fontSize: 10 }}>{effectiveBucket(g) === '20min' ? '20 MIN' : '5 MIN'}</span>
-                  <span style={{ fontSize: 11.5, color: 'var(--muted)', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon />{recorderOf(g) || '—'}</span>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-              <button className="btn btn-sm" onClick={() => setShowConfirm(false)} disabled={confirming}>Cancel</button>
-              <button className="btn btn-sm btn-primary" onClick={confirmAssign} disabled={confirming || visibleDraftGames.length === 0}>
-                {confirming ? 'Confirming...' : `Confirm ${visibleDraftGames.length}`}
-              </button>
-            </div>
+        <Modal title="Confirm assign" onClose={() => setShowConfirm(false)} busy={confirming} width={480}
+          sub={`${gamesWord(nDraft)} · Draft → Recording`}
+          footer={<>
+            <button type="button" className="btn btn-sm" onClick={() => setShowConfirm(false)} disabled={confirming}>Cancel</button>
+            <button type="button" className="btn btn-sm btn-primary" onClick={confirmAssign} disabled={confirming || nDraft === 0}>
+              {confirming ? 'Confirming…' : `Confirm ${gamesWord(nDraft)}`}
+            </button>
+          </>}>
+          <div style={{ maxHeight: 'calc(70vh - 200px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+            {visibleDraftGames.map(g => (
+              <div key={g.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                borderBottom: '1px solid var(--border)',
+              }}>
+                <span style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
+                <span className="badge idle">{effectiveBucket(g) === '20min' ? '20 MIN' : '5 MIN'}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserIcon />{recorderOf(g) || '—'}</span>
+              </div>
+            ))}
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

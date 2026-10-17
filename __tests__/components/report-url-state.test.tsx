@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ReportView } from '@/components/report/ReportView'
 
 // Task 5: the Report's inner tab (?rtab=) and a one-shot focus key (?focus=) live in
@@ -152,4 +152,76 @@ it('writes rtab back to the URL on tab change without touching other params', as
   const [url, opts] = replace.mock.calls[0]
   expect(url).toBe('/team-ops?tab=performance&foo=bar&rtab=leaderboard')
   expect(opts).toEqual({ scroll: false })
+})
+
+// The filter bar is in the URL too: view, period, start/end, title, cat. The URL is
+// the state, so these check both directions - the URL drives the request, and a
+// control writes the URL (one replace per change, defaults left out).
+describe('filter bar in the URL', () => {
+  const reportCalls = () => (global.fetch as jest.Mock).mock.calls
+    .map((c) => new URL(String(c[0]), 'http://x'))
+    .filter((u) => u.pathname === '/api/report')
+  const settle = () => waitFor(() => expect(screen.queryByText('Loading…')).not.toBeInTheDocument())
+
+  it('asks the API for what the URL says', async () => {
+    params = new URLSearchParams('tab=performance&view=month&period=2026-08&cat=arcade&title=fulltime')
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
+    render(<ReportView />)
+    await settle()
+    const q = reportCalls()[0].searchParams
+    expect(q.get('view')).toBe('month')
+    expect(q.get('key')).toBe('2026-08')
+    expect(q.get('category')).toBe('arcade')
+    expect(q.get('title')).toBe('fulltime')
+  })
+
+  it('lands on the newest batch, Puzzle, all titles when the URL says nothing', async () => {
+    params = new URLSearchParams('tab=performance')
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
+    render(<ReportView />)
+    await settle()
+    const q = reportCalls()[0].searchParams
+    expect(q.get('view')).toBe('batch')
+    expect(q.get('key')).toBeNull()
+    expect(q.get('category')).toBe('puzzle')
+    expect(q.get('title')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+  })
+
+  it('puts the category group first, All first, and writes cat to the URL', async () => {
+    params = new URLSearchParams('tab=performance')
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
+    const { container } = render(<ReportView />)
+    await settle()
+    const groups = Array.from(container.querySelectorAll('.rp-filters [role="group"]'))
+    expect(groups[0].getAttribute('aria-label')).toBe('Category')
+    expect(Array.from(groups[0].querySelectorAll('button')).map((b) => b.textContent))
+      .toEqual(['All', 'Puzzle', 'Arcade', 'Simulation'])
+    fireEvent.click(screen.getByRole('button', { name: 'Arcade' }))
+    expect(replace).toHaveBeenCalledTimes(1)
+    expect(replace.mock.calls[0][0]).toBe('/team-ops?tab=performance&cat=arcade')
+  })
+
+  it('switching the lens drops the old period and dates in one navigation', async () => {
+    params = new URLSearchParams('tab=performance&view=custom&start=2026-08-01&end=2026-08-20&cat=arcade')
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
+    render(<ReportView />)
+    await settle()
+    const q = reportCalls()[0].searchParams
+    expect(q.get('from')).toBe('2026-08-01')
+    expect(q.get('to')).toBe('2026-08-20')
+    fireEvent.click(screen.getByRole('button', { name: 'Week' }))
+    expect(replace).toHaveBeenCalledTimes(1)
+    expect(replace.mock.calls[0][0]).toBe('/team-ops?tab=performance&view=week&cat=arcade')
+  })
+
+  it('Clear filters removes every filter key and keeps the rest of the URL', async () => {
+    params = new URLSearchParams('tab=performance&rtab=leaderboard&view=week&period=2026-09-01&cat=all&title=freelancer')
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
+    render(<ReportView />)
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(replace).toHaveBeenCalledTimes(1)
+    expect(replace.mock.calls[0][0]).toBe('/team-ops?tab=performance&rtab=leaderboard')
+  })
 })

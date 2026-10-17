@@ -159,7 +159,9 @@ describe('Individual tab', () => {
     const toggle = container.querySelector('.rp-guide button')!
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(container.querySelector('.rp-guide .read')).toBeNull()
-    expect(container.querySelectorAll('button[aria-expanded]')).toHaveLength(1)
+    // Filter dropdowns (StyledSelect, .ssel-btn) carry aria-expanded too, but they
+    // pick a value, they do not hide content - so they are not folds.
+    expect(Array.from(container.querySelectorAll('button[aria-expanded]')).filter((b) => !b.classList.contains('ssel-btn'))).toHaveLength(1)
     expect(container.querySelector('details')).toBeNull()
   })
 

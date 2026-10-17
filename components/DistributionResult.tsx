@@ -5,6 +5,8 @@
 // the card header so committing lives right next to what it will do.
 'use client'
 import { useMemo, type ReactNode, type CSSProperties } from 'react'
+import { EmptyState } from '@/components/ui/States'
+import { fmtDateVN } from '@/lib/format-date'
 
 export interface DistResult {
   candidate_count: number
@@ -16,12 +18,6 @@ export interface DistResult {
   by_platform?: { ios: number; android: number; other: number }
   by_date?: { date: string; count: number }[]
   dryRun: boolean
-}
-
-function fmtDate(d: string): string {
-  if (!d || d === '—') return '—'
-  const [y, m, day] = d.slice(0, 10).split('-')
-  return `${day}/${m}/${y.slice(2)}`
 }
 
 const SUB_BOX: CSSProperties = {
@@ -62,8 +58,9 @@ export function DistributionResult({ result, action }: { result: DistResult; act
   const moved = committed ? (result.assigned ?? 0) : (result.assignable ?? rows.reduce((s, r) => s + r.total, 0))
 
   return (
-    <div className="card" style={{ marginTop: 14 }}>
-      <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    // No top margin: the page (and a modal body) space their children with gap.
+    <div className="card">
+      <div className="card-head" style={{ alignItems: 'center' }}>
         <span className="card-label">{committed ? 'Result' : 'Preview'}</span>
         {action}
       </div>
@@ -92,13 +89,13 @@ export function DistributionResult({ result, action }: { result: DistResult; act
             <div className="tbl-wrap">
               <table className="tbl">
                 <thead>
-                  <tr><th>Date</th><th style={{ width: 80, textAlign: 'right' }}>Games</th></tr>
+                  <tr><th>Date</th><th className="tnum" style={{ width: 80 }}>Games</th></tr>
                 </thead>
                 <tbody>
                   {result.by_date?.map(d => (
                     <tr key={d.date}>
-                      <td>{fmtDate(d.date)}</td>
-                      <td style={{ fontWeight: 600, textAlign: 'right' }}>{d.count}</td>
+                      <td>{fmtDateVN(d.date)}</td>
+                      <td className="tnum" style={{ fontWeight: 600 }}>{d.count}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -116,29 +113,29 @@ export function DistributionResult({ result, action }: { result: DistResult; act
                 <thead>
                   <tr>
                     <th>Evaluator</th>
-                    {detail && <th style={{ width: 60, textAlign: 'right' }}>iOS</th>}
-                    {detail && <th style={{ width: 74, textAlign: 'right' }}>Android</th>}
-                    {detail && hasOther && <th style={{ width: 60, textAlign: 'right' }}>Other</th>}
-                    <th style={{ width: 64, textAlign: 'right' }}>Total</th>
+                    {detail && <th className="tnum" style={{ width: 60 }}>iOS</th>}
+                    {detail && <th className="tnum" style={{ width: 74 }}>Android</th>}
+                    {detail && hasOther && <th className="tnum" style={{ width: 60 }}>Other</th>}
+                    <th className="tnum" style={{ width: 64 }}>Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map(r => (
                     <tr key={r.name}>
                       <td className="cell-name">{r.name}</td>
-                      {detail && <td style={{ textAlign: 'right', color: r.ios ? undefined : 'var(--faint)' }}>{r.ios}</td>}
-                      {detail && <td style={{ textAlign: 'right', color: r.android ? undefined : 'var(--faint)' }}>{r.android}</td>}
-                      {detail && hasOther && <td style={{ textAlign: 'right', color: r.other ? undefined : 'var(--faint)' }}>{r.other}</td>}
-                      <td style={{ fontWeight: 700, textAlign: 'right' }}>{r.total}</td>
+                      {detail && <td className="tnum" style={{ color: r.ios ? undefined : 'var(--faint)' }}>{r.ios}</td>}
+                      {detail && <td className="tnum" style={{ color: r.android ? undefined : 'var(--faint)' }}>{r.android}</td>}
+                      {detail && hasOther && <td className="tnum" style={{ color: r.other ? undefined : 'var(--faint)' }}>{r.other}</td>}
+                      <td className="tnum" style={{ fontWeight: 700 }}>{r.total}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ) : (
-            <p className="empty" style={{ padding: '4px 2px' }}>
-              {result.candidate_count === 0 ? 'No pending games match — nothing to move.' : 'Pick target evaluators to see the split.'}
-            </p>
+            <EmptyState>
+              {result.candidate_count === 0 ? 'No pending games match, so nothing moves.' : 'Pick target evaluators to see the split.'}
+            </EmptyState>
           )}
         </div>
       </div>

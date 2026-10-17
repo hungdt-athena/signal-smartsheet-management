@@ -4,6 +4,24 @@ import { TaggingTab } from '@/components/TaggingTab'
 jest.mock('next-auth/react', () => ({
   useSession: () => ({ data: { user: { role: 'admin', name: 'VinhTD' } } }),
 }))
+
+// View and filters live in the URL. A stand-in router that writes to jsdom's
+// location and re-renders every reader, the way the real one does.
+jest.mock('next/navigation', () => {
+  const React = jest.requireActual('react')
+  const subs = new Set<() => void>()
+  const read = () => window.location.search
+  const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f) } }
+  return {
+    useSearchParams: () => {
+      const qs = React.useSyncExternalStore(subscribe, read, read)
+      return React.useMemo(() => new URLSearchParams(qs), [qs])
+    },
+    useRouter: () => ({ replace: (url: string) => { window.history.replaceState(null, '', url); subs.forEach(f => f()) } }),
+    usePathname: () => '/evaluations',
+  }
+})
+beforeEach(() => { window.history.replaceState(null, '', '/evaluations') })
 jest.mock('@/components/EvalDetailPanel', () => ({
   __esModule: true,
   default: () => <div data-testid="eval-panel" />,
@@ -69,7 +87,7 @@ describe('Tagging > Category group filter', () => {
     await waitFor(() => expect(screen.getByText('Farm Game')).toBeInTheDocument())
     const bar = within(groupBar())
     expect(bar.getByRole('button', { name: 'All', pressed: true })).toBeInTheDocument()
-    for (const g of ['puzzle', 'arcade', 'simulation']) {
+    for (const g of ['Puzzle', 'Arcade', 'Simulation']) {
       expect(bar.getByRole('button', { name: g })).toBeInTheDocument()
     }
     // All is the absence of a filter, not a category group called "all".
@@ -79,7 +97,7 @@ describe('Tagging > Category group filter', () => {
   it('re-reads Pending from the first row when the category group changes', async () => {
     render(<TaggingTab />)
     await waitFor(() => expect(screen.getByText('Farm Game')).toBeInTheDocument())
-    fireEvent.click(within(groupBar()).getByRole('button', { name: 'arcade' }))
+    fireEvent.click(within(groupBar()).getByRole('button', { name: 'Arcade' }))
     await waitFor(() => expect(last('/api/playtest-tags/pending')).toContain('category_group=arcade'))
     expect(last('/api/playtest-tags/pending')).toContain('offset=0')
   })
@@ -87,7 +105,7 @@ describe('Tagging > Category group filter', () => {
   it('carries the category group into History and back to All', async () => {
     render(<TaggingTab />)
     await waitFor(() => expect(screen.getByText('Farm Game')).toBeInTheDocument())
-    fireEvent.click(within(groupBar()).getByRole('button', { name: 'simulation' }))
+    fireEvent.click(within(groupBar()).getByRole('button', { name: 'Simulation' }))
     fireEvent.click(screen.getByRole('button', { name: 'History' }))
     await waitFor(() => expect(last('/api/playtest-tags/history')).toContain('category_group=simulation'))
     expect(last('/api/playtest-tags/history')).toContain('page=1')
@@ -103,7 +121,7 @@ describe('Tagging > Category group filter', () => {
     await waitFor(() => expect(screen.getByText('Block Puzzle')).toBeInTheDocument())
     expect(screen.getByText('Farm Life')).toBeInTheDocument()
 
-    fireEvent.click(within(groupBar()).getByRole('button', { name: 'arcade' }))
+    fireEvent.click(within(groupBar()).getByRole('button', { name: 'Arcade' }))
     await waitFor(() => expect(screen.queryByText('Block Puzzle')).not.toBeInTheDocument())
     expect(screen.getByText('Farm Life')).toBeInTheDocument()
     // Defined for both genres, so it stays under either.
@@ -137,7 +155,7 @@ describe('Tagging > Category group filter and the selection', () => {
     fireEvent.click(screen.getByLabelText('Select Farm Life on Farm Game'))
     expect(screen.getByRole('button', { name: 'Confirm 1 tag' })).toBeInTheDocument()
 
-    fireEvent.click(within(groupBar()).getByRole('button', { name: 'puzzle' }))
+    fireEvent.click(within(groupBar()).getByRole('button', { name: 'Puzzle' }))
     await waitFor(() => expect(last('/api/playtest-tags/pending')).toContain('category_group=puzzle'))
     expect(screen.queryByRole('button', { name: /^Confirm \d+ tag/ })).not.toBeInTheDocument()
   })

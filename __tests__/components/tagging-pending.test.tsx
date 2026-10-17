@@ -1,9 +1,29 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { TaggingTab } from '@/components/TaggingTab'
+import { toast } from '@/lib/toast'
 
 jest.mock('next-auth/react', () => ({
   useSession: () => ({ data: { user: { role: 'admin', name: 'VinhTD' } } }),
 }))
+
+// View and filters live in the URL. A stand-in router that writes to jsdom's
+// location and re-renders every reader, the way the real one does.
+jest.mock('next/navigation', () => {
+  const React = jest.requireActual('react')
+  const subs = new Set<() => void>()
+  const read = () => window.location.search
+  const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f) } }
+  return {
+    useSearchParams: () => {
+      const qs = React.useSyncExternalStore(subscribe, read, read)
+      return React.useMemo(() => new URLSearchParams(qs), [qs])
+    },
+    useRouter: () => ({ replace: (url: string) => { window.history.replaceState(null, '', url); subs.forEach(f => f()) } }),
+    usePathname: () => '/evaluations',
+  }
+})
+beforeEach(() => { window.history.replaceState(null, '', '/evaluations') })
+jest.mock('@/lib/toast', () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 // The evaluation panel only opens on a game click and drags a large tree of its
 // own in with it; the queue is what these tests are about.
 jest.mock('@/components/EvalDetailPanel', () => ({
@@ -80,7 +100,8 @@ describe('Tagging > Pending', () => {
     // the rewrite is that reviewing a tag does not reload the list.
     await waitFor(() => expect(queueRows()).toHaveLength(2))
     expect(pendingReads).toBe(1)
-    expect(screen.getByText(/Confirmed 1 tag — 1 inserted/)).toBeInTheDocument()
+    // The result is a toast, not a line in the page.
+    expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/Confirmed 1 tag — 1 inserted/))
   })
 
   it('splits a multi-game selection into one confirm per game', async () => {

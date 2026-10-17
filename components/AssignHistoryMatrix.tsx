@@ -8,6 +8,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { shadeScale, type Cell, type Matrix, type Totals } from '@/lib/assign-history-matrix'
+import { CloseButton } from '@/components/ui/CloseButton'
+import { EmptyState } from '@/components/ui/States'
+
+// Action type in the popover is read, not clicked, so it is a badge.
+const ACTION_BADGE: Record<string, string> = { assign: 'success', reassign: 'info' }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -47,7 +52,7 @@ export function AssignHistoryMatrix({ matrix }: { matrix: Matrix }) {
   // A new window means the old popover points at nothing.
   useEffect(() => { setOpen(null) }, [matrix])
 
-  if (matrix.rows.length === 0) return <p className="empty">No history in this window</p>
+  if (matrix.rows.length === 0) return <EmptyState>No history in this window</EmptyState>
 
   return (
     <div className="hist-matrix-wrap">
@@ -183,7 +188,7 @@ function PopoverCard({ open, onClose }: { open: Popover; onClose: () => void }) 
       <div className="hm-pop-head">
         <span className="hm-pop-date">{title}</span>
         {open.kind === 'cell' && <span className="hm-pop-tz">UTC+7</span>}
-        <button className="hm-pop-x" onClick={onClose} aria-label="Close">✕</button>
+        <CloseButton onClick={onClose} />
       </div>
 
       <Breakdown totals={totals} />
@@ -192,7 +197,7 @@ function PopoverCard({ open, onClose }: { open: Popover; onClose: () => void }) 
         {entries.map(({ row, dir }) => (
           <div className={`hm-pop-row${dir === 'out' ? ' out' : ''}`} key={`${row.id}-${dir}`}>
             <span className="hm-pop-time">{hhmmVN(row.run_at)}</span>
-            <span className={`pill ${row.action === 'assign' ? 'on' : row.action === 'reassign' ? 'tag' : 'off'}`}>
+            <span className={`badge ${ACTION_BADGE[row.action] ?? 'running'}`}>
               {row.action}
             </span>
             <span className="hm-pop-genre">{row.category_group}</span>

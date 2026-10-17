@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { IconX } from '@/components/ui/SearchInput'
 
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp']
 const MAX_FILES = 10
@@ -137,7 +138,7 @@ const ManualScreenshotsCard = forwardRef<ManualScreenshotsHandle, Props>(functio
     <div className="card" style={{ margin: 0 }}>
       <div className="card-head">
         <span className="card-label">
-          Screenshots <span className="pill muted" style={{ fontSize: 9, marginLeft: 6 }}>manual</span>
+          Screenshots <span className="badge neutral" style={{ marginLeft: 6 }}>manual</span>
           {urls.length > 0 && ` (${urls.length})`}
         </span>
         {urls.length > 0 && (
@@ -161,13 +162,9 @@ const ManualScreenshotsCard = forwardRef<ManualScreenshotsHandle, Props>(functio
                 loading="lazy"
                 onError={e => { e.currentTarget.style.display = 'none' }} />
               {canEdit && (
-                <button onClick={() => removeSaved(url)} title="Delete this screenshot"
-                  style={{
-                    position: 'absolute', top: 6, right: 6, width: 24, height: 24, borderRadius: 12,
-                    background: 'rgba(0,0,0,.55)', color: '#fff', border: 'none', cursor: 'pointer',
-                    display: 'grid', placeItems: 'center', fontSize: 13, lineHeight: 1,
-                  }}>
-                  ✕
+                <button type="button" className="shot-x lg" onClick={() => removeSaved(url)}
+                  title="Delete this screenshot" aria-label={`Delete screenshot ${i + 1}`}>
+                  <IconX size={13} />
                 </button>
               )}
             </div>
@@ -211,25 +208,21 @@ const ManualScreenshotsCard = forwardRef<ManualScreenshotsHandle, Props>(functio
                   <div key={s.preview} style={{ position: 'relative', flexShrink: 0 }}>
                     <img src={s.preview} alt={s.file.name}
                       style={{ height: 120, borderRadius: 8, border: '1.5px dashed var(--warn)' }} />
-                    <button onClick={() => unstage(s.preview)} title="Remove from staging" disabled={saving}
-                      style={{
-                        position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10,
-                        background: 'rgba(0,0,0,.55)', color: '#fff', border: 'none', cursor: 'pointer',
-                        display: 'grid', placeItems: 'center', fontSize: 11, lineHeight: 1,
-                      }}>
-                      ✕
+                    <button type="button" className="shot-x sm" onClick={() => unstage(s.preview)} disabled={saving}
+                      title="Remove from staging" aria-label={`Remove ${s.file.name} from staging`}>
+                      <IconX size={11} />
                     </button>
                   </div>
                 ))}
               </div>
               {deferSave ? (
-                <p style={{ fontSize: 11.5, color: 'var(--faint)', textAlign: 'center', margin: '8px 0 0' }}>
+                <p style={{ fontSize: 12, color: 'var(--faint)', textAlign: 'center', margin: '8px 0 0' }}>
                   {staged.length} pending — will be saved with the evaluation
                 </p>
               ) : (
                 <button className="btn btn-primary" onClick={() => uploadStaged(false)} disabled={saving}
                   style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}>
-                  {saving ? 'Saving...' : `Save screenshots (${staged.length})`}
+                  {saving ? 'Saving…' : `Save screenshots (${staged.length})`}
                 </button>
               )}
             </>

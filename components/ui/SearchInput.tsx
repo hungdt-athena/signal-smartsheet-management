@@ -6,7 +6,8 @@ export function SearchInput({ value, onChange, placeholder = 'Search', width = 2
   value: string
   onChange: (v: string) => void
   placeholder?: string
-  width?: number
+  /** px number, or any CSS width such as '100%'. */
+  width?: number | string
   ariaLabel?: string
   autoFocus?: boolean
 }) {

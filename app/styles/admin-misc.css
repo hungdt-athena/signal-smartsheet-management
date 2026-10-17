@@ -1,1 +1,2 @@
 /* admin-misc — area styles for the UI cleanup. Owned by one area; shared rules live in globals.css. */
+.login-brand { padding: 0; margin-bottom: 24px; }

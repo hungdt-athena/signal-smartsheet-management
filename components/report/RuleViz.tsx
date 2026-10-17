@@ -15,21 +15,24 @@
 // the flagged state is also in the label and the sentence under the chart.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
+// Tokens, not hex: the shared ones from globals.css, and the three shades that have
+// no shared token (flag amber, base and muted grey) from app/styles/performance.css.
+// var() works in SVG fill/stroke attributes, so the marks need no literal.
 export const VIZ = {
-  flag: '#d97706',      // status: warning (marks only - text stays in text tokens)
-  flagWash: '#fbf1de',  // the zone a flag lives in
-  base: '#8b97aa',      // everyone the rule looked at and did not flag
-  muted: '#dde2ea',     // not looked at
-  grid: '#e7e9ee',
-  ink: '#1a1c22',
-  sub: '#59606e',
-  faint: '#99a0ad',
+  flag: 'var(--rv-flag)',          // status: warning (marks only - text stays in text tokens)
+  flagWash: 'var(--warn-weak)',    // the zone a flag lives in
+  base: 'var(--rv-base)',          // everyone the rule looked at and did not flag
+  muted: 'var(--rv-muted)',        // not looked at
+  grid: 'var(--border)',
+  ink: 'var(--text)',
+  sub: 'var(--muted)',
+  faint: 'var(--faint)',
 }
 
 // 'hit' = the people a NEUTRAL readout is about (e.g. whose score gets discounted):
 // the accent hue, because it is emphasis without being an alert.
 export type VizState = 'flag' | 'hit' | 'base' | 'muted'
-const HIT = '#2a78d6'
+const HIT = 'var(--rv-hit)'
 
 // Draw in real pixels. A fixed viewBox scaled to the card made an 11px label 16px on
 // a wide screen and 8px on a narrow one; measuring the box keeps text at its size and
@@ -84,7 +87,7 @@ export function ThresholdBars({ rows, domain, limit, limitLabel, ariaLabel }: {
           <g key={r.key} onMouseEnter={() => setHover(r.key)}>
             <title>{r.tip || `${r.name}: ${r.label}`}</title>
             {/* the whole row is the hit target, not the painted bar */}
-            <rect x={0} y={y} width={W} height={rowH} fill={hover === r.key ? '#f5f6f8' : 'transparent'} rx={4} />
+            <rect x={0} y={y} width={W} height={rowH} fill={hover === r.key ? 'var(--surface-2)' : 'transparent'} rx={4} />
             <text x={nameW} y={y + rowH / 2 + 4} textAnchor="end" className={'rv-name' + (r.state === 'flag' ? ' flag' : r.state === 'muted' ? ' muted' : '')}>
               {r.state === 'flag' ? '! ' : ''}{r.name}
             </text>
@@ -163,7 +166,7 @@ export function RatioStrip({ dots, low, high, ariaLabel }: {
         <g key={p.key} onMouseEnter={() => setHover(p.key)} onFocus={() => setHover(p.key)} tabIndex={0}>
           <title>{p.tip}</title>
           <circle cx={p.cx} cy={p.cy} r={12} fill="transparent" />
-          <circle cx={p.cx} cy={p.cy} r={5.5} fill={p.state === 'flag' ? VIZ.flag : VIZ.base} stroke="#fff" strokeWidth={2} />
+          <circle cx={p.cx} cy={p.cy} r={5.5} fill={p.state === 'flag' ? VIZ.flag : VIZ.base} stroke="var(--surface)" strokeWidth={2} />
           {(p.state === 'flag' || hover === p.key) && (
             <text x={p.cx} y={labelBelow.has(p.key) ? p.cy + 20 : p.cy - 10} textAnchor="middle" className={'rv-dot-l' + (p.state === 'flag' ? ' flag' : '')}>
               {p.state === 'flag' ? '! ' : ''}{p.name}
@@ -193,7 +196,7 @@ export function SpreadLine({ dots, limit, ariaLabel }: { dots: SpreadDot[]; limi
   return (
     <div ref={ref}><svg className="rv-svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={ariaLabel} onMouseLeave={() => setHover(null)}>
       {/* the spread the rule allows, measured from the loosest evaluator */}
-      <rect x={x(loose.value)} y={axisY - 12} width={x(allowEnd) - x(loose.value)} height={24} fill="#eef3ff" rx={6} />
+      <rect x={x(loose.value)} y={axisY - 12} width={x(allowEnd) - x(loose.value)} height={24} fill="var(--accent-weak)" rx={6} />
       <line x1={padX} x2={W - padX} y1={axisY} y2={axisY} stroke={VIZ.grid} strokeWidth={1} />
       <line x1={x(allowEnd)} x2={x(allowEnd)} y1={axisY - 16} y2={axisY + 16} stroke={VIZ.ink} strokeWidth={1.5} strokeDasharray="4 3" />
       {/* the gap itself, as a bracket above the two ends */}
@@ -211,7 +214,7 @@ export function SpreadLine({ dots, limit, ariaLabel }: { dots: SpreadDot[]; limi
           <g key={p.key} onMouseEnter={() => setHover(p.key)} tabIndex={0}>
             <title>{p.tip}</title>
             <circle cx={x(p.value)} cy={axisY} r={12} fill="transparent" />
-            <circle cx={x(p.value)} cy={axisY} r={5.5} fill={end && over ? VIZ.flag : VIZ.base} stroke="#fff" strokeWidth={2} />
+            <circle cx={x(p.value)} cy={axisY} r={5.5} fill={end && over ? VIZ.flag : VIZ.base} stroke="var(--surface)" strokeWidth={2} />
             {(end || hover === p.key) && (
               <text x={x(p.value)} y={axisY + 22} textAnchor="middle" className="rv-dot-l">{p.name}</text>
             )}
@@ -231,7 +234,7 @@ export function Meter({ value, limit, max, format, ariaLabel }: {
   return (
     <div className="rv-meter" role="img" aria-label={ariaLabel}>
       <div className="rv-meter-track">
-        <div className="rv-meter-fill" style={{ width: pct(value), background: over ? VIZ.flag : '#2a78d6' }} />
+        <div className="rv-meter-fill" style={{ width: pct(value), background: over ? VIZ.flag : HIT }} />
         <div className="rv-meter-limit" style={{ left: pct(limit) }}><span>limit {format(limit)}</span></div>
       </div>
       <div className="rv-meter-read">

@@ -1,23 +1,33 @@
-// components/RescuePanel.tsx — stale-backlog rescue (admin only).
+// components/RescuePanel.tsx — stale-backlog rescue. Running one is admin only;
+// an evaluator sees History alone (the rescue runs they were in, scoped by
+// /api/operations/runs) and this panel never calls the scan API for them.
 //
 // Reassign asks the manager who to move games from. Rescue answers that itself: it
 // scans the whole bucket, marks who is sitting on stale games (SOURCE) and who has
 // earned the right to take them (RECEIVER), and shows the reason for every verdict so
 // the run can be argued with before it happens.
 //
-// Three explicit steps, nothing automatic: Scan → Preview → Approve & commit. The
-// thresholds live in app_config (key 'rescue_config') and are saved on every Scan.
+// Three explicit steps, nothing automatic: Scan → Preview → Move (with a confirm
+// that states the count). The thresholds live in app_config (key 'rescue_config')
+// and are saved on every Scan.
+//
+// Layout: category group, then the scan form, its preview, then History below.
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BUCKETS, type Bucket } from '@/lib/buckets'
+import { useSession } from 'next-auth/react'
+import type { Bucket } from '@/lib/buckets'
+import { toast } from '@/lib/toast'
+import { BUCKET_OPTS } from '@/components/RosterTable'
 import { DistributionResult, type DistResult } from '@/components/DistributionResult'
 import { OperationHistory } from '@/components/OperationHistory'
+import { FilterBar } from '@/components/ui/FilterBar'
+import { Modal } from '@/components/ui/Modal'
+import { Seg } from '@/components/ui/Seg'
+import { EmptyState, ErrorState } from '@/components/ui/States'
 // The "?" popover used across the Report tab — same idiom, same CSS (.rp-qtip).
 import { InfoTip } from '@/components/report/charts'
 import { DEFAULT_RESCUE_CONFIG, type RescueConfig } from '@/lib/rescue-config'
-
-const BUCKET_LABELS: Record<Bucket, string> = { puzzle: 'Puzzle', arcade: 'Arcade', simulation: 'Simulation' }
 
 interface ScanRow {
   name: string
@@ -41,7 +51,8 @@ interface RescueResult extends DistResult {
   per_source?: { from: string; pulled: number; per_evaluator: Record<string, number> }[]
 }
 
-const ROLE_PILL: Record<ScanRow['role'], string> = { source: 'off', receiver: 'on', neutral: 'muted' }
+// Role is read, not clicked, so it is a badge. Source is amber (behind), not red.
+const ROLE_BADGE: Record<ScanRow['role'], string> = { source: 'running', receiver: 'success', neutral: 'neutral' }
 const ROLE_LABEL: Record<ScanRow['role'], string> = { source: 'Source', receiver: 'Receiver', neutral: '—' }
 
 // Label + hover description for each threshold, in the order they read as a sentence.
@@ -76,20 +87,20 @@ const KNOBS: { key: keyof RescueConfig; label: string; tip: ReactNode }[] = [
 ]
 
 // Table columns. `tip` is omitted where the header already says everything.
-const COLS: { label: string; width?: number; tip?: ReactNode }[] = [
+const COLS: { label: string; width?: number; tip?: ReactNode; num?: boolean }[] = [
   { label: 'Evaluator' },
-  { label: 'Pending', width: 78, tip: <>Games they hold right now with no initial conclusion yet.</> },
+  { label: 'Pending', width: 78, num: true, tip: <>Games they hold right now with no initial conclusion yet.</> },
   {
-    label: 'Stale', width: 70,
+    label: 'Stale', width: 70, num: true,
     tip: <>How many of those are past the stale threshold. Games inside their cool-down are <b>included</b>{' '}
       here, because such a game still sits on their shelf even though this run will not move it.</>,
   },
   {
-    label: 'Movable', width: 84,
+    label: 'Movable', width: 84, num: true,
     tip: <>What can actually be pulled: stale minus anything still in cool-down. A source shows{' '}
       <b>−N</b> (games leaving). After a Preview, a receiver shows <b>+N</b> — the games they would take on.</>,
   },
-  { label: 'Done', width: 78, tip: <>Games concluded within the &quot;Active within&quot; window. This is what separates a fast-moving evaluator from an inactive one.</> },
+  { label: 'Done', width: 78, num: true, tip: <>Games concluded within the &quot;Active within&quot; window. This is what separates a fast-moving evaluator from an inactive one.</> },
   {
     label: 'Role', width: 96,
     tip: <><b>Source</b> gives games up, <b>Receiver</b> takes them on, <b>—</b> sits this run out. Nobody can
@@ -113,14 +124,46 @@ const RESULT_MSG: Record<NonNullable<RescueResult['reason']>, string> = {
 // a link carrying one would silently rewrite the admin's saved settings the next
 // time this panel scans.
 //
-// initialCategory: which bucket the sentence that sent them here was about. A
-// category is a VIEW SELECTOR, not a setting — it decides which scan is on screen and
-// is never written back to app_config — so unlike a threshold it is safe in a URL.
-// Without it a reader on Arcade landed on a puzzle scan where none of the flashed
-// names appear and none of the numbers in the sentence exist. The caller validates it
-// against the bucket list; anything else falls back to this panel's own default.
-export function RescuePanel({ flash = [], initialCategory }: { flash?: string[]; initialCategory?: Bucket } = {}) {
-  const [category, setCategory] = useState<Bucket>(initialCategory ?? 'puzzle')
+// category: which bucket is on screen; the page keeps it in ?cat=. A category is a
+// VIEW SELECTOR, not a setting — it decides which scan is on screen and is never
+// written back to app_config — so unlike a threshold it is safe in a URL. Without
+// it a reader on Arcade landed on a puzzle scan where none of the flashed names
+// appear and none of the numbers in the sentence exist.
+export function RescuePanel({ flash = [], category, onCategoryChange }: {
+  flash?: string[]
+  category: Bucket
+  onCategoryChange: (b: Bucket) => void
+}) {
+  const { data: session, status } = useSession()
+  const isEvaluator = session?.user?.role === 'evaluator'
+  // Wait for the session before the first scan: an evaluator must never call the
+  // admin-only scan, not even once while the role is still unknown.
+  const canScan = status !== 'loading' && !isEvaluator
+
+  const bucketBar = (
+    <FilterBar ariaLabel="Category group">
+      <Seg value={category} onChange={onCategoryChange} options={BUCKET_OPTS} ariaLabel="Category group" />
+    </FilterBar>
+  )
+
+  if (!canScan) {
+    return (
+      <>
+        {bucketBar}
+        {isEvaluator && <OperationHistory kind="rescue" category={category} />}
+      </>
+    )
+  }
+
+  return (
+    <>
+      {bucketBar}
+      <RescueRunner flash={flash} category={category} />
+    </>
+  )
+}
+
+function RescueRunner({ flash, category }: { flash: string[]; category: Bucket }) {
   const [config, setConfig] = useState<RescueConfig>(DEFAULT_RESCUE_CONFIG)
   const [rows, setRows] = useState<ScanRow[] | null>(null)
   const [pickedSources, setPickedSources] = useState<Record<string, boolean>>({})
@@ -129,7 +172,9 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
   const [scanning, setScanning] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [committing, setCommitting] = useState(false)
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [loadTick, setLoadTick] = useState(0) // bump to retry the initial load
   const [histToken, setHistToken] = useState(0)
   // The config the visible table was scanned with, and the picks the visible preview
   // was built from. Either drifting from the current form state means the result on
@@ -161,21 +206,22 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
     setResult(null)
   }, [])
 
-  // Initial load per bucket: stored config + a scan against it.
+  // Initial load per bucket: stored config + a scan against it. A GET, so a retry
+  // after a failure is safe: it never writes the config the way a POST scan does.
   useEffect(() => {
     let alive = true
-    setRows(null); setResult(null); setMsg(null); setScanning(true)
+    setRows(null); setResult(null); setLoadError(false); setScanning(true)
     fetch(`/api/operations/rescue?category=${category}`, { cache: 'no-store' })
-      .then(res => res.json())
+      .then(res => { if (!res.ok) throw new Error(); return res.json() })
       .then(json => {
         if (!alive) return
         if (json.config) { setConfig(json.config as RescueConfig); setScannedKey(JSON.stringify(json.config)) }
         applyRows((json.rows ?? []) as ScanRow[])
       })
-      .catch(() => { if (alive) setMsg({ type: 'err', text: 'Failed to load the roster scan.' }) })
+      .catch(() => { if (alive) setLoadError(true) })
       .finally(() => { if (alive) setScanning(false) })
     return () => { alive = false }
-  }, [category, applyRows])
+  }, [category, applyRows, loadTick])
 
   async function post(action: 'scan' | 'preview' | 'commit') {
     const body = { action, category, config, ...picks() }
@@ -188,17 +234,18 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
   }
 
   async function runScan() {
-    setScanning(true); setMsg(null)
+    setScanning(true)
     try {
       const json = await post('scan')
       if (json.config) { setConfig(json.config); setScannedKey(JSON.stringify(json.config)) }
       applyRows(json.rows ?? [])
-    } catch (e) { setMsg({ type: 'err', text: e instanceof Error ? e.message : 'Scan failed' }) }
+      setLoadError(false)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Scan failed.') }
     finally { setScanning(false) }
   }
 
   async function runPreview() {
-    setPreviewing(true); setMsg(null)
+    setPreviewing(true)
     const sent = pickKey // what this preview is about to be built from
     try {
       const json = await post('preview')
@@ -215,16 +262,17 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
       }
       setResult({ ...json, dryRun: true })
       setPreviewKey(sent)
-    } catch (e) { setMsg({ type: 'err', text: e instanceof Error ? e.message : 'Preview failed' }) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Preview failed.') }
     finally { setPreviewing(false) }
   }
 
   async function commit() {
-    setCommitting(true); setMsg(null)
+    setCommitting(true)
     try {
       const json = await post('commit')
       setResult({ ...json, dryRun: false })
-      setMsg({ type: 'ok', text: `Rescued ${json.assigned ?? 0} stale games from ${json.per_source?.length ?? 0} evaluators.` })
+      setConfirming(false)
+      toast.success(`Moved ${json.assigned ?? 0} stale games from ${json.per_source?.length ?? 0} evaluators.`)
       setHistToken(t => t + 1)
       // Every number in the table just changed; re-scan so it matches the DB. applyRows
       // clears the result, so hold the committed one and put it back.
@@ -232,7 +280,7 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
       const fresh = await post('scan')
       applyRows(fresh.rows ?? [])
       setResult(committed)
-    } catch (e) { setMsg({ type: 'err', text: e instanceof Error ? e.message : 'Commit failed' }) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Rescue failed.') }
     finally { setCommitting(false) }
   }
 
@@ -257,9 +305,14 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
   const pickKey = JSON.stringify(picks())
   const previewStale = !!result && result.dryRun && previewKey !== pickKey
 
+  // The count the preview says will move: the button and the confirm both say it.
+  const toMove = result?.dryRun ? (result.assignable ?? 0) : 0
+  const moveLabel = `Move ${toMove} ${toMove === 1 ? 'game' : 'games'}`
+
   const commitBtn = (
-    <button className="btn btn-primary btn-sm" disabled={!canCommit || committing || previewStale} onClick={commit}>
-      {committing ? 'Rescuing…' : `Approve & commit${toPull ? ` · ${toPull} games` : ''}`}
+    <button className="btn btn-primary btn-sm" disabled={!canCommit || committing || previewStale}
+      onClick={() => setConfirming(true)}>
+      {moveLabel}
     </button>
   )
 
@@ -269,136 +322,122 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
   }
 
   return (
-    <div>
-      <div className="seg-wrapper" style={{ display: 'inline-flex', gap: 4, marginBottom: 14 }}>
-        {BUCKETS.map(b => (
-          <button key={b} className={`seg-btn-premium${category === b ? ' active' : ''}`} onClick={() => setCategory(b)}>
-            {BUCKET_LABELS[b]}
-          </button>
-        ))}
-      </div>
-
-      <OperationHistory kind="rescue" category={category} reloadToken={histToken} />
-
+    <>
       <div className="card">
-        <div style={{ padding: 16 }}>
-          <p style={{ fontSize: 12.5, color: 'var(--faint)', margin: '0 2px 14px' }}>
-            Moves games that have sat too long with one evaluator to evaluators who are clearing
-            their own shelf. Nothing moves until you approve the preview.
-          </p>
-
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
-            {KNOBS.map(k => (
-              <div className="field" key={k.key} style={{ width: 178 }}>
-                <span className="label">
-                  {k.label}
-                  <InfoTip title={k.label}>{k.tip}</InfoTip>
-                </span>
-                <input type="number" min={0} className="input" value={config[k.key]}
-                  onChange={e => setKnob(k.key, e.target.value)} />
-              </div>
-            ))}
-            <button className="btn btn-primary" disabled={scanning} onClick={runScan}>
-              {scanning ? 'Scanning…' : 'Scan'}
-            </button>
-          </div>
-
-          {configDirty && (
-            <p style={{ fontSize: 12, color: 'var(--warn, var(--faint))', margin: '-6px 2px 12px' }}>
-              Thresholds changed — Scan again to refresh the table below.
-            </p>
-          )}
-
-          {rows && rows.length === 0 && <p className="empty">No evaluators on this bucket&apos;s initial roster.</p>}
-
-          {rows && rows.length > 0 && (
-            <div className="tbl-wrap">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th style={{ width: 34 }}>
-                      <InfoTip title="Include in this run">
-                        Ticked rows take part. Untick a source to leave its backlog for a later run, or a
-                        receiver to keep games off their shelf. Unticking re-splits the games among whoever
-                        is left, so run Preview again afterwards.
-                      </InfoTip>
-                    </th>
-                    {COLS.map(c => (
-                      <th key={c.label} style={c.width ? { width: c.width } : undefined}>
-                        {c.label === 'Done' ? `Done ${config.activeDays}d` : c.label}
-                        {c.tip && <InfoTip title={c.label}>{c.tip}</InfoTip>}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map(r => {
-                    const picked = r.role === 'source' ? !!pickedSources[r.name]
-                      : r.role === 'receiver' ? !!pickedReceivers[r.name] : false
-                    const toggle = () => (r.role === 'source' ? setPickedSources : setPickedReceivers)(
-                      prev => ({ ...prev, [r.name]: !prev[r.name] }),
-                    )
-                    const quota = result?.quotas?.[r.name]
-                    return (
-                      <tr key={r.name} id={`rescue-row-${r.name}`}
-                        className={ring.has(r.name.toLowerCase()) ? 'cfg-highlightable cfg-highlight' : undefined}
-                        style={r.role === 'neutral' ? { opacity: 0.55 } : undefined}>
-                        <td>
-                          {r.role !== 'neutral' && (
-                            <input type="checkbox" checked={picked} onChange={toggle}
-                              aria-label={`Include ${r.name}`} />
-                          )}
-                        </td>
-                        <td className="cell-name">
-                          {r.name}
-                          {!r.available && <span className="pill off" style={{ fontSize: 10, marginLeft: 6 }}>away</span>}
-                          {r.platform && r.platform !== 'all' && (
-                            <span className="pill tag" style={{ fontSize: 10, marginLeft: 6 }}>{r.platform}</span>
-                          )}
-                        </td>
-                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.pending}</td>
-                        <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: r.stale ? 600 : 400 }}>{r.stale}</td>
-                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          {r.role === 'source' ? <strong>−{r.pull}</strong> : quota ? <strong>+{quota}</strong> : r.movable || '—'}
-                        </td>
-                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.evaluatedRecent}</td>
-                        <td><span className={`pill ${ROLE_PILL[r.role]}`} style={{ fontSize: 10 }}>{ROLE_LABEL[r.role]}</span></td>
-                        <td style={{ fontSize: 12, color: 'var(--faint)' }}>{r.reason}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+        <div className="ops-knobs">
+          {KNOBS.map(k => (
+            <div className="field" key={k.key} style={{ width: 178 }}>
+              <span className="label">
+                {k.label}
+                <InfoTip title={k.label}>{k.tip}</InfoTip>
+              </span>
+              <input type="number" min={0} className="input" value={config[k.key]}
+                onChange={e => setKnob(k.key, e.target.value)} />
             </div>
-          )}
+          ))}
+          <button className="btn btn-primary" disabled={scanning} onClick={runScan}>
+            {scanning ? 'Scanning…' : 'Scan'}
+          </button>
+        </div>
 
-          <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button className="btn btn-primary" disabled={!canPreview || previewing || configDirty} onClick={runPreview}>
-              {previewing ? 'Previewing…' : 'Preview'}
-            </button>
-            <span style={{ fontSize: 12, color: 'var(--faint)' }}>
-              {canPreview
-                ? `${toPull} stale games from ${selSources.length} ${selSources.length === 1 ? 'evaluator' : 'evaluators'} → ${selReceivers.length} ${selReceivers.length === 1 ? 'receiver' : 'receivers'}`
-                : toPull === 0
-                  ? 'Nothing stale to move under these thresholds.'
-                  : 'No eligible receiver — stale games would only change hands, not get done.'}
-            </span>
+        {configDirty && (
+          <p className="ops-hint ops-warn">Thresholds changed. Scan again to refresh the table below.</p>
+        )}
+
+        {loadError && !rows && (
+          <ErrorState onRetry={() => setLoadTick(t => t + 1)}>Could not load the roster scan.</ErrorState>
+        )}
+
+        {rows && rows.length === 0 && <EmptyState>No evaluators on this category group&apos;s initial roster.</EmptyState>}
+
+        {rows && rows.length > 0 && (
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th style={{ width: 34 }}>
+                    <InfoTip title="Include in this run">
+                      Ticked rows take part. Untick a source to leave its backlog for a later run, or a
+                      receiver to keep games off their shelf. Unticking re-splits the games among whoever
+                      is left, so run Preview again afterwards.
+                    </InfoTip>
+                  </th>
+                  {COLS.map(c => (
+                    <th key={c.label} className={c.num ? 'tnum' : undefined} style={c.width ? { width: c.width } : undefined}>
+                      {c.label === 'Done' ? `Done ${config.activeDays}d` : c.label}
+                      {c.tip && <InfoTip title={c.label}>{c.tip}</InfoTip>}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => {
+                  const picked = r.role === 'source' ? !!pickedSources[r.name]
+                    : r.role === 'receiver' ? !!pickedReceivers[r.name] : false
+                  const toggle = () => (r.role === 'source' ? setPickedSources : setPickedReceivers)(
+                    prev => ({ ...prev, [r.name]: !prev[r.name] }),
+                  )
+                  const quota = result?.quotas?.[r.name]
+                  return (
+                    <tr key={r.name} id={`rescue-row-${r.name}`}
+                      className={ring.has(r.name.toLowerCase()) ? 'cfg-highlightable cfg-highlight' : undefined}
+                      style={r.role === 'neutral' ? { opacity: 0.55 } : undefined}>
+                      <td>
+                        {r.role !== 'neutral' && (
+                          <input type="checkbox" checked={picked} onChange={toggle}
+                            aria-label={`Include ${r.name}`} />
+                        )}
+                      </td>
+                      <td className="cell-name">
+                        {r.name}
+                        {/* Away is grey, not red: being off today is not an error. */}
+                        {!r.available && <span className="pill muted" style={{ marginLeft: 6 }}>away</span>}
+                        {r.platform && r.platform !== 'all' && (
+                          <span className="pill tag" style={{ marginLeft: 6 }}>{r.platform}</span>
+                        )}
+                      </td>
+                      <td className="tnum">{r.pending}</td>
+                      <td className="tnum" style={{ fontWeight: r.stale ? 600 : 400 }}>{r.stale}</td>
+                      <td className="tnum">
+                        {r.role === 'source' ? <strong>−{r.pull}</strong> : quota ? <strong>+{quota}</strong> : r.movable || '—'}
+                      </td>
+                      <td className="tnum">{r.evaluatedRecent}</td>
+                      <td><span className={`badge ${ROLE_BADGE[r.role]}`}>{ROLE_LABEL[r.role]}</span></td>
+                      <td style={{ fontSize: 12, color: 'var(--faint)' }}>{r.reason}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
+        )}
+
+        <div className="ops-actions">
+          <button className="btn btn-primary" disabled={!canPreview || previewing || configDirty} onClick={runPreview}>
+            {previewing ? 'Previewing…' : 'Preview'}
+          </button>
+          <span className="ops-hint">
+            {canPreview
+              ? `${toPull} stale games from ${selSources.length} ${selSources.length === 1 ? 'evaluator' : 'evaluators'} → ${selReceivers.length} ${selReceivers.length === 1 ? 'receiver' : 'receivers'}`
+              : toPull === 0
+                ? 'Nothing stale to move under these thresholds.'
+                : 'No receiver qualifies. Stale games would only change hands, not get done.'}
+          </span>
         </div>
       </div>
 
-      {result?.reason && <p className="msg-err" style={{ marginTop: 10 }}>{RESULT_MSG[result.reason]}</p>}
+      {result?.reason && (
+        <div className="card"><EmptyState>{RESULT_MSG[result.reason]}</EmptyState></div>
+      )}
 
       {result && !result.reason && (
         <>
           {previewStale && (
-            <p style={{ fontSize: 12, color: 'var(--faint)', margin: '10px 2px 0', fontStyle: 'italic' }}>
-              Selection changed — re-run Preview before committing.
-            </p>
+            <p className="ops-hint">Selection changed. Run Preview again before moving.</p>
           )}
-          <DistributionResult result={result} action={commitBtn} />
+          <DistributionResult result={result} action={result.dryRun ? commitBtn : undefined} />
           {!!result.per_source?.length && (
-            <div className="card" style={{ marginTop: 12 }}>
+            <div className="card">
               <div className="card-head">
                 <span className="card-label">
                   Pulled from
@@ -414,7 +453,7 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
                   <thead>
                     <tr>
                       <th>Source</th>
-                      <th style={{ width: 80 }}>Games</th>
+                      <th className="tnum" style={{ width: 80 }}>Games</th>
                       <th>
                         Went to
                         <InfoTip title="Went to">Receivers and how many of THIS source&apos;s games each took.</InfoTip>
@@ -425,7 +464,7 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
                     {result.per_source.map(s => (
                       <tr key={s.from}>
                         <td className="cell-name">{s.from}</td>
-                        <td style={{ fontWeight: 600 }}>{s.pulled}</td>
+                        <td className="tnum" style={{ fontWeight: 600 }}>{s.pulled}</td>
                         <td style={{ fontSize: 12 }}>
                           {Object.entries(s.per_evaluator).map(([n, c]) => `${n} (${c})`).join(', ') || '—'}
                         </td>
@@ -439,7 +478,23 @@ export function RescuePanel({ flash = [], initialCategory }: { flash?: string[];
         </>
       )}
 
-      {msg && <p className={msg.type === 'ok' ? 'msg-ok' : 'msg-err'} style={{ marginTop: 10 }}>{msg.text}</p>}
-    </div>
+      <OperationHistory kind="rescue" category={category} reloadToken={histToken} />
+
+      {confirming && (
+        <Modal title={`${moveLabel}?`} width={460} busy={committing} onClose={() => setConfirming(false)}
+          footer={<>
+            <button type="button" className="btn" disabled={committing} onClick={() => setConfirming(false)}>Cancel</button>
+            <button type="button" className="btn btn-primary" disabled={committing} onClick={commit}>
+              {committing ? 'Moving…' : moveLabel}
+            </button>
+          </>}>
+          <p className="ops-confirm">
+            {toMove} stale {toMove === 1 ? 'game moves' : 'games move'} from {selSources.length}{' '}
+            {selSources.length === 1 ? 'evaluator' : 'evaluators'} ({selSources.map(r => r.name).join(', ')}) to{' '}
+            {selReceivers.length} {selReceivers.length === 1 ? 'receiver' : 'receivers'} ({selReceivers.map(r => r.name).join(', ')}).
+          </p>
+        </Modal>
+      )}
+    </>
   )
 }

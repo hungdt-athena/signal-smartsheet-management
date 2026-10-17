@@ -52,4 +52,28 @@ describe('UnsavedChangesDialog', () => {
     fireEvent.click(document.querySelector('.modal-backdrop')!)
     expect(p.onStay).toHaveBeenCalledTimes(1)
   })
+  it('keeps Discard on the left, red, and Save last; focus starts on Save', () => {
+    show()
+    const foot = document.querySelector('.modal-foot')!
+    const names = Array.from(foot.querySelectorAll('button')).map(b => b.textContent)
+    expect(names).toEqual(['Discard & next', 'Keep editing', 'Save & next'])
+    expect(screen.getByRole('button', { name: 'Discard & next' }).className).toContain('btn-danger')
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Save & next' }))
+    // a prompt that must be answered: no X
+    expect(screen.queryByLabelText('Close')).toBeNull()
+  })
+  it('starts focus on Keep editing when Save is blocked', () => {
+    show({ saveBlockedReason: 'Self note needs at least 10 characters.' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Keep editing' }))
+  })
+  it('Esc keeps editing', () => {
+    const p = show()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(p.onStay).toHaveBeenCalledTimes(1)
+  })
+  it('ignores Esc while a save runs', () => {
+    const p = show({ saving: true })
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(p.onStay).not.toHaveBeenCalled()
+  })
 })

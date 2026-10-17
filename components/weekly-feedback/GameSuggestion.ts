@@ -13,7 +13,7 @@ function platformBadge(link: string | null): HTMLSpanElement | null {
   if (!p) return null
   const span = document.createElement('span')
   span.className = 'wf-plat'
-  span.style.color = p === 'ios' ? 'var(--muted)' : '#1aa260'
+  span.style.color = p === 'ios' ? 'var(--muted)' : 'var(--good)'
   span.innerHTML = p === 'ios' ? IOS_SVG : ANDROID_SVG
   return span
 }

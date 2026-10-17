@@ -1,1 +1,33 @@
 /* performance — area styles for the UI cleanup. Owned by one area; shared rules live in globals.css. */
+
+/* Rule illustrations (Config -> Alert rules, components/report/RuleViz.tsx). The three
+   shades with no shared token. Kept as tokens so the TSX holds no hex. */
+:root {
+  --rv-flag: #d97706;   /* a flagged person: warning amber, marks only */
+  --rv-base: #8b97aa;   /* looked at, not flagged */
+  --rv-muted: #dde2ea;  /* not looked at (too few games) */
+  --rv-hit: #2a78d6;    /* the people a neutral readout is about */
+}
+
+/* Filter bar: the shared .filter-row box. The Report's bar keeps its own wider gaps,
+   because every control in it carries a visible label. */
+.filter-row.rp-filters { gap: 10px 20px; padding: 10px 16px; }
+/* Custom range dates: 32px like every other control in a filter bar. */
+.rp-filters .rp-date { height: 32px; font-size: var(--fs-13); padding: 0 8px; }
+
+/* Daily, recording and flow tables take the shared .tbl header (11px caps, faint).
+   A row header (tbody th) is a name or a metric, not a column head, so it keeps
+   body text rather than the header caps. */
+.tbl.rp-daily-table tbody th,
+.tbl.rp-flow-table tbody th { font-size: inherit; text-transform: none; letter-spacing: normal; white-space: nowrap; }
+.tbl.rp-daily-table tbody th { color: var(--text); }
+.tbl.rp-flow-table thead th { color: var(--faint); font-weight: 700; }
+.tbl.rp-flow-table td { font-size: inherit; }
+/* The flow table's first and last columns are sticky with a solid background, so a
+   row hover would only colour the middle of the row. */
+.tbl.rp-flow-table tbody tr:hover { background: none; }
+
+/* Individual -> Review table toolbar: the shared filter bar inside the section. */
+.rp-review-toolbar .filter-row { flex: 1 1 auto; }
+.rp-review-filters .rp-review-filter { flex-direction: row; align-items: center; gap: 8px; }
+.rp-review-filters .rp-review-filter input[type=date] { height: 32px; padding: 0 8px; }

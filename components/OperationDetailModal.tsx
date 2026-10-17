@@ -1,67 +1,52 @@
 // components/OperationDetailModal.tsx — "Details" popup for a Team Operations run.
 // Re-renders the stored snapshot (or the committed result, for an approved handover)
 // through the shared DistributionResult, so the Source pool + Distribution look
-// exactly as they were previewed. Reuses the eval-modal-* backdrop/container.
+// exactly as they were previewed. Uses the shared <Modal> (Esc, focus trap, X).
 'use client'
 import { DistributionResult } from '@/components/DistributionResult'
 import type { OperationRun } from '@/components/OperationHistory'
-import { useEscapeToClose } from '@/lib/use-escape-to-close'
+import { Modal } from '@/components/ui/Modal'
+import { fmtDateTimeVN, fmtDateVN } from '@/lib/format-date'
 
-const STATUS_PILL: Record<string, string> = {
-  committed: 'on', approved: 'on', pending: 'tag', rejected: 'off',
+// Status is a badge (it is read, not clicked). OperationHistory uses the same map.
+// It lives here so the two files import each other only for types.
+export const STATUS_BADGE: Record<string, string> = {
+  committed: 'success', approved: 'success', pending: 'running', rejected: 'error',
 }
 
-function fmtDate(d: string | null): string {
-  if (!d) return '—'
-  const [y, m, day] = d.slice(0, 10).split('-')
-  return `${day}/${m}/${y.slice(2)}`
-}
-
-function fmtWhen(ts: string | null): string {
-  if (!ts) return '—'
-  return new Date(ts).toLocaleString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', dateStyle: 'short', timeStyle: 'short' })
+const KIND_LABEL: Record<OperationRun['kind'], string> = {
+  reassign: 'Reassign', handover: 'Handover', rescue: 'Rescue',
 }
 
 export function OperationDetailModal({ run, onClose }: { run: OperationRun; onClose: () => void }) {
   // Approved handover carries the committed result; everything else shows the snapshot.
   const dist = run.result ?? run.snapshot
   const window = run.params?.start_date && run.params?.end_date
-    ? `${fmtDate(run.params.start_date)} → ${fmtDate(run.params.end_date)}`
+    ? `${fmtDateVN(run.params.start_date)} → ${fmtDateVN(run.params.end_date)}`
     : run.params?.count
       ? `${run.params.count} games (oldest first)`
       : null
 
-  useEscapeToClose(onClose)
   return (
-    <div className="eval-modal-backdrop" onClick={onClose}>
-      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{ padding: '20px 24px 24px', maxWidth: 760, width: '96vw', maxHeight: '90vh', overflowY: 'auto' }}>
-
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
-          <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, textTransform: 'capitalize' }}>
-            {run.kind} · {run.from_evaluator}
-          </h2>
-          <button className="btn btn-ghost" onClick={onClose} style={{ padding: '4px 10px', fontSize: 12 }}>✕</button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5, color: 'var(--faint)', marginBottom: 4 }}>
-          <span className={`pill ${STATUS_PILL[run.status] ?? 'tag'}`} style={{ fontSize: 10 }}>{run.status}</span>
+    <Modal width={760} onClose={onClose}
+      title={`${KIND_LABEL[run.kind] ?? run.kind} · ${run.from_evaluator}`}
+      sub={
+        <span className="opdet-meta">
+          <span className={`badge ${STATUS_BADGE[run.status] ?? 'neutral'}`}>{run.status}</span>
           <span>{run.category_group}</span>
           {window && <span>· {window}</span>}
-          <span>· submitted {fmtWhen(run.submitted_at)}{run.submitted_by ? ` by ${run.submitted_by}` : ''}</span>
-          {run.reviewed_at && <span>· {run.status} {fmtWhen(run.reviewed_at)}{run.reviewed_by ? ` by ${run.reviewed_by}` : ''}</span>}
-        </div>
-        {run.review_note && (
-          <p style={{ fontSize: 12.5, color: 'var(--faint)', margin: '2px 0 0' }}>Note: {run.review_note}</p>
-        )}
-        {run.kind === 'handover' && run.status === 'pending' && (
-          <p style={{ fontSize: 12, color: 'var(--faint)', margin: '6px 0 0', fontStyle: 'italic' }}>
-            Preview from submit time — the actual distribution is recomputed when approved.
-          </p>
-        )}
+          <span>· submitted {fmtDateTimeVN(run.submitted_at)}{run.submitted_by ? ` by ${run.submitted_by}` : ''}</span>
+          {run.reviewed_at && <span>· {run.status} {fmtDateTimeVN(run.reviewed_at)}{run.reviewed_by ? ` by ${run.reviewed_by}` : ''}</span>}
+        </span>
+      }>
+      {run.review_note && <p className="opdet-note">Note: {run.review_note}</p>}
+      {run.kind === 'handover' && run.status === 'pending' && (
+        <p className="opdet-note">
+          This is the preview from when it was submitted. The split is worked out again when a manager approves it.
+        </p>
+      )}
 
-        <DistributionResult result={dist} />
-      </div>
-    </div>
+      <DistributionResult result={dist} />
+    </Modal>
   )
 }

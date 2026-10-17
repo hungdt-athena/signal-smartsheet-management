@@ -12,7 +12,12 @@ import { unsavedFields } from '@/lib/unsaved-fields'
 import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
 import { useConfig } from '@/hooks/useConfig'
 import { prettyConclusion } from '@/lib/buckets'
-import { CONCLUSION_COLORS } from '@/lib/conclusion-badge'
+import { conclusionBadgeClass, RECORD_STATUS_BADGE, type RecordStatus } from '@/lib/conclusion-badge'
+import { fmtDateVN, fmtDateTimeVN } from '@/lib/format-date'
+import { toast } from '@/lib/toast'
+import { CloseButton } from '@/components/ui/CloseButton'
+import { Switch } from '@/components/ui/Switch'
+import { IconX } from '@/components/ui/SearchInput'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
 import { type ReviewChange, type ReviewTag } from './TrendTagReview'
@@ -91,11 +96,6 @@ export interface EvalListItem { game_id: string; title: string }
 const INITIAL_CONCLUSION_OPTIONS = ['Bypass', 'List_Idea', 'Playtest & Bypass']
 
 
-function fmtDate(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: '2-digit' })
-}
-
 const MONTH_ABBR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 // Weekly batch labels for a month, e.g. weekBatches(2026, 6) →
@@ -104,16 +104,6 @@ const MONTH_ABBR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 
 export function weekBatches(year: number, month: number): string[] {
   const m = MONTH_ABBR[month] || ''
   return [1, 2, 3, 4].map(w => `W${w} ${m}, ${year}`)
-}
-
-// dd/MM/YY - hh:mm in Asia/Ho_Chi_Minh (UTC+7), same shape as the Evaluated
-// column in the evaluations table.
-function fmtDateTime(d: string | null) {
-  if (!d) return '—'
-  const dt = new Date(d)
-  const day = dt.toLocaleDateString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: '2-digit' })
-  const time = dt.toLocaleTimeString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hour12: false })
-  return `${day} - ${time}`
 }
 
 /** `category` picks the row when a game has one in more than one genre, each
@@ -142,6 +132,13 @@ export async function fetchTrendTags(gameId: string): Promise<TrendTagsPayload> 
   return { pending: d.pending || [], existing: d.existing || [] }
 }
 
+const CopyIcon = ({ size }: { size: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+)
+
 function InfoField({ label, value, copyValue, icon }: { label: string; value: string | null | undefined; copyValue?: string; icon?: ReactNode }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
@@ -159,14 +156,9 @@ function InfoField({ label, value, copyValue, icon }: { label: string; value: st
         {icon}
         <span>{value || '—'}</span>
         {copyValue && (
-          <button onClick={copy} title={`Copy ${label}`}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: copied ? 'var(--good)' : 'var(--faint)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            {copied ? '✓' : (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            )}
+          <button type="button" onClick={copy} title={`Copy ${label}`} aria-label={copied ? 'Copied' : `Copy ${label}`}
+            className={`copy-btn${copied ? ' done' : ''}`}>
+            {copied ? '✓' : <CopyIcon size={12} />}
           </button>
         )}
       </div>
@@ -190,25 +182,21 @@ function FileNameField({ name }: { name: string }) {
   }
   return (
     <div className="field" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-      <span className="label">File Name</span>
+      <span className="label">File name</span>
       <div style={{ display: 'flex', gap: 6 }}>
         <input className="input" readOnly value={name}
           style={{ flex: 1, minWidth: 0, fontSize: 12, fontFamily: 'var(--num)' }} />
-        <button className="btn btn-sm" onClick={copy} title="Copy file name"
+        <button type="button" className="btn btn-sm" onClick={copy} title="Copy file name" aria-label={copied ? 'Copied' : 'Copy file name'}
           style={{ flexShrink: 0, minWidth: 38, justifyContent: 'center' }}>
-          {copied ? '✓' : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          )}
+          {copied ? '✓' : <CopyIcon size={13} />}
         </button>
       </div>
     </div>
   )
 }
 
-function TitleCopyButton({ title }: { title: string }) {
+/** `label` names what is copied, for the tooltip and screen readers. */
+function TitleCopyButton({ title, label = 'title' }: { title: string; label?: string }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
@@ -218,14 +206,9 @@ function TitleCopyButton({ title }: { title: string }) {
     } catch { /* ignore */ }
   }
   return (
-    <button onClick={copy} title="Copy title"
-      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: copied ? 'var(--good)' : 'var(--faint)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-      {copied ? '✓' : (
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-        </svg>
-      )}
+    <button type="button" onClick={copy} title={`Copy ${label}`} aria-label={copied ? 'Copied' : `Copy ${label}`}
+      className={`copy-btn${copied ? ' done' : ''}`}>
+      {copied ? '✓' : <CopyIcon size={13} />}
     </button>
   )
 }
@@ -296,14 +279,10 @@ function NoteBox({ label, hint, value, onChange, placeholder, rows, disabled, wa
 
 function ClearBtn({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} title="Clear this field"
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none', border: 'none',
-        cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--faint)', padding: '0 2px',
-      }}>
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M18 6L6 18M6 6l12 12" />
-      </svg>
+    // A text-size action inside a field's label row, so .field-clear and not .btn-sm:
+    // a 28px button would make the row grow the moment the field gets a value.
+    <button type="button" onClick={onClick} title="Clear this field" className="field-clear">
+      <IconX size={11} />
       Clear
     </button>
   )
@@ -311,13 +290,7 @@ function ClearBtn({ onClick }: { onClick: () => void }) {
 
 function SaveStatus({ dirty }: { dirty: boolean }) {
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 999,
-      color: dirty ? 'var(--warn)' : 'var(--good)',
-      background: dirty ? 'var(--warn-weak)' : 'var(--good-weak)',
-      border: `1px solid ${dirty ? 'var(--warn)' : 'var(--good)'}`,
-    }}>
+    <span className={`badge ${dirty ? 'running' : 'success'}`}>
       {dirty ? (
         <>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)' }} />
@@ -429,8 +402,8 @@ function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: 
                   </span>
                 )}
                 {step.date && (
-                  <span style={{ fontSize: 10, color: 'var(--faint)', marginTop: step.assignee ? 1 : 2 }}>
-                    {fmtDate(step.date)}
+                  <span style={{ fontSize: 11, color: 'var(--faint)', marginTop: step.assignee ? 1 : 2 }}>
+                    {fmtDateVN(step.date)}
                   </span>
                 )}
               </div>
@@ -447,7 +420,7 @@ function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: 
                 {step.connector && (
                   <span style={{
                     position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
-                    fontSize: 9.5, fontWeight: 700, letterSpacing: '0.3px', whiteSpace: 'nowrap',
+                    fontSize: 11, fontWeight: 700, letterSpacing: '0.3px', whiteSpace: 'nowrap',
                     color: isCompleted ? 'var(--good)' : 'var(--muted)',
                     background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 5,
                   }}>
@@ -461,6 +434,26 @@ function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: 
       })}
     </div>
   )
+}
+
+// Same four states and badges as the Record tab (lib/conclusion-badge.ts):
+// uploaded → Recorded, no recorder → Pending, recorder confirmed → Recording,
+// recorder picked but not confirmed → Draft.
+function recordStatusOf(youtubeId: string | undefined, assignee: string | null, confirmed: boolean): RecordStatus {
+  if (youtubeId) return 'recorded'
+  if (!assignee) return 'pending'
+  return confirmed ? 'recording' : 'draft'
+}
+
+function RecordBadge({ status, youtubeId }: { status: RecordStatus; youtubeId?: string }) {
+  const b = RECORD_STATUS_BADGE[status]
+  if (status === 'recorded' && youtubeId) {
+    return (
+      <a className={`badge ${b.cls} yt-link`} href={`https://www.youtube.com/watch?v=${youtubeId}`} target="_blank" rel="noopener noreferrer"
+        title="Open on YouTube" style={{ textDecoration: 'none' }}>▶ {b.label}</a>
+    )
+  }
+  return <span className={`badge ${b.cls}`}>{b.label}</span>
 }
 
 interface Props {
@@ -541,7 +534,6 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   const [ev, setEv] = useState<EvalDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState<{ msg: string; err?: boolean } | null>(null)
 
   const [noteParts, setNoteParts] = useState<NoteParts>(EMPTY_NOTE_PARTS)
   const setNotePart = (k: keyof NoteParts, v: string) => setNoteParts(p => ({ ...p, [k]: v }))
@@ -640,6 +632,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     const gen = ++qrGenRef.current
     setQrDataUrl(null)
     if (!appLink) return
+    // Hex on purpose: the QR is drawn to a canvas (no CSS variables there) and must stay
+    // dark-on-white whatever the theme, or phones cannot scan it.
     QRCode.toDataURL(appLink, {
       width: 200, margin: 2, color: { dark: '#1a1c22', light: '#ffffff' },
     }).then(url => {
@@ -873,9 +867,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       .catch(() => setHistory(h => (h && h.gameId === gameId ? { ...h, error: true } : h)))
   }
 
+  // Results go to the app-wide toaster (bottom-right), same messages as before.
   const showToast = (msg: string, err = false) => {
-    setToast({ msg, err })
-    setTimeout(() => setToast(null), 3000)
+    if (err) toast.error(msg)
+    else toast.success(msg)
   }
 
   const updateManualShots = (gameId: string, urls: string[]) => {
@@ -1166,7 +1161,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     setDirty(true); setConfirmClearAll(false)
   }
 
-  if (loading && !ev) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>Loading...</div>
+  if (loading && !ev) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>Loading…</div>
   if (!ev) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>Not found</div>
 
   const screenshots = ev.screenshot_urls || []
@@ -1180,20 +1175,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       {/* Marker: when present, the parent .eval-modal-container expands to fill the
           viewport via a :has() rule in globals.css (no prop plumbing needed). */}
       {fullscreen && <div className="eval-fs-on" hidden />}
-      {/* Top bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-        {onClose && (
-          <button className="btn btn-sm btn-ghost" onClick={() => requestLeaveRef.current('close', onClose)}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
-        )}
-
+      {/* Top bar: game navigation on the left, state and window controls on the
+          right, the close X last (where every other dialog has it). */}
+      <div className="eval-topbar">
         {hasNav && (
           <>
-            <button className="btn btn-sm" onClick={goPrev} title="Previous (←)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <button className="btn btn-sm" onClick={goPrev} title="Previous (←)" aria-label="Previous game">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M15 18l-6-6 6-6" />
               </svg>
             </button>
@@ -1202,10 +1190,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 value={currentGameId}
                 onChange={v => requestLeaveRef.current('jump', () => goTo(v))}
                 options={gameList.map(g => ({ value: g.game_id, label: g.title }))}
+                ariaLabel="Go to game"
               />
             </div>
-            <button className="btn btn-sm" onClick={goNext} title="Next (→)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <button className="btn btn-sm" onClick={goNext} title="Next (→)" aria-label="Next game">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M9 18l6-6-6-6" />
               </svg>
             </button>
@@ -1215,32 +1204,26 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
 
         <div style={{ flex: 1 }} />
         {ev.initial_conclusion && (
-          <span className={`badge ${CONCLUSION_COLORS[ev.initial_conclusion] || 'neutral'}`} style={{ fontSize: 12, padding: '4px 12px' }}>
-            {ev.initial_conclusion}
+          <span className={`badge ${conclusionBadgeClass(ev.initial_conclusion)}`}>
+            {prettyConclusion(ev.initial_conclusion)}
           </span>
         )}
         {canEdit && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap', marginRight: 2 }}
-            title="Auto-save changes as you edit">
-            <span style={{ fontSize: 12, fontWeight: 600, color: autoSave ? 'var(--accent)' : 'var(--faint)' }}>Auto-save</span>
-            <label className="switch">
-              <input type="checkbox" checked={autoSave} onChange={e => setAutoSave(e.target.checked)} />
-              <span className="slider"></span>
-            </label>
-          </div>
+          <Switch checked={autoSave} onChange={setAutoSave} label="Auto-save" title="Auto-save changes as you edit" />
         )}
         <button className="btn btn-sm btn-ghost" onClick={() => setFullscreen(v => !v)}
-          title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}>
+          title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'} aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
           {fullscreen ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M8 3v4a1 1 0 0 1-1 1H3M21 8h-4a1 1 0 0 1-1-1V3M3 16h4a1 1 0 0 1 1 1v4M16 21v-4a1 1 0 0 1 1-1h4" />
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />
             </svg>
           )}
         </button>
+        {onClose && <CloseButton onClick={() => requestLeaveRef.current('close', onClose)} />}
       </div>
 
       {/* Progress Tracker */}
@@ -1285,15 +1268,16 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                   <span style={{ wordBreak: 'break-all' }}>{ev.game_id}</span>
-                  <TitleCopyButton title={ev.game_id} />
+                  <TitleCopyButton title={ev.game_id} label="game ID" />
                 </div>
                 {ev.subtitle && <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 5 }}>{ev.subtitle}</div>}
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                  <span className="pill muted" style={{ fontSize: 10 }}>{ev.os?.toUpperCase()}</span>
+                  {/* Labels, not chips anyone can click: .badge (see C3). */}
+                  <span className="badge neutral">{ev.os?.toUpperCase()}</span>
                   {cats.map((c, i) => (
-                    <span key={i} className="pill tag" style={{ fontSize: 10 }}>{c}</span>
+                    <span key={i} className="badge info">{c}</span>
                   ))}
-                  {ev.content_rating && <span className="pill muted" style={{ fontSize: 10 }}>{ev.content_rating}</span>}
+                  {ev.content_rating && <span className="badge neutral">{ev.content_rating}</span>}
                 </div>
               </div>
             </div>
@@ -1301,7 +1285,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             {/* Info grid with QR */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '10px 10px' }}>
               <InfoField label="Publisher" value={ev.publisher_name} copyValue={ev.publisher_name || ''} />
-              <InfoField label="Assigned" value={fmtDate(ev.assigned_date)} />
+              <InfoField label="Assigned" value={fmtDateVN(ev.assigned_date)} />
               {ev.app_link ? (
                 <div 
                   onClick={() => qrDataUrl && setExpandedImg(qrDataUrl)}
@@ -1331,15 +1315,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                       </span>
                     </div>
                   )}
-                  <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--muted)', marginTop: 8, textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginTop: 8, textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
                     Scan to download
                   </span>
                 </div>
               ) : <div />}
-              <InfoField label="Release Date" value={fmtDate(ev.release_date)} copyValue={ev.release_date ? fmtDate(ev.release_date) : ''} />
-              <InfoField label="Initial Evaluated" value={ev.evaluate_date ? `${fmtDateTime(ev.evaluate_date)}${ev.initial_evaluator ? ` · ${ev.initial_evaluator}` : ''}` : '—'} />
+              <InfoField label="Release Date" value={fmtDateVN(ev.release_date)} copyValue={ev.release_date ? fmtDateVN(ev.release_date) : ''} />
+              <InfoField label="Initial Evaluated" value={ev.evaluate_date ? `${fmtDateTimeVN(ev.evaluate_date)}${ev.initial_evaluator ? ` · ${ev.initial_evaluator}` : ''}` : '—'} />
               <InfoField label="Genre" value={[ev.genre_1, ev.genre_2].filter(Boolean).join(' / ') || '—'} />
-              <InfoField label="Final Evaluated" value={ev.final_conclusion_date ? `${fmtDateTime(ev.final_conclusion_date)}${ev.final_evaluator ? ` · ${ev.final_evaluator}` : ''}` : '—'} />
+              <InfoField label="Final Evaluated" value={ev.final_conclusion_date ? `${fmtDateTimeVN(ev.final_conclusion_date)}${ev.final_evaluator ? ` · ${ev.final_evaluator}` : ''}` : '—'} />
             </div>
 
           </div>
@@ -1392,7 +1376,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 <span className="card-label">Description</span>
               </div>
               <div
-                style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--muted)', flex: 1, minHeight: 0, overflowY: 'auto' }}
+                style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--muted)', flex: 1, minHeight: 0, overflowY: 'auto' }}
                 dangerouslySetInnerHTML={{ __html: ev.description }}
               />
             </div>
@@ -1406,14 +1390,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
               <span className="card-label">Initial Evaluation</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
                 {canEditInitialConc && (
-                  <button onClick={clearAll}
+                  // Two clicks: the first arms it (red, for 3s), the second clears.
+                  <button type="button" onClick={clearAll}
                     title="Clear all evaluation fields"
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 600,
-                      padding: '2px 6px', borderRadius: 6,
-                      color: confirmClearAll ? 'var(--bad)' : 'var(--faint)',
-                    }}>
-                    {confirmClearAll ? 'Click to confirm' : 'Clear all'}
+                    className={`btn btn-sm ${confirmClearAll ? 'btn-danger' : 'btn-ghost'}`}>
+                    {confirmClearAll ? 'Clear all?' : 'Clear all'}
                   </button>
                 )}
                 {canEdit && <SaveStatus dirty={needsSave} />}
@@ -1427,14 +1408,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     {canEditInitialConc && conclusion && !deadLink && <ClearBtn onClick={() => clearField('conclusion')} />}
                     {canEditInitialConc && (
-                      <span title="Mark the store link as invalid"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 600, color: deadLink ? 'var(--bad)' : 'var(--muted)' }}>
-                        Dead link
-                        <label className="switch sm">
-                          <input type="checkbox" checked={deadLink} onChange={e => toggleDeadLink(e.target.checked)} aria-label="Dead link" />
-                          <span className="slider"></span>
-                        </label>
-                      </span>
+                      <Switch checked={deadLink} onChange={toggleDeadLink} label="Dead link" title="Mark the store link as invalid" />
                     )}
                   </div>
                 </div>
@@ -1448,7 +1422,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                     if (v === 'List_Idea' && isManager && !batch) setBatch(ev.current_batch || '')
                     setDirty(true)
                   }}
-                  placeholder="Select conclusion..."
+                  placeholder="Select a conclusion…"
                   options={(() => {
                     const opts = [...INITIAL_CONCLUSION_OPTIONS]
                     if (conclusion && conclusion !== 'Link_dead' && !opts.includes(conclusion)) opts.unshift(conclusion)
@@ -1468,7 +1442,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                     <StyledSelect
                       value={batch}
                       onChange={v => { setBatch(v); setDirty(true) }}
-                      placeholder="Select batch..."
+                      placeholder="Select a batch…"
                       options={(() => {
                         const now = new Date()
                         const opts = weekBatches(now.getFullYear(), now.getMonth() + 1)
@@ -1596,7 +1570,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                     width: '100%', justifyContent: 'center', marginTop: 2, gap: 6,
                     ...(needsSave ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
                   }}>
-                  {saving ? 'Saving...' : needsSave ? (autoSave ? 'Save now' : 'Save Evaluation') : (
+                  {saving ? 'Saving…' : needsSave ? (autoSave ? 'Save now' : 'Save evaluation') : (
                     <>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
@@ -1620,7 +1594,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 {canEditFinalNote ? (
                   <SaveStatus dirty={needsSave} />
                 ) : (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--faint)' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--faint)' }}>
                     <LockIcon /> Admin only
                   </span>
                 )}
@@ -1631,7 +1605,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   <StyledSelect
                     value={finalConclusion}
                     onChange={v => { setFinalConclusion(v); setDirty(true) }}
-                    placeholder="Select final conclusion..."
+                    placeholder="Select a final conclusion…"
                     options={(() => {
                       const opts = [...finalConclusionOptions]
                       if (finalConclusion && !opts.includes(finalConclusion)) opts.unshift(finalConclusion)
@@ -1663,7 +1637,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                       width: '100%', justifyContent: 'center', gap: 6,
                       ...(needsSave ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
                     }}>
-                    {saving ? 'Saving...' : needsSave ? (autoSave ? 'Save now' : 'Save Final Conclusion') : (
+                    {saving ? 'Saving…' : needsSave ? (autoSave ? 'Save now' : 'Save final conclusion') : (
                       <>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
@@ -1682,11 +1656,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 5 min</span>
-                {yt5
-                  ? <a className="badge success yt-link" href={`https://www.youtube.com/watch?v=${yt5}`} target="_blank" rel="noopener noreferrer" title="Open on YouTube" style={{ fontSize: 10, textDecoration: 'none' }}>▶ Recorded</a>
-                  : ev.record_5min_assignee
-                    ? <span className="badge running" style={{ fontSize: 10 }}>Recording</span>
-                    : <span className="badge idle" style={{ fontSize: 10 }}>Unassigned</span>}
+                <RecordBadge status={recordStatusOf(yt5, ev.record_5min_assignee, recordConfirmed)} youtubeId={yt5} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1700,11 +1670,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   ) : (
                     <InfoField label="Assignee" value={ev.record_5min_assignee} icon={recordConfirmed && ev.record_5min_assignee ? <LockIcon /> : undefined} />
                   )}
-                  <InfoField label="Assigned" value={fmtDate(ev.record_5min_date)} />
+                  <InfoField label="Assigned" value={fmtDateVN(ev.record_5min_date)} />
                 </div>
                 {canEditAssignee && recordConfirmed && !yt5 && (
                   <button className="btn btn-sm btn-ghost" onClick={resetRecordConfirm}
-                    style={{ alignSelf: 'flex-start', fontSize: 11.5, padding: '3px 10px', color: 'var(--muted)' }}>
+                    style={{ alignSelf: 'flex-start' }}>
                     ↺ Reset — un-confirm to reassign
                   </button>
                 )}
@@ -1724,11 +1694,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 20 min</span>
-                {yt20
-                  ? <a className="badge success yt-link" href={`https://www.youtube.com/watch?v=${yt20}`} target="_blank" rel="noopener noreferrer" title="Open on YouTube" style={{ fontSize: 10, textDecoration: 'none' }}>▶ Recorded</a>
-                  : ev.record_20min_assignee
-                    ? <span className="badge running" style={{ fontSize: 10 }}>Recording</span>
-                    : <span className="badge idle" style={{ fontSize: 10 }}>Unassigned</span>}
+                <RecordBadge status={recordStatusOf(yt20, ev.record_20min_assignee, recordConfirmed)} youtubeId={yt20} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1742,11 +1708,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   ) : (
                     <InfoField label="Assignee" value={ev.record_20min_assignee} icon={recordConfirmed && ev.record_20min_assignee ? <LockIcon /> : undefined} />
                   )}
-                  <InfoField label="Assigned" value={fmtDate(ev.record_20min_date)} />
+                  <InfoField label="Assigned" value={fmtDateVN(ev.record_20min_date)} />
                 </div>
                 {canEditAssignee && recordConfirmed && !yt20 && (
                   <button className="btn btn-sm btn-ghost" onClick={resetRecordConfirm}
-                    style={{ alignSelf: 'flex-start', fontSize: 11.5, padding: '3px 10px', color: 'var(--muted)' }}>
+                    style={{ alignSelf: 'flex-start' }}>
                     ↺ Reset — un-confirm to reassign
                   </button>
                 )}
@@ -1768,7 +1734,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 width: '100%', justifyContent: 'center', gap: 6,
                 ...(dirty ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
               }}>
-              {saving ? 'Saving...' : dirty ? 'Save Changes' : (
+              {saving ? 'Saving…' : dirty ? 'Save changes' : (
                 <>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="20 6 9 17 4 12" />
@@ -1783,16 +1749,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           <div className="card" style={{ margin: 0, opacity: 0.7 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--faint)' }}>
-                <span>Imported</span><span>{fmtDateTime(ev.imported_at)}</span>
+                <span>Imported</span><span>{fmtDateTimeVN(ev.imported_at)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--faint)' }}>
                 <span>Updated</span>
-                <span>{fmtDateTime(ev.updated_at)}{ev.updated_by ? ` · by ${ev.updated_by}` : ''}</span>
+                <span>{fmtDateTimeVN(ev.updated_at)}{ev.updated_by ? ` · by ${ev.updated_by}` : ''}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--faint)' }}>
                 <span>History</span>
-                <button className="btn btn-sm btn-ghost" onClick={() => openHistory(ev.game_id)}
-                  style={{ fontSize: 11, padding: '2px 8px', height: 'auto', color: 'var(--accent)' }}>
+                <button className="btn btn-sm btn-link" onClick={() => openHistory(ev.game_id)}>
                   View
                 </button>
               </div>
@@ -1837,12 +1802,6 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           onSave={leaveSave} onDiscard={leaveDiscard} onStay={() => setLeave(null)} />
       )}
 
-      {/* Toast */}
-      {toast && (
-        <div className="toast-wrap">
-          <div className={`toast${toast.err ? ' err' : ''}`}>{toast.msg}</div>
-        </div>
-      )}
     </>
   )
 }

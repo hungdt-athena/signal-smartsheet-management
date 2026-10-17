@@ -33,8 +33,8 @@ export async function GET(req: NextRequest) {
   //   handover        → only their OWN requests (from_evaluator = them).
   //   reassign/rescue → only runs they are involved in — as the source (from) OR as a
   //                     recipient (a key in the resulting per_evaluator split, or picked
-  //                     in params.selected_evaluators). The Rescue tab itself is
-  //                     admin-only, but the scoping holds if that ever changes.
+  //                     in params.selected_evaluators). Evaluators reach this
+  //                     through the History card on the Reassign and Rescue tabs.
   const scopeName = isEvaluator ? (session?.user?.name || '__no_such_evaluator__') : null
 
   try {

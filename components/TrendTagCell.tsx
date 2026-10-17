@@ -24,7 +24,7 @@ const CHIP: CSSProperties = {
 const CHIP_PENDING: CSSProperties = {
   background: 'transparent', borderStyle: 'dashed', color: 'var(--faint)', opacity: 0.7,
 }
-const CHIP_SUB: CSSProperties = { fontSize: 10, color: 'var(--faint)', fontFamily: 'var(--font)' }
+const CHIP_SUB: CSSProperties = { fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--font)' }
 
 /** Read-only Trends chips for a table cell. Confirmed tags are solid; pending
  *  proposals are dimmed and dashed, so a glance down the column separates "this

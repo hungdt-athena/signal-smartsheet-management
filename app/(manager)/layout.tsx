@@ -37,10 +37,12 @@ interface NavItem { href: string; label: string; icon: keyof typeof ICONS; roles
 const NAV_ITEMS: NavItem[] = [
   { href: '/team-ops',        label: 'Team Operations', icon: 'users', roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/team-ops?tab=assign',   label: 'Assign' },
-    // Manager tier: middleware.ts sends an evaluator on this tab back to Assign.
-    { href: '/team-ops?tab=reassign', label: 'Reassign', roles: ['admin', 'moderator'] },
-    // Rescue compares every teammate's backlog on one screen — manager tier.
-    { href: '/team-ops?tab=rescue', label: 'Rescue', roles: ['admin', 'moderator'] },
+    // Evaluators see Reassign and Rescue as history only: the runs they were in,
+    // as source or receiver (/api/operations/runs scopes it; the action APIs stay
+    // manager-only). Keep in step with evaluatorTabs in middleware.ts, or the link
+    // shows and then bounces.
+    { href: '/team-ops?tab=reassign', label: 'Reassign' },
+    { href: '/team-ops?tab=rescue', label: 'Rescue' },
     { href: '/team-ops?tab=handover', label: 'Handover' },
     // Evaluators see Performance too, scoped to their own Individual view.
     { href: '/team-ops?tab=performance', label: 'Performance', roles: ['admin', 'moderator', 'evaluator'] },
@@ -57,9 +59,9 @@ const NAV_ITEMS: NavItem[] = [
   ]},
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
-    // Manager tier: middleware.ts sends an evaluator on this tab back to YouTube.
-    // Keep the two in step, or the link shows and then bounces.
-    { href: '/youtube?tab=record_video', label: 'Record', roles: ['admin', 'moderator'] },
+    // Evaluators see Record too, scoped to the rows where they are the recorder
+    // (the Record tab asks the API with ?recorder=). middleware.ts lets them through.
+    { href: '/youtube?tab=record_video', label: 'Record' },
   ]},
   { href: '/admin',           label: 'Users Management', icon: 'shield', roles: ['admin', 'moderator'] },
   { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin', 'moderator'] },

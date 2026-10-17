@@ -147,7 +147,9 @@ describe('Leaderboard tab', () => {
     const toggle = container.querySelector('.rp-guide button')!
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(container.querySelector('.rp-guide .read')).toBeNull()
-    expect(container.querySelectorAll('button[aria-expanded]')).toHaveLength(1)
+    // Filter dropdowns (StyledSelect, .ssel-btn) carry aria-expanded too, but they
+    // pick a value, they do not hide content - so they are not folds.
+    expect(Array.from(container.querySelectorAll('button[aria-expanded]')).filter((b) => !b.classList.contains('ssel-btn'))).toHaveLength(1)
     expect(container.querySelector('details')).toBeNull()
     // Overview owns the team numbers. Repeating four of them above a table of the same
     // numbers is the duplication this redesign existed to remove.
@@ -603,7 +605,7 @@ describe('Leaderboard tab', () => {
 
   it('sends a stuck backlog to Reassign, not to Rescue', async () => {
     const people = [even('Alpha', { evaluated: 700 }), even('Beta'), even('Gamma'), even('Delta')]
-    const { container } = await leaderboard(bundleOf(people, {
+    await leaderboard(bundleOf(people, {
       backlogBy: [
         { key: 'k1', name: 'Beta', n: 300, a0: 100, a1: 40, a2: 120, a3: 40, oldest: 22, stale: 160 },
       ],

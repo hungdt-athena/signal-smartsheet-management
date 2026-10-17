@@ -1,8 +1,18 @@
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { parseMarkdownLite, type Inline } from '@/lib/markdown-lite'
 import type { EvalListItem } from './EvalDetailPanel'
-import { useEscapeToClose } from '@/lib/use-escape-to-close'
+import { StyledSelect } from './StyledSelect'
+import { Modal } from './ui/Modal'
+import { FilterBar, FilterSpacer, ClearFilters, FilterCount } from './ui/FilterBar'
+import { SearchInput } from './ui/SearchInput'
+import { EmptyState, ErrorState, SkeletonRows } from './ui/States'
+import { useUrlState, useSetUrlParams } from '@/lib/use-url-state'
+import { fmtDateVN } from '@/lib/format-date'
+
+/** URL key of the Tagging tab's category group filter. Lives here because both
+ *  this listing and TaggingTab (which imports this file) clear it. */
+export const CATEGORY_KEY = 'bucket'
 
 /** One trend as the listing shows it. Counts are games, not proposals. */
 interface TrendRow {
@@ -26,15 +36,13 @@ interface TrendGame {
 
 type Sort = 'last30' | 'total' | 'recent' | 'name'
 
-const SORTS: { key: Sort; label: string }[] = [
-  { key: 'last30', label: 'Busiest 30 days' },
-  { key: 'total', label: 'Most games' },
-  { key: 'recent', label: 'Recently tagged' },
-  { key: 'name', label: 'A–Z' },
+const SORTS: { value: Sort; label: string }[] = [
+  { value: 'last30', label: 'Busiest 30 days' },
+  { value: 'total', label: 'Most games' },
+  { value: 'recent', label: 'Recently tagged' },
+  { value: 'name', label: 'A–Z' },
 ]
-
-const fmt = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+const isSort = (v: string): v is Sort => SORTS.some(s => s.value === v)
 
 const num = (n: number) => (n === 0 ? '—' : n.toLocaleString('en-US'))
 
@@ -48,12 +56,12 @@ function Text({ parts }: { parts: Inline[] }) {
 function Instruction({ md }: { md: string }) {
   const blocks = useMemo(() => parseMarkdownLite(md), [md])
   return (
-    <div style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
+    <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}>
       {blocks.map((b, i) => {
         if (b.kind === 'heading') return (
           <p key={i} style={{
             margin: i === 0 ? '0 0 6px' : '12px 0 6px',
-            fontWeight: 600, fontSize: b.level <= 2 ? 13 : 12.5, color: 'var(--muted)',
+            fontWeight: 600, fontSize: 13, color: 'var(--muted)',
           }}><Text parts={b.text} /></p>
         )
         if (b.kind === 'list') return (
@@ -78,6 +86,7 @@ function TrendPanel({ trend, onClose, onOpenGame }: {
   const [games, setGames] = useState<TrendGame[]>([])
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let live = true
@@ -92,105 +101,115 @@ function TrendPanel({ trend, onClose, onOpenGame }: {
       .catch(() => { if (live) setFailed(true) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
-  }, [trend.value])
+  }, [trend.value, reloadKey])
 
   // The panel's prev/next walks the games shown here, so the reader stays inside
   // the trend they opened rather than the whole system.
   const list = useMemo<EvalListItem[]>(
     () => games.map(g => ({ game_id: g.game_id, title: g.title })), [games])
 
-  useEscapeToClose(onClose)
   return (
-    <div className="eval-modal-backdrop" onClick={onClose}>
-      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{ padding: '20px 24px 24px', maxWidth: 640 }}>
-        <div className="card-head" style={{ alignItems: 'flex-start' }}>
-          <div>
-            <span className="card-label" style={{ fontSize: 15 }}>{trend.value}</span>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--faint)' }}>
-              {num(trend.total)} game{trend.total === 1 ? '' : 's'} tagged
-              {trend.last30 > 0 ? `, ${trend.last30} in the last 30 days` : ''}
-              {trend.lastTaggedAt ? ` — last on ${fmt(trend.lastTaggedAt)}` : ''}
-            </p>
-          </div>
-          <button className="btn btn-sm btn-ghost" onClick={onClose}>Close</button>
-        </div>
+    <Modal title={trend.value} width={640} onClose={onClose}
+      sub={<>
+        {num(trend.total)} game{trend.total === 1 ? '' : 's'} tagged
+        {trend.last30 > 0 ? `, ${trend.last30} in the last 30 days` : ''}
+        {trend.lastTaggedAt ? `. Last on ${fmtDateVN(trend.lastTaggedAt)}` : ''}
+      </>}>
+      {loading && <p style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</p>}
+      {failed && <ErrorState onRetry={() => setReloadKey(k => k + 1)}>Could not load this trend.</ErrorState>}
 
-        {loading && <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading…</p>}
-        {failed && <p style={{ fontSize: 12.5, color: 'var(--bad)' }}>Could not load this trend.</p>}
+      {!loading && !failed && (
+        <>
+          {instruction
+            ? <div style={{ marginBottom: 16 }}><Instruction md={instruction} /></div>
+            : (
+              <p style={{ fontSize: 13, color: 'var(--faint)', marginBottom: 16 }}>
+                No description written for this trend yet.
+              </p>
+            )}
 
-        {!loading && !failed && (
-          <>
-            {instruction
-              ? <div style={{ marginBottom: 16 }}><Instruction md={instruction} /></div>
-              : (
-                <p style={{ fontSize: 12.5, color: 'var(--faint)', marginBottom: 16 }}>
-                  No description written for this trend yet.
-                </p>
-              )}
-
-            <span className="card-label" style={{ fontSize: 12 }}>Recently tagged</span>
-            <div className="tbl-wrap" style={{ marginTop: 8, maxHeight: 320, overflowY: 'auto' }}>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Game</th>
-                    <th style={{ width: 130 }}>Sub-value</th>
-                    <th style={{ width: 116 }}>Tagged</th>
+          <span className="card-label" style={{ fontSize: 12 }}>Recently tagged</span>
+          <div className="tbl-wrap" style={{ marginTop: 8, maxHeight: 320, overflowY: 'auto' }}>
+            <table className="tbl tbl-sticky">
+              <thead>
+                <tr>
+                  <th>Game</th>
+                  <th style={{ width: 130 }}>Sub-value</th>
+                  <th style={{ width: 116 }}>Tagged</th>
+                </tr>
+              </thead>
+              <tbody>
+                {games.length === 0 && (
+                  <tr><td colSpan={3}><EmptyState>No game carries this trend yet.</EmptyState></td></tr>
+                )}
+                {games.map(g => (
+                  <tr key={g.game_id}>
+                    <td className="cell-name">
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {g.icon_url && (
+                          <img src={g.icon_url} alt="" width={24} height={24}
+                            style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
+                        )}
+                        <button type="button" title="Open the evaluation"
+                          onClick={() => onOpenGame(g.game_id, list)}
+                          style={{
+                            border: 0, background: 'none', padding: 0, cursor: 'pointer',
+                            font: 'inherit', color: 'var(--accent)', textAlign: 'left',
+                          }}>{g.title}</button>
+                      </span>
+                    </td>
+                    <td style={{ color: g.sub_value_name ? undefined : 'var(--faint)' }}>
+                      {g.sub_value_name || '—'}
+                    </td>
+                    <td style={{ fontFamily: 'var(--num)', fontSize: 12, color: 'var(--faint)' }}>
+                      {fmtDateVN(g.created_at)}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {games.length === 0 && (
-                    <tr><td colSpan={3} className="empty">No game carries this trend yet.</td></tr>
-                  )}
-                  {games.map(g => (
-                    <tr key={g.game_id}>
-                      <td className="cell-name">
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                          {g.icon_url && (
-                            <img src={g.icon_url} alt="" width={24} height={24}
-                              style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
-                          )}
-                          <button type="button" title="Open the evaluation"
-                            onClick={() => onOpenGame(g.game_id, list)}
-                            style={{
-                              border: 0, background: 'none', padding: 0, cursor: 'pointer',
-                              font: 'inherit', color: 'var(--accent)', textAlign: 'left',
-                            }}>{g.title}</button>
-                        </span>
-                      </td>
-                      <td style={{ color: g.sub_value_name ? undefined : 'var(--faint)' }}>
-                        {g.sub_value_name || '—'}
-                      </td>
-                      <td style={{ fontFamily: 'var(--num)', fontSize: 11.5, color: 'var(--faint)' }}>
-                        {fmt(g.created_at)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Modal>
   )
 }
 
 // Every Trends value an evaluator may pick, with how much it is being used.
 // Read-only: definitions belong to Signal Sense, this view only makes them
 // findable — and shows which of them the team is actually tagging.
-export function TrendsCatalog({ onOpenGame, categoryGroup = 'all' }: {
+export function TrendsCatalog({ onOpenGame, categoryGroup = 'all', lead }: {
   onOpenGame: (gameId: string, list: EvalListItem[]) => void
   /** The tab's Category group filter: 'all', or one group to narrow the listing to. */
   categoryGroup?: string
+  /** The tab's category group control, put first in this view's filter bar. */
+  lead?: ReactNode
 }) {
   const [trends, setTrends] = useState<TrendRow[]>([])
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
-  const [q, setQ] = useState('')
-  const [sort, setSort] = useState<Sort>('last30')
+  // Search and sort live in the URL. The box keeps its own text while typing and
+  // writes to the URL once the typing pauses, so each key press is not a navigation.
+  const [qParam, setQParam] = useUrlState('q', '')
+  const [q, setQ] = useState(qParam)
+  const [sortParam, setSort] = useUrlState('sort', 'last30')
+  const sort: Sort = isSort(sortParam) ? sortParam : 'last30'
+  const setUrlParams = useSetUrlParams()
   const [open, setOpen] = useState<TrendRow | null>(null)
+
+  // The URL changed under the box (Clear filters, Back): follow it. Our own
+  // debounced write is skipped, or text typed after it would be overwritten.
+  const written = useRef(qParam)
+  useEffect(() => {
+    if (qParam === written.current) return
+    written.current = qParam
+    setQ(qParam)
+  }, [qParam])
+  useEffect(() => {
+    if (q === written.current) return
+    const t = setTimeout(() => { written.current = q; setQParam(q) }, 300)
+    return () => clearTimeout(t)
+  }, [q, setQParam])
 
   const load = useCallback(() => {
     setLoading(true); setFailed(false)
@@ -225,82 +244,73 @@ export function TrendsCatalog({ onOpenGame, categoryGroup = 'all' }: {
     return rows
   }, [inCategoryGroup, q, sort])
 
+  // Sort is not a filter, so Clear filters leaves it alone.
+  const filtered = categoryGroup !== 'all' || q.trim() !== ''
+  const clearFilters = () => { setQ(''); setUrlParams({ [CATEGORY_KEY]: null, q: null }) }
+
   return (
-    <div className="card">
-      <div className="card-head" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <span className="card-label">
-          Trends
-          <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>
-            {q ? `${shown.length} of ${inCategoryGroup.length}` : inCategoryGroup.length}
-          </span>
-        </span>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
-          <div className="field">
-            <span className="label">Search</span>
-            <input className="input" style={{ width: 200 }} placeholder="Search trends"
-              value={q} onChange={e => setQ(e.target.value)} />
-          </div>
-          <div className="field">
-            <span className="label" id="trend-sort-label">Sort</span>
-            <select className="input" style={{ width: 170 }} aria-labelledby="trend-sort-label"
-              value={sort} onChange={e => setSort(e.target.value as Sort)}>
-              {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-          </div>
+    <>
+      <FilterBar>
+        {lead}
+        <SearchInput value={q} onChange={setQ} placeholder="Search trends" />
+        <FilterSpacer />
+        <ClearFilters visible={filtered} onClear={clearFilters} />
+        <FilterCount loading={loading} shown={shown.length} total={trends.length} noun="trends" />
+        <div style={{ width: 170 }}>
+          <StyledSelect ariaLabel="Sort" value={sort} onChange={setSort} options={SORTS} />
         </div>
+      </FilterBar>
+
+      <div className="card">
+        {failed ? (
+          <ErrorState onRetry={load}>Could not load the trends.</ErrorState>
+        ) : (
+          <div className="tbl-wrap tag-scroll">
+            <table className="tbl tbl-sticky">
+              <thead>
+                <tr>
+                  <th>Trend</th>
+                  <th className="tnum" style={{ width: 110 }}>Last 30 days</th>
+                  <th className="tnum" style={{ width: 110 }}>Total games</th>
+                  <th style={{ width: 130 }}>Last tagged</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading && trends.length === 0 && <SkeletonRows widths={[200, 40, 40, 80]} />}
+                {!loading && shown.length === 0 && (
+                  <tr><td colSpan={4}>
+                    <EmptyState action={filtered ? { label: 'Clear filters', onClick: clearFilters } : undefined}>
+                      {q ? `No trend matches “${q}”.` : categoryGroup === 'all' ? 'No trends defined.' : `No ${categoryGroup} trends defined yet.`}
+                    </EmptyState>
+                  </td></tr>
+                )}
+                {shown.map(t => (
+                  <tr key={t.value}>
+                    <td className="cell-name">
+                      <button type="button" title="See what this trend means and which games carry it"
+                        onClick={() => setOpen(t)}
+                        style={{
+                          border: 0, background: 'none', padding: 0, cursor: 'pointer',
+                          font: 'inherit', color: 'var(--accent)', textAlign: 'left',
+                        }}>{t.value}</button>
+                    </td>
+                    <td className="num tnum">{num(t.last30)}</td>
+                    <td className="num tnum">{num(t.total)}</td>
+                    <td style={{ fontFamily: 'var(--num)', fontSize: 12, color: 'var(--faint)' }}>
+                      {fmtDateVN(t.lastTaggedAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {open && (
+          <TrendPanel trend={open} onClose={() => setOpen(null)}
+            onOpenGame={(gameId, list) => { setOpen(null); onOpenGame(gameId, list) }} />
+        )}
       </div>
-
-      {failed && (
-        <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--bad)' }}>
-          Could not load the trends.{' '}
-          <button className="btn btn-sm btn-ghost" onClick={load}>Retry</button>
-        </p>
-      )}
-
-      <div className="tbl-wrap tag-scroll">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Trend</th>
-              <th style={{ width: 110 }}>Last 30 days</th>
-              <th style={{ width: 110 }}>Total games</th>
-              <th style={{ width: 130 }}>Last tagged</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!loading && shown.length === 0 && (
-              <tr><td colSpan={4} className="empty">
-                {q ? `No trend matches “${q}”.` : categoryGroup === 'all' ? 'No trends defined.' : `No ${categoryGroup} trends defined yet.`}
-              </td></tr>
-            )}
-            {shown.map(t => (
-              <tr key={t.value}>
-                <td className="cell-name">
-                  <button type="button" title="See what this trend means and which games carry it"
-                    onClick={() => setOpen(t)}
-                    style={{
-                      border: 0, background: 'none', padding: 0, cursor: 'pointer',
-                      font: 'inherit', color: 'var(--accent)', textAlign: 'left',
-                    }}>{t.value}</button>
-                </td>
-                <td className="num">{num(t.last30)}</td>
-                <td className="num">{num(t.total)}</td>
-                <td style={{ fontFamily: 'var(--num)', fontSize: 11.5, color: 'var(--faint)' }}>
-                  {fmt(t.lastTaggedAt)}
-                </td>
-              </tr>
-            ))}
-            {loading && (
-              <tr><td colSpan={4} className="tag-sentinel">Loading…</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {open && (
-        <TrendPanel trend={open} onClose={() => setOpen(null)}
-          onOpenGame={(gameId, list) => { setOpen(null); onOpenGame(gameId, list) }} />
-      )}
-    </div>
+    </>
   )
 }

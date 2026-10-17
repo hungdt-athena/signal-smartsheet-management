@@ -5,7 +5,7 @@ import { ALL_ROUNDER_AXES, allRounderScore, DEFAULT_REPORT_CONFIG, DEFAULT_REPOR
 import {
   Kpi, Heatmap, Funnel, HealthBars, StackedBars, ColumnChart, DivergingBars, QueueBars,
   LineChart, Scatter, SortTable, Empty, fmt, InfoTip, conclusionColor, usePalette, PaletteContext, inkOn,
-  type Bench, type SortCol,
+  type Bench, type SortCol, type ConclusionKind,
 } from '@/components/report/charts'
 import type { BenchStats } from '@/lib/report'
 import { isBucket } from '@/lib/buckets'
@@ -13,8 +13,17 @@ import { ReviewTable } from '@/components/report/ReviewTable'
 import { DailyBlock, DayBreakdown } from '@/components/report/DailyBlock'
 import { Meter, RatioStrip, RuleBlock, RuleControl, SpreadLine, ThresholdBars, type VizState } from '@/components/report/RuleViz'
 import { NEUTRAL as NEUTRAL_REF, PALETTES, PALETTE_KEYS, ROLE_LABELS, parsePaletteKey, resolvePalette, type PaletteKey } from '@/lib/report-palette'
+import { useSetUrlParams } from '@/lib/use-url-state'
+import { fmtDateVN } from '@/lib/format-date'
+import { PageHeader, RefreshButton } from '@/components/ui/PageHeader'
+import { Seg } from '@/components/ui/Seg'
+import { FilterBar, FilterSpacer, ClearFilters } from '@/components/ui/FilterBar'
+import { ErrorState } from '@/components/ui/States'
+import { Modal } from '@/components/ui/Modal'
+import { StyledSelect } from '@/components/StyledSelect'
 
 type View = 'week' | 'month' | 'quarter' | 'year' | 'batch' | 'custom'
+const VIEWS: View[] = ['batch', 'week', 'month', 'quarter', 'year', 'custom']
 // The axis keys below have to stay 'Signal'/'Survival' - they index the `axes` map the
 // API sends (still read by the Leaderboard's Overall score and the Config tab's weight
 // preview) and the all-rounder weights in lib/report-config.ts. What the reader sees is
@@ -170,7 +179,7 @@ const TIP = {
 }
 
 // Quality orderings (user-defined weights). Initial: List_Idea is the strongest
-// signal, Bypass the weakest; Link_dead is waste, appended last in gray.
+// signal, Bypass the weakest; Link_dead is waste, appended last (red in the bars).
 // Final: Priority IV best … Bypass worst; Not Found excluded from the score.
 const INIT_ORDER = ['List_Idea', 'Playtest & Bypass', 'Bypass']
 const FINAL_ORDER = ['Priority IV', 'Insight', 'Watch List', 'Priority V', 'Theme/Art', 'Bypass']
@@ -293,7 +302,8 @@ type AgeRow = { key: string; label: string; a0: number; a1: number; a2: number; 
 // "old" still reads as the alarm the stale flags raise. Generated in OKLCH (L 0.78 ->
 // 0.42, hue 30) and passed the dataviz validator's --ordinal checks: one hue, steady
 // lightness steps, light end above 2:1 on white. Fixed - it does not change with the
-// chart preset, and it is never a series colour.
+// chart preset, and it is never a series colour. Hex, not tokens: BandBar picks the
+// label ink from each fill's luminance (inkOn), which needs the literal value.
 const AGE_BANDS = [
   { k: 'a0' as const, label: '0–3d', color: '#f19f91' },
   { k: 'a1' as const, label: '4–7d', color: '#da6d5d' },
@@ -355,14 +365,46 @@ function ReportInner() {
     next.set('rtab', id)
     router.replace(`${pathname}?${next.toString()}`, { scroll: false })
   }
+  // The filter bar lives in the URL, so reload, Back and a shared link open the same
+  // window. Keys: view, period, start/end (custom range), title, cat. `cat` is the
+  // same key Team Ops uses for its category group, so a link between the two keeps
+  // the genre. The custom range is start/end, not from/to: Team Ops already uses
+  // ?from= for a person's name on Reassign. A value equal to its default is not
+  // written, which keeps the plain /team-ops?tab=performance link the landing view.
+  const setUrl = useSetUrlParams()
   // Batch is the landing view: it is the unit the team actually plans in, and the
   // server resolves an empty key to the newest batch, so the first paint is the current
   // batch rather than an all-time scan.
-  const [view, setView] = useState<View>('batch')
-  const [selKey, setSelKey] = useState('')  // adaptive bucket key; on batch '' = newest, 'all' = every batch
-  const [from, setFrom] = useState(''); const [to, setTo] = useState('')
-  const [category, setCategory] = useState('puzzle')
-  const [title, setTitle] = useState('all')  // job classification lens (dashboard_users.title)
+  const viewParam = sp.get('view') as View | null
+  const view: View = viewParam && VIEWS.includes(viewParam) ? viewParam : 'batch'
+  // Adaptive bucket key. On batch '' = newest and 'all' = every batch. On the other
+  // lenses the default is the current period, and "All time" ('' to the API) travels
+  // in the URL as 'all', because an absent key already means "now".
+  const periodParam = sp.get('period')
+  const selKey = periodParam == null
+    ? (view === 'batch' || view === 'custom' ? '' : currentKey(view))
+    : (view !== 'batch' && periodParam === 'all' ? '' : periodParam)
+  const setSelKey = (v: string) => {
+    const isDefault = view === 'batch' ? v === '' : v === currentKey(view)
+    setUrl({ period: isDefault ? null : (view !== 'batch' && v === '' ? 'all' : v) })
+  }
+  // Custom pre-fills the current month so the page never silently flips back to
+  // all-time. That pre-fill is the default, so it is not written to the URL.
+  const monthStart = (() => { const { y, m } = vnToday(); return `${y}-${pad2(m)}-01` })()
+  const today = vnTodayIso()
+  const from = view === 'custom' ? (sp.get('start') ?? monthStart) : ''
+  const to = view === 'custom' ? (sp.get('end') ?? today) : ''
+  const setFrom = (v: string) => setUrl({ start: v === monthStart ? null : v })
+  const setTo = (v: string) => setUrl({ end: v === today ? null : v })
+  const catRaw = sp.get('cat')
+  const category = catRaw === 'all' || isBucket(catRaw) ? catRaw : 'puzzle'
+  const setCategory = (v: string) => setUrl({ cat: v === 'puzzle' ? null : v })
+  // job classification lens (dashboard_users.title)
+  const titleRaw = sp.get('title')
+  const title = titleRaw === 'fulltime' || titleRaw === 'freelancer' ? titleRaw : 'all'
+  const setTitle = (v: string) => setUrl({ title: v === 'all' ? null : v })
+  const filtersOn = view !== 'batch' || periodParam != null || category !== 'puzzle' || title !== 'all'
+  const clearFilters = () => setUrl({ view: null, period: null, start: null, end: null, cat: null, title: null })
 
   const [data, setData] = useState<Bundle | null>(null)
   const [loading, setLoading] = useState(true)
@@ -391,19 +433,10 @@ function ReportInner() {
   const shownKey = view === 'batch' && !selKey ? (data?.window.batch || '') : selKey
 
   // Switching the lens defaults its bucket to "now": this week / this month /
-  // this quarter / latest batch. Custom pre-fills the current month so the page
-  // never silently flips back to all-time.
+  // this quarter / latest batch / this month so far on Custom. One navigation, so the
+  // old lens's period and dates cannot survive into the new one.
   const changeView = (v: string) => {
-    const nv = v as View
-    setView(nv)
-    if (nv === 'batch') setSelKey('')
-    else if (nv === 'custom') {
-      setSelKey('')
-      if (!from && !to) {
-        const { y, m, d } = vnToday()
-        setFrom(`${y}-${pad2(m)}-01`); setTo(`${y}-${pad2(m)}-${pad2(d)}`)
-      }
-    } else setSelKey(currentKey(nv))
+    setUrl({ view: v === 'batch' ? null : v, period: null, start: null, end: null })
   }
 
   // The payload decides what this user may see - not the client. Until it arrives we
@@ -417,35 +450,39 @@ function ReportInner() {
   const optListShown: Opt[] = shownKey && view !== 'batch' && view !== 'custom' && !optList.some((o) => o.key === shownKey)
     ? [{ key: shownKey, label: keyLabel(view, shownKey) }, ...optList] : optList
 
+  const periodLabel = view === 'batch' ? 'Batch' : view === 'week' ? 'Week' : view === 'quarter' ? 'Quarter' : view === 'year' ? 'Year' : 'Month'
+  const periodOptions = [
+    // On batch an empty key means "the newest one", which the SERVER resolves so
+    // landing here costs one request rather than two. Asking for every batch is
+    // therefore an explicit value, not the absence of one.
+    { value: view === 'batch' ? 'all' : '', label: view === 'batch' ? 'All batches' : 'All time' },
+    ...optListShown.map((o) => ({ value: o.key, label: o.label })),
+  ]
+  const range = data ? rangeText(data.window.from, data.window.to) : ''
+
   return (
     <div className="page">
-      <div className="page-head">
-        <div>
-          <h1 className="h-title">Performance</h1>
-          <p className="h-sub">{teamView
-            ? <>Evaluator performance · initial evaluation, recording &amp; shortlist funnel</>
-            : <>Your performance · initial evaluation, recording &amp; shortlist quality, compared with the team average</>}
-            {data && <> · <b>{data.window.label}</b>
-              {rangeText(data.window.from, data.window.to) && <> · {rangeText(data.window.from, data.window.to)}</>}</>}
-            {data?.movedIn && <> · <span title="Games with this batch's label that were judged outside these days. They count in every total on this tab but are not drawn in the day charts.">
-              {data.movedIn.count} moved in{data.movedIn.firstJudged && data.movedIn.lastJudged
-                ? ` (judged ${rangeText(data.movedIn.firstJudged, addDays(data.movedIn.lastJudged, 1))})` : ''}</span></>}</p>
-        </div>
-        <div className="head-actions">
-          <button className="btn btn-sm" onClick={fetchData} disabled={loading}>{loading ? 'Loading…' : '↻ Refresh'}</button>
-        </div>
-      </div>
+      <PageHeader title="Performance"
+        sub={<>{teamView ? 'How each evaluator is doing on evaluation, recording and shortlist' : 'Your work compared with the team average'}
+          {data && <> · <b>{data.window.label}</b>{range && <> · {range}</>}</>}
+          {data?.movedIn && <> · <span title="Games with this batch's label that were evaluated outside these days. They count in every total on this tab but are not drawn in the day charts.">
+            {data.movedIn.count} moved in{data.movedIn.firstJudged && data.movedIn.lastJudged
+              ? ` (evaluated ${rangeText(data.movedIn.firstJudged, addDays(data.movedIn.lastJudged, 1))})` : ''}</span></>}</>}
+        actions={<RefreshButton onClick={fetchData} loading={loading} />} />
 
-      {/* Filter bar: view lens + adaptive picker + category */}
-      <div className="rp-filters card">
-        <Seg label="View by" value={view} onChange={changeView}
+      {/* Filter bar: category group first (the same first control as every other
+          page), then the view lens and its adaptive picker, then the title lens. */}
+      <FilterBar className="rp-filters">
+        <SegGroup label="Category" value={category} onChange={setCategory}
+          options={[['all', 'All'], ['puzzle', 'Puzzle'], ['arcade', 'Arcade'], ['simulation', 'Simulation']]} />
+        <SegGroup label="View by" value={view} onChange={changeView}
           options={[['batch', 'Batch'], ['week', 'Week'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year'], ['custom', 'Custom']]} />
         {view === 'custom' ? (
           <div className="rp-seg-group">
             <span className="rp-seg-label">Range</span>
-            <input type="date" className="rp-date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <input type="date" className="rp-date" aria-label="Start date" value={from} onChange={(e) => setFrom(e.target.value)} />
             <span style={{ color: 'var(--faint)' }}>→</span>
-            <input type="date" className="rp-date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <input type="date" className="rp-date" aria-label="End date" value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
         ) : (
           <div className="rp-seg-group">
@@ -456,30 +493,28 @@ function ReportInner() {
                  Naming the report's weeks any other way would put the Week picker and
                  the Batch picker a week out of step with each other. */
               title={view === 'week' ? 'A week is named for the month its last day falls in, matching the team\u2019s batch labels - so W1 Sep runs 31/8 \u2013 6/9. Each option shows its exact dates.' : undefined}>
-              {view === 'batch' ? 'Batch' : view === 'week' ? 'Week' : view === 'quarter' ? 'Quarter' : view === 'year' ? 'Year' : 'Month'}</span>
-            <select className="rp-select" value={shownKey} onChange={(e) => setSelKey(e.target.value)}>
-              {/* On batch an empty key means "the newest one", which the SERVER resolves
-                  so landing here costs one request rather than two. Asking for every
-                  batch is therefore an explicit value, not the absence of one. */}
-              <option value={view === 'batch' ? 'all' : ''}>{view === 'batch' ? 'All batches' : 'All time'}</option>
-              {optListShown.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-            </select>
+              {periodLabel}</span>
+            <StyledSelect value={shownKey} onChange={setSelKey} options={periodOptions}
+              placeholder={view === 'batch' ? 'Select a batch' : 'Select'} ariaLabel={periodLabel}
+              // Tinted only when the reader moved off the lens's own default (newest
+              // batch / current period). On batch that default is the resolved key.
+              filter inactiveValue={periodParam == null ? shownKey : '\u0000'}
+              style={{ minWidth: 200 }} />
           </div>
         )}
-        <div className="rp-filter-spacer" />
-        {teamView && <Seg label="Title" value={title} onChange={setTitle}
+        {teamView && <SegGroup label="Title" value={title} onChange={setTitle}
           options={[['all', 'All'], ['fulltime', 'Fulltime'], ['freelancer', 'Freelancer']]} />}
-        <Seg label="Category" value={category} onChange={setCategory}
-          options={[['puzzle', 'Puzzle'], ['arcade', 'Arcade'], ['simulation', 'Sim'], ['all', 'All']]} />
-      </div>
+        <FilterSpacer />
+        <ClearFilters visible={filtersOn} onClear={clearFilters} />
+      </FilterBar>
 
       {tabs.length > 1 && (
         <div className="rp-tabs">
-          {tabs.map((t) => <button key={t.id} className={'rp-tab' + (activeTab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>{t.label}</button>)}
+          {tabs.map((t) => <button key={t.id} type="button" className={'rp-tab' + (activeTab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>{t.label}</button>)}
         </div>
       )}
 
-      {err && !data && <div className="card" style={{ color: 'var(--bad)' }}>Couldn’t load report: {err}. The database may be waking up - try Refresh.</div>}
+      {err && !data && <ErrorState onRetry={fetchData}>Could not load the report: {err}. The database may be waking up.</ErrorState>}
       {err && data && <div className="rp-stale-note">Couldn’t refresh ({err}) - showing last loaded data.</div>}
       {loading && !data && <div className="card"><Empty text="Loading…" /></div>}
       {!loading && data && data.empty && <div className="card"><Empty text={teamView ? 'No data for this selection.' : 'You have no evaluations or recordings in this window.'} /></div>}
@@ -930,8 +965,8 @@ function Overview({ d }: { d: Bundle }) {
     { label: 'Shortlist', value: f.shortlisted },
     { label: 'Final Priority', value: f.finalPriority, parts: [
       // the conclusion colours, the same two the Conclusion flow bars use
-      { label: 'Priority IV', value: f.priorityIV, color: conclusionColor('Priority IV') },
-      { label: 'Insight', value: f.insight, color: conclusionColor('Insight') },
+      { label: 'Priority IV', value: f.priorityIV, color: conclusionColor('Priority IV', 'final') },
+      { label: 'Insight', value: f.insight, color: conclusionColor('Insight', 'final') },
     ] },
   ]
   const fnStages = [
@@ -1503,7 +1538,7 @@ function Overview({ d }: { d: Bundle }) {
 
       <div className="rp-strip-2">
         <BandBar label="Initial conclusions mix"
-          bands={orderedBands(d.initialConclusions, INIT_ORDER)} />
+          bands={orderedBands(d.initialConclusions, INIT_ORDER, 'initial')} />
         <BandBar label="Backlog by age" focusKey="age" total={`${fmt.int(stock)} waiting`}
           empty="Nothing waiting."
           bands={AGE_BANDS.map((b) => ({ name: b.label, value: stockAge[b.k], color: b.color }))} />
@@ -1602,7 +1637,7 @@ function Overview({ d }: { d: Bundle }) {
         </Card>
         <Card label="Final conclusions" note="moderator outcomes"
           tip={<><F>= distribution of final_conclusion</F>Only shortlisted games ever get one, so this is usually tens of games. At that size a pie chart is unreadable, which is why it is a list.</>}>
-          <ConclusionList data={d.finalConclusions} />
+          <ConclusionList data={d.finalConclusions} kind="final" />
         </Card>
       </div>
 
@@ -2304,11 +2339,11 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
       </Card>
 
       <div className="rp-section-title">Conclusions - what each person decided, and the moderator&apos;s final conclusions</div>
-      <Card label="Initial conclusions by evaluator" note="quality order: List_Idea › Playtest &amp; Bypass › Bypass · gray = Link_dead"
-        tip={<><F>bar = one evaluator · segment = count per conclusion</F>The picture behind the bypass spread in the chips above: red is where each person&apos;s bar sits.</>}>
-        {initRows.length ? <StackedBars rows={initRows} keys={initKeys} /> : <Empty />}
+      <Card label="Initial conclusions by evaluator" note="quality order: List_Idea › Playtest &amp; Bypass › Bypass · red = Link_dead"
+        tip={<><F>bar = one evaluator · segment = count per conclusion</F>The picture behind the bypass spread in the chips above: the grey part of each bar is bypasses.</>}>
+        {initRows.length ? <StackedBars rows={initRows} keys={initKeys} kind="initial" /> : <Empty />}
         <Foot
-          hint="A bigger red part than the others = bypasses more than the team"
+          hint="A bigger grey part than the others = bypasses more than the team"
           facts={byIdea.length < 2
             ? [{ value: `${byIdea.length} ${byIdea.length === 1 ? 'person has' : 'people have'} ${LB_T.calMin}+ games`, note: 'too few to compare' }]
             : ideaShare(byIdea[0]) - ideaShare(byIdea[byIdea.length - 1]) < 0.02
@@ -2320,7 +2355,7 @@ function Leaderboard({ d, focusOnce, onConsumeFocus }: {
       </Card>
       <Card label="Shortlisted games - final conclusions" note="quality order: Priority IV › Insight › Watch List › Priority V › Theme/Art › Bypass"
         tip={<><F>bar = games one evaluator shortlisted · segment = the moderator&apos;s final conclusion</F>Final conclusions come days after the evaluation, so a window that just opened is mostly empty here.</>}>
-        {finRows.length ? <StackedBars rows={finRows} keys={finKeys} /> : <Empty text="No shortlisted game has a final conclusion in this window" />}
+        {finRows.length ? <StackedBars rows={finRows} keys={finKeys} kind="final" /> : <Empty text="No shortlisted game has a final conclusion in this window" />}
         <Foot
           hint="Bar length = shortlisted games with a final conclusion. Short bar = still waiting."
           facts={finGames === 0
@@ -2540,8 +2575,8 @@ function Individual({ d }: { d: Bundle }) {
   const agedIntoOldP = moves.reduce((s2, m) => s2 + m.aged[1] + m.aged[2], 0)
 
   // ---- conclusion flow: what they decided, and how it was judged ----
-  const initBands = orderedBands(Object.entries(e.initialConclusions).map(([name, count]) => ({ name, count })), INIT_ORDER)
-  const finBands = orderedBands(Object.entries(e.finalConclusions).map(([name, count]) => ({ name, count })), FINAL_ORDER)
+  const initBands = orderedBands(Object.entries(e.initialConclusions).map(([name, count]) => ({ name, count })), INIT_ORDER, 'initial')
+  const finBands = orderedBands(Object.entries(e.finalConclusions).map(([name, count]) => ({ name, count })), FINAL_ORDER, 'final')
   const initTot = initBands.reduce((s, b) => s + b.value, 0)
   const finTot = finBands.reduce((s, b) => s + b.value, 0)
   // The three per-day KPI tiles this replaces. Kept as a sentence under the bar rather
@@ -3502,7 +3537,8 @@ function ConfigTab({ d, onSaved }: { d: Bundle; onSaved: () => void }) {
               <span className="cfg-pal-fixed-l">Never change with the preset</span>
               <span><i style={{ background: 'var(--good)' }} /><i style={{ background: 'var(--warn)' }} /><i style={{ background: 'var(--bad)' }} /> status: good, warning, bad</span>
               <span>{AGE_BANDS.map((b) => <i key={b.k} style={{ background: b.color }} />)} backlog age bands</span>
-              <span>{['List_Idea', 'Playtest & Bypass', 'Bypass', 'Priority IV', 'Insight'].map((c) => <i key={c} style={{ background: conclusionColor(c) }} />)} conclusions</span>
+              <span>{['List_Idea', 'Playtest & Bypass', 'Bypass'].map((c) => <i key={c} style={{ background: conclusionColor(c, 'initial') }} />)} initial conclusions</span>
+              <span>{['Priority IV', 'Insight', 'Bypass'].map((c) => <i key={c} style={{ background: conclusionColor(c, 'final') }} />)} final conclusions</span>
               <span><i style={{ background: NEUTRAL_REF }} /> team average and link dead</span>
             </div>
           </section>
@@ -3541,8 +3577,6 @@ function vidStatus(v: VidRow): VidStatus {
   if (v.confirmedOn) return 'recording'
   return 'pending'
 }
-// ISO day → d/m (module scope already has a Date-based `dm`)
-const dmISO = (day: string) => day.split('-').reverse().slice(0, 2).map(Number).join('/')
 
 // The recording list can run to dozens of rows and used to push every card below it off the
 // screen. It now shows five and grows as you scroll: the data is already in the
@@ -3563,21 +3597,21 @@ function VideoQueue({ vids }: { vids: Bundle['videos'][string] }) {
   return (
     <>
       <div className="rp-vid-wrap rp-vid-scroll" ref={boxRef} onScroll={onScroll}>
-        <table className="rp-vidtable">
-          <thead><tr><th>#</th><th>Game</th><th>Slot</th><th>Batch</th><th>Status</th><th>Link</th></tr></thead>
+        <table className="tbl tbl-sticky rp-vidtable">
+          <thead><tr><th className="tnum">#</th><th>Game</th><th>Slot</th><th>Batch</th><th>Status</th><th>Link</th></tr></thead>
           <tbody>
             {rows.map((v, i) => {
               const st = vidStatus(v)
               return (
                 <tr key={`${v.gameId}-${v.slot}`}>
-                  <td className="rp-vid-i">{i + 1}</td>
+                  <td className="rp-vid-i tnum">{i + 1}</td>
                   <td className="rp-vid-game">{v.title || v.gameId}{v.os && <span className="rp-vid-os"> · {fmtOs(v.os)}</span>}</td>
                   <td>{v.slot}</td>
                   <td>{v.batch || '-'}</td>
                   <td>{st === 'recorded'
-                    ? <span className="rp-vid-done">Recorded{v.recordedOn ? ` ${dmISO(v.recordedOn)}` : ''}</span>
+                    ? <span className="rp-vid-done">Recorded{v.recordedOn ? ` ${fmtDateVN(v.recordedOn)}` : ''}</span>
                     : st === 'recording'
-                      ? <span className="rp-vid-wip" title="Confirm pressed in the Record tab; no upload matched yet">Recording{v.confirmedOn ? ` · ${dmISO(v.confirmedOn)}` : ''}</span>
+                      ? <span className="rp-vid-wip" title="Confirm pressed in the Record tab; no upload matched yet">Recording{v.confirmedOn ? ` · ${fmtDateVN(v.confirmedOn)}` : ''}</span>
                       : <span className="rp-vid-pending">Pending</span>}</td>
                   <td>{v.youtube ? <a href={v.youtube} target="_blank" rel="noreferrer">YouTube ↗</a> : '-'}</td>
                 </tr>
@@ -3615,24 +3649,7 @@ function Card({ label, note, tip, fill, focusKey, children }: {
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
-  useEffect(() => {
-    if (!open) return
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [open])
-  const head = (expanded: boolean) => (
-    <div className="card-head">
-      <span className="card-label">{label}{tip && <InfoTip title={label}>{tip}</InfoTip>}</span>
-      <span className="card-head-right">
-        {note && <span className="card-note" title={note}>{note}</span>}
-        <button className="rp-expand" onClick={() => setOpen(!expanded)}
-          aria-label={expanded ? 'Close' : 'Expand'} title={expanded ? 'Close (Esc)' : 'Expand'}>
-          {expanded ? '✕' : '⤢'}
-        </button>
-      </span>
-    </div>
-  )
+  const title = <>{label}{tip && <InfoTip title={label}>{tip}</InfoTip>}</>
   // A card in a grid row is as tall as its tallest sibling, so a short chart used to
   // leave a column of dead space under its own footer. Splitting the children into a
   // body and a footer lets the body take the slack and centre in it, and pins the
@@ -3652,16 +3669,21 @@ function Card({ label, note, tip, fill, focusKey, children }: {
   return (
     <>
       <div className={'card' + (fill ? ' rp-card-fill' : '')} data-rp-focus={focusKey}>
-        {head(false)}
+        <div className="card-head">
+          <span className="card-label">{title}</span>
+          <span className="card-head-right">
+            {note && <span className="card-note" title={note}>{note}</span>}
+            <button type="button" className="rp-expand" onClick={() => setOpen(true)} aria-label="Expand" title="Expand">⤢</button>
+          </span>
+        </div>
         {inner}
       </div>
+      {/* The shared modal frame: Esc, focus trap and the X come with it. 1180 wide
+          because the point of expanding is a chart with room to read. */}
       {open && (
-        <div className="rp-modal-backdrop" onClick={() => setOpen(false)}>
-          <div className="rp-modal card" onClick={(e) => e.stopPropagation()}>
-            {head(true)}
-            {inner}
-          </div>
-        </div>
+        <Modal title={title} sub={note} onClose={() => setOpen(false)} width={1180} className="rp-modal">
+          {inner}
+        </Modal>
       )}
     </>
   )
@@ -3726,48 +3748,48 @@ function FlowTable({ rows, partialTail, inLabel, outLabel }: {
   const netTot = sum(change)
   return (
     <div className="rp-flow-scroll">
-      <table className="rp-flow-table">
+      <table className="tbl rp-flow-table">
         <thead>
           <tr>
             <th />
             {rows.map((r, i) => (
-              <th key={r.label + i} className={partialTail && i === last ? 'partial' : undefined}>
+              <th key={r.label + i} className={partialTail && i === last ? 'tnum partial' : 'tnum'}>
                 {r.label}{partialTail && i === last && <small>so far</small>}
               </th>
             ))}
-            <th className="rp-flow-total">Total</th>
+            <th className="rp-flow-total tnum">Total</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <th>{inLabel}</th>
-            {rows.map((r, i) => <td key={i}>{fmt.int(r.in)}</td>)}
-            <td className="rp-flow-total">{fmt.int(sum((r) => r.in))}</td>
+            {rows.map((r, i) => <td key={i} className="tnum">{fmt.int(r.in)}</td>)}
+            <td className="rp-flow-total tnum">{fmt.int(sum((r) => r.in))}</td>
           </tr>
           <tr>
             <th>{outLabel}</th>
-            {rows.map((r, i) => <td key={i}>{fmt.int(r.out)}</td>)}
-            <td className="rp-flow-total">{fmt.int(sum((r) => r.out))}</td>
+            {rows.map((r, i) => <td key={i} className="tnum">{fmt.int(r.out)}</td>)}
+            <td className="rp-flow-total tnum">{fmt.int(sum((r) => r.out))}</td>
           </tr>
           {showDead && (
             <tr>
               <th>Link dead</th>
-              {rows.map((r, i) => <td key={i}>{fmt.int(r.dead || 0)}</td>)}
-              <td className="rp-flow-total">{fmt.int(sum((r) => r.dead || 0))}</td>
+              {rows.map((r, i) => <td key={i} className="tnum">{fmt.int(r.dead || 0)}</td>)}
+              <td className="rp-flow-total tnum">{fmt.int(sum((r) => r.dead || 0))}</td>
             </tr>
           )}
           <tr>
             <th>Change</th>
             {rows.map((r, i) => {
               const n = change(r)
-              return <td key={i} className={tone(n) || undefined}>{signed(n)}</td>
+              return <td key={i} className={`tnum ${tone(n)}`.trim()}>{signed(n)}</td>
             })}
-            <td className={`rp-flow-total ${tone(netTot)}`.trim()}>{signed(netTot)}</td>
+            <td className={`rp-flow-total tnum ${tone(netTot)}`.trim()}>{signed(netTot)}</td>
           </tr>
           <tr className="rp-flow-stock">
             <th>Backlog</th>
-            {rows.map((r, i) => <td key={i}>{fmt.int(r.backlog)}</td>)}
-            <td className="rp-flow-total" />
+            {rows.map((r, i) => <td key={i} className="tnum">{fmt.int(r.backlog)}</td>)}
+            <td className="rp-flow-total tnum" />
           </tr>
         </tbody>
       </table>
@@ -3881,13 +3903,13 @@ function BubbleKey({ min, max, rad, caption, format }: {
 // snapshot, so none of them can separate "the 8-14d backlog shrank because we judged
 // those games" from "it shrank because they turned 15d+". Rows are where a game stood
 // when the window opened, columns where it stands now; each game is counted once.
-function orderedBands(data: Cnt[], order: string[]): Band[] {
+function orderedBands(data: Cnt[], order: string[], kind: ConclusionKind): Band[] {
   return [...data].filter((c) => c.count > 0)
     .sort((a, b) => {
       const ia = order.indexOf(a.name), ib = order.indexOf(b.name)
       return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
     })
-    .map((c, i) => ({ name: c.name, value: c.count, color: conclusionColor(c.name, i) }))
+    .map((c, i) => ({ name: c.name, value: c.count, color: conclusionColor(c.name, kind, i) }))
 }
 type Band = { name: string; value: number; color: string }
 // One 100%-wide stacked bar plus its own legend. It replaced an 8px strip captioned
@@ -3984,7 +4006,7 @@ function BandBar({ label, total, bands, empty, scaleTo, restLabel, focusKey }: {
 }
 // A small sample (tens of games) makes a donut's slices unreadable at a glance - a
 // plain ranked list carries the same counts without the chart chrome.
-function ConclusionList({ data }: { data: Cnt[] }) {
+function ConclusionList({ data, kind }: { data: Cnt[]; kind: ConclusionKind }) {
   if (!data.length) return <Empty text="No final conclusions in this window" />
   const total = data.reduce((s, c) => s + c.count, 0)
   const rows = [...data].sort((a, b) => b.count - a.count)
@@ -3992,7 +4014,7 @@ function ConclusionList({ data }: { data: Cnt[] }) {
     <div className="rp-conc-list">
       {rows.map((c, i) => (
         <div className="rp-conc-row" key={c.name}>
-          <span className="rp-dot" style={{ background: conclusionColor(c.name, i) }} />
+          <span className="rp-dot" style={{ background: conclusionColor(c.name, kind, i) }} />
           <span className="rp-conc-name">{c.name}</span>
           <span className="rp-conc-val">{fmt.int(c.count)} <span className="rp-conc-pct">({Math.round((c.count / total) * 100)}%)</span></span>
         </div>
@@ -4000,13 +4022,14 @@ function ConclusionList({ data }: { data: Cnt[] }) {
     </div>
   )
 }
-function Seg({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: Array<[string, string]> }) {
+// A visible label beside the shared segmented control. The label stays on screen
+// because the Review table's note names these controls by it.
+function SegGroup({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: Array<[string, string]> }) {
   return (
     <div className="rp-seg-group">
       <span className="rp-seg-label">{label}</span>
-      <div className="seg">
-        {options.map(([v, l]) => <button key={v} className={'rp-seg-btn' + (value === v ? ' active' : '')} onClick={() => onChange(v)}>{l}</button>)}
-      </div>
+      <Seg ariaLabel={label} value={value} onChange={onChange}
+        options={options.map(([v, l]) => ({ value: v, label: l }))} />
     </div>
   )
 }

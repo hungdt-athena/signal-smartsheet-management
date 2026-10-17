@@ -4,6 +4,13 @@ import { Lightbox } from '@/components/Lightbox'
 import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
 import { prettyConclusion } from '@/lib/buckets'
 import { thumbUrl } from '@/lib/image-thumbs'
+import { conclusionBadgeClass, finalConclusionStyle } from '@/lib/conclusion-badge'
+import { fmtDateVN } from '@/lib/format-date'
+import { StyledSelect } from '@/components/StyledSelect'
+import { Seg } from '@/components/ui/Seg'
+import { Switch } from '@/components/ui/Switch'
+import { FilterBar, FilterSpacer, ClearFilters } from '@/components/ui/FilterBar'
+import { ErrorState } from '@/components/ui/States'
 
 // The Individual tab's bottom block: one evaluator's judged games, one row each,
 // with the StoreKit screenshots visible so a wrong call is obvious at a glance --
@@ -21,8 +28,8 @@ const PAGE_SIZE = 20
 
 // 'all' is deliberately absent from the category filter: category_group is a
 // required, non-empty column and there is no 'all' value for it in the DB.
-const CATEGORY_OPTIONS: Array<[string, string]> = [
-  ['puzzle', 'Puzzle'], ['arcade', 'Arcade'], ['simulation', 'Sim'],
+const CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'puzzle', label: 'Puzzle' }, { value: 'arcade', label: 'Arcade' }, { value: 'simulation', label: 'Simulation' },
 ]
 
 // Fallback/canonical ordering for the conclusion filter -- kept in sync with
@@ -131,21 +138,14 @@ interface ReviewRow {
   manual_screenshot_urls: string[] | null
 }
 
-// What a conclusion MEANS, in four tones, so a column of pills reads as kept /
-// dropped / not decided without anyone learning seventeen labels.
-//
-// Rules, not a table of seventeen values, because the list is admin-editable in
-// Config -- a table would leave every new value colourless. The bypass rule is not
-// invented here either: `NOT ILIKE '%bypass%'` is exactly how the server decides what
-// counts as shortlisted (app/api/report/route.ts), so "Playtest & Bypass" and
-// "M_ByPass" land on the same side of the line here as they do in the KPI above.
-function conclusionTone(v: string | null | undefined): string {
-  if (!v) return 'rp-tone-none'
-  if (HOUSEKEEPING.includes(v)) return 'rp-tone-none'
-  if (/bypass/i.test(v) || /^skip$/i.test(v)) return 'rp-tone-bad'
-  // Not a verdict yet -- it asks for more work before anyone can call it.
-  if (/^(need|wait|check)\b/i.test(v)) return 'rp-tone-hold'
-  return 'rp-tone-good'
+// Conclusion colours come from the app's one map (lib/conclusion-badge.ts): the
+// initial call as a .badge, the moderator's final call as the same chip Short List
+// draws. The two are separate maps because "Bypass" means different things in each.
+
+// The moderator's final call, coloured the way Short List colours it.
+function FinalChip({ value }: { value: string }) {
+  const st = finalConclusionStyle(value)
+  return <span className="badge" style={{ background: st.bg, color: st.color }}>{prettyConclusion(value)}</span>
 }
 
 // 'ios' -> 'iOS', 'android' -> 'Android'; anything else as it came.
@@ -225,15 +225,6 @@ function resolveCountry(v: string | null | undefined): { flag: string; name: str
   // Two regional-indicator letters make the flag emoji: 'JP' -> 🇯🇵.
   const flag = String.fromCodePoint(...Array.from(code, c => 0x1f1e6 + c.charCodeAt(0) - 65))
   return { flag, name }
-}
-
-function fmtDate(d: string | null | undefined): string {
-  if (!d) return '—' // em dash used ONLY as the established placeholder glyph for a
-  // missing data value (matches EvalRow/InfoField elsewhere in this codebase) -- never
-  // written into a sentence, which is what the lexicon rule actually forbids.
-  const dt = new Date(d)
-  if (Number.isNaN(dt.getTime())) return '—'
-  return dt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
 
 // StoreKit first, manual second -- same fallback EvalDetailPanel/ManualScreenshotsCard
@@ -392,6 +383,9 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     () => CONCLUSION_DEFAULTS.filter(c => !HOUSEKEEPING.includes(c)))
   const [from, setFrom] = useState<string | null>(null)
   const [to, setTo] = useState<string | null>(null)
+  // The dates the table opened on (the page's period, or the probe's newest days), so
+  // Clear filters can tell when the reader moved them and put them back.
+  const [openedOn, setOpenedOn] = useState<{ from: string | null; to: string | null }>({ from: null, to: null })
   const [initializing, setInitializing] = useState(true)
   const [rows, setRows] = useState<ReviewRow[]>([])
   // Starts true: the very first paint is always waiting on the resolved window
@@ -470,6 +464,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     if (windowFrom && windowTo) {
       setFrom(windowFrom)
       setTo(windowTo)
+      setOpenedOn({ from: windowFrom, to: windowTo })
       setInitializing(false)
       return
     }
@@ -480,6 +475,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
       if (cancelled) return
       setFrom(f)
       setTo(t)
+      setOpenedOn({ from: f, to: t })
       setInitializing(false)
     })()
     return () => { cancelled = true }
@@ -645,9 +641,9 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
 
   const who = canSeeTeam ? evaluator : 'You'
   const have = canSeeTeam ? 'has' : 'have'
-  const catLabel = CATEGORY_OPTIONS.find(([v]) => v === category)?.[1] || category
+  const catLabel = CATEGORY_OPTIONS.find((o) => o.value === category)?.label || category
   const rangeText = from && to
-    ? (from === to ? ` on ${fmtDate(from)}` : ` between ${fmtDate(from)} and ${fmtDate(to)}`)
+    ? (from === to ? ` on ${fmtDateVN(from)}` : ` between ${fmtDateVN(from)} and ${fmtDateVN(to)}`)
     : ''
   // On "All" there is no conclusion to name, so the sentence says what the filter
   // really is -- evaluated at all -- rather than printing the sentinel.
@@ -662,23 +658,32 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
 
   const showEmpty = !initializing && !loading && rows.length === 0
 
+  const datesMoved = from !== openedOn.from || to !== openedOn.to
+  const filtersOn = category !== 'puzzle' || conclusion !== ALL_CONCLUSIONS || hasFinal || datesMoved
+  // One reset for every filter. Category goes back through changeCategory, which
+  // re-resolves the dates for Puzzle; otherwise the dates go back to what the table
+  // opened on.
+  function clearFilters() {
+    setConclusion(ALL_CONCLUSIONS)
+    setHasFinal(false)
+    if (category !== 'puzzle') changeCategory('puzzle')
+    else { setFrom(openedOn.from); setTo(openedOn.to) }
+  }
+
   return (
     <div className="rp-review-table">
       <div className="rp-review-toolbar">
-        <div className="rp-review-filters">
-          <label className="rp-review-filter">
+        {/* Category group first, the same as every filter bar in the app. These filters
+            stay in component state, not the URL: they reset when the person changes
+            (during render, see above) and Category also re-resolves the dates, and
+            the page above already owns the URL's cat/period keys. The dates stay two
+            native pickers because they are clamped to the page's period (min/max),
+            which DateFilter cannot do. */}
+        <FilterBar className="rp-review-filters" ariaLabel="Review filters">
+          <div className="rp-review-filter">
             <span>Category</span>
-            <select aria-label="Category" value={category} onChange={e => changeCategory(e.target.value)}>
-              {CATEGORY_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </label>
-          <label className="rp-review-filter">
-            <span>Initial conclusion</span>
-            <select aria-label="Initial conclusion" value={conclusion} onChange={e => setConclusion(e.target.value)}>
-              <option value={ALL_CONCLUSIONS}>All</option>
-              {conclusionOptions.map(c => <option key={c} value={c}>{prettyConclusion(c)}</option>)}
-            </select>
-          </label>
+            <Seg ariaLabel="Category" value={category} onChange={changeCategory} options={CATEGORY_OPTIONS} />
+          </div>
           <label className="rp-review-filter">
             <span>From</span>
             <input aria-label="From date" type="date" value={from || ''}
@@ -691,25 +696,28 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
               min={from || windowFrom || undefined} max={windowTo || undefined}
               onChange={e => changeTo(e.target.value)} />
           </label>
-          <label className="rp-review-check">
-            <input type="checkbox" checked={hasFinal} onChange={e => setHasFinal(e.target.checked)} />
-            <span>Has final conclusion</span>
-          </label>
-        </div>
+          <div className="rp-review-filter">
+            <span>Initial conclusion</span>
+            <StyledSelect ariaLabel="Initial conclusion" value={conclusion} onChange={setConclusion}
+              filter inactiveValue={ALL_CONCLUSIONS} style={{ minWidth: 180 }}
+              options={[{ value: ALL_CONCLUSIONS, label: 'All' },
+                ...conclusionOptions.map(c => ({ value: c, label: prettyConclusion(c) }))]} />
+          </div>
+          <Switch checked={hasFinal} onChange={setHasFinal} label="Has final conclusion" />
+          <FilterSpacer />
+          <ClearFilters visible={filtersOn} onClear={clearFilters} />
+        </FilterBar>
       </div>
 
       {showEmpty && loadFailed ? (
-        <div className="rp-review-empty" role="alert" style={{ color: 'var(--bad)' }}>
-          Could not load the games.{' '}
-          <button type="button" className="btn btn-sm" onClick={() => { pageRef.current = 1; fetchPage(1, false) }}>Try again</button>
-        </div>
+        <ErrorState onRetry={() => { pageRef.current = 1; fetchPage(1, false) }}>Could not load the games.</ErrorState>
       ) : showEmpty ? (
         <div className="rp-review-empty">{emptySentence}</div>
       ) : (
         <div className="rp-review-rows" ref={rowsRef}>
           {rows.map(row => {
             const shots = shotsFor(row)
-            const evaluatedOn = fmtDate(row.evaluate_date || row.updated_at)
+            const evaluatedOn = fmtDateVN(row.evaluate_date || row.updated_at)
             const tags = Array.isArray(row.tags) ? row.tags : []
             const country = resolveCountry(row.publisher_country)
             return (
@@ -751,7 +759,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                           kinds of chip in one line. The date still says which date. */}
                       <div className="rp-review-meta">
                         <span className="rp-review-fact">{fmtOs(row.os)}</span>
-                        <span className="rp-review-fact">Released {fmtDate(row.release_date)}</span>
+                        <span className="rp-review-fact">Released {fmtDateVN(row.release_date)}</span>
                       </div>
                       {/* Tags only when the game has any -- an empty row of chips would
                           add a line to every row to say nothing. */}
@@ -764,7 +772,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                   <div className="rp-review-calls">
                     <div className="rp-review-call rp-review-verdict">
                       <span className="rp-review-call-l">Initial</span>
-                      <span className={`pill ${conclusionTone(row.initial_conclusion)}`}>
+                      <span className={`badge ${conclusionBadgeClass(row.initial_conclusion)}`}>
                         {prettyConclusion(row.initial_conclusion)}</span>
                       <span className="rp-review-call-by">
                         {row.initial_evaluator || evaluator} · {evaluatedOn}
@@ -773,7 +781,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                     <div className="rp-review-call rp-review-final">
                       <span className="rp-review-call-l">Final</span>
                       {row.final_conclusion
-                        ? <span className={`pill ${conclusionTone(row.final_conclusion)}`}>{prettyConclusion(row.final_conclusion)}</span>
+                        ? <FinalChip value={row.final_conclusion} />
                         : <span className="rp-review-final-none">not given yet</span>}
                       {row.final_conclusion && row.final_evaluator && (
                         <span className="rp-review-call-by">{row.final_evaluator}</span>
@@ -832,8 +840,8 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
           })}
           <div ref={sentinelRef} style={{ height: 1 }} />
           {/* First page: say so rather than showing a screen-tall empty box. */}
-          {loading && rows.length === 0 && <div className="rp-review-loading">Loading...</div>}
-          {loadingMore && <div className="rp-review-loading">Loading more...</div>}
+          {loading && rows.length === 0 && <div className="rp-review-loading">Loading…</div>}
+          {loadingMore && <div className="rp-review-loading">Loading more…</div>}
         </div>
       )}
 

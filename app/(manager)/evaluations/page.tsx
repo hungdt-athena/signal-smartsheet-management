@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { useSession } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import { StyledSelect } from '@/components/StyledSelect'
-import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth, valueLabel } from '@/components/DateFilter'
+import { DateFilter, dateFilterParams, monthToValue, valueToYearMonth } from '@/components/DateFilter'
 import type { YearMonth } from '@/components/DateFilter'
 import { useDateFilter } from '@/hooks/useDateFilter'
 import { useConfig } from '@/hooks/useConfig'
@@ -18,7 +18,7 @@ import { Highlight } from '@/components/Highlight'
 import { QuickStatsModal } from '@/components/QuickStatsModal'
 import { WeeklyFeedbackTab } from '@/components/weekly-feedback/WeeklyFeedbackTab'
 import { TaggingTab } from '@/components/TaggingTab'
-import { BUCKETS, prettyConclusion, type Bucket } from '@/lib/buckets'
+import { BUCKETS, isBucket, prettyConclusion, type Bucket } from '@/lib/buckets'
 import type { EvalDetail, EvalListItem } from '@/components/EvalDetailPanel'
 import { GameAlikeChips, GameAlikeField } from '@/components/GameAlikeField'
 import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
@@ -29,6 +29,15 @@ import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
 import { saveCurrentBatch, loadCurrentBatchStart } from '@/lib/current-batch-client'
 import { BatchMoveBar } from '@/components/BatchMoveBar'
 import { batchLabelsOfMonth, monthKeyOfBatch, monthKeyLabel } from '@/lib/batch-month'
+import { conclusionBadgeClass, finalConclusionStyle } from '@/lib/conclusion-badge'
+import { fmtDateVN, fmtDateTimeVN } from '@/lib/format-date'
+import { toast } from '@/lib/toast'
+import { useUrlState, useSetUrlParams } from '@/lib/use-url-state'
+import { Seg } from '@/components/ui/Seg'
+import { FilterBar, FilterSpacer, ClearFilters, FilterCount } from '@/components/ui/FilterBar'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { EmptyState, ErrorState, SkeletonRows } from '@/components/ui/States'
 
 interface Evaluation {
   id: number
@@ -54,37 +63,17 @@ interface Evaluation {
 }
 
 
-const CONCLUSION_COLORS: Record<string, string> = {
-  'Bypass': 'error', 'M_ByPass': 'error', 'Skip': 'error', 'Link_dead': 'error',
-  // Stale_release: pushed by mistake (back-catalog game), taken out of the queue
-  // without anyone evaluating it. Not selectable — set by the prune script only.
-  'Stale_release': 'error',
-  'Playtest & Bypass': 'error',
-  'Good': 'success', 'Conclusion': 'success',
-  'List_Idea': 'success', 'Priority I': 'success', 'Priority II': 'success',
-  'Priority III: Watchlist for next phase': 'running',
-  'Priority IV: Idea': 'running', 'Watchlist for next milestone': 'running',
-  'Need deeper testing': 'running', 'Wait for PlayTest': 'running',
-  'Check Market Data': 'running', 'Need Direction': 'running',
-}
-
-
 // Sentinel for the Short List "Final conclusion" filter meaning "not yet
 // decided" (final_conclusion IS NULL). Kept in sync with the server check.
 const FINAL_CONCLUSION_NONE = '(none)'
 
 // Final Conclusion is the moderator's triage verdict (distinct from the
 // evaluator's initial_conclusion). Options are managed from the Config tab
-// (see useConfig); these are just the badge colors keyed by value.
-const FINAL_CONCLUSION_STYLES: Record<string, { bg: string; color: string }> = {
-  'Priority V':  { bg: '#ede9fe', color: '#6d28d9' },
-  'Priority IV': { bg: '#0f766e', color: '#ffffff' },
-  'Bypass':      { bg: '#d23b3b', color: '#ffffff' },
-  'Theme/Art':   { bg: '#dbeafe', color: '#2563eb' },
-  'Insight':     { bg: '#15803d', color: '#ffffff' },
-  'Watch List':  { bg: '#dcfce7', color: '#16a34a' },
-  'Not Found':   { bg: '#374151', color: '#e5e7eb' },
-}
+// (see useConfig); the colours come from lib/conclusion-badge.
+
+// Category group labels, the same words as everywhere else: Puzzle / Arcade / Simulation.
+const bucketLabel = (b: string) => b.charAt(0).toUpperCase() + b.slice(1)
+const BUCKET_OPTIONS = BUCKETS.map(b => ({ value: b as string, label: bucketLabel(b) }))
 
 function osLabel(os: string) {
   const o = (os || '').toLowerCase()
@@ -103,6 +92,7 @@ function CopyBtn({ text }: { text: string | null | undefined }) {
       type="button"
       className={`cell-copy${done ? ' done' : ''}`}
       title="Copy to clipboard"
+      aria-label="Copy to clipboard"
       onClick={e => {
         e.stopPropagation()
         navigator.clipboard.writeText(text).then(() => {
@@ -126,13 +116,8 @@ function CopyBtn({ text }: { text: string | null | undefined }) {
 }
 
 function FinalConclusionBadge({ value }: { value: string }) {
-  const s = FINAL_CONCLUSION_STYLES[value] || { bg: 'var(--surface-3)', color: 'var(--muted)' }
-  return (
-    <span style={{
-      display: 'inline-block', fontSize: 11, fontWeight: 700, padding: '3px 10px',
-      borderRadius: 999, background: s.bg, color: s.color, whiteSpace: 'nowrap', lineHeight: 1.5,
-    }}>{value}</span>
-  )
+  const s = finalConclusionStyle(value)
+  return <span className="badge" style={{ background: s.bg, color: s.color }}>{value}</span>
 }
 
 interface ShortListItem {
@@ -179,7 +164,7 @@ function NoteHover({ text, maxWidth = 240 }: { text: string; maxWidth?: number }
       ref={ref}
       onMouseEnter={show}
       onMouseLeave={() => setPos(null)}
-      style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth, cursor: 'inherit' }}
+      style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth, cursor: 'inherit' }}
     >
       {text}
       {pos && createPortal(
@@ -187,7 +172,7 @@ function NoteHover({ text, maxWidth = 240 }: { text: string; maxWidth?: number }
           position: 'fixed', top: pos.top, left: pos.left, zIndex: 1000, maxWidth: 360,
           background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)',
           borderRadius: 10, boxShadow: '0 10px 30px rgba(0,0,0,0.20)', padding: '10px 13px',
-          fontSize: 13.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}>{text}</div>,
         document.body
       )}
@@ -254,14 +239,21 @@ function FinalConclusionCell({ item, isManager, options, onSaved }: {
   const pick = async (v: string) => {
     setAnchor(null)
     if (!v || v === val) return
+    let ok = false
     try {
       const res = await fetch('/api/evaluations', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: item.id, final_conclusion: v }),
       })
-      if (res.ok) onSaved(item.id, v)
-    } catch { /* ignore */ }
+      ok = res.ok
+    } catch { /* reported below */ }
+    if (ok) {
+      onSaved(item.id, v)
+      toast.success(`Final conclusion set to ${v}`)
+    } else {
+      toast.error("Couldn't save the final conclusion.", { label: 'Try again', run: () => pick(v) })
+    }
   }
 
   return (
@@ -314,7 +306,12 @@ function DemoVideoCell({ item, onSaved }: {
     const v = val.trim()
     if (v === (item.drive_link || '')) { setEditing(false); return }
     setSaving(true)
-    if (await saveDriveLink(item.id, v || null)) onSaved(item.id, v || null)
+    if (await saveDriveLink(item.id, v || null)) {
+      onSaved(item.id, v || null)
+      toast.success(v ? 'Video link saved' : 'Video link removed')
+    } else {
+      toast.error("Couldn't save the video link.")
+    }
     setSaving(false)
     setEditing(false)
   }
@@ -332,8 +329,8 @@ function DemoVideoCell({ item, onSaved }: {
           onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel() }}
           disabled={saving}
         />
-        <button className="btn btn-primary btn-sm" style={{ padding: '3px 7px', fontSize: 11 }} onClick={save} disabled={saving} title="Save link">✓</button>
-        <button className="btn btn-ghost btn-sm" style={{ padding: '3px 6px', fontSize: 11 }} onClick={cancel} disabled={saving} title="Cancel">✕</button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={saving} title="Save link" aria-label="Save link">✓</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={cancel} disabled={saving} title="Cancel" aria-label="Cancel">✕</button>
       </span>
     )
   }
@@ -347,7 +344,7 @@ function DemoVideoCell({ item, onSaved }: {
           </svg>
           Video
         </a>
-        <button className="cell-copy" title="Replace video link"
+        <button type="button" className="cell-copy" title="Replace video link" aria-label="Replace video link"
           onClick={e => { e.stopPropagation(); setVal(item.drive_link || ''); setEditing(true) }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
@@ -359,12 +356,8 @@ function DemoVideoCell({ item, onSaved }: {
   }
 
   return (
-    <button onClick={e => { e.stopPropagation(); setEditing(true) }}
-      title="Import a demo video link"
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', background: 'transparent',
-        cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--accent)', padding: 0,
-      }}>
+    <button type="button" className="btn btn-sm btn-link" onClick={e => { e.stopPropagation(); setEditing(true) }}
+      title="Import a demo video link">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
       </svg>
@@ -395,16 +388,24 @@ function FinalNoteCell({ item, isManager, onSaved }: {
     const v = val.trim()
     if (v === (item.final_note || '')) { close(); return }
     setSaving(true)
+    let ok = false
     try {
       const res = await fetch('/api/evaluations', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: item.id, final_note: v || null }),
       })
-      if (res.ok) onSaved(item.id, v || null)
-    } catch { /* ignore */ }
+      ok = res.ok
+    } catch { /* reported below */ }
     setSaving(false)
-    close()
+    if (ok) {
+      onSaved(item.id, v || null)
+      toast.success('Final note saved')
+      close()
+    } else {
+      // Keep the popover open with the text still in it, so nothing typed is lost.
+      toast.error("Couldn't save the final note.")
+    }
   }
 
   return (
@@ -434,7 +435,7 @@ function FinalNoteCell({ item, isManager, onSaved }: {
               disabled={saving}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 10.5, color: 'var(--faint)' }}>⌘/Ctrl+Enter to save</span>
+              <span style={{ fontSize: 11, color: 'var(--faint)' }}>⌘/Ctrl+Enter to save</span>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button className="btn btn-ghost btn-sm" onClick={close} disabled={saving}>Cancel</button>
                 <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>Save</button>
@@ -476,7 +477,10 @@ function GameAlikeCell({ item, canEdit, onSaved }: {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: item.id, game_alike: next }),
-    }).then(res => { if (res.ok) onSaved(item.id, next) }).catch(() => { /* ignore */ })
+    }).then(res => res.ok, () => false).then(ok => {
+      if (ok) { onSaved(item.id, next); toast.success('Game alike saved') }
+      else toast.error("Couldn't save game alike.")
+    })
   }, [item.id, item.game_alike, onSaved])
 
   return (
@@ -491,7 +495,7 @@ function GameAlikeCell({ item, canEdit, onSaved }: {
             ? <span style={ADD_PILL}>+ Add</span>
             : <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>}
         {canEdit && games.length > 0 && (
-          <button type="button" className="cell-copy" title="Edit game alike" onClick={open} style={{ flexShrink: 0 }}>
+          <button type="button" className="cell-copy" title="Edit game alike" aria-label="Edit game alike" onClick={open} style={{ flexShrink: 0 }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
             </svg>
@@ -531,11 +535,7 @@ function vnMonthKey() {
 
 // The same colours as the Final Conclusion chip in the table, so a card and the rows it lists
 // read as one thing.
-const FINAL_TONE: Record<string, string> = {
-  'Insight': FINAL_CONCLUSION_STYLES['Insight'].bg,
-  'Priority IV': FINAL_CONCLUSION_STYLES['Priority IV'].bg,
-}
-const toneOf = (c: string) => FINAL_TONE[c] || 'var(--muted)'
+const toneOf = (c: string) => MONTHLY_FINALS.includes(c) ? finalConclusionStyle(c).bg : 'var(--muted)'
 
 function StatCard({ label, current, value, pair, tone, bar, on, onClick }: {
   label: string; current?: boolean; value: string
@@ -577,13 +577,14 @@ function fmtStart(at: string | null) {
 
 // The team's current batch is a global setting, not a filter, so it lives in a popover off
 // the header instead of sitting in the filter bar.
-function CurrentBatchMenu({ value, options, startsAt, failed, onChange, onStartChange }: {
-  value: string | null; options: string[]; startsAt: string | null; failed: boolean
+// A failed save is reported as a toast by the caller (the picker goes back to the value the
+// server still has), so this menu holds no error state of its own.
+function CurrentBatchMenu({ value, options, startsAt, onChange, onStartChange }: {
+  value: string | null; options: string[]; startsAt: string | null
   onChange: (v: string) => void; onStartChange: (at: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => { if (failed) setOpen(true) }, [failed])
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
@@ -615,6 +616,7 @@ function CurrentBatchMenu({ value, options, startsAt, failed, onChange, onStartC
             value={value || ''}
             onChange={onChange}
             placeholder="Not set"
+            ariaLabel="Current batch"
             options={[{ value: '', label: '— none —' }, ...options.map(b => ({ value: b, label: b }))]}
           />
           {value && (
@@ -624,7 +626,6 @@ function CurrentBatchMenu({ value, options, startsAt, failed, onChange, onStartC
                 onChange={e => onStartChange(e.target.value)} />
             </label>
           )}
-          {failed && <span role="alert" className="alert">Couldn&apos;t save the batch. Try again.</span>}
         </div>
       )}
     </div>
@@ -641,20 +642,41 @@ function ShortListEvalTab() {
   const [data, setData] = useState<ShortListItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [availableEvaluators, setAvailableEvaluators] = useState<string[]>([])
-  const [filterCategory, setFilterCategory] = useState('puzzle')
-  // Short List reviews one batch; Monthly lists the Insight / Priority IV games of every
-  // batch of one month. Same table, same row handlers -- only the scope changes.
-  const [view, setView] = useState<'shortlist' | 'monthly'>('shortlist')
-  const [monthKey, setMonthKey] = useState('')
+
+  // The view and the filters live in the URL, so reload, Back and a shared link open the
+  // same list. The date range is the exception: useDateFilter resolves month=auto with the
+  // server and suppresses its own refetches, which is not safe to drive from the URL.
+  //
+  // Short List (view=batch, the default) reviews one batch; Monthly lists the Insight /
+  // Priority IV games of every batch of one month. Same table, same row handlers -- only
+  // the scope changes.
+  const setUrl = useSetUrlParams()
+  const [viewParam] = useUrlState('view', 'batch')
+  const view: 'shortlist' | 'monthly' = viewParam === 'monthly' ? 'monthly' : 'shortlist'
+  const [categoryParam, setFilterCategory] = useUrlState('bucket', 'puzzle')
+  const filterCategory = isBucket(categoryParam) || (view === 'monthly' && categoryParam === 'all') ? categoryParam : 'puzzle'
+  // batch: absent = the default batch (Short List) or the whole month (Monthly); 'all' = All
+  // batches, written out so a shared "All batches" link is not turned into the current batch.
+  const [batchParam, setBatchParam] = useUrlState('batch', '')
+  const [monthParam] = useUrlState('month', '')
+  const [evParam, setFilterEvaluator] = useUrlState('ev', '')
+  // Only managers have the evaluator filter; the server locks an evaluator to their own rows.
+  const filterEvaluator = isManager ? evParam : ''
+  // final: the Final conclusions menu value ('' = all, 'other', '(none)' or one conclusion).
+  const [finalParam, setFinalParam] = useUrlState('final', '')
+
   const [breakdown, setBreakdown] = useState<BreakdownRow[] | null>(null)
-  const shortListScope = useRef<{ category: string; conclusions: string[]; finals: string[]; batch: string } | null>(null)
-  const [filterConclusions, setFilterConclusions] = useState<string[]>(['List_Idea'])
-  const [filterFinalConclusions, setFilterFinalConclusions] = useState<string[]>([])
-  const [filterEvaluator, setFilterEvaluator] = useState('')
-  const [filterBatch, setFilterBatch] = useState('')
+  const shortListScope = useRef<{ category: string; batch: string; final: string } | null>(null)
+  // The batch the server says to open on: set once, from the first facets response.
+  const [defaultBatch, setDefaultBatch] = useState('')
+  const filterBatch = batchParam === 'all' ? '' : batchParam || (view === 'shortlist' ? defaultBatch : '')
+  const setFilterBatch = (v: string) => {
+    if (view === 'monthly') setBatchParam(v)
+    else setBatchParam(v === defaultBatch ? '' : v || 'all')
+  }
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
-  const [currentBatchSaveFailed, setCurrentBatchSaveFailed] = useState(false)
   // The moment the current batch starts (batches.starts_at, Vietnam time). The Report
   // places games that carry no label by it, so a manager can see and change it where the
   // batch is set.
@@ -665,6 +687,17 @@ function ShortListEvalTab() {
   const confirmedBatchRef = useRef<string | null>(null)
   const batchSaveSeqRef = useRef(0)
   const [availableBatches, setAvailableBatches] = useState<string[]>([])
+  const monthKey = monthParam || (view === 'monthly' ? (monthKeyOfBatch(currentBatch) ?? vnMonthKey()) : '')
+
+  // Initial conclusion is fixed: List_Idea is what Short List is; Monthly takes any.
+  const conclusionsParam = view === 'monthly' ? '' : 'List_Idea'
+  const otherFinals = finalConclusionOptions.filter(c => !MONTHLY_FINALS.includes(c))
+  const otherKey = otherFinals.join(',')
+  // As a joined string, so the fetch callbacks keep their identity between renders.
+  const finalsParam = view === 'monthly'
+    ? (MONTHLY_FINALS.includes(finalParam) ? finalParam : MONTHLY_FINALS.join(','))
+    : finalParam === 'other' ? otherKey : finalParam
+
   // Short List is organised by batch, so the date filter defaults to all-time
   // (evaluated basis) rather than the current month — the month would fight the
   // batch slicing and hide games evaluated in other months of the same batch.
@@ -700,8 +733,8 @@ function ShortListEvalTab() {
   // the facets request can never disagree about what is being looked at.
   const scopeParams = useCallback(() => {
     const params = new URLSearchParams({ category: filterCategory })
-    if (filterConclusions.length > 0) params.set('conclusions', filterConclusions.join(','))
-    if (filterFinalConclusions.length > 0) params.set('final_conclusions', filterFinalConclusions.join(','))
+    if (conclusionsParam) params.set('conclusions', conclusionsParam)
+    if (finalsParam) params.set('final_conclusions', finalsParam)
     // Evaluators are locked to their own rows -- by the server, from the session, which
     // ignores this param for them. Sending it added nothing but a dependency on
     // useSession() having resolved, which duplicated both first-load requests the moment
@@ -712,7 +745,7 @@ function ShortListEvalTab() {
     if (view === 'monthly' && monthKey) params.set('batch_month', monthKey)
     for (const [k, v] of Object.entries(dateFilterParams(df.value, df.autoMonth))) params.set(k, v)
     return params
-  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, df.value, df.autoMonth, view, monthKey])
+  }, [filterCategory, conclusionsParam, finalsParam, filterEvaluator, df.value, df.autoMonth, view, monthKey])
 
   // Dropdown contents. Deliberately NOT dependent on batch or sort: `available_batches`
   // and `default_batch` ignore the batch filter by design, and nothing here depends on
@@ -733,11 +766,12 @@ function ShortListEvalTab() {
           batchDefaultedRef.current = true
           // Pre-select the team's current batch, but fall back to the most recent
           // batch with games (server-resolved default_batch) when current is empty.
+          // A batch already in the URL wins: it is what the link was shared for.
           const def = json.default_batch !== undefined ? json.default_batch : json.current_batch
-          if (def) setFilterBatch(def)
+          if (def) setDefaultBatch(def)
         }
       }
-    } catch { /* ignore */ }
+    } catch { /* the dropdowns keep what they had */ }
   }, [scopeParams])
 
   const fetchData = useCallback(async () => {
@@ -756,8 +790,10 @@ function ShortListEvalTab() {
       // sort direction). Let the DB filter before LIMIT instead.
       if (filterBatch) params.set('batch', filterBatch)
       const res = await fetch(`/api/evaluations?${params}`)
+      if (!res.ok) throw new Error(String(res.status))
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return
+      setLoadFailed(false)
       setData(json.data || [])
       setTotal(json.total || 0)
       if (json.breakdown) setBreakdown(json.breakdown)
@@ -772,8 +808,11 @@ function ShortListEvalTab() {
         df.setAutoMonth(false)
         df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
-    } catch { /* ignore */ }
-    setLoading(false)
+    } catch {
+      // A failed load is shown as a failure with a retry, never as an empty list.
+      if (seq === fetchSeqRef.current) setLoadFailed(true)
+    }
+    if (seq === fetchSeqRef.current) setLoading(false)
   }, [scopeParams, filterBatch, sortAsc, df.autoMonth])
 
   useEffect(() => {
@@ -790,13 +829,13 @@ function ShortListEvalTab() {
   // (category, any filter, the date range) drops the selection.
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [filterCategory, filterConclusions, filterFinalConclusions, filterEvaluator, filterBatch, df.value, view, monthKey])
+  }, [filterCategory, conclusionsParam, finalsParam, filterEvaluator, filterBatch, df.value, view, monthKey])
 
   // The card counts do not depend on batch or final conclusion, but they do on everything
   // else. Until the matching response lands show a dash, not the previous scope's numbers.
   useEffect(() => {
     setBreakdown(null)
-  }, [filterCategory, filterConclusions, filterEvaluator, df.value, view, monthKey])
+  }, [filterCategory, conclusionsParam, filterEvaluator, df.value, view, monthKey])
 
   const handleFinalConclusionSaved = (id: number, value: string) => {
     setData(prev => prev.map(d => d.id === id ? { ...d, final_conclusion: value } : d))
@@ -834,7 +873,7 @@ function ShortListEvalTab() {
     if (ok) {
       confirmedBatchRef.current = v || null
       if (latest) {
-        setCurrentBatchSaveFailed(false)
+        toast.success(v ? `Current batch set to ${v}` : 'Current batch cleared')
         setCurrentBatchStart(v ? await loadCurrentBatchStart() : null)
       }
       return
@@ -842,17 +881,17 @@ function ShortListEvalTab() {
     // An older request failing after a newer one was sent says nothing about the picker.
     if (!latest) return
     setCurrentBatch(confirmedBatchRef.current)
-    setCurrentBatchSaveFailed(true)
+    toast.error("Couldn't save the batch. Try again.")
   }
   const handleCurrentBatchStartChange = async (at: string) => {
     if (!currentBatch || !at) return
     const before = currentBatchStart
     setCurrentBatchStart(at)
     const ok = await saveCurrentBatch(currentBatch, at)
-    if (ok) { setCurrentBatchSaveFailed(false); return }
+    if (ok) { toast.success('Batch start saved'); return }
     // e.g. another batch already starts at that time: show what the server still has.
     setCurrentBatchStart(before)
-    setCurrentBatchSaveFailed(true)
+    toast.error("Couldn't save the batch. Try again.")
   }
   const currentBatchOptions = (() => {
     const now = new Date()
@@ -884,46 +923,40 @@ function ShortListEvalTab() {
     return Array.from(keys).sort().reverse()
   })()
 
-  // Switching view swaps the whole scope. Short List's own filters are parked and put back,
-  // so a round trip to Monthly does not cost the manager their batch and category.
+  // Switching view swaps the whole scope, in one URL change. Short List's own filters are
+  // parked and put back, so a round trip to Monthly does not cost the manager their batch
+  // and category.
   const switchView = (next: 'shortlist' | 'monthly') => {
     if (next === view) return
     exitSelectMode()
     if (next === 'monthly') {
-      shortListScope.current = { category: filterCategory, conclusions: filterConclusions, finals: filterFinalConclusions, batch: filterBatch }
-      setFilterCategory('all')
-      setFilterConclusions([])
-      setFilterFinalConclusions(MONTHLY_FINALS)
-      setFilterBatch('')
-      setMonthKey(monthKeyOfBatch(currentBatch) ?? vnMonthKey())
+      shortListScope.current = { category: filterCategory, batch: batchParam, final: finalParam }
+      setUrl({ view: 'monthly', bucket: 'all', batch: null, final: null, month: monthKeyOfBatch(currentBatch) ?? vnMonthKey() })
     } else {
       const s = shortListScope.current
-      setFilterCategory(s?.category ?? 'puzzle')
-      setFilterConclusions(s?.conclusions ?? ['List_Idea'])
-      setFilterFinalConclusions(s?.finals ?? [])
-      setFilterBatch(s?.batch ?? '')
+      setUrl({
+        view: null, month: null,
+        bucket: s && s.category !== 'puzzle' && s.category !== 'all' ? s.category : null,
+        batch: s?.batch || null, final: s?.final || null,
+      })
     }
-    setView(next)
   }
 
-  const categoryChoices = view === 'monthly'
-    ? [{ value: 'all', label: 'All' }, { value: 'puzzle', label: 'Puzzle' }, { value: 'arcade', label: 'Arcade' }, { value: 'simulation', label: 'Simulation' }]
-    : [{ value: 'puzzle', label: 'Puzzle' }, { value: 'arcade', label: 'Arcade' }, { value: 'simulation', label: 'Simulation' }]
+  const categoryChoices = view === 'monthly' ? [{ value: 'all', label: 'All' }, ...BUCKET_OPTIONS] : BUCKET_OPTIONS
+
+  // Clear filters resets the narrowing filters. The category group is the scope and the
+  // date range is component state (see above), so neither is touched.
+  const filtersOn = (view === 'monthly' ? !!batchParam : batchParam !== '' && filterBatch !== defaultBatch)
+    || !!filterEvaluator || !!finalParam
+  const clearFilters = () => setUrl({ batch: null, ev: null, final: null })
 
   // ---- Stat cards: the filter on final conclusion (Short List) or on batch (Monthly) ----
-  const otherFinals = finalConclusionOptions.filter(c => !MONTHLY_FINALS.includes(c))
-  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every(x => b.includes(x))
-  // What the Final conclusions select shows. Cards can also set "everything but Insight and
-  // Priority IV", which the select names Other.
-  const finalFilterValue = filterFinalConclusions.length === 0 ? 'all'
-    : filterFinalConclusions.length === 1 ? filterFinalConclusions[0]
-    : sameSet(filterFinalConclusions, otherFinals) ? 'other' : 'all'
   const statCards = (() => {
     const loaded = breakdown !== null
     const rows = breakdown || []
     if (view === 'monthly') {
       // Cards follow the Final conclusion filter: pick only Insight and only Insight is counted.
-      const shown = filterFinalConclusions.length > 0 ? filterFinalConclusions : MONTHLY_FINALS
+      const shown = finalsParam.split(',')
       const inMonth = rows.filter(r => shown.includes(r.final_conclusion))
       const monthLabels = batchLabelsOfMonth(monthKey)
       const biggest = Math.max(0, ...monthLabels.map(b => sumN(inMonth.filter(r => r.batch === b))))
@@ -958,157 +991,136 @@ function ShortListEvalTab() {
     const ins = sumN(scope.filter(r => r.final_conclusion === 'Insight'))
     const p4 = sumN(scope.filter(r => r.final_conclusion === 'Priority IV'))
     const other = all - none - ins - p4
-    const f = filterFinalConclusions
-    const active = f.length === 0 ? 'all'
-      : sameSet(f, [FINAL_CONCLUSION_NONE]) ? 'none'
-      : sameSet(f, ['Insight']) ? 'Insight'
-      : sameSet(f, ['Priority IV']) ? 'Priority IV'
-      : sameSet(f, otherFinals) ? 'other' : ''
-    const pick = (key: string, values: string[]) => setFilterFinalConclusions(active === key ? [] : values)
-    const mk = (key: string, label: string, n: number, tone: string, values: string[]) => (
+    // The card that matches the Final conclusions menu, if any.
+    const active = finalParam === '' ? 'all' : finalParam === FINAL_CONCLUSION_NONE ? 'none' : finalParam
+    const mk = (key: string, label: string, n: number, tone: string, param: string) => (
       <StatCard key={key} label={label} value={loaded ? fmtN(n) : '–'} tone={tone}
         bar={loaded ? { fill: 100, parts: [{ color: tone, pct: all ? (n / all) * 100 : 0 }] } : undefined}
-        on={active === key} onClick={() => key === 'all' ? setFilterFinalConclusions([]) : pick(key, values)} />
+        on={active === key} onClick={() => setFinalParam(key === 'all' || active === key ? '' : param)} />
     )
     return [
-      mk('all', 'All', all, 'var(--accent)', []),
-      mk('none', 'Not set', none, 'var(--faint)', [FINAL_CONCLUSION_NONE]),
-      mk('Insight', 'Insight', ins, toneOf('Insight'), ['Insight']),
-      mk('Priority IV', 'Priority IV', p4, toneOf('Priority IV'), ['Priority IV']),
-      mk('other', 'Other', other, 'var(--muted)', otherFinals),
+      mk('all', 'All', all, 'var(--accent)', ''),
+      mk('none', 'Not set', none, 'var(--faint)', FINAL_CONCLUSION_NONE),
+      mk('Insight', 'Insight', ins, toneOf('Insight'), 'Insight'),
+      mk('Priority IV', 'Priority IV', p4, toneOf('Priority IV'), 'Priority IV'),
+      mk('other', 'Other', other, 'var(--muted)', 'other'),
     ]
   })()
 
-  const subtitle = view === 'monthly'
-    ? `${filterCategory === 'all' ? 'All categories' : filterCategory} · ${monthKey ? monthKeyLabel(monthKey) : ''}`
-    : `${filterCategory}${filterBatch ? ` · ${filterBatch}` : ''}`
-  const countLabel = loading
-    ? 'Loading...'
-    : total > data.length ? `Showing ${fmtN(data.length)} of ${fmtN(total)} games` : `${fmtN(total)} games`
   const detailCategory = data.find(d => d.game_id === detailGameId)?.category_group
     ?? (filterCategory === 'all' ? undefined : filterCategory)
+  // One placeholder per real column: Select mode adds a checkbox column first.
+  const skeletonWidths = selecting ? [16, 30, 240, 70, 60, 200, 110, 200, 150, 140] : [30, 240, 70, 60, 200, 110, 200, 150, 140]
+  const colCount = skeletonWidths.length
 
   return (
-    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div className="page-head" style={{ gap: 16, flexShrink: 0 }}>
-        <div>
-          <h1 className="h-title">{view === 'monthly' ? 'Monthly' : 'Short List'}</h1>
-          <p className="h-sub">{subtitle}</p>
-        </div>
-        <div className="sl-head-actions">
-          <div className="sl-seg" role="group" aria-label="View">
-            <button type="button" className={'sl-seg-btn' + (view === 'shortlist' ? ' active' : '')}
-              aria-pressed={view === 'shortlist'} onClick={() => switchView('shortlist')}>Batch</button>
-            <button type="button" className={'sl-seg-btn' + (view === 'monthly' ? ' active' : '')}
-              aria-pressed={view === 'monthly'} onClick={() => switchView('monthly')}>Monthly</button>
-          </div>
+    <div className="page ev-page">
+      <PageHeader
+        title="Short List"
+        sub={view === 'monthly' ? 'Insight and Priority IV games of one month.' : 'Give List Idea games a final conclusion.'}
+        actions={<>
+          <Seg ariaLabel="View" value={view} onChange={switchView}
+            options={[{ value: 'shortlist', label: 'Batch' }, { value: 'monthly', label: 'Monthly' }]} />
           {isManager && (
             <CurrentBatchMenu value={currentBatch} options={currentBatchOptions} startsAt={currentBatchStart}
-              failed={currentBatchSaveFailed} onChange={handleCurrentBatchChange} onStartChange={handleCurrentBatchStartChange} />
+              onChange={handleCurrentBatchChange} onStartChange={handleCurrentBatchStartChange} />
           )}
-        </div>
-      </div>
+        </>}
+      />
 
-      <div className="sl-stats" style={{ flexShrink: 0 }}>{statCards}</div>
+      <div className="sl-stats">{statCards}</div>
 
-      <div className="filter-row sl" style={{ position: 'relative', zIndex: 30, flexShrink: 0 }}>
-        <div className="sl-grp">
-          <div className="sl-seg" role="group" aria-label="Category">
-            {categoryChoices.map(c => (
-              <button key={c.value} type="button" className={'sl-seg-btn' + (filterCategory === c.value ? ' active' : '')}
-                aria-pressed={filterCategory === c.value} onClick={() => setFilterCategory(c.value)}>{c.label}</button>
-            ))}
-          </div>
+      <FilterBar className="ev-filters">
+        <Seg ariaLabel="Category group" value={filterCategory} onChange={setFilterCategory} options={categoryChoices} />
 
-          {view === 'monthly' ? (
-            <div style={{ width: 130 }}>
-              <StyledSelect
-                value={monthKey}
-                onChange={k => { setMonthKey(k); setFilterBatch('') }}
-                placeholder="Month"
-                options={monthOptions.map(k => ({ value: k, label: monthKeyLabel(k) }))}
-              />
-            </div>
-          ) : (
-            <div style={{ width: 160 }}>
-              <StyledSelect
-                value={filterBatch}
-                onChange={setFilterBatch}
-                placeholder="All batches"
-                options={[{ value: '', label: 'All batches' }, ...batchOptions.map(b => ({ value: b, label: b }))]}
-              />
-            </div>
-          )}
-          <DateFilter value={df.value}
-            onChange={v => { df.setAutoMonth(false); df.setValue(v) }} />
+        {view === 'monthly' ? (
+          <StyledSelect
+            value={monthKey}
+            onChange={k => setUrl({ month: k, batch: null })}
+            placeholder="Month"
+            ariaLabel="Month"
+            style={{ width: 130 }}
+            options={monthOptions.map(k => ({ value: k, label: monthKeyLabel(k) }))}
+          />
+        ) : (
+          <StyledSelect
+            value={filterBatch}
+            onChange={setFilterBatch}
+            placeholder="All batches"
+            ariaLabel="Batch"
+            filter
+            inactiveValue={defaultBatch}
+            style={{ width: 160 }}
+            options={[{ value: '', label: 'All batches' }, ...batchOptions.map(b => ({ value: b, label: b }))]}
+          />
+        )}
+        <DateFilter value={df.value}
+          onChange={v => { df.setAutoMonth(false); df.setValue(v) }} />
 
-          {isManager && (
-            <div style={{ width: 150 }}>
-              <StyledSelect
-                value={filterEvaluator}
-                onChange={setFilterEvaluator}
-                placeholder="All evaluators"
-                options={[{ value: '', label: 'All evaluators' }, ...availableEvaluators.map(e => ({ value: e, label: e }))]}
-              />
-            </div>
-          )}
+        {isManager && (
+          <StyledSelect
+            value={filterEvaluator}
+            onChange={setFilterEvaluator}
+            placeholder="All evaluators"
+            ariaLabel="Evaluator"
+            filter
+            style={{ width: 150 }}
+            options={[{ value: '', label: 'All evaluators' }, ...availableEvaluators.map(e => ({ value: e, label: e }))]}
+          />
+        )}
 
-          <div style={{ width: 190 }}>
-            {view === 'monthly' ? (
-              // All = both calls that put a game into Record; Monthly never lists any other.
-              <StyledSelect
-                value={filterFinalConclusions.length === 1 ? filterFinalConclusions[0] : 'all'}
-                onChange={v => setFilterFinalConclusions(v === 'all' ? MONTHLY_FINALS : [v])}
-                placeholder="Final conclusions"
-                options={[{ value: 'all', label: 'All final conclusions' }, ...MONTHLY_FINALS.map(c => ({ value: c, label: c }))]}
-              />
-            ) : (
-              // The initial conclusion is fixed to List_Idea here (that is what Short List is);
-              // the stat cards above are shortcuts into this same filter.
-              <StyledSelect
-                value={finalFilterValue}
-                onChange={v => setFilterFinalConclusions(v === 'all' ? [] : v === 'other' ? otherFinals : [v])}
-                placeholder="Final conclusions"
-                options={[
-                  { value: 'all', label: 'All final conclusions' },
-                  { value: FINAL_CONCLUSION_NONE, label: 'Not set' },
-                  ...finalConclusionOptions.map(c => ({ value: c, label: c })),
-                  { value: 'other', label: 'Other (all except Insight, Priority IV)' },
-                ]}
-              />
-            )}
-          </div>
-        </div>
-      </div>
+        {view === 'monthly' ? (
+          // All = both calls that put a game into Record; Monthly never lists any other.
+          <StyledSelect
+            value={MONTHLY_FINALS.includes(finalParam) ? finalParam : 'all'}
+            onChange={v => setFinalParam(v === 'all' ? '' : v)}
+            placeholder="Final conclusions"
+            ariaLabel="Final conclusion"
+            filter
+            inactiveValue="all"
+            style={{ width: 190 }}
+            options={[{ value: 'all', label: 'All final conclusions' }, ...MONTHLY_FINALS.map(c => ({ value: c, label: c }))]}
+          />
+        ) : (
+          // The initial conclusion is fixed to List_Idea here (that is what Short List is);
+          // the stat cards above are shortcuts into this same filter.
+          <StyledSelect
+            value={finalParam || 'all'}
+            onChange={v => setFinalParam(v === 'all' ? '' : v)}
+            placeholder="Final conclusions"
+            ariaLabel="Final conclusion"
+            filter
+            inactiveValue="all"
+            style={{ width: 190 }}
+            options={[
+              { value: 'all', label: 'All final conclusions' },
+              { value: FINAL_CONCLUSION_NONE, label: 'Not set' },
+              ...finalConclusionOptions.map(c => ({ value: c, label: c })),
+              { value: 'other', label: 'Other (all except Insight, Priority IV)' },
+            ]}
+          />
+        )}
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div className="sl-list-bar">
-          <span className="count">{countLabel}</span>
-          <div className="right">
-            <button
-              className="btn btn-sm"
-              title={sortAsc ? 'Sorted oldest first — click to sort newest first' : 'Sorted newest first — click to sort oldest first'}
-              onClick={() => setSortAsc(v => !v)}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
-              {sortAsc ? (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
-              ) : (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 5v14M5 12l7 7 7-7" />
-                </svg>
-              )}
-              {sortAsc ? 'Oldest first' : 'Newest first'}
-            </button>
-            {isManager && (selecting
-              ? <button className="btn btn-sm" onClick={exitSelectMode}>Cancel</button>
-              : <button className="btn btn-sm" onClick={() => setSelectMode(true)}>Select</button>)}
-          </div>
-        </div>
-        <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-          <table className="tbl">
-            <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
+        <FilterSpacer />
+        <ClearFilters visible={filtersOn} onClear={clearFilters} />
+        <FilterCount loading={loading} shown={data.length} total={total} />
+        <button
+          type="button"
+          className="btn btn-sm"
+          title={sortAsc ? 'Sorted oldest first — click to sort newest first' : 'Sorted newest first — click to sort oldest first'}
+          onClick={() => setSortAsc(v => !v)}>
+          <SortIcon asc={sortAsc} />
+          {sortAsc ? 'Oldest first' : 'Newest first'}
+        </button>
+        {isManager && (selecting
+          ? <button type="button" className="btn btn-sm" onClick={exitSelectMode}>Cancel</button>
+          : <button type="button" className="btn btn-sm" onClick={() => setSelectMode(true)}>Select</button>)}
+      </FilterBar>
+
+      <div className="card ev-table-card">
+        <div className="tbl-wrap ev-table-scroll">
+          <table className="tbl tbl-sticky">
+            <thead>
               <tr>
                 {selecting && (
                   <th style={{ width: 34 }}>
@@ -1129,17 +1141,19 @@ function ShortListEvalTab() {
               </tr>
             </thead>
             <tbody>
-              {data.length === 0 && !loading && (
-                <tr><td colSpan={selecting ? 10 : 9} className="empty">No games found</td></tr>
+              {loadFailed && !loading && (
+                <tr><td colSpan={colCount}><ErrorState onRetry={fetchData}>Could not load the games.</ErrorState></td></tr>
               )}
-              {loading && Array.from({ length: 5 }).map((_, i) => (
-                // One placeholder per real column: Select mode adds a checkbox column first.
-                <tr key={i}>{(selecting ? [16, 30, 240, 70, 60, 200, 110, 200, 150, 140] : [30, 240, 70, 60, 200, 110, 200, 150, 140]).map((w, c) => (
-                  <td key={c}><span className="skeleton" style={{ width: w, height: 14 }} /></td>
-                ))}</tr>
-              ))}
-              {data.map((item, idx) => (
-                <tr key={item.id} className="tbl-row-premium" style={{ cursor: 'pointer' }}
+              {!loadFailed && data.length === 0 && !loading && (
+                <tr><td colSpan={colCount}>
+                  <EmptyState action={filtersOn ? { label: 'Clear filters', onClick: clearFilters } : undefined}>
+                    {filtersOn ? 'No games match these filters.' : 'No games found.'}
+                  </EmptyState>
+                </td></tr>
+              )}
+              {loading && data.length === 0 && <SkeletonRows widths={skeletonWidths} />}
+              {!loadFailed && data.map((item, idx) => (
+                <tr key={item.id} className={`tbl-row-premium${item.game_id === detailGameId ? ' tbl-row-active' : ''}`} style={{ cursor: 'pointer' }}
                   onClick={() => setDetailGameId(item.game_id)}>
                   {selecting && (
                     <td onClick={e => e.stopPropagation()}>
@@ -1152,9 +1166,9 @@ function ShortListEvalTab() {
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 230 }}>
                       {item.icon_url ? (
-                        <img src={item.icon_url} alt="" width={44} height={44} style={{ borderRadius: 10, flexShrink: 0 }} />
+                        <img src={item.icon_url} alt="" width={32} height={32} style={{ borderRadius: 7, flexShrink: 0 }} />
                       ) : (
-                        <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--surface-3)', flexShrink: 0 }} />
+                        <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
                       )}
                       <div style={{ minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -1162,15 +1176,9 @@ function ShortListEvalTab() {
                           <CopyBtn text={item.title} />
                         </div>
                         <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-                          {item.batch && (
-                            <span className="pill" style={{ padding: '1px 6px', fontSize: 9, fontWeight: 700, background: 'var(--accent-weak)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}>{item.batch}</span>
-                          )}
-                          {item.initial_evaluator && (
-                            <span className="pill muted" style={{ padding: '1px 7px', fontSize: 9.5, fontWeight: 700 }}>{item.initial_evaluator}</span>
-                          )}
-                          {view === 'monthly' && (
-                            <span className="pill muted" style={{ padding: '1px 7px', fontSize: 9.5, fontWeight: 700 }}>{item.category_group}</span>
-                          )}
+                          {item.batch && <span className="badge info">{item.batch}</span>}
+                          {item.initial_evaluator && <span className="badge neutral">{item.initial_evaluator}</span>}
+                          {view === 'monthly' && <span className="badge neutral">{bucketLabel(item.category_group)}</span>}
                         </div>
                         {item.publisher_name && (
                           <div style={{ display: 'flex', alignItems: 'center', marginTop: 2 }}>
@@ -1188,14 +1196,14 @@ function ShortListEvalTab() {
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
                       {item.app_link ? (
                         <a href={item.app_link} target="_blank" rel="noopener" onClick={e => e.stopPropagation()}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>
                           {osLabel(item.os)}
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
                           </svg>
                         </a>
                       ) : (
-                        <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>{osLabel(item.os)}</span>
+                        <span style={{ fontSize: 13, color: 'var(--faint)' }}>{osLabel(item.os)}</span>
                       )}
                       <CopyBtn text={item.app_link} />
                     </span>
@@ -1273,24 +1281,18 @@ function ShortListEvalTab() {
   )
 }
 
+// The arrow on a sort button: up = oldest first, down = newest first.
+function SortIcon({ asc }: { asc: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={asc ? 'M12 19V5M5 12l7-7 7 7' : 'M12 5v14M5 12l7 7 7-7'} />
+    </svg>
+  )
+}
+
 function conclusionBadge(c: string | null) {
   if (!c) return <span className="badge idle">Pending</span>
-  return <span className={`badge ${CONCLUSION_COLORS[c] || 'neutral'}`}>{prettyConclusion(c)}</span>
-}
-
-function fmtDate(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: '2-digit' })
-}
-
-// dd/MM/YY - hh:mm in Asia/Ho_Chi_Minh (UTC+7) - the hour matters for filtering
-// and for telling apart evaluations submitted on the same day.
-function fmtDateTime(d: string | null) {
-  if (!d) return '—'
-  const dt = new Date(d)
-  const day = dt.toLocaleDateString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: '2-digit' })
-  const time = dt.toLocaleTimeString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hour12: false })
-  return `${day} - ${time}`
+  return <span className={`badge ${conclusionBadgeClass(c)}`}>{prettyConclusion(c)}</span>
 }
 
 // One table row, memoised.
@@ -1340,19 +1342,13 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen,
                 <Highlight text={ev.title} term={term} />
               </div>
               {idMatched && (
-                <div style={{ fontSize: 10.5, color: 'var(--faint)', fontFamily: 'var(--num)', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)', marginTop: 2 }}>
                   <Highlight text={ev.game_id} term={term} />
                 </div>
               )}
               <div style={{ display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
-                <span className="pill muted" style={{ padding: '1px 6px', fontSize: 10 }}>
-                  {ev.os?.toUpperCase()}
-                </span>
-                {genres.map(g => (
-                  <span key={g} className="pill tag" style={{ padding: '1px 6px', fontSize: 10 }}>
-                    {g}
-                  </span>
-                ))}
+                <span className="badge neutral">{ev.os?.toUpperCase()}</span>
+                {genres.map(g => <span key={g} className="badge info">{g}</span>)}
               </div>
               {ev.publisher_name && (
                 <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1362,14 +1358,14 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen,
             </div>
           </div>
         </td>
-        <td style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', color: ev.initial_evaluator ? 'var(--text)' : 'var(--faint)' }}>
+        <td style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', color: ev.initial_evaluator ? 'var(--text)' : 'var(--faint)' }}>
           {ev.initial_evaluator || '—'}
         </td>
-        <td style={{ fontSize: 12.5, whiteSpace: 'nowrap', color: ev.final_evaluator ? 'var(--text)' : 'var(--faint)' }}>
+        <td style={{ fontSize: 13, whiteSpace: 'nowrap', color: ev.final_evaluator ? 'var(--text)' : 'var(--faint)' }}>
           {ev.final_evaluator || '—'}
         </td>
         <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-          {fmtDate(ev.assigned_date)}
+          {fmtDateVN(ev.assigned_date)}
         </td>
         <td>
           <div style={{ fontSize: 12, color: ev.initial_note ? 'var(--text)' : 'var(--faint)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1381,7 +1377,7 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen,
           <TrendTagCell tags={ev.tags} maxWidth={170} />
         </td>
         <td className="num" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-          {fmtDateTime(ev.evaluate_date)}
+          {fmtDateTimeVN(ev.evaluate_date)}
         </td>
         <td>
           {ev.drive_link ? (
@@ -1428,47 +1424,66 @@ function EvaluationsPageInner() {
   const { data: session } = useSession()
   const role = session?.user?.role
   const userName = session?.user?.name || ''
+  const isManager = isManagerRole(role)
 
-  // The three buckets are merged into one "Evaluate" tab; the active bucket is
-  // in-page state (was the ?cat= query param when each bucket had its own nav entry).
-  const [category, setCategory] = useState<Bucket>('puzzle')
+  // The category group, the filters, the search and the sort live in the URL, so reload,
+  // Back and a shared link open the same list. The date range is the exception: useDateFilter
+  // resolves month=auto with the server and suppresses its own refetches, which is not safe
+  // to drive from the URL, so it stays component state.
+  const setUrl = useSetUrlParams()
+  const [bucketParam, setBucket] = useUrlState('bucket', 'puzzle')
+  const category: Bucket = isBucket(bucketParam) ? bucketParam : 'puzzle'
 
   const [data, setData] = useState<Evaluation[]>([])
   const [total, setTotal] = useState(0)
   const [conclusionOptions, setConclusionOptions] = useState<string[]>([])
   const [evaluatorOptions, setEvaluatorOptions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
 
-  const [filterEvaluator, setFilterEvaluator] = useState('')
-  const [filterConclusion, setFilterConclusion] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-  const [sortAsc, setSortAsc] = useState(true)
+  const [evParam, setFilterEvaluator] = useUrlState('ev', '')
+  // Only managers have the evaluator filter; the server locks an evaluator to their own rows.
+  const filterEvaluator = isManager ? evParam : ''
+  const [filterConclusion, setFilterConclusion] = useUrlState('concl', '')
+  const [statusParam, setFilterStatus] = useUrlState('status', '')
+  const filterStatus = statusParam === 'pending' || statusParam === 'done' ? statusParam : ''
+  const [sortParam, setSortParam] = useUrlState('sort', 'asc')
+  const sortAsc = sortParam !== 'desc'
   // Standard evaluators tab tracks when work was assigned → default basis =
   // assigned. First load sends month=auto; the server resolves the default month
   // (current month, falling back to latest with data) and echoes it back.
   const df = useDateFilter('assigned')
   const fetchSeqRef = useRef(0)
 
-  const [search, setSearch] = useState('')
-  // The box is debounced before it reaches the server, and only a term long enough for
-  // a trigram index to serve goes there at all -- see lib/eval-search.
-  const [debouncedSearch, setDebouncedSearch] = useState('')
+  // The box keeps its own state while typing; the URL (`q`) gets the term once typing
+  // stops, and the request is built from the URL. So the debounce that spares the server
+  // is the same one that keeps the URL from changing on every keystroke.
+  const [urlQ, setUrlQ] = useUrlState('q', '')
+  const [search, setSearch] = useState(urlQ)
+  // The last term this page wrote to the URL. A URL change that is not ours (Back, Clear
+  // filters) is copied into the box; ours is not, or a slow navigation would overwrite
+  // what was typed after it.
+  const wroteQRef = useRef(urlQ)
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), SEARCH_DEBOUNCE_MS)
+    if (urlQ !== wroteQRef.current) { wroteQRef.current = urlQ; setSearch(urlQ) }
+  }, [urlQ])
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (search !== wroteQRef.current) { wroteQRef.current = search; setUrlQ(search) }
+    }, SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(t)
-  }, [search])
-  const searchTerm = debouncedSearch.trim()
+  }, [search, setUrlQ])
+  // Only a term long enough for a trigram index to serve goes to the server at all --
+  // see lib/eval-search.
+  const searchTerm = urlQ.trim()
   const searching = searchTerm.length >= SEARCH_MIN_CHARS
   // The term the REQUEST is built from -- '' until it is long enough to be worth
   // asking the server. Typing below the floor must not change this, or every one of
   // those keystrokes would re-issue the month query it is not even searching.
   const activeQuery = searching ? searchTerm : ''
   const [totalCapped, setTotalCapped] = useState(false)
-  // A search overrides these filters, so they stop taking clicks while one is live --
-  // greyed out rather than hidden, so it is obvious they are coming back.
-  const inertWhileSearching = searching ? { opacity: 0.45 } : undefined
   const [tableExpanded, setTableExpanded] = useState(false)
   const [showQuickStats, setShowQuickStats] = useState(false)
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
@@ -1515,7 +1530,7 @@ function EvaluationsPageInner() {
       if (json.available_months) df.setAvailableMonths(json.available_months)
       if (json.available_conclusions) setConclusionOptions(json.available_conclusions)
       if (json.available_evaluators) setEvaluatorOptions(json.available_evaluators)
-    } catch { /* ignore */ }
+    } catch { /* the dropdowns keep what they had */ }
   }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams])
 
   useEffect(() => {
@@ -1554,8 +1569,10 @@ function EvaluationsPageInner() {
       // Dropdowns come from /api/evaluations/facets on their own effect below.
       params.set('meta', '0')
       const res = await fetch(`/api/evaluations?${params}`)
+      if (!res.ok) throw new Error(String(res.status))
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return // stale response; a newer fetch owns the state
+      setLoadFailed(false)
       const rows = json.data || []
       if (append) {
         setData(prev => [...prev, ...rows])
@@ -1563,8 +1580,8 @@ function EvaluationsPageInner() {
         setData(rows)
       }
       if (json.total !== undefined) setTotal(json.total)
-      // The cards above the table are the month's workload, not the search's: a lookup
-      // must not rewrite them, least of all with a total the server deliberately capped.
+      // The counts on the status switch are the month's workload, not the search's: a
+      // lookup must not rewrite them, least of all with a total the server deliberately capped.
       if (json.stats && !activeQuery) setApiStats(json.stats)
       setTotalCapped(!!json.total_capped)
       // A search sends no month at all, so its response resolves none: letting it
@@ -1582,7 +1599,13 @@ function EvaluationsPageInner() {
         df.setValue(v => ap ? monthToValue(ap, v.basis) : { ...v, from: null, to: null })
       }
       setHasMore(rows.length === pageLimit)
-    } catch { /* ignore */ }
+    } catch {
+      // A failed first page is shown as a failure with a retry, never as an empty list.
+      // A failed later page only stops the infinite scroll.
+      if (seq === fetchSeqRef.current) {
+        if (append) setHasMore(false); else setLoadFailed(true)
+      }
+    }
     setLoading(false)
     setLoadingMore(false)
   }, [category, filterEvaluator, filterConclusion, filterStatus, evalDateParams, df.autoMonth, sortAsc,
@@ -1610,16 +1633,16 @@ function EvaluationsPageInner() {
     return () => observer.disconnect()
   }, [hasMore, loading, loadingMore, fetchPage])
 
+  // Below the index floor the rows in hand are filtered instead, as the user types.
+  const localTerm = searching ? '' : search.trim().toLowerCase()
   const filtered = useMemo(() => {
     // A live search is already the server's answer, over every month. Below the index
     // floor we keep filtering the rows in hand instead, which is instant and costs
     // nothing -- and is a subset of what the server would return, so crossing the
     // threshold only ever widens the list.
-    if (searching) return data
-    const q = search.trim().toLowerCase()
-    if (!q) return data
-    return data.filter(d => d.title.toLowerCase().includes(q) || d.game_id.toLowerCase().includes(q))
-  }, [data, search, searching])
+    if (!localTerm) return data
+    return data.filter(d => d.title.toLowerCase().includes(localTerm) || d.game_id.toLowerCase().includes(localTerm))
+  }, [data, localTerm])
 
   // Server-provided full list for the category (ignores month + pagination);
   // fall back to deriving from loaded rows until the first page-1 response lands.
@@ -1653,166 +1676,137 @@ function EvaluationsPageInner() {
     }, 50)
   }
 
+  // Clear filters resets the narrowing filters and the search, in one URL change. The
+  // category group is the scope and the date range is component state, so neither is touched.
+  const filtersOn = !!filterStatus || !!filterEvaluator || !!filterConclusion || !!search
+  const clearFilters = () => {
+    wroteQRef.current = ''
+    setSearch('')
+    setUrl({ status: null, ev: null, concl: null, q: null })
+  }
+
+  // The count: the server's total for the filters; the rows in hand when the box is
+  // narrowing them below the index floor; "500+" when the server capped a search on purpose
+  // (an exact all-time count costs more than the rows it counts).
+  const count = loading
+    ? <FilterCount loading shown={0} />
+    : searching && totalCapped
+      ? <FilterCount shown={SEARCH_TOTAL_CAP} capped />
+      : localTerm
+        ? <FilterCount shown={filtered.length} total={total} />
+        : <FilterCount shown={total} />
+
   return (
-    <div className="page" style={{ paddingBottom: 16, height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div className="page-head" style={{ marginBottom: 10 }}>
-        <div>
-          <h1 className="h-title">Evaluations</h1>
-          <p className="h-sub">
-            {total} games · {category}
-            {filterStatus === 'pending' ? ' · All time' : df.value.from ? ` · ${valueLabel(df.value)}` : ''}
-            {!isManagerRole(role) && userName ? ` · ${userName}` : ''}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button className="btn btn-sm" onClick={() => setShowQuickStats(true)}
-            title="Per-evaluator breakdown"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', marginRight: 6 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <div className="page ev-page">
+      <PageHeader
+        title="Evaluate"
+        sub="Test assigned games and save an initial conclusion."
+        actions={
+          <button type="button" className="btn btn-sm" onClick={() => setShowQuickStats(true)}
+            title="Per-evaluator breakdown">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <line x1="18" y1="20" x2="18" y2="10" />
               <line x1="12" y1="20" x2="12" y2="4" />
               <line x1="6" y1="20" x2="6" y2="14" />
             </svg>
             Quick stats
           </button>
-          {BUCKETS.map(b => (
-            <button key={b} className={`seg-btn-premium${category === b ? ' active' : ''}`}
-              onClick={() => setCategory(b)}>
-              {b.charAt(0).toUpperCase() + b.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
+        }
+      />
 
-      {/* Filters */}
-      <div className="filter-row" style={{ position: 'relative', zIndex: 30, display: tableExpanded ? 'none' : undefined }}>
-        <div className="search-wrap">
-          <span className="search-icon-abs">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-            </svg>
-          </span>
-          <input className="search-input" placeholder="Search games..."
-            value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
+      {!tableExpanded && (
+        <FilterBar className="ev-filters">
+          <Seg ariaLabel="Category group" value={category} onChange={setBucket} options={BUCKET_OPTIONS} />
 
-        {/* Pending is locked to all-time assigned (see fetchPage), so the date
-            picker would be inert — hide it and show the fixed scope instead. */}
-        {filterStatus === 'pending' || searching ? (
-          <span className="btn btn-sm"
-            title={searching ? 'A search looks at every month. Clear it to go back to the date filter.' : undefined}
-            style={{ cursor: 'default', gap: 6, minWidth: 200, justifyContent: 'flex-start', opacity: 0.7 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
-            <span style={{ color: 'var(--muted)' }}>Assigned</span>{' · All time'}
-          </span>
-        ) : (
-          <DateFilter
-            value={df.value}
-            onChange={v => { df.setAutoMonth(false); df.setValue(v) }}
-          />
-        )}
-
-        <div className="seg-wrapper" style={inertWhileSearching}>
-          {[
-            { value: '', label: 'All', count: stats.totalCount, warn: false },
-            { value: 'pending', label: 'Pending', count: stats.pendingCount, warn: stats.pendingCount > 0 },
-            { value: 'done', label: 'Done', count: stats.evaluatedCount, warn: false },
-          ].map(s => (
-            <button key={s.value} className={`seg-btn-premium${filterStatus === s.value ? ' active' : ''}`}
-              disabled={searching}
-              title={s.value === 'done' ? `${stats.percent}% of the month's games are evaluated` : undefined}
-              onClick={() => setFilterStatus(s.value)}>
-              {s.label}
-              <span className={`seg-count${s.warn ? ' warn' : ''}`}>{s.count}</span>
-            </button>
-          ))}
-        </div>
-
-        <button
-          className="btn btn-sm"
-          // Relevance decides a search's order, so there is nothing here to reverse.
-          disabled={searching}
-          title={searching
-            ? 'Search results are ordered by how well they match'
-            : sortAsc ? 'Sorted oldest first — click to sort newest first' : 'Sorted newest first — click to sort oldest first'}
-          onClick={() => { setSortAsc(v => !v); pageRef.current = 1 }}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', ...inertWhileSearching }}>
-          {sortAsc ? (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 19V5M5 12l7-7 7 7" />
-            </svg>
+          {/* Pending is locked to all-time assigned (see fetchPage), and a search looks at
+              every month, so the date picker would be inert -- show the fixed scope instead. */}
+          {filterStatus === 'pending' || searching ? (
+            <span className="btn btn-sm ev-date-fixed"
+              title={searching ? 'A search looks at every month. Clear it to go back to the date filter.' : undefined}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+              <span style={{ color: 'var(--muted)' }}>Assigned</span>{' · All time'}
+            </span>
           ) : (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12l7 7 7-7" />
-            </svg>
+            <DateFilter
+              value={df.value}
+              onChange={v => { df.setAutoMonth(false); df.setValue(v) }}
+            />
           )}
-          {sortAsc ? 'Oldest first' : 'Newest first'}
-        </button>
 
-        {isManagerRole(role) && (
-          <div style={{ width: 180 }}>
+          <SearchInput value={search} onChange={setSearch} placeholder="Search games" />
+
+          {/* A search overrides these, so they stop taking clicks while one is live --
+              greyed out rather than hidden, so it is obvious they are coming back. */}
+          <Seg ariaLabel="Status" value={filterStatus} onChange={setFilterStatus}
+            className={searching ? 'ev-inert' : ''}
+            options={[
+              { value: '', label: 'All', count: stats.totalCount, disabled: searching },
+              { value: 'pending', label: 'Pending', count: stats.pendingCount, countTone: stats.pendingCount > 0 ? 'warn' : undefined, disabled: searching },
+              { value: 'done', label: 'Done', count: stats.evaluatedCount, disabled: searching, title: `${stats.percent}% of the month's games are evaluated` },
+            ]} />
+
+          {isManager && (
             <StyledSelect
               value={filterEvaluator}
               onChange={setFilterEvaluator}
               placeholder="All evaluators"
+              ariaLabel="Evaluator"
+              filter
+              style={{ width: 180 }}
               options={[{ value: '', label: 'All evaluators' }, ...evaluators.map(e => ({ value: e, label: e }))]}
             />
-          </div>
-        )}
+          )}
 
-        <div style={{ width: 220, ...inertWhileSearching }}>
           <StyledSelect
             value={filterConclusion}
             onChange={setFilterConclusion}
             disabled={searching}
             placeholder="All conclusions"
+            ariaLabel="Conclusion"
+            filter
+            style={{ width: 220 }}
             options={[{ value: '', label: 'All conclusions' }, ...conclusionOptions.map(c => ({ value: c, label: prettyConclusion(c) }))]}
           />
-        </div>
 
-        <span className="sync" style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600 }}>
-          {loading
-            ? 'Loading...'
-            : searching
-              // Capped on purpose: an exact all-time count costs more than the rows it
-              // counts, and "500+" is all the header has to say.
-              ? `${totalCapped ? `${SEARCH_TOTAL_CAP}+` : total} results for "${searchTerm}"`
-              : `${filtered.length}${search ? ` / ${total}` : ''} results`}
-        </span>
-      </div>
+          <FilterSpacer />
+          <ClearFilters visible={filtersOn} onClear={clearFilters} />
+          {count}
+          <button
+            type="button"
+            className="btn btn-sm"
+            // Relevance decides a search's order, so there is nothing here to reverse.
+            disabled={searching}
+            title={searching
+              ? 'Search results are ordered by how well they match'
+              : sortAsc ? 'Sorted oldest first — click to sort newest first' : 'Sorted newest first — click to sort oldest first'}
+            onClick={() => { setSortParam(sortAsc ? 'desc' : 'asc'); pageRef.current = 1 }}>
+            <SortIcon asc={sortAsc} />
+            {sortAsc ? 'Oldest first' : 'Newest first'}
+          </button>
+        </FilterBar>
+      )}
 
       {/* Table */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div className="card ev-table-card">
         {/* Expand/collapse toggle */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 8px 0', flexShrink: 0 }}>
+        <div className="ev-expand-row">
           <button
+            type="button"
             className="btn btn-ghost btn-sm"
             title={tableExpanded ? 'Show filters' : 'Expand table'}
-            onClick={() => setTableExpanded(v => !v)}
-            style={{ padding: '3px 8px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
-            {tableExpanded ? (
-              <>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M6 15l6-6 6 6" />
-                </svg>
-                Show filters
-              </>
-            ) : (
-              <>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-                Expand table
-              </>
-            )}
+            onClick={() => setTableExpanded(v => !v)}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d={tableExpanded ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} />
+            </svg>
+            {tableExpanded ? 'Show filters' : 'Expand table'}
           </button>
         </div>
-        <div className="tbl-wrap" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-          <table className="tbl">
-            <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)', boxShadow: '0 1px 0 var(--border)' }}>
+        <div className="tbl-wrap ev-table-scroll">
+          <table className="tbl tbl-sticky">
+            <thead>
               <tr>
                 <th style={{ width: 36 }}>#</th>
                 <th>Game</th>
@@ -1827,10 +1821,18 @@ function EvaluationsPageInner() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && !loading && (
-                <tr><td colSpan={10} className="empty">{search ? 'No games match your search' : 'No evaluations found'}</td></tr>
+              {loadFailed && !loading && (
+                <tr><td colSpan={10}><ErrorState onRetry={() => fetchPage(1, false)}>Could not load the games.</ErrorState></td></tr>
               )}
-              {filtered.map((ev, idx) => (
+              {!loadFailed && filtered.length === 0 && !loading && (
+                <tr><td colSpan={10}>
+                  <EmptyState action={filtersOn ? { label: 'Clear filters', onClick: clearFilters } : undefined}>
+                    {search ? 'No games match your search.' : filtersOn ? 'No games match these filters.' : 'No games assigned in this period.'}
+                  </EmptyState>
+                </td></tr>
+              )}
+              {loading && data.length === 0 && <SkeletonRows widths={[20, 220, 70, 70, 60, 150, 80, 120, 90, 50]} />}
+              {!loadFailed && filtered.map((ev, idx) => (
                 <EvalRow key={ev.id} ev={ev} idx={idx} term={searchTerm}
                   isActive={ev.game_id === activeGameId}
                   activeRowRef={activeRowRef}
@@ -1841,7 +1843,7 @@ function EvaluationsPageInner() {
           <div ref={sentinelRef} style={{ height: 1 }} />
           {loadingMore && (
             <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 12, color: 'var(--faint)' }}>
-              Loading more...
+              Loading more…
             </div>
           )}
         </div>

@@ -638,10 +638,6 @@ body {
    Single-class selectors, so they must stay AFTER `.pill` in this file -- they carry
    the same specificity and win on source order alone. See conclusionTone() in
    components/report/ReviewTable.tsx for which conclusion lands on which. */
-.rp-tone-good { background: var(--good-weak); color: var(--good); }
-.rp-tone-bad  { background: var(--bad-weak);  color: var(--bad); }
-.rp-tone-hold { background: var(--warn-weak); color: var(--warn); }
-.rp-tone-none { background: var(--surface-3); color: var(--muted); }
 
 .status-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--faint); }
 .status-dot .sd { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); }
@@ -729,13 +725,6 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 
 /* ===== Segmented tabs ===== */
 .seg { display: flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: 9px; }
-.seg-btn {
-  flex: 1; padding: 6px 10px; border-radius: 6px; border: none; background: none;
-  font-family: var(--font); font-size: 13px; font-weight: 600; color: var(--muted);
-  cursor: pointer; transition: all .14s;
-}
-.seg-btn:hover { color: var(--text); }
-.seg-btn.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 
 /* ===== Trigger button (ops) ===== */
 .trig {
@@ -1372,13 +1361,6 @@ input:checked + .slider:before {
 .opt-usage { font-family: var(--num); font-size: 11px; color: var(--faint); white-space: nowrap;
   font-variant-numeric: tabular-nums; }
 
-.opt-sw { border: none; padding: 0; width: 30px; height: 17px; border-radius: 99px; cursor: pointer;
-  background: var(--track); position: relative; transition: background .13s; flex: none; }
-.opt-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
-  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(20,24,40,.25); transition: transform .13s; }
-.opt-sw[aria-checked="true"] { background: var(--good); }
-.opt-sw[aria-checked="true"]::after { transform: translateX(13px); }
-
 .opt-del { border: none; background: none; cursor: pointer; color: var(--faint); font-size: 12px;
   padding: 1px 3px; line-height: 1; border-radius: 3px; }
 .opt-del:hover { color: var(--bad); background: var(--bad-weak, transparent); }
@@ -1396,7 +1378,7 @@ input:checked + .slider:before {
 
 /* ===== Config: people in filters ===== */
 .ppl-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.ppl-search { width: 170px; font-size: 13px; padding: 5px 8px; }
+
 .ppl-hint { font-size: 11px; color: var(--faint); margin-left: auto; }
 
 .ppl-body { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 16px; align-items: start; }
@@ -1474,53 +1456,10 @@ input:checked + .slider:before {
 .wf-savestate { font-size: 12px; color: var(--faint); }
 .wf-savestate.err { color: var(--bad); font-weight: 600; }
 .wf-label-actions { display: flex; align-items: center; gap: 10px; }
-.wf-history-btn {
-  padding: 3px 10px;
-  font-size: 12px; font-weight: 600;
-  color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.wf-history-btn:hover { color: var(--text); background: var(--surface-2); border-color: var(--border-strong); }
 
 /* Back-to-grid nav, shown in the Editor filter row once a week is open. */
-.wf-back {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 14px;
-  font-size: 13px; font-weight: 600;
-  color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.wf-back:hover { color: var(--text); background: var(--surface-2); border-color: var(--border-strong); }
-.wf-back span { font-size: 16px; line-height: 1; }
 
 /* Auto-save toggle + manual Save (Editor toolbar) */
-.wf-autosave {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 10px; font-size: 12px; font-weight: 600;
-  color: var(--muted); background: var(--surface);
-  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
-  transition: all 0.15s ease;
-}
-.wf-autosave:hover { border-color: var(--border-strong); }
-.wf-autosave-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-.wf-autosave.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 35%, var(--border)); background: var(--good-weak); }
-.wf-autosave.on .wf-autosave-dot { background: var(--good); }
-.wf-save-btn {
-  padding: 3px 12px; font-size: 12px; font-weight: 600;
-  color: var(--accent-contrast); background: var(--accent);
-  border: 1px solid var(--accent); border-radius: 6px; cursor: pointer;
-  transition: all 0.15s ease;
-}
-.wf-save-btn:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
-.wf-save-btn:disabled { opacity: 0.45; cursor: default; }
 
 /* History panel: recent auto-saved versions with one-click restore. */
 .wf-history {
@@ -1534,25 +1473,11 @@ input:checked + .slider:before {
 .wf-history-note { margin: 0; font-size: 12px; color: var(--faint); }
 /* Show ~5 rows, then scroll to lazy-load more. */
 .wf-history-list { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow: auto; }
-.wf-history-item { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 6px; font-size: 13px; }
-.wf-history-item:hover { background: var(--surface); }
-.wf-history-item.is-active { background: var(--accent-weak); }
+
 .wf-history-when { color: var(--text); font-weight: 500; }
 .wf-history-meta { color: var(--faint); font-size: 12px; }
 .wf-history-ttl { color: var(--warn); font-size: 11px; font-weight: 600; }
 .wf-history-more { margin: 4px 0 0; text-align: center; font-size: 11px; color: var(--faint); }
-.wf-history-item button {
-  padding: 3px 12px;
-  font-size: 12px; font-weight: 600;
-  color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.wf-history-item button:hover { color: var(--text); background: var(--surface-2); border-color: var(--border-strong); }
-.wf-history-item .wf-history-restore { color: var(--accent-strong); background: var(--accent-weak); border-color: var(--accent-border); }
-.wf-history-item .wf-history-restore:hover { background: color-mix(in srgb, var(--accent-weak) 70%, var(--accent) 12%); }
 
 /* History preview (before restore) */
 .wf-history-preview { border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); overflow: hidden; }
@@ -1661,18 +1586,6 @@ input:checked + .slider:before {
   cursor: pointer;
 }
 .wf-chip > button:hover { color: var(--text); background: var(--surface-3); }
-.wf-addsection, .wf-addmanual {
-  align-self: flex-start;
-  padding: 5px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent-strong);
-  background: var(--accent-weak);
-  border: 1px solid var(--accent-border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.wf-addsection:hover, .wf-addmanual:hover { background: color-mix(in srgb, var(--accent-weak) 70%, var(--accent) 12%); }
 
 /* Editor landing: batch cards grouped year → month → week. Filled = bold/solid,
    empty = faint dashed "add…" prompt. Ordered newest → oldest. */
@@ -1787,16 +1700,6 @@ input:checked + .slider:before {
 }
 .wf-manual-form input:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
 .wf-manual-form-actions { display: flex; gap: 6px; }
-.wf-manual-add, .wf-manual-cancel {
-  padding: 5px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.wf-manual-add { color: #fff; background: var(--accent); border: 1px solid var(--accent); }
-.wf-manual-add:disabled { opacity: .5; cursor: not-allowed; }
-.wf-manual-cancel { color: var(--muted); background: var(--surface); border: 1px solid var(--border-strong); }
 
 /* List view table — spreadsheet-like. border-collapse:separate (not collapse)
    so the sticky header stays above rowspanned cells in Chrome; gridlines are
@@ -1948,21 +1851,9 @@ input:checked + .slider:before {
 
 /* ===== Inline link bar ===== */
 /* Docs-style floating link popover, anchored under the text selection. */
-.wf-linkpop {
-  position: fixed; z-index: 1100;
-  display: flex; flex-direction: column; gap: 6px;
-  width: 320px; max-width: calc(100vw - 16px);
-  padding: 7px;
-  border: 1px solid var(--border-strong);
-  border-radius: 9px;
-  background: var(--surface);
-  box-shadow: var(--shadow-md, var(--shadow-sm));
-}
+
 .wf-linkpop-row { display: flex; gap: 6px; align-items: center; }
-.wf-linkpop input { flex: 1; min-width: 0; padding: 6px 9px; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
-.wf-linkpop input:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
-.wf-linkpop button { flex: none; padding: 6px 11px; font-size: 13px; font-weight: 600; border-radius: 6px; cursor: pointer; }
-.wf-linkpop-apply { color: #fff; background: var(--accent); border: 1px solid var(--accent); }
+
 .wf-linkpop-remove { color: var(--muted); background: var(--surface); border: 1px solid var(--border-strong); }
 .wf-linkpop-remove:hover { background: var(--surface-2); }
 /* Each game-alike group is a light card so two groups in one section are distinct. */
@@ -1971,16 +1862,9 @@ input:checked + .slider:before {
 .wf-alike-head { display: flex; align-items: center; gap: 6px; }
 .wf-alike-head .wf-alike-name { flex: 1; }
 .wf-alike-del { border: none; background: none; cursor: pointer; color: #b00; line-height: 1; padding: 2px 4px; }
-.wf-addgroup { border: 1px dashed var(--border, #ccc); background: none; cursor: pointer; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
 
 /* ===== Weekly Feedback — Overview/Editor UI enhancements ===== */
 /* Overview toolbar controls (live in the fixed filter-row) */
-.wf-search { flex: 0 1 240px; min-width: 160px; padding: 7px 11px; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
-.wf-search:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-weak); }
-.wf-clear { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); cursor: pointer; }
-.wf-clear:hover { color: var(--text); background: var(--surface-2); }
-.wf-collapse-all { padding: 6px 12px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); cursor: pointer; }
-.wf-collapse-all:hover { color: var(--text); background: var(--surface-2); }
 
 /* Week band row (replaces the rowspanned Batch column) */
 .wf-list .wf-week-row td { background: var(--surface-3); border-bottom: 1px solid var(--border-strong); padding: 7px 12px; cursor: pointer; user-select: none; }
@@ -2602,9 +2486,7 @@ input:checked + .slider:before {
 .rp-stack-total { font-size: 12px; font-weight: 700; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
 
 /* adaptive filter control */
-.rp-select { font-family: var(--font); font-size: 13px; font-weight: 600; color: var(--text);
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
-.rp-select:hover { border-color: var(--accent); }
+
 .rp-date { font-family: var(--font); font-size: 12px; border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 8px; color: var(--text); background: var(--surface); }
 .rp-filter-spacer { flex: 1; }
 
@@ -2661,10 +2543,7 @@ input:checked + .slider:before {
   font-size: 13px; line-height: 1.2; color: var(--faint); cursor: pointer; flex-shrink: 0;
 }
 .rp-expand:hover { color: var(--accent); border-color: var(--border); background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.rp-modal-backdrop {
-  position: fixed; inset: 0; z-index: 90; background: rgba(15, 23, 42, .45);
-  display: flex; align-items: center; justify-content: center; padding: 28px;
-}
+
 .rp-modal {
   width: min(1180px, 96vw); max-height: 92vh; overflow-y: auto;
   box-shadow: 0 24px 70px rgba(15, 23, 42, .35);
@@ -3121,9 +3000,7 @@ input:checked + .slider:before {
 .rp-review-note.open { -webkit-line-clamp: unset; display: block; }
 .rp-review-note.final { background: var(--accent-weak); border-color: var(--accent-border); }
 .rp-review-note-l { margin-right: 8px; }
-.rp-review-check { display: flex; align-items: center; gap: 7px; align-self: flex-end; padding: 7px 2px;
-  font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
-.rp-review-check input { width: 15px; height: 15px; accent-color: var(--accent); }
+
 .rp-review-loading { text-align: center; font-size: 12px; color: var(--faint); padding: 10px 0; }
 .rp-review-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--muted);
   background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius); }
@@ -3257,7 +3134,7 @@ input:checked + .slider:before {
 .bmb { display: flex; align-items: center; gap: 10px; padding: 10px 16px; margin-top: 10px; background: var(--surface); border: 1px solid var(--accent-border); border-radius: 12px; box-shadow: var(--shadow-md); flex: none; }
 .bmb-count { font-size: 13px; font-weight: 700; color: var(--accent); }
 .bmb-label { font-size: 12px; color: var(--muted); margin-left: 6px; }
-.bmb-dialog { max-width: 440px; }
+
 .bmb-note { margin: 0; font-size: 13px; color: var(--warn); background: var(--warn-weak); border-radius: 8px; padding: 8px 10px; }
 .bmb-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
 .bmb-row { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
@@ -3268,16 +3145,10 @@ input:checked + .slider:before {
 .bmb-err { margin: 0; font-size: 13px; color: var(--bad); }
 
 /* ===== Short List / Monthly: header, stat cards, filter bar, list bar ===== */
-.sl-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+
 .sl-seg { display: flex; gap: 2px; background: var(--surface-3); padding: 3px; border-radius: 9px; border: 1px solid var(--border); }
-.sl-seg-btn {
-  padding: 5px 10px; border-radius: 6px; border: none; background: none;
-  font-family: var(--font); font-size: 13px; font-weight: 600; color: var(--muted);
-  cursor: pointer; white-space: nowrap;
-}
-.sl-seg-btn:hover { color: var(--text); }
-.sl-seg-btn.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
-.sl-seg-btn:focus-visible, .sl-stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.sl-stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .sl-cur { position: relative; }
 .sl-cur-btn { gap: 8px; }
@@ -3313,13 +3184,8 @@ input:checked + .slider:before {
 .sl-stat .bar .fill i { display: block; height: 100%; }
 
 .filter-row.sl { background: var(--surface); backdrop-filter: none; margin-bottom: 0; }
-.sl-grp { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-.sl-list-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.sl-list-bar .count { font-size: 13px; font-weight: 600; }
-.sl-list-bar .count span { color: var(--faint); font-weight: 500; }
-.sl-list-bar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 @media (max-width: 767px) {
-  .sl-list-bar .right { margin-left: 0; width: 100%; }
+
   .filter-row.sl { gap: 8px; }
 }

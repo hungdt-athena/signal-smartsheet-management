@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { TrendValuePicker } from './TrendValuePicker'
+import { toast } from '@/lib/toast'
 
 /** One pending proposal, as `GET /api/playtest-tags` returns it (the shape
  *  `lib/playtest-tags-queue.ts` produces, so `conflict` is the same verdict the
@@ -52,7 +53,7 @@ const PILL: React.CSSProperties = {
   padding: '3px 4px 3px 9px', borderRadius: 7, background: 'var(--surface-2)',
   border: '1px solid var(--border)', fontSize: 12, fontFamily: 'var(--num)',
 }
-const SUB: React.CSSProperties = { fontSize: 10.5, color: 'var(--faint)', fontFamily: 'var(--font)' }
+const SUB: React.CSSProperties = { fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--font)' }
 const ICON: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   width: 20, height: 20, padding: 0, borderRadius: 5, lineHeight: 1,
@@ -64,7 +65,7 @@ const PANEL: React.CSSProperties = {
   border: '1px solid var(--border)', background: 'var(--surface)',
   display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 460,
 }
-const CTL: React.CSSProperties = { fontSize: 12.5, padding: '6px 9px', width: '100%' }
+const CTL: React.CSSProperties = { fontSize: 13, padding: '6px 9px', width: '100%' }
 
 /** Which panel a pill has open. `null` = just the pill. */
 type Open = 'confirm' | 'options' | 'edit'
@@ -87,7 +88,6 @@ export function TrendTagReview({ tags, options, categoryGroups, categoryGroup, s
   const [busy, setBusy] = useState<Set<number>>(new Set())
   const [open, setOpen] = useState<Record<number, Open>>({})
   const [notes, setNotes] = useState<Record<number, string>>({})
-  const [error, setError] = useState<string | null>(null)
 
   const used = tags.map(t => t.field_value)
   const setOpenFor = (id: number, next: Open | null) =>
@@ -104,19 +104,18 @@ export function TrendTagReview({ tags, options, categoryGroups, categoryGroup, s
     read: (body: Record<string, unknown>) => ReviewChange,
   ) => {
     setBusy(prev => new Set(prev).add(t.id))
-    setError(null)
     try {
       const res = await work()
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError((body as { error?: string }).error || 'That did not go through — nothing was changed.')
+        toast.error((body as { error?: string }).error || 'That did not go through. Nothing was changed.')
         return
       }
       const change = read(body as Record<string, unknown>)
       if (change.kind === 'resolved') setOpenFor(t.id, null)
       onReviewed(change)
     } catch {
-      setError('That did not go through — nothing was changed.')
+      toast.error('That did not go through. Nothing was changed.')
     } finally {
       setBusy(prev => { const next = new Set(prev); next.delete(t.id); return next })
     }
@@ -165,9 +164,6 @@ export function TrendTagReview({ tags, options, categoryGroups, categoryGroup, s
 
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
-      {error && (
-        <div className="wf-hint" style={{ color: 'var(--bad)', width: '100%' }}>{error}</div>
-      )}
       {tags.map(t => {
         const working = busy.has(t.id)
         const panel = open[t.id]
@@ -198,10 +194,10 @@ export function TrendTagReview({ tags, options, categoryGroups, categoryGroup, s
                 </span>
                 {noteBox(t, working)}
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button type="button" className="btn btn-sm btn-primary" disabled={working}
-                    onClick={() => confirm(t, true)}>Confirm and overwrite</button>
                   <button type="button" className="btn btn-sm btn-ghost" disabled={working}
                     onClick={() => setOpenFor(t.id, null)}>Cancel</button>
+                  <button type="button" className="btn btn-sm btn-primary" disabled={working}
+                    onClick={() => confirm(t, true)}>Confirm and overwrite</button>
                 </div>
               </div>
             )}
@@ -210,13 +206,13 @@ export function TrendTagReview({ tags, options, categoryGroups, categoryGroup, s
               <div style={PANEL}>
                 {noteBox(t, working)}
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button type="button" className="btn btn-sm" disabled={working}
-                    onClick={() => reject(t)}>Reject</button>
+                  <button type="button" className="btn btn-sm btn-ghost" disabled={working}
+                    onClick={() => setOpenFor(t.id, null)}>Cancel</button>
                   <button type="button" className="btn btn-sm" disabled={working || optionsError}
                     title={optionsError ? 'The Trends catalog failed to load' : 'Correct this tag and leave it pending'}
                     onClick={() => setOpenFor(t.id, 'edit')}>Edit</button>
-                  <button type="button" className="btn btn-sm btn-ghost" disabled={working}
-                    onClick={() => setOpenFor(t.id, null)}>Cancel</button>
+                  <button type="button" className="btn btn-sm btn-danger" disabled={working}
+                    onClick={() => reject(t)}>Reject</button>
                 </div>
               </div>
             )}

@@ -47,9 +47,26 @@ jest.mock('next-auth/react', () => {
   }
 })
 
-jest.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(''),
-}))
+// The page keeps its view and filters in the URL (lib/use-url-state). This stand-in for
+// next/navigation keeps the query string in jsdom's location, so changing a filter
+// re-renders the page the way the real router does.
+jest.mock('next/navigation', () => {
+  const React = jest.requireActual('react')
+  const listeners = new Set<() => void>()
+  const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
+  const read = () => window.location.search
+  const router = {
+    replace: (url: string) => { window.history.replaceState(null, '', url); listeners.forEach(l => l()) },
+  }
+  return {
+    useSearchParams: () => {
+      const qs = React.useSyncExternalStore(subscribe, read, read)
+      return React.useMemo(() => new URLSearchParams(qs), [qs])
+    },
+    useRouter: () => router,
+    usePathname: () => window.location.pathname,
+  }
+})
 
 jest.mock('@/hooks/useConfig', () => ({
   useConfig: () => ({ conclusion: [], final_conclusion: [] }),
@@ -66,6 +83,8 @@ jest.mock('@/components/weekly-feedback/WeeklyFeedbackTab', () => ({ WeeklyFeedb
 jest.mock('@/components/TaggingTab', () => ({ TaggingTab: () => null }))
 
 import EvaluationsPage from '@/app/(manager)/evaluations/page'
+
+beforeEach(() => { window.history.replaceState(null, '', '/evaluations') })
 
 const APPLIED_MONTH = { year: 2026, month: 9 }
 

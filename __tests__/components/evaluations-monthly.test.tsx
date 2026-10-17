@@ -9,7 +9,26 @@ jest.mock('next-auth/react', () => ({
     status: 'authenticated',
   }),
 }))
-jest.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('cat=short_list') }))
+// The page keeps its view and filters in the URL (lib/use-url-state). This stand-in for
+// next/navigation keeps the query string in jsdom's location, so changing a filter
+// re-renders the page the way the real router does.
+jest.mock('next/navigation', () => {
+  const React = jest.requireActual('react')
+  const listeners = new Set<() => void>()
+  const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
+  const read = () => window.location.search
+  const router = {
+    replace: (url: string) => { window.history.replaceState(null, '', url); listeners.forEach(l => l()) },
+  }
+  return {
+    useSearchParams: () => {
+      const qs = React.useSyncExternalStore(subscribe, read, read)
+      return React.useMemo(() => new URLSearchParams(qs), [qs])
+    },
+    useRouter: () => router,
+    usePathname: () => window.location.pathname,
+  }
+})
 jest.mock('@/hooks/useConfig', () => ({ useConfig: () => ({ conclusion: [], final_conclusion: ['Insight', 'Priority IV', 'Bypass'] }) }))
 jest.mock('@/components/EvalDetailPanel', () => ({
   __esModule: true,
@@ -33,6 +52,8 @@ jest.mock('@/components/weekly-feedback/WeeklyFeedbackTab', () => ({ WeeklyFeedb
 jest.mock('@/components/TaggingTab', () => ({ TaggingTab: () => null }))
 
 import EvaluationsPage from '@/app/(manager)/evaluations/page'
+
+beforeEach(() => { window.history.replaceState(null, '', '/evaluations?cat=short_list') })
 
 const row = (over: Record<string, unknown>) => ({
   id: 1, game_id: 'g1', title: 'Alpha', icon_url: null, os: 'ios', app_link: null,
@@ -129,7 +150,10 @@ describe('Short List / Monthly views', () => {
     expect(q.get('date_basis')).toBe('evaluated')
     expect(q.get('from')).toBeNull()
 
-    expect(screen.getByRole('heading', { name: 'Monthly' })).toBeInTheDocument()
+    // One page, one title: Monthly is a view of Short List, not a page of its own.
+    expect(screen.getByRole('heading', { name: 'Short List' })).toBeInTheDocument()
+    // The view is in the URL, so a reload or a shared link opens Monthly again.
+    expect(window.location.search).toContain('view=monthly')
     // Month card: 5 games (3+2 Insight, 1 Priority IV -> 6 actually), W1 has 4.
     await waitFor(() => expect(view(/^W1/)).toHaveTextContent('4'))
     expect(view(/^Oct 2026/)).toHaveTextContent('6')

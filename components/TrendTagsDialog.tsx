@@ -1,5 +1,7 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useState } from 'react'
+import { Modal } from '@/components/ui/Modal'
+import { IconX } from '@/components/ui/SearchInput'
 import { TrendValuePicker } from './TrendValuePicker'
 import { ExistingTrendTags, type ExistingTagChange, type ExistingTrendTag } from './ExistingTrendTags'
 import type { TrendTag } from './TrendTagsField'
@@ -55,21 +57,26 @@ export function TrendTagsDialog({
   const takenBy = (i: number) =>
     new Set(draft.filter((_, x) => x !== i).map(r => r.field_value).filter(Boolean))
 
-  // The evaluation panel underneath listens on window for Esc and ←/→. Claim those keys
-  // first (capture phase) and mark them handled, so Esc closes this dialog instead of the
-  // panel, and the arrows do not switch to another game behind it. Keys typed into a
-  // field are left alone, as the panel already ignores them.
-  useEffect(() => {
+  // The evaluation panel underneath listens on window for Esc and ←/→. Modal closes on
+  // Esc and marks it handled, so the panel leaves it alone. The arrows are claimed here
+  // (capture phase, marked handled) so they do not switch to another game behind this
+  // dialog. Keys typed into a field are left to the field, as the panel already ignores
+  // them; Esc typed into one (the trend search) is marked handled too, so it closes the
+  // search list and not the whole dialog with the draft in it.
+  // A layout effect, not a passive one: it must be on window before Modal's listener,
+  // which a passive effect would not be (Modal is the child, its effects run first).
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
       const t = e.target
-      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return
+      const typing = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement
+      if (e.key === 'Escape') { if (typing) e.preventDefault(); return }
+      if (typing || t instanceof HTMLSelectElement) return
       e.preventDefault()
-      if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [onClose])
+  }, [])
 
   const filled = draft.filter(r => r.field_value)
   const save = () => {
@@ -77,143 +84,109 @@ export function TrendTagsDialog({
     onClose()
   }
 
+  // Nested above the evaluation panel (z-index 900), below the picker's list (1000).
+  // The look (no scrim, real border, deep shadow) lives in app/styles/panel.css.
   return (
-    // Nested above the evaluation modal, which sits at z-index 900. No scrim: a
-    // second layer of dimming made the evaluation modal read as another container
-    // behind this one. The layer stays to catch click-outside, so it must be
-    // transparent rather than absent. Shadow and a real border do the separating
-    // — the shared container's border is a white alpha that vanishes on this
-    // light theme, which is invisible against the white panel behind it.
-    <div className="eval-modal-backdrop"
-      style={{ zIndex: 950, background: 'transparent', backdropFilter: 'none' }}
-      onClick={onClose}>
-      <div className="eval-modal-container" onClick={e => e.stopPropagation()}
-        style={{
-          maxWidth: 560, width: '94vw', maxHeight: '86vh',
-          display: 'flex', flexDirection: 'column',
-          border: '1px solid var(--border-strong)',
-          boxShadow: '0 30px 70px rgba(20, 24, 40, 0.28)',
-        }}>
+    <Modal title="Trends tags" sub="An admin reviews these before they reach Signal Sense."
+      onClose={onClose} width={560} zIndex={950} className="trend-dialog"
+      footer={<>
+        <span style={{ fontSize: 12, color: 'var(--faint)', marginRight: 'auto' }}>
+          {filled.length} tag{filled.length === 1 ? '' : 's'} · saved with the evaluation
+        </span>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={save}>Save</button>
+      </>}>
+      <div>
+        <section style={{ marginBottom: existing.length > 0 ? 16 : 0 }}>
+          <ExistingTrendTags
+            gameId={gameId}
+            tags={existing}
+            subValues={subValues}
+            canEdit={!!canEditExisting}
+            onChanged={c => onExistingChanged?.(c)}
+          />
+        </section>
 
-        <header style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          gap: 12, padding: '18px 20px 14px', borderBottom: '1px solid var(--border)',
-        }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 650, letterSpacing: '-0.01em' }}>Trends tags</h2>
-            <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--muted)' }}>
-              An admin reviews these before they reach Signal Sense.
-            </p>
+        {optionsError ? (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: 12,
+            borderRadius: 10, background: 'var(--bad-weak)', border: '1px solid var(--bad)',
+          }}>
+            <span style={{ fontSize: 13, color: 'var(--text)' }}>
+              The trends list didn&apos;t load, so there&apos;s nothing to pick from yet.
+            </span>
+            <button type="button" className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={onRetryOptions}>
+              Try again
+            </button>
           </div>
-          <button className="btn btn-sm btn-ghost" onClick={onClose} title="Close">✕</button>
-        </header>
-
-        <div style={{ padding: '14px 20px', overflowY: 'auto', flex: 1 }}>
-          <section style={{ marginBottom: existing.length > 0 ? 16 : 0 }}>
-            <ExistingTrendTags
-              gameId={gameId}
-              tags={existing}
-              subValues={subValues}
-              canEdit={!!canEditExisting}
-              onChanged={c => onExistingChanged?.(c)}
-            />
-          </section>
-
-          {optionsError ? (
+        ) : (
+          <>
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: 12,
-              borderRadius: 10, background: 'var(--bad-weak)', border: '1px solid var(--bad)',
+              display: 'grid', gridTemplateColumns: '1fr 168px 30px', gap: 8,
+              fontSize: 11, fontWeight: 600, color: 'var(--faint)',
+              textTransform: 'uppercase', letterSpacing: '0.04em', padding: '0 0 6px',
             }}>
-              <span style={{ fontSize: 12.5, color: 'var(--text)' }}>
-                The trends list didn&apos;t load, so there&apos;s nothing to pick from yet.
-              </span>
-              <button type="button" className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={onRetryOptions}>
-                Try again
-              </button>
+              <span>Trend</span>
+              <span>Sub-value</span>
+              <span />
             </div>
-          ) : (
-            <>
-              <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 168px 30px', gap: 8,
-                fontSize: 11, fontWeight: 600, color: 'var(--faint)',
-                textTransform: 'uppercase', letterSpacing: '0.04em', padding: '0 0 6px',
-              }}>
-                <span>Trend</span>
-                <span>Sub-value</span>
-                <span />
-              </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                {draft.map((r, i) => {
-                  const theirs = r.field_value ? existingByValue.get(r.field_value) : undefined
-                  return (
-                    <div key={i}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 168px 30px', gap: 8, alignItems: 'center' }}>
-                        <TrendValuePicker
-                          options={options}
-                          categoryGroups={categoryGroups}
-                          categoryGroup={categoryGroup}
-                          exclude={takenBy(i)}
-                          onPick={v => setRow(i, { field_value: v })}
-                          label={r.field_value || 'Pick a trend'}
-                          placeholder={!r.field_value}
-                          title={r.field_value ? 'Change this trend' : 'Browse or search trends'}
-                          triggerClassName="input"
-                          triggerStyle={{ fontSize: 13 }}
-                        />
-                        <select
-                          className="input"
-                          style={{ fontSize: 13 }}
-                          value={r.sub_value_id ?? ''}
-                          onChange={e => setRow(i, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
-                        >
-                          <option value="">None</option>
-                          {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                        <button type="button" className="btn btn-sm btn-ghost"
-                          onClick={() => removeRow(i)} title="Remove this trend"
-                          style={{ padding: '6px 0', justifyContent: 'center', color: 'var(--faint)' }}>✕</button>
-                      </div>
-                      {theirs && (
-                        <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--warn)' }}>
-                          Signal Sense already has this
-                          {theirs.sub_value_name ? ` as ${theirs.sub_value_name}` : ' without a sub-value'} —
-                          the admin will see a {theirs.sub_value_name ? 'conflict' : 'duplicate'}.
-                        </p>
-                      )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {draft.map((r, i) => {
+                const theirs = r.field_value ? existingByValue.get(r.field_value) : undefined
+                return (
+                  <div key={i}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 168px 30px', gap: 8, alignItems: 'center' }}>
+                      <TrendValuePicker
+                        options={options}
+                        categoryGroups={categoryGroups}
+                        categoryGroup={categoryGroup}
+                        exclude={takenBy(i)}
+                        onPick={v => setRow(i, { field_value: v })}
+                        label={r.field_value || 'Pick a trend'}
+                        placeholder={!r.field_value}
+                        title={r.field_value ? 'Change this trend' : 'Browse or search trends'}
+                        triggerClassName="input"
+                        triggerStyle={{ fontSize: 13 }}
+                      />
+                      <select
+                        className="input"
+                        style={{ fontSize: 13 }}
+                        aria-label="Sub-value"
+                        value={r.sub_value_id ?? ''}
+                        onChange={e => setRow(i, { sub_value_id: e.target.value ? Number(e.target.value) : null })}
+                      >
+                        <option value="">None</option>
+                        {subValues.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      <button type="button" className="x-btn"
+                        onClick={() => removeRow(i)} title="Remove this trend" aria-label="Remove this trend">
+                        <IconX size={14} />
+                      </button>
                     </div>
-                  )
-                })}
-              </div>
+                    {theirs && (
+                      <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--warn)' }}>
+                        Signal Sense already has this
+                        {theirs.sub_value_name ? ` as ${theirs.sub_value_name}` : ' without a sub-value'} —
+                        the admin will see a {theirs.sub_value_name ? 'conflict' : 'duplicate'}.
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
 
-              <button type="button" onClick={addRow}
-                style={{
-                  marginTop: 10, width: '100%', padding: '9px 0',
-                  border: '1px dashed var(--border-strong)', borderRadius: 9,
-                  background: 'transparent', color: 'var(--accent)',
-                  fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
-                }}>+ Add another trend</button>
+            <button type="button" className="btn btn-sm btn-link" onClick={addRow}
+              style={{ marginTop: 10 }}>+ Add another trend</button>
 
-              <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--faint)', lineHeight: 1.6 }}>
-                Pick from the {options.length} trends already in Signal Sense — an admin adds new ones there.
-                {categoryGroup && categoryGroups ? ` The list opens on ${categoryGroup} trends.` : ''}
-                Sub-value says how this game relates to the trend.
-              </p>
-            </>
-          )}
-        </div>
-
-        <footer style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '12px 20px 16px', borderTop: '1px solid var(--border)',
-        }}>
-          <span style={{ fontSize: 11.5, color: 'var(--faint)', marginRight: 'auto' }}>
-            {filled.length} tag{filled.length === 1 ? '' : 's'} · saved with the evaluation
-          </span>
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={save}>Save</button>
-        </footer>
+            <p style={{ margin: '14px 0 0', fontSize: 12, color: 'var(--faint)', lineHeight: 1.6 }}>
+              Pick from the {options.length} trends already in Signal Sense — an admin adds new ones there.
+              {categoryGroup && categoryGroups ? ` The list opens on ${categoryGroup} trends.` : ''}
+              Sub-value says how this game relates to the trend.
+            </p>
+          </>
+        )}
       </div>
-    </div>
+    </Modal>
   )
 }
