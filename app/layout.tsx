@@ -1,8 +1,16 @@
 import type { Metadata } from 'next'
 import { IBM_Plex_Sans, IBM_Plex_Mono } from 'next/font/google'
 import './globals.css'
+import './styles/evaluations.css'
+import './styles/record.css'
+import './styles/teamops.css'
+import './styles/tagging-weekly.css'
+import './styles/performance.css'
+import './styles/panel.css'
+import './styles/admin-misc.css'
 import { Providers } from './providers'
 import VersionWatcher from '@/components/VersionWatcher'
+import { Toaster } from '@/components/ui/Toaster'
 
 const ibmPlexSans = IBM_Plex_Sans({
   subsets: ['latin'],
@@ -24,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${ibmPlexSans.variable} ${ibmPlexMono.variable}`}>
         <Providers>{children}</Providers>
         <VersionWatcher />
+        <Toaster />
       </body>
     </html>
   )

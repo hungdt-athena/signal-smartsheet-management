@@ -10,11 +10,17 @@ interface StyledSelectProps {
   disabled?: boolean
   required?: boolean
   style?: React.CSSProperties
+  /** Filter use: tint the control while it holds a value other than `inactiveValue`
+   *  (default ''), so an active filter is visible at a glance. */
+  filter?: boolean
+  inactiveValue?: string
+  /** Accessible name when there is no visible label; read as "name: current value". */
+  ariaLabel?: string
 }
 
 interface MenuPos { top?: number; bottom?: number; left: number; width: number; maxHeight: number }
 
-export function StyledSelect({ value, onChange, options, placeholder = 'Select', disabled, style }: StyledSelectProps) {
+export function StyledSelect({ value, onChange, options, placeholder = 'Select', disabled, style, filter = false, inactiveValue = '', ariaLabel }: StyledSelectProps) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<MenuPos | null>(null)
   const ref = useRef<HTMLDivElement>(null)
@@ -57,12 +63,14 @@ export function StyledSelect({ value, onChange, options, placeholder = 'Select',
       <button
         ref={btnRef}
         type="button"
-        className="ssel-btn"
+        className={'ssel-btn' + (filter && value !== inactiveValue ? ' is-active' : '')}
         aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={ariaLabel ? `${ariaLabel}: ${selectedLabel ?? placeholder}` : undefined}
         disabled={disabled}
         onClick={() => !disabled && setOpen(!open)}
       >
-        <span style={{ color: selectedLabel ? 'var(--text)' : 'var(--faint)' }}>
+        <span style={{ color: selectedLabel ? 'inherit' : 'var(--faint)' }}>
           {selectedLabel ?? placeholder}
         </span>
         <span className="chev">
