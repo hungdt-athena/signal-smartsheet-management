@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import type { YearMonth } from '@/components/DateFilter'
 import { prettyConclusion } from '@/lib/buckets'
+import { useEscapeToClose } from '@/lib/use-escape-to-close'
 
 interface EvaluatorStats {
   evaluator: string
@@ -85,6 +86,7 @@ export function QuickStatsModal({ category, month, onClose }: {
     return month ? `${MONTH_NAMES[month.month]} ${month.year}` : 'all time'
   }
 
+  useEscapeToClose(onClose)
   return (
     <div className="eval-modal-backdrop" onClick={onClose}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}

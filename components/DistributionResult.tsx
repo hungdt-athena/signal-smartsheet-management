@@ -147,7 +147,7 @@ export function DistributionResult({ result, action }: { result: DistResult; act
 }
 
 function Stat({ label, value, warn, accent }: { label: string; value: number; warn?: boolean; accent?: boolean }) {
-  const color = warn ? 'var(--danger, #d9534f)' : accent ? 'var(--accent, #4f7cff)' : undefined
+  const color = warn ? 'var(--bad)' : accent ? 'var(--accent)' : undefined
   return (
     <div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>

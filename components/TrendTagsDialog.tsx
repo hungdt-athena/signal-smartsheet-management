@@ -1,5 +1,5 @@
 'use client'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { TrendValuePicker } from './TrendValuePicker'
 import { ExistingTrendTags, type ExistingTagChange, type ExistingTrendTag } from './ExistingTrendTags'
 import type { TrendTag } from './TrendTagsField'
@@ -54,6 +54,22 @@ export function TrendTagsDialog({
   // duplicate the server would silently collapse.
   const takenBy = (i: number) =>
     new Set(draft.filter((_, x) => x !== i).map(r => r.field_value).filter(Boolean))
+
+  // The evaluation panel underneath listens on window for Esc and ←/→. Claim those keys
+  // first (capture phase) and mark them handled, so Esc closes this dialog instead of the
+  // panel, and the arrows do not switch to another game behind it. Keys typed into a
+  // field are left alone, as the panel already ignores them.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      const t = e.target
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return
+      e.preventDefault()
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onClose])
 
   const filled = draft.filter(r => r.field_value)
   const save = () => {

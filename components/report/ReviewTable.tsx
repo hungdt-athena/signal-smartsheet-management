@@ -400,6 +400,9 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(false)
+  // First page failed to load. Shown as an error, not as the "no games" sentence,
+  // which read as if the person had nothing to show.
+  const [loadFailed, setLoadFailed] = useState(false)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [lightboxImages, setLightboxImages] = useState<string[]>([])
 
@@ -509,11 +512,13 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
     if (to) params.set('to', to)
     try {
       const res = await fetch(`/api/evaluations?${params}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json = await res.json()
       if (seq !== fetchSeqRef.current) return // stale response; a newer fetch owns the state
       const newRows: ReviewRow[] = json.data || []
       setRows(prev => (append ? [...prev, ...newRows] : newRows))
       setHasMore(newRows.length === PAGE_SIZE)
+      if (!append) setLoadFailed(false)
     } catch {
       if (seq === fetchSeqRef.current) {
         if (append) {
@@ -528,6 +533,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
         } else {
           setRows([])
           setHasMore(false)
+          setLoadFailed(true)
         }
       }
     }
@@ -692,7 +698,12 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
         </div>
       </div>
 
-      {showEmpty ? (
+      {showEmpty && loadFailed ? (
+        <div className="rp-review-empty" role="alert" style={{ color: 'var(--bad)' }}>
+          Could not load the games.{' '}
+          <button type="button" className="btn btn-sm" onClick={() => { pageRef.current = 1; fetchPage(1, false) }}>Try again</button>
+        </div>
+      ) : showEmpty ? (
         <div className="rp-review-empty">{emptySentence}</div>
       ) : (
         <div className="rp-review-rows" ref={rowsRef}>

@@ -166,7 +166,7 @@ export function TrendTagReview({ tags, options, categoryGroups, categoryGroup, s
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
       {error && (
-        <div className="wf-hint" style={{ color: 'var(--danger)', width: '100%' }}>{error}</div>
+        <div className="wf-hint" style={{ color: 'var(--bad)', width: '100%' }}>{error}</div>
       )}
       {tags.map(t => {
         const working = busy.has(t.id)
@@ -180,7 +180,7 @@ export function TrendTagReview({ tags, options, categoryGroups, categoryGroup, s
               <button type="button" disabled={working}
                 title={t.conflict ? 'Review this conflict' : 'Confirm — sync into Signal Sense'}
                 aria-label={`Confirm ${t.field_value}`}
-                style={{ ...ICON, color: 'var(--ok, #2e9e6b)' }}
+                style={{ ...ICON, color: 'var(--good)' }}
                 onClick={() => (t.conflict ? setOpenFor(t.id, 'confirm') : confirm(t, false))}>✓</button>
               <button type="button" disabled={working}
                 title="Reject or edit this tag"

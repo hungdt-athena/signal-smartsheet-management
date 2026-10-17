@@ -1133,8 +1133,9 @@ function ShortListEvalTab() {
                 <tr><td colSpan={selecting ? 10 : 9} className="empty">No games found</td></tr>
               )}
               {loading && Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i}>{Array.from({ length: 9 }).map((__, c) => (
-                  <td key={c}><span className="skeleton" style={{ width: [30, 240, 70, 60, 200, 110, 200, 150, 140][c] || 80, height: 14 }} /></td>
+                // One placeholder per real column: Select mode adds a checkbox column first.
+                <tr key={i}>{(selecting ? [16, 30, 240, 70, 60, 200, 110, 200, 150, 140] : [30, 240, 70, 60, 200, 110, 200, 150, 140]).map((w, c) => (
+                  <td key={c}><span className="skeleton" style={{ width: w, height: 14 }} /></td>
                 ))}</tr>
               ))}
               {data.map((item, idx) => (

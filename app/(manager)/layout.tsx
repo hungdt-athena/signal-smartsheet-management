@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { signOut, useSession } from 'next-auth/react'
 import { MissingDemoPrompt } from '@/components/MissingDemoPrompt'
+import { isBucket } from '@/lib/buckets'
 
 function SIcon({ d, size = 17 }: { d: string | string[]; size?: number }) {
   return (
@@ -36,7 +37,8 @@ interface NavItem { href: string; label: string; icon: keyof typeof ICONS; roles
 const NAV_ITEMS: NavItem[] = [
   { href: '/team-ops',        label: 'Team Operations', icon: 'users', roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/team-ops?tab=assign',   label: 'Assign' },
-    { href: '/team-ops?tab=reassign', label: 'Reassign' },
+    // Manager tier: middleware.ts sends an evaluator on this tab back to Assign.
+    { href: '/team-ops?tab=reassign', label: 'Reassign', roles: ['admin', 'moderator'] },
     // Rescue compares every teammate's backlog on one screen — manager tier.
     { href: '/team-ops?tab=rescue', label: 'Rescue', roles: ['admin', 'moderator'] },
     { href: '/team-ops?tab=handover', label: 'Handover' },
@@ -55,7 +57,9 @@ const NAV_ITEMS: NavItem[] = [
   ]},
   { href: '/youtube',         label: 'Videos',     icon: 'video',  roles: ['admin', 'moderator', 'evaluator'], children: [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
-    { href: '/youtube?tab=record_video', label: 'Record', roles: ['admin', 'moderator', 'evaluator'] },
+    // Manager tier: middleware.ts sends an evaluator on this tab back to YouTube.
+    // Keep the two in step, or the link shows and then bounces.
+    { href: '/youtube?tab=record_video', label: 'Record', roles: ['admin', 'moderator'] },
   ]},
   { href: '/admin',           label: 'Users Management', icon: 'shield', roles: ['admin', 'moderator'] },
   { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin', 'moderator'] },
@@ -116,7 +120,12 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
                 const childPaths = childItems.map(c => new URL(c.href, 'http://x').pathname)
                 const childActive = childPaths.some(cp => pathname === cp || pathname.startsWith(cp + '/'))
                 const selfActive = pathname === item.href || pathname.startsWith(item.href + '/')
-                const currentCat = searchParams.get('cat') || 'puzzle'
+                // No ?cat (an evaluator's landing page, a game opened at /evaluations/[id])
+                // or a bucket name is the Evaluate tab.
+                const rawCat = searchParams.get('cat')
+                const currentCat = !rawCat || isBucket(rawCat) ? 'evaluate' : rawCat
+                // No ?tab means the page's first tab (Assign, YouTube).
+                const defaultTab = childItems.length > 0 ? new URL(childItems[0].href, 'http://x').searchParams.get('tab') || '' : ''
                 // Parent of an active child gets accent text only — the child's
                 // pill carries the highlight, keeping one level visually "selected".
                 const itemClass = childItems.length > 0
@@ -149,7 +158,7 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
                           const subPath = subUrl.pathname
                           const subCat = subUrl.searchParams.get('cat') || ''
                           const subTab = subUrl.searchParams.get('tab') || ''
-                          const currentTab = searchParams.get('tab') || ''
+                          const currentTab = searchParams.get('tab') || defaultTab
                           const subActive = subCat
                             ? currentCat === subCat && pathname.startsWith(item.href)
                             : subTab

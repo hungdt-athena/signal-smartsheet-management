@@ -5,6 +5,7 @@ import EvalDetailPanel, { type EvalListItem } from './EvalDetailPanel'
 import { TrendValuePicker } from './TrendValuePicker'
 import { TrendsCatalog } from './TrendsCatalog'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
+import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
 
 /** The tab-wide Category group filter: puzzle / arcade / simulation, or all. This
  *  is the game's `category_group` (Signal Sense calls it `genre`); a game's own
@@ -166,7 +167,7 @@ export function TaggingTab() {
       {view === 'trends' && <TrendsCatalog onOpenGame={openGame} categoryGroup={categoryGroup} />}
 
       {detail && (
-        <div className="eval-modal-backdrop" onClick={() => setDetail(null)}>
+        <div className="eval-modal-backdrop" onClick={() => requestLeaveUnsaved(() => setDetail(null))}>
           <div className="eval-modal-container" onClick={e => e.stopPropagation()}
             style={{ padding: '20px 24px 24px' }}>
             <EvalDetailPanel
@@ -224,7 +225,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
   const [working, setWorking] = useState(false)
   /** Rows mid-flight on their own, so only they show as busy. */
   const [rowBusy, setRowBusy] = useState<Set<number>>(new Set())
-  const [msg, setMsg] = useState<string | null>(null)
+  const [msg, setMsg] = useState<{ text: string; err: boolean } | null>(null)
   // Catalog for the inline value/sub-value editors. A failed load leaves the
   // rows readable but not editable, rather than offering an empty picker.
   const [options, setOptions] = useState<string[]>([])
@@ -337,7 +338,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         body: JSON.stringify(patch),
       })
       const d = await r.json().catch(() => ({}))
-      if (!r.ok) { setMsg(d.error || 'Could not update that tag'); return }
+      if (!r.ok) { setMsg({ text: d.error || 'Could not update that tag', err: true }); return }
       setMsg(null)
       const tag = d.tag as PendingRow | undefined
       if (tag && typeof tag.conflict === 'boolean') {
@@ -352,9 +353,9 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         // The row was resolved underneath the edit and no longer reads back as
         // pending. Drop it rather than leaving a row that is not in the queue.
         dropRows([id])
-        setMsg('That tag was reviewed elsewhere — removed it from the queue.')
+        setMsg({ text: 'That tag was reviewed elsewhere — removed it from the queue.', err: false })
       }
-    } catch { setMsg('Network error') }
+    } catch { setMsg({ text: 'Network error', err: true }) }
     finally { setEditing(null) }
   }
 
@@ -438,7 +439,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
     }
     if (skipped.length) parts.push(`not written: ${skipped.join('; ')}`)
     if (failed.length) parts.push(`failed — ${failed.join('; ')}`)
-    setMsg(parts.join(' · ') || 'Nothing to confirm')
+    setMsg({ text: parts.join(' · ') || 'Nothing to confirm', err: failed.length > 0 })
   }
 
   const rejectTags = async (ids: number[]) => {
@@ -450,10 +451,10 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, notes: notesFor(ids) }),
       })
-      if (!r.ok) { setMsg('Reject failed'); markBusy(ids, false); return }
+      if (!r.ok) { setMsg({ text: 'Reject failed', err: true }); markBusy(ids, false); return }
       dropRows(ids)
-      setMsg(`Rejected ${ids.length} tag${ids.length === 1 ? '' : 's'} — nothing was written to Signal Sense.`)
-    } catch { setMsg('Network error') }
+      setMsg({ text: `Rejected ${ids.length} tag${ids.length === 1 ? '' : 's'} — nothing was written to Signal Sense.`, err: false })
+    } catch { setMsg({ text: 'Network error', err: true }) }
     markBusy(ids, false)
   }
 
@@ -502,7 +503,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
   if (rows.length === 0) {
     return (
       <div className="card">
-        {msg && <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
+        {msg && <p role={msg.err ? 'alert' : 'status'} style={{ margin: '0 0 10px', fontSize: 12.5, color: msg.err ? 'var(--bad)' : 'var(--muted)' }}>{msg.text}</p>}
         <p className="empty">
           {isAdmin
             ? 'Nothing waiting for review. Trends tagged during playtest show up here.'
@@ -581,7 +582,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         </div>
       )}
 
-      {msg && <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
+      {msg && <p role={msg.err ? 'alert' : 'status'} style={{ margin: '0 0 10px', fontSize: 12.5, color: msg.err ? 'var(--bad)' : 'var(--muted)' }}>{msg.text}</p>}
 
       <div className="tbl-wrap tag-scroll">
         <table className="tbl">
@@ -755,7 +756,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
   /** Everyone who has ever had a tag reviewed, for the filter's options. Sent
    *  with every page, so it survives a filter that empties the table. */
   const [taggers, setTaggers] = useState<{ email: string; name: string | null }[]>([])
-  const [msg, setMsg] = useState<string | null>(null)
+  const [msg, setMsg] = useState<{ text: string; err: boolean } | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -807,7 +808,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
     if (!isAdmin) { void fetchPage(1, false); return }
     fetch('/api/playtest-tags/reconcile', { method: 'POST' })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (live && d?.removed > 0) setMsg(`${d.removed} tag${d.removed === 1 ? '' : 's'} no longer in Signal Sense — recorded as removed.`) })
+      .then(d => { if (live && d?.removed > 0) setMsg({ text: `${d.removed} tag${d.removed === 1 ? '' : 's'} no longer in Signal Sense — recorded as removed.`, err: false }) })
       .catch(() => {})
       .finally(() => { if (live) void fetchPage(1, false) })
     return () => { live = false }
@@ -846,12 +847,12 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         body: JSON.stringify({ id: r.id }),
       })
       const d = await res.json().catch(() => ({}))
-      if (!res.ok) setMsg(d.error || 'Could not remove that tag')
-      else setMsg(d.outcome === 'deleted'
+      if (!res.ok) setMsg({ text: d.error || 'Could not remove that tag', err: true })
+      else setMsg({ err: false, text: d.outcome === 'deleted'
         ? `Removed ${r.field_value} from Signal Sense.`
-        : `${r.field_value} was already gone from Signal Sense — recorded as removed.`)
+        : `${r.field_value} was already gone from Signal Sense — recorded as removed.` })
       setReloadKey(k => k + 1)
-    } catch { setMsg('Network error') }
+    } catch { setMsg({ text: 'Network error', err: true }) }
     setBusy(null)
   }
 
@@ -893,12 +894,12 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
 
   return (
     <div className="card">
-      <div className="card-head" style={{ alignItems: 'flex-end' }}>
+      <div className="card-head" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <span className="card-label">
           Reviewed
           <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>{total}</span>
         </span>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
           {/* Options come from the API rather than the loaded page: a name that
               only appears on page 3 still has to be pickable from page 1. */}
           <div className="field">
@@ -940,7 +941,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup }: { onOpenGame: OpenG
         </div>
       </div>
 
-      {msg && <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>{msg}</p>}
+      {msg && <p role={msg.err ? 'alert' : 'status'} style={{ margin: '0 0 10px', fontSize: 12.5, color: msg.err ? 'var(--bad)' : 'var(--muted)' }}>{msg.text}</p>}
 
       <div className="tbl-wrap tag-scroll">
         <table className="tbl">

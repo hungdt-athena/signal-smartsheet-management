@@ -20,15 +20,18 @@ export function PushWindowSection({ highlight = false }: { highlight?: boolean }
   const [canEdit, setCanEdit] = useState(false)
   const [saving, setSaving] = useState<Bucket | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // A failed load said "Loading…" forever. Now it says so and offers a retry.
+  const [loadFailed, setLoadFailed] = useState(false)
 
   const load = useCallback(async () => {
+    setLoadFailed(false)
     try {
       const res = await fetch('/api/config/push-window', { cache: 'no-store' })
-      if (!res.ok) return
+      if (!res.ok) { setLoadFailed(true); return }
       const json = await res.json()
       setWindows(json.windows ?? null)
       setCanEdit(json.canEdit === true)
-    } catch { /* leave the section empty rather than break the page */ }
+    } catch { setLoadFailed(true) }
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -66,7 +69,12 @@ export function PushWindowSection({ highlight = false }: { highlight?: boolean }
       <p className="pw-note">{PUSH_WINDOW_NOTE}</p>
 
       {!windows ? (
-        <p className="pw-empty">Loading…</p>
+        loadFailed ? (
+          <p className="msg-err" role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            Could not load the push windows.
+            <button type="button" className="btn btn-sm" onClick={() => load()}>Try again</button>
+          </p>
+        ) : <p className="pw-empty">Loading…</p>
       ) : (
         <table className="tbl pw-tbl">
           <thead>

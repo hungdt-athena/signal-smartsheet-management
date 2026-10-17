@@ -845,6 +845,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A dialog stacked on the panel (Trends tags) already took this key.
+      if (e.defaultPrevented) return
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return
       // A popup open: Esc closes it, arrows do not move to another game underneath.
       if (leave) { if (e.key === 'Escape' && !leaveSaving) setLeave(null); return }

@@ -5,6 +5,7 @@
 'use client'
 import { DistributionResult } from '@/components/DistributionResult'
 import type { OperationRun } from '@/components/OperationHistory'
+import { useEscapeToClose } from '@/lib/use-escape-to-close'
 
 const STATUS_PILL: Record<string, string> = {
   committed: 'on', approved: 'on', pending: 'tag', rejected: 'off',
@@ -30,6 +31,7 @@ export function OperationDetailModal({ run, onClose }: { run: OperationRun; onCl
       ? `${run.params.count} games (oldest first)`
       : null
 
+  useEscapeToClose(onClose)
   return (
     <div className="eval-modal-backdrop" onClick={onClose}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}

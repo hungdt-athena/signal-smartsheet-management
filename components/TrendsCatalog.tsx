@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { parseMarkdownLite, type Inline } from '@/lib/markdown-lite'
 import type { EvalListItem } from './EvalDetailPanel'
+import { useEscapeToClose } from '@/lib/use-escape-to-close'
 
 /** One trend as the listing shows it. Counts are games, not proposals. */
 interface TrendRow {
@@ -98,6 +99,7 @@ function TrendPanel({ trend, onClose, onOpenGame }: {
   const list = useMemo<EvalListItem[]>(
     () => games.map(g => ({ game_id: g.game_id, title: g.title })), [games])
 
+  useEscapeToClose(onClose)
   return (
     <div className="eval-modal-backdrop" onClick={onClose}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}
@@ -225,14 +227,14 @@ export function TrendsCatalog({ onOpenGame, categoryGroup = 'all' }: {
 
   return (
     <div className="card">
-      <div className="card-head" style={{ alignItems: 'flex-end' }}>
+      <div className="card-head" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <span className="card-label">
           Trends
           <span style={{ color: 'var(--faint)', fontWeight: 400, marginLeft: 8 }}>
             {q ? `${shown.length} of ${inCategoryGroup.length}` : inCategoryGroup.length}
           </span>
         </span>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
           <div className="field">
             <span className="label">Search</span>
             <input className="input" style={{ width: 200 }} placeholder="Search trends"

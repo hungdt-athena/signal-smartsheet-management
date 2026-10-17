@@ -106,6 +106,7 @@ export function WeeklyFeedbackTab() {
   const [records, setRecords] = useState<WeeklyRecord[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState(false)
   const [autoSave, setAutoSave] = useState(true)
   const dirtyRef = useRef(false)
   const dragFrom = useRef<number | null>(null)
@@ -158,7 +159,7 @@ export function WeeklyFeedbackTab() {
     fetch(`/api/weekly-feedback?${qs}`).then(r => r.json()).then(d => {
       const secs: Section[] = Array.isArray(d.record?.sections) ? d.record.sections : []
       setSections(secs.length ? secs : (self ? [newSection()] : []))
-      setCollapsedSecs({}); setDirty(false); dirtyRef.current = false
+      setCollapsedSecs({}); setDirty(false); setSaveError(false); dirtyRef.current = false
     })
   }, [view, selectedBatch, evaluator, isManager, userName])
 
@@ -180,13 +181,20 @@ export function WeeklyFeedbackTab() {
     setCollapsed(c)
   }, [records])
 
+  // A failed save keeps the changes marked unsaved and says so. Before, the result was
+  // never read, so a 500 or a dropped connection still showed "All changes saved".
   const save = useCallback(async () => {
-    setSaving(true)
-    await fetch('/api/weekly-feedback', {
-      method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ batch: selectedBatch, sections }),
-    })
-    setSaving(false); setDirty(false); dirtyRef.current = false
+    setSaving(true); setSaveError(false)
+    let ok = false
+    try {
+      const res = await fetch('/api/weekly-feedback', {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ batch: selectedBatch, sections }),
+      })
+      ok = res.ok
+    } catch { ok = false }
+    setSaving(false)
+    if (ok) { setDirty(false); dirtyRef.current = false } else setSaveError(true)
   }, [selectedBatch, sections])
 
   useEffect(() => registerUnsavedGuard({ isDirty: () => dirtyRef.current, flush: () => save() }), [save])
@@ -231,7 +239,7 @@ export function WeeklyFeedbackTab() {
     setSections(secs.length ? secs : (who === '' ? [newSection()] : []))
     setSelectedBatch(rec.batch)
     if (isManager) setEvaluator(who)
-    setCollapsedSecs({}); setDirty(false); dirtyRef.current = false; setHistoryOpen(false)
+    setCollapsedSecs({}); setDirty(false); setSaveError(false); dirtyRef.current = false; setHistoryOpen(false)
     setView('week')
   }
 
@@ -406,7 +414,7 @@ export function WeeklyFeedbackTab() {
                   )}
                 </div>
                 <div className="wf-label-actions">
-                  <span className="wf-savestate">{saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'All changes saved'}</span>
+                  <span className={`wf-savestate${saveError && !saving ? ' err' : ''}`} role="status">{saving ? 'Saving…' : saveError ? 'Not saved. Try again.' : dirty ? 'Unsaved changes' : 'All changes saved'}</span>
                   <button type="button" className={`wf-autosave${autoSave ? ' on' : ''}`} onClick={() => setAutoSave(v => !v)} title="Toggle auto-save (off = save manually)">
                     <span className="wf-autosave-dot" />Auto-save {autoSave ? 'On' : 'Off'}
                   </button>

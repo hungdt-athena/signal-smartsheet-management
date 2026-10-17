@@ -12,6 +12,7 @@ import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
 import { isManagerRole } from '@/lib/roles'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
+import { useEscapeToClose } from '@/lib/use-escape-to-close'
 
 interface YtbRow {
   row_index: number
@@ -822,6 +823,8 @@ function ExtractChatModal({ games, onClose }: {
     } catch { /* ignore */ }
   }
 
+  useEscapeToClose(onClose)
+
   return (
     <div className="eval-modal-backdrop" onClick={onClose}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}
@@ -1291,8 +1294,10 @@ function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onCon
     border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: 12.5,
   }
 
+  useEscapeToClose(onCancel, !saving)
+
   return (
-    <div className="eval-modal-backdrop" onClick={onCancel} style={{ zIndex: 60 }}>
+    <div className="eval-modal-backdrop" onClick={e => { e.stopPropagation(); if (!saving) onCancel() }} style={{ zIndex: 60 }}>
       <div className="eval-modal-container" onClick={e => e.stopPropagation()}
         style={{ padding: '20px 22px 20px', maxWidth: 560, width: '92vw' }}>
         {/* Header */}
@@ -1353,7 +1358,7 @@ function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onCon
               {resolvedBucket !== targetBucket && <span style={{ color: 'var(--accent)' }}> (moved by final conclusion)</span>}
             </p>
 
-            {error && <p style={{ fontSize: 12, color: 'var(--danger, #d23b3b)', margin: '8px 0 0' }}>{error}</p>}
+            {error && <p style={{ fontSize: 12, color: 'var(--bad)', margin: '8px 0 0' }}>{error}</p>}
           </>
         )}
 
@@ -1428,6 +1433,8 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, recorders
     () => (searching ? results : batchGames).filter(g => !excludeGameIds.has(g.game_id)),
     [searching, results, batchGames, excludeGameIds]
   )
+
+  useEscapeToClose(onClose)
 
   return (
     <div className="eval-modal-backdrop" onClick={onClose}>
@@ -1519,6 +1526,7 @@ function RecordTab() {
   const [showExtract, setShowExtract] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  useEscapeToClose(() => setShowConfirm(false), showConfirm && !confirming)
   // Manual bucket override: drag/drop, add-game modal, inline remove-confirm.
   const [dragOverBucket, setDragOverBucket] = useState<'5min' | '20min' | null>(null)
   const [addBucket, setAddBucket] = useState<'5min' | '20min' | null>(null)

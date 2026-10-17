@@ -89,7 +89,7 @@ export function HandoverPanel() {
 
       <div className="card">
         <div style={{ padding: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
             <div className="field">
               <span className="label">Evaluator on leave</span>
               <StyledSelect value={from} onChange={setFrom} disabled={isEvaluator || fromOptions.length === 0}

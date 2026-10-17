@@ -144,7 +144,7 @@ export function ExistingTrendTags({ gameId, tags, subValues, canEdit, onChanged 
     <div>
       <span style={LABEL}>Already in Signal Sense</span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
-        {error && <div className="wf-hint" style={{ color: 'var(--danger)', width: '100%' }}>{error}</div>}
+        {error && <div className="wf-hint" style={{ color: 'var(--bad)', width: '100%' }}>{error}</div>}
 
         {tags.map(t => {
           const working = busy === t.field_value

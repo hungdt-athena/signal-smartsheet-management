@@ -166,7 +166,7 @@ export default function VersionWatcher() {
             disabled={reloading}
             style={{ fontSize: 12.5, padding: '6px 13px' }}
           >
-            {reloading ? 'Saving…' : 'Reload now'}
+            {reloading ? 'Reloading…' : 'Reload now'}
           </button>
         </div>
       ) : (

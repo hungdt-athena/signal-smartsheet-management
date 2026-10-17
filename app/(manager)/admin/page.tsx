@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
+import { useEscapeToClose } from '@/lib/use-escape-to-close'
 
 type Role = 'admin' | 'moderator' | 'evaluator'
 
@@ -14,6 +15,8 @@ interface User {
   active: boolean
   created_at: string
 }
+
+interface Notice { ok: boolean; text: string }
 
 interface Orphan { key: string; name: string; total: number; last_eval: string | null }
 
@@ -48,12 +51,17 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
-  const [syncResult, setSyncResult] = useState<string | null>(null)
+  // Results carry their kind, so a failure is shown in red and not as a success line.
+  const [syncResult, setSyncResult] = useState<Notice | null>(null)
   // Evaluator audit: preview first (GET), then apply (POST). Nothing is written
   // until the admin has seen the list.
   const [orphans, setOrphans] = useState<Orphan[] | null>(null)
   const [auditing, setAuditing] = useState(false)
-  const [auditResult, setAuditResult] = useState<string | null>(null)
+  const [auditResult, setAuditResult] = useState<Notice | null>(null)
+  // A failed row update (role, title, name, active) or a failed list load.
+  const [tableError, setTableError] = useState<string | null>(null)
+  // The account waiting for the Deactivate confirmation.
+  const [confirmDeactivate, setConfirmDeactivate] = useState<User | null>(null)
 
   const [newEmail, setNewEmail] = useState('')
   const [newName, setNewName] = useState('')
@@ -70,7 +78,8 @@ export default function AdminPage() {
     try {
       const res = await fetch('/api/admin/users', { cache: 'no-store' })
       if (res.ok) setUsers(await res.json())
-    } catch { /* ignore */ }
+      else setTableError('Could not load users. Click Refresh to try again.')
+    } catch { setTableError('Could not load users. Network error.') }
     finally { setLoading(false) }
   }, [])
 
@@ -106,6 +115,7 @@ export default function AdminPage() {
   }
 
   async function updateUser(id: number, patch: { role?: string; name?: string; title?: string; active?: boolean }) {
+    setTableError(null)
     try {
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
@@ -114,10 +124,12 @@ export default function AdminPage() {
       })
       if (res.ok) fetchUsers()
       else {
-        const body = await res.json()
-        alert(body.error ?? 'Failed to update')
+        const body = await res.json().catch(() => ({}))
+        setTableError(`Not saved. ${body.error ?? 'Failed to update'}`)
       }
-    } catch { /* ignore */ }
+    } catch {
+      setTableError('Not saved. Network error.')
+    }
   }
 
   function startEditName(u: User) {
@@ -133,7 +145,7 @@ export default function AdminPage() {
   // Deactivating replaced deleting: the row and its history stay, but the person
   // cannot sign in and drops out of every evaluator dropdown and Config › People.
   function setActive(u: User, active: boolean) {
-    if (!active && !confirm(`Deactivate ${u.email}? They will not be able to sign in.`)) return
+    if (!active) { setConfirmDeactivate(u); return }
     updateUser(u.id, { active })
   }
 
@@ -143,19 +155,19 @@ export default function AdminPage() {
     try {
       const res = await fetch('/api/admin/users/audit-evaluators', { method: apply ? 'POST' : 'GET' })
       const body = await res.json()
-      if (!res.ok) { setAuditResult(body.error ?? 'Audit failed'); return }
+      if (!res.ok) { setAuditResult({ ok: false, text: body.error ?? 'Audit failed' }); return }
       if (apply) {
         setOrphans(null)
-        setAuditResult(body.created.length
+        setAuditResult({ ok: true, text: body.created.length
           ? `Created ${body.created.length} deactivated account(s): ${body.created.join(', ')}`
-          : 'Nothing to create')
+          : 'Nothing to create' })
         fetchUsers()
       } else {
         setOrphans(body.orphans)
-        if (body.orphans.length === 0) setAuditResult('Every evaluator already has an account')
+        if (body.orphans.length === 0) setAuditResult({ ok: true, text: 'Every evaluator already has an account' })
       }
     } catch {
-      setAuditResult('Network error')
+      setAuditResult({ ok: false, text: 'Audit failed. Network error.' })
     } finally {
       setAuditing(false)
     }
@@ -168,17 +180,19 @@ export default function AdminPage() {
       const res = await fetch('/api/admin/sync-evaluators', { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
-        setSyncResult(`Synced: ${data.added} new evaluators added (${data.total} total in sheets)`)
+        setSyncResult({ ok: true, text: `Synced: ${data.added} new evaluators added (${data.total} total in sheets)` })
         fetchUsers()
       } else {
-        setSyncResult('Sync failed')
+        setSyncResult({ ok: false, text: 'Sync failed' })
       }
     } catch {
-      setSyncResult('Network error')
+      setSyncResult({ ok: false, text: 'Sync failed. Network error.' })
     } finally {
       setSyncing(false)
     }
   }
+
+  useEscapeToClose(() => setConfirmDeactivate(null), confirmDeactivate !== null)
 
   const active = users.filter(u => u.active !== false)
   const inactive = users.filter(u => u.active === false)
@@ -207,10 +221,10 @@ export default function AdminPage() {
         </div>
 
         {syncResult && (
-          <p className="msg-ok" style={{ marginBottom: 10 }}>{syncResult}</p>
+          <p className={syncResult.ok ? 'msg-ok' : 'msg-err'} style={{ marginBottom: 10 }}>{syncResult.text}</p>
         )}
         {auditResult && (
-          <p className="msg-ok" style={{ marginBottom: 10 }}>{auditResult}</p>
+          <p className={auditResult.ok ? 'msg-ok' : 'msg-err'} style={{ marginBottom: 10 }}>{auditResult.text}</p>
         )}
         {orphans && orphans.length > 0 && (
           <div className="audit-box">
@@ -279,11 +293,12 @@ export default function AdminPage() {
       <div className="card">
         <div className="card-head">
           <span className="card-label">Users ({active.length})</span>
-          <button className="btn btn-sm" onClick={fetchUsers} disabled={loading}>
+          <button className="btn btn-sm" onClick={() => { setTableError(null); fetchUsers() }} disabled={loading}>
             <span className={loading ? 'spin' : ''}>↻</span>
             {loading ? '...' : 'Refresh'}
           </button>
         </div>
+        {tableError && <p className="msg-err" role="alert" style={{ marginBottom: 10 }}>{tableError}</p>}
 
         <div className="tbl-wrap">
           <table className="tbl">
@@ -410,6 +425,29 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {confirmDeactivate && (
+        <div className="modal-backdrop" onClick={() => setConfirmDeactivate(null)}>
+          <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="deact-title"
+            style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div className="modal-title" id="deact-title">Deactivate {confirmDeactivate.name || confirmDeactivate.email}?</div>
+            </div>
+            <div className="modal-body" style={{ gap: 6, fontSize: 13 }}>
+              <div>{confirmDeactivate.email} will not be able to sign in.</div>
+              <div style={{ color: 'var(--muted)' }}>Their evaluations stay. You can activate the account again later.</div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn btn-sm btn-ghost" onClick={() => setConfirmDeactivate(null)} autoFocus>Cancel</button>
+              <button className="btn btn-sm btn-danger" onClick={() => {
+                const u = confirmDeactivate
+                setConfirmDeactivate(null)
+                updateUser(u.id, { active: false })
+              }}>Deactivate</button>
+            </div>
           </div>
         </div>
       )}

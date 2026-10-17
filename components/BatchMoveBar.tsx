@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { moveBatch, MAX_MOVE } from '@/lib/batch-move-client'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
+import { useEscapeToClose } from '@/lib/use-escape-to-close'
 
 export interface SelectedGame {
   id: number
@@ -76,6 +77,7 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
     onMovedRef.current(res.moved ?? 0)
   }
 
+  useEscapeToClose(() => setConfirming(false), confirming && !busy)
   return (
     <>
       <div className="bmb" role="region" aria-label="Move games to another batch">
