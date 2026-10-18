@@ -393,10 +393,21 @@ function ReportInner() {
   // all-time. That pre-fill is the default, so it is not written to the URL.
   const monthStart = (() => { const { y, m } = vnToday(); return `${y}-${pad2(m)}-01` })()
   const today = vnTodayIso()
-  const from = view === 'custom' ? (sp.get('start') ?? monthStart) : ''
-  const to = view === 'custom' ? (sp.get('end') ?? today) : ''
-  const setFrom = (v: string) => setUrl({ start: v === monthStart ? null : v })
-  const setTo = (v: string) => setUrl({ end: v === today ? null : v })
+  // 'open' in the URL = that end of the range left empty on purpose (an absent key
+  // already means the default).
+  const readEnd = (key: string, dflt: string) => { const v = sp.get(key); return v === 'open' ? '' : (v ?? dflt) }
+  const from = view === 'custom' ? readEnd('start', monthStart) : ''
+  const to = view === 'custom' ? readEnd('end', today) : ''
+  // The date inputs edit a local copy. Bound straight to the URL, each keystroke's
+  // value came back late (URL updates render in a transition) and React put the old
+  // date back, so typing "15" gave "05". The URL is written once a value is complete.
+  const [fromDraft, setFromDraft] = useState(from)
+  const [toDraft, setToDraft] = useState(to)
+  useEffect(() => { setFromDraft(from) }, [from])
+  useEffect(() => { setToDraft(to) }, [to])
+  const isDay = (v: string) => v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)
+  const setFrom = (v: string) => { setFromDraft(v); if (isDay(v)) setUrl({ start: v === monthStart ? null : (v || 'open') }) }
+  const setTo = (v: string) => { setToDraft(v); if (isDay(v)) setUrl({ end: v === today ? null : (v || 'open') }) }
   const catRaw = sp.get('cat')
   const category = catRaw === 'all' || isBucket(catRaw) ? catRaw : 'puzzle'
   const setCategory = (v: string) => setUrl({ cat: v === 'puzzle' ? null : v })
@@ -494,9 +505,9 @@ function ReportInner() {
         {view === 'custom' ? (
           <div className="rp-seg-group">
             <span className="rp-seg-label">Range</span>
-            <input type="date" className="rp-date" aria-label="Start date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <input type="date" className="rp-date" aria-label="Start date" value={fromDraft} onChange={(e) => setFrom(e.target.value)} />
             <span style={{ color: 'var(--faint)' }}>→</span>
-            <input type="date" className="rp-date" aria-label="End date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <input type="date" className="rp-date" aria-label="End date" value={toDraft} onChange={(e) => setTo(e.target.value)} />
           </div>
         ) : (
           <div className="rp-seg-group">

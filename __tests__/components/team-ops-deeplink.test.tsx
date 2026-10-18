@@ -184,9 +184,13 @@ describe('team-ops deep links', () => {
 
   it('switching category group writes ?cat= and drops ?from= and ?flash=', async () => {
     params = new URLSearchParams('tab=reassign&from=PhuongNT1&flash=X')
+    // The URL is written with history.replaceState from the live location.
+    window.history.replaceState(null, '', '/team-ops?tab=reassign&from=PhuongNT1&flash=X')
+    const hist = jest.spyOn(window.history, 'replaceState')
     render(<TeamOpsPage />)
     fireEvent.click(await screen.findByRole('button', { name: 'Arcade' }))
-    expect(replace).toHaveBeenCalledWith('/team-ops?tab=reassign&cat=arcade', { scroll: false })
+    expect(hist.mock.calls.at(-1)![2]).toBe('/team-ops?tab=reassign&cat=arcade')
+    hist.mockRestore()
   })
 })
 

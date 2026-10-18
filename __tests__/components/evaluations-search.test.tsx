@@ -32,7 +32,7 @@ jest.mock('next-auth/react', () => ({
 jest.mock('next/navigation', () => {
   const React = jest.requireActual('react')
   const listeners = new Set<() => void>()
-  const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
+  const subscribe = (l: () => void) => { listeners.add(l); window.addEventListener('test:urlchange', l); return () => { listeners.delete(l); window.removeEventListener('test:urlchange', l) } }
   const read = () => window.location.search
   const router = {
     replace: (url: string) => { window.history.replaceState(null, '', url); listeners.forEach(l => l()) },

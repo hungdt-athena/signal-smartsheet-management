@@ -15,3 +15,14 @@ if (typeof (globalThis as { IntersectionObserver?: unknown }).IntersectionObserv
   }
   ;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = NoopIntersectionObserver
 }
+
+// Next (14.1+) patches history.replaceState so useSearchParams follows it, and
+// lib/use-url-state writes through it. Tests mock next/navigation, so mirror the
+// patch: every replaceState fires 'test:urlchange', which the mocks subscribe to.
+if (typeof window !== 'undefined') {
+  const origReplaceState = window.history.replaceState.bind(window.history)
+  window.history.replaceState = function replaceState(data: unknown, unused: string, url?: string | URL | null) {
+    origReplaceState(data, unused, url)
+    window.dispatchEvent(new Event('test:urlchange'))
+  }
+}

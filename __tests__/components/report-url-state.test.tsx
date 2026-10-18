@@ -157,6 +157,18 @@ it('writes rtab back to the URL on tab change without touching other params', as
 // The filter bar is in the URL too: view, period, start/end, title, cat. The URL is
 // the state, so these check both directions - the URL drives the request, and a
 // control writes the URL (one replace per change, defaults left out).
+// Filter writes go through history.replaceState (lib/use-url-state), from the live
+// location: set both the mocked params and the location, then spy on the writes.
+let histSpy: jest.SpyInstance | null = null
+const hist = () => histSpy!
+function useUrl(qs: string) {
+  params = new URLSearchParams(qs)
+  histSpy?.mockRestore()
+  window.history.replaceState(null, '', `/team-ops${qs ? `?${qs}` : ''}`)
+  histSpy = jest.spyOn(window.history, 'replaceState')
+}
+afterEach(() => { histSpy?.mockRestore(); histSpy = null })
+
 describe('filter bar in the URL', () => {
   const reportCalls = () => (global.fetch as jest.Mock).mock.calls
     .map((c) => new URL(String(c[0]), 'http://x'))
@@ -164,7 +176,7 @@ describe('filter bar in the URL', () => {
   const settle = () => waitFor(() => expect(screen.queryByText('Loading…')).not.toBeInTheDocument())
 
   it('asks the API for what the URL says', async () => {
-    params = new URLSearchParams('tab=performance&view=month&period=2026-08&cat=arcade&title=fulltime')
+    useUrl('tab=performance&view=month&period=2026-08&cat=arcade&title=fulltime')
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
     render(<ReportView />)
     await settle()
@@ -176,7 +188,7 @@ describe('filter bar in the URL', () => {
   })
 
   it('lands on the newest batch, Puzzle, all titles when the URL says nothing', async () => {
-    params = new URLSearchParams('tab=performance')
+    useUrl('tab=performance')
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
     render(<ReportView />)
     await settle()
@@ -189,7 +201,7 @@ describe('filter bar in the URL', () => {
   })
 
   it('puts the category group first, All first, and writes cat to the URL', async () => {
-    params = new URLSearchParams('tab=performance')
+    useUrl('tab=performance')
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
     const { container } = render(<ReportView />)
     await settle()
@@ -198,12 +210,12 @@ describe('filter bar in the URL', () => {
     expect(Array.from(groups[0].querySelectorAll('button')).map((b) => b.textContent))
       .toEqual(['All', 'Puzzle', 'Arcade', 'Simulation'])
     fireEvent.click(screen.getByRole('button', { name: 'Arcade' }))
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace.mock.calls[0][0]).toBe('/team-ops?tab=performance&cat=arcade')
+    expect(hist()).toHaveBeenCalledTimes(1)
+    expect(hist().mock.calls[0][2]).toBe('/team-ops?tab=performance&cat=arcade')
   })
 
   it('switching the lens drops the old period and dates in one navigation', async () => {
-    params = new URLSearchParams('tab=performance&view=custom&start=2026-08-01&end=2026-08-20&cat=arcade')
+    useUrl('tab=performance&view=custom&start=2026-08-01&end=2026-08-20&cat=arcade')
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
     render(<ReportView />)
     await settle()
@@ -211,12 +223,12 @@ describe('filter bar in the URL', () => {
     expect(q.get('from')).toBe('2026-08-01')
     expect(q.get('to')).toBe('2026-08-20')
     fireEvent.click(screen.getByRole('button', { name: 'Week' }))
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace.mock.calls[0][0]).toBe('/team-ops?tab=performance&view=week&cat=arcade')
+    expect(hist()).toHaveBeenCalledTimes(1)
+    expect(hist().mock.calls[0][2]).toBe('/team-ops?tab=performance&view=week&cat=arcade')
   })
 
   it('the Batch picker writes the batch, All batches as period=all, and a whole month as the Month lens', async () => {
-    params = new URLSearchParams('tab=performance&cat=arcade')
+    useUrl('tab=performance&cat=arcade')
     const bundle = teamBundle([person('Alpha'), person('Beta')], {
       view: 'batch',
       window: { label: 'W2 Aug, 2026', from: '2026-08-03', to: '2026-08-10', batch: 'W2 Aug, 2026' },
@@ -231,22 +243,24 @@ describe('filter bar in the URL', () => {
     const open = () => fireEvent.click(screen.getByRole('button', { name: 'Batch: W2 Aug, 2026' }))
     open()
     fireEvent.click(screen.getByRole('button', { name: 'W1 Aug, 2026' }))
-    expect(replace.mock.calls.at(-1)![0]).toBe('/team-ops?tab=performance&cat=arcade&period=W1+Aug%2C+2026')
+    expect(hist().mock.calls.at(-1)![2]).toBe('/team-ops?tab=performance&cat=arcade&period=W1+Aug%2C+2026')
     open()
     fireEvent.click(screen.getByRole('button', { name: 'All batches' }))
-    expect(replace.mock.calls.at(-1)![0]).toBe('/team-ops?tab=performance&cat=arcade&period=all')
+    expect(hist().mock.calls.at(-1)![2]).toBe('/team-ops?tab=performance&cat=arcade&period=all')
     open()
     fireEvent.click(screen.getByRole('button', { name: /^All of Aug/ }))
-    expect(replace.mock.calls.at(-1)![0]).toBe('/team-ops?tab=performance&cat=arcade&view=month&period=2026-08')
+    // Earlier picks in this test already wrote period, so compare keys, not order.
+    expect(Object.fromEntries(new URL(String(hist().mock.calls.at(-1)![2]), 'http://x').searchParams))
+      .toEqual({ tab: 'performance', cat: 'arcade', view: 'month', period: '2026-08' })
   })
 
   it('Clear filters removes every filter key and keeps the rest of the URL', async () => {
-    params = new URLSearchParams('tab=performance&rtab=leaderboard&view=week&period=2026-09-01&cat=all&title=freelancer')
+    useUrl('tab=performance&rtab=leaderboard&view=week&period=2026-09-01&cat=all&title=freelancer')
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })
     render(<ReportView />)
     await settle()
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    expect(replace).toHaveBeenCalledTimes(1)
-    expect(replace.mock.calls[0][0]).toBe('/team-ops?tab=performance&rtab=leaderboard')
+    expect(hist()).toHaveBeenCalledTimes(1)
+    expect(hist().mock.calls[0][2]).toBe('/team-ops?tab=performance&rtab=leaderboard')
   })
 })

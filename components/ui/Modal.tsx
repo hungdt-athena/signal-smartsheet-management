@@ -46,8 +46,10 @@ export function Modal({ title, sub, onClose, children, footer, width = 540, busy
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null
     const box = boxRef.current
-    // Focus the first field if there is one, else the box itself.
-    const first = box?.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), select:not([disabled])')
+    // Focus the first text field if there is one, else the box itself.
+    // Text fields only: a focused <select> changes value on arrow keys or a typed
+    // letter, so a stray key press would edit it.
+    const first = box?.querySelector<HTMLElement>('input:not([disabled]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), textarea:not([disabled])')
       || box?.querySelector<HTMLElement>('[autofocus]')
     ;(first || box)?.focus()
     const onKey = (e: KeyboardEvent) => {

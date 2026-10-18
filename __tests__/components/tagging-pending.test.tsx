@@ -12,7 +12,7 @@ jest.mock('next/navigation', () => {
   const React = jest.requireActual('react')
   const subs = new Set<() => void>()
   const read = () => window.location.search
-  const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f) } }
+  const subscribe = (f: () => void) => { subs.add(f); window.addEventListener('test:urlchange', f); return () => { subs.delete(f); window.removeEventListener('test:urlchange', f) } }
   return {
     useSearchParams: () => {
       const qs = React.useSyncExternalStore(subscribe, read, read)
