@@ -3198,3 +3198,32 @@ input:checked + .slider:before {
   background: var(--surface); box-shadow: 0 0 0 1px var(--border), var(--shadow-sm);
   display: grid; place-items: center;
 }
+
+/* ===== Batch picker (components/ui/BatchPicker.tsx): year → month → batch ===== */
+.bp-pop {
+  position: fixed; z-index: 3000; background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 10px; box-shadow: var(--shadow-md); overflow: hidden; width: max-content; max-width: calc(100vw - 16px);
+}
+.bp-top { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px; border-bottom: 1px solid var(--border); }
+.bp-chip {
+  height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface);
+  font-family: var(--font); font-size: var(--fs-12); font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap;
+}
+.bp-chip:hover { border-color: var(--accent-border); }
+.bp-chip.on { background: var(--accent-weak); border-color: var(--accent-border); color: var(--accent-strong); }
+.bp-cols { display: grid; grid-template-columns: 92px 100px 172px; max-height: 300px; }
+.bp-col { display: flex; flex-direction: column; gap: 2px; padding: 6px; overflow-y: auto; border-right: 1px solid var(--border); }
+.bp-col-last { border-right: 0; }
+.bp-h { padding: 2px 8px 4px; font-size: var(--fs-11); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+.bp-it {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 30px; padding: 0 8px;
+  border: 0; border-radius: 6px; background: none; font-family: var(--font); font-size: var(--fs-13); color: var(--text);
+  cursor: pointer; text-align: left; white-space: nowrap; flex-shrink: 0;
+}
+.bp-it:hover { background: var(--surface-2); }
+.bp-it.path { background: var(--surface-3); font-weight: 600; }
+.bp-it.on { background: var(--accent-weak); color: var(--accent-strong); font-weight: 600; }
+.bp-it:focus-visible, .bp-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.bp-ch { color: var(--faint); }
+.bp-month { color: var(--accent-strong); font-weight: 600; border-bottom: 1px dashed var(--border); border-radius: 6px 6px 0 0; }
+.bp-cur { font-style: normal; font-size: var(--fs-11); font-weight: 700; color: var(--good); background: var(--good-weak); padding: 0 6px; border-radius: 4px; }

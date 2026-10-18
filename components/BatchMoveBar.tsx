@@ -1,6 +1,6 @@
 'use client'
 import { useRef, useState } from 'react'
-import { StyledSelect } from '@/components/StyledSelect'
+import { BatchPicker } from '@/components/ui/BatchPicker'
 import { moveBatch, MAX_MOVE } from '@/lib/batch-move-client'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { toast } from '@/lib/toast'
@@ -38,9 +38,11 @@ const gamesWord = (k: number) => `${k} ${k === 1 ? 'game' : 'games'}`
  *  Moving a game that already has a final conclusion is allowed (ticking it means the
  *  manager wants it moved); the confirm dialog says how many such games are included,
  *  because batch is also the week the Record tab shows. */
-export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
+export function BatchMoveBar({ selected, batchOptions, current, onCancel, onMoved }: {
   selected: SelectedGame[]
   batchOptions: string[]
+  /** The team's current batch: a shortcut at the top of the picker. */
+  current?: string | null
   onCancel: () => void
   onMoved: (moved: number) => void
 }) {
@@ -84,14 +86,17 @@ export function BatchMoveBar({ selected, batchOptions, onCancel, onMoved }: {
       <div className="bmb" role="region" aria-label="Move games to another batch">
         <span className="bmb-count">{n} selected</span>
         <span className="bmb-label">Move to</span>
-        <div style={{ width: 190 }}>
-          <StyledSelect
-            value={batch}
-            onChange={setBatch}
-            placeholder="Move to batch"
-            options={batchOptions.map(b => ({ value: b, label: b }))}
-          />
-        </div>
+        <BatchPicker
+          value={batch}
+          onChange={setBatch}
+          batches={batchOptions}
+          current={current}
+          allowAll={false}
+          allowMonth={false}
+          placeholder="Move to batch"
+          ariaLabel="Move to batch"
+          width={190}
+        />
         <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
         <button type="button" className="btn btn-primary btn-sm" disabled={!batch || n === 0 || tooMany || alreadyThere}
           onClick={() => { setError(null); setConfirming(true) }}>

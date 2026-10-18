@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { StyledSelect } from '@/components/StyledSelect'
+import { BatchPicker } from '@/components/ui/BatchPicker'
 import ManualScreenshotsCard, { type ManualScreenshotsHandle } from '@/components/ManualScreenshotsCard'
 import { Lightbox } from '@/components/Lightbox'
 import { EvalHistoryModal } from '@/components/EvalHistoryModal'
@@ -1454,19 +1455,23 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 <div className="field">
                   <span className="label">Batch (week)</span>
                   {isManager ? (
-                    <StyledSelect
+                    <BatchPicker
                       value={batch}
                       onChange={v => { setBatch(v); setDirty(true) }}
                       placeholder="Select a batch…"
-                      options={(() => {
+                      batches={(() => {
                         const now = new Date()
                         const opts = weekBatches(now.getFullYear(), now.getMonth() + 1)
                         const cur = ev.current_batch
                         const merged = [...opts]
                         if (cur && !merged.includes(cur)) merged.unshift(cur)
                         if (batch && !merged.includes(batch)) merged.unshift(batch)
-                        return [{ value: '', label: '— none —' }, ...merged.map(b => ({ value: b, label: b }))]
+                        return merged
                       })()}
+                      current={ev.current_batch || null}
+                      // The "— none —" choice the old dropdown had: '' clears the batch.
+                      allowAll allLabel="No batch" allowMonth={false}
+                      ariaLabel="Batch" width="100%"
                       disabled={!canEditInitialConc}
                     />
                   ) : ev.current_batch ? (

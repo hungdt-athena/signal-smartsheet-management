@@ -1,17 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
-jest.mock('@/components/StyledSelect', () => ({
-  StyledSelect: ({ value, onChange, options, placeholder }: {
-    value: string; onChange: (v: string) => void
-    options: { value: string; label: string }[]; placeholder?: string
-  }) => (
-    <select aria-label={placeholder ?? 'select'} value={value} onChange={e => onChange(e.target.value)}>
-      <option value="">{placeholder}</option>
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  ),
-}))
-
 import { BatchMoveBar } from '@/components/BatchMoveBar'
 import { MAX_MOVE } from '@/lib/batch-move-client'
 
@@ -27,7 +15,15 @@ function mount(selected: React.ComponentProps<typeof BatchMoveBar>['selected'] =
 }
 // The dialog's main button names the count: "Move 2 games".
 const confirmBtn = () => within(screen.getByRole('dialog')).getByRole('button', { name: /^Move \d+ games?$/ })
-const pick = (v: string) => fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: v } })
+// The batch picker: open it, then year -> month -> batch ("W2 Oct, 2026").
+function pick(label: string) {
+  const [, mon, year] = /^W\d (\w{3}), (\d{4})$/.exec(label)!
+  fireEvent.click(screen.getByRole('button', { name: /^Move to batch:/ }))
+  const pop = screen.getByRole('dialog', { name: 'Pick a move to batch' })
+  fireEvent.click(within(within(pop).getByRole('group', { name: 'Year' })).getByRole('button', { name: year }))
+  fireEvent.click(within(within(pop).getByRole('group', { name: 'Month' })).getByRole('button', { name: mon }))
+  fireEvent.click(within(within(pop).getByRole('group', { name: 'Batch' })).getByRole('button', { name: new RegExp(`^${label}`) }))
+}
 
 let moveBody: unknown
 function stubFetch(result: { ok: boolean; json: unknown }) {
@@ -39,6 +35,17 @@ function stubFetch(result: { ok: boolean; json: unknown }) {
 }
 
 describe('BatchMoveBar', () => {
+  it('offers the current batch as a shortcut, and no All batches or whole-month pick', () => {
+    mount(undefined, { current: 'W3 Oct, 2026' })
+    fireEvent.click(screen.getByRole('button', { name: /^Move to batch:/ }))
+    const pop = screen.getByRole('dialog', { name: 'Pick a move to batch' })
+    expect(within(pop).queryByRole('button', { name: 'All batches' })).toBeNull()
+    expect(within(pop).queryByRole('button', { name: /^All of/ })).toBeNull()
+    fireEvent.click(within(pop).getByRole('button', { name: 'Current · W3 Oct, 2026' }))
+    expect(screen.getByRole('button', { name: 'Move to batch: W3 Oct, 2026' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Move' })).toBeEnabled()
+  })
+
   it('shows the selected count and keeps Move disabled until a batch is chosen', () => {
     mount()
     expect(screen.getByText('2 selected')).toBeInTheDocument()

@@ -28,6 +28,7 @@ import { saveDriveLink } from '@/lib/drive-link-client'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
 import { saveCurrentBatch, loadCurrentBatchStart } from '@/lib/current-batch-client'
 import { BatchMoveBar } from '@/components/BatchMoveBar'
+import { BatchPicker, parseBatchPick } from '@/components/ui/BatchPicker'
 import { batchLabelsOfMonth, monthKeyOfBatch, monthKeyLabel } from '@/lib/batch-month'
 import { conclusionBadgeClass, finalConclusionStyle } from '@/lib/conclusion-badge'
 import { fmtDateVN, fmtDateTimeVN } from '@/lib/format-date'
@@ -589,11 +590,12 @@ function CurrentBatchMenu({ value, options, startsAt, onChange, onStartChange }:
     if (!open) return
     const onDown = (e: MouseEvent) => {
       const t = e.target as Element
-      // StyledSelect portals its menu to <body>, so it is outside `ref` but not outside the popover.
-      if (ref.current?.contains(t) || t.closest?.('.ssel-menu')) return
+      // BatchPicker portals its panel to <body>, so it is outside `ref` but not outside the popover.
+      if (ref.current?.contains(t) || t.closest?.('.bp-pop')) return
       setOpen(false)
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    // Esc with the picker open closes the picker only (it marks the key handled).
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) setOpen(false) }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
@@ -612,12 +614,18 @@ function CurrentBatchMenu({ value, options, startsAt, onChange, onStartChange }:
         <div className="sl-pop">
           <h4>Current batch</h4>
           <p>Applies to all categories. Evaluators auto-fill it for List_Idea.</p>
-          <StyledSelect
+          <BatchPicker
             value={value || ''}
             onChange={onChange}
+            batches={options}
+            current={value}
+            // "Not set" keeps the old "— none —": a manager can still clear the current batch.
+            allowAll
+            allLabel="Not set"
+            allowMonth={false}
             placeholder="Not set"
             ariaLabel="Current batch"
-            options={[{ value: '', label: '— none —' }, ...options.map(b => ({ value: b, label: b }))]}
+            width="100%"
           />
           {value && (
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
@@ -671,7 +679,13 @@ function ShortListEvalTab() {
   const shortListScope = useRef<{ category: string; batch: string; final: string } | null>(null)
   // The batch the server says to open on: set once, from the first facets response.
   const [defaultBatch, setDefaultBatch] = useState('')
-  const filterBatch = batchParam === 'all' ? '' : batchParam || (view === 'shortlist' ? defaultBatch : '')
+  // A picker value: '' (all), a batch label, or `month:YYYY-MM` (every batch of a month,
+  // Short List only -- Monthly is already one month, so a month pick there means all).
+  const pickedBatch = batchParam === 'all' ? '' : batchParam || (view === 'shortlist' ? defaultBatch : '')
+  const filterBatch = view === 'monthly' && parseBatchPick(pickedBatch).month ? '' : pickedBatch
+  const batchPick = parseBatchPick(filterBatch)
+  // The batch labels the pick covers, or null for all batches.
+  const pickedLabels = batchPick.month ? batchLabelsOfMonth(batchPick.month) : batchPick.batch ? [batchPick.batch] : null
   const setFilterBatch = (v: string) => {
     if (view === 'monthly') setBatchParam(v)
     else setBatchParam(v === defaultBatch ? '' : v || 'all')
@@ -788,7 +802,9 @@ function ShortListEvalTab() {
       // Filter batch server-side: doing it client-side over the 500-row page meant
       // batch rows outside the loaded window vanished (and the count flipped with
       // sort direction). Let the DB filter before LIMIT instead.
-      if (filterBatch) params.set('batch', filterBatch)
+      // A month pick sends batch_month: the API keeps W1..W4 of that month.
+      if (batchPick.batch) params.set('batch', batchPick.batch)
+      else if (batchPick.month) params.set('batch_month', batchPick.month)
       const res = await fetch(`/api/evaluations?${params}`)
       if (!res.ok) throw new Error(String(res.status))
       const json = await res.json()
@@ -813,7 +829,7 @@ function ShortListEvalTab() {
       if (seq === fetchSeqRef.current) setLoadFailed(true)
     }
     if (seq === fetchSeqRef.current) setLoading(false)
-  }, [scopeParams, filterBatch, sortAsc, df.autoMonth])
+  }, [scopeParams, batchPick.batch, batchPick.month, sortAsc, df.autoMonth])
 
   useEffect(() => {
     if (df.suppressFacetsRef.current) { df.suppressFacetsRef.current = false; return }
@@ -859,7 +875,7 @@ function ShortListEvalTab() {
   const batchOptions = [...availableBatches].sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a))
   // A fallback-defaulted batch may not be in the present-batch list yet (e.g. a
   // fresh week with no games) — surface it so the dropdown reflects the selection.
-  if (filterBatch && !batchOptions.includes(filterBatch)) batchOptions.unshift(filterBatch)
+  if (batchPick.batch && !batchOptions.includes(batchPick.batch)) batchOptions.unshift(batchPick.batch)
 
   // Manager control: set the team's current batch. Offer this + next calendar
   // month's weeks so W4→W1-next-month rollover (after the 28th) is one click.
@@ -985,7 +1001,7 @@ function ShortListEvalTab() {
         ...monthLabels.map(b => mk(b, b.split(' ')[0], inMonth.filter(r => r.batch === b), b === currentBatch)),
       ]
     }
-    const scope = filterBatch ? rows.filter(r => r.batch === filterBatch) : rows
+    const scope = pickedLabels ? rows.filter(r => r.batch !== null && pickedLabels.includes(r.batch)) : rows
     const all = sumN(scope)
     const none = sumN(scope.filter(r => r.final_conclusion === FINAL_CONCLUSION_NONE))
     const ins = sumN(scope.filter(r => r.final_conclusion === 'Insight'))
@@ -1043,15 +1059,17 @@ function ShortListEvalTab() {
             options={monthOptions.map(k => ({ value: k, label: monthKeyLabel(k) }))}
           />
         ) : (
-          <StyledSelect
+          <BatchPicker
             value={filterBatch}
             onChange={setFilterBatch}
-            placeholder="All batches"
+            batches={batchOptions}
+            current={currentBatch}
+            allowAll
+            allowMonth
+            // Tinted only away from the batch the page opened on, as before.
+            filter={filterBatch !== defaultBatch}
             ariaLabel="Batch"
-            filter
-            inactiveValue={defaultBatch}
-            style={{ width: 160 }}
-            options={[{ value: '', label: 'All batches' }, ...batchOptions.map(b => ({ value: b, label: b }))]}
+            width={160}
           />
         )}
         <DateFilter value={df.value}
@@ -1252,6 +1270,7 @@ function ShortListEvalTab() {
         <BatchMoveBar
           selected={selectedGames}
           batchOptions={moveTargetOptions}
+          current={currentBatch}
           onCancel={exitSelectMode}
           onMoved={() => { exitSelectMode(); fetchData(); fetchFacets() }}
         />

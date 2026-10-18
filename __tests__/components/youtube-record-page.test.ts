@@ -33,6 +33,17 @@ describe('YouTube / Record page', () => {
     expect(src).toMatch(/if \(!isManager && userName\) params\.set\('recorder', userName\)/)
   })
 
+  it('picks the batch with BatchPicker, and a month pick asks the API for that month', () => {
+    expect(src).toMatch(/<BatchPicker filter=\{batchParam !== ''\} allowAll allowMonth current=\{currentBatch\}/)
+    expect(src).not.toMatch(/<StyledSelect filter ariaLabel="Batch"/)
+    // A month is sent as batch_month, never as batch.
+    expect(src).toMatch(/if \(filterMonth\) params\.set\('batch_month', filterMonth\)\s*else if \(filterBatch\) params\.set\('batch', filterBatch\)/)
+    // Recorder sync runs once per batch of the month, not over all batches.
+    expect(src).toMatch(/filterMonth\s*\?\s*batchLabelsOfMonth\(filterMonth\)/)
+    // Add game still gets one real batch in a month view.
+    expect(src).toMatch(/batch=\{addBatch\}\s*month=\{filterMonth\}/)
+  })
+
   it('keeps YouTube filters in the URL', () => {
     for (const key of ['year', 'month', 'ev', 'dur']) expect(src).toContain(`useUrlState('${key}'`)
   })

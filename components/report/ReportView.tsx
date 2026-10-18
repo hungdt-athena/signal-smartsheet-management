@@ -21,6 +21,7 @@ import { FilterBar, FilterSpacer, ClearFilters } from '@/components/ui/FilterBar
 import { ErrorState } from '@/components/ui/States'
 import { Modal } from '@/components/ui/Modal'
 import { StyledSelect } from '@/components/StyledSelect'
+import { BatchPicker, parseBatchPick } from '@/components/ui/BatchPicker'
 
 type View = 'week' | 'month' | 'quarter' | 'year' | 'batch' | 'custom'
 const VIEWS: View[] = ['batch', 'week', 'month', 'quarter', 'year', 'custom']
@@ -459,6 +460,19 @@ function ReportInner() {
     ...optListShown.map((o) => ({ value: o.key, label: o.label })),
   ]
   const range = data ? rangeText(data.window.from, data.window.to) : ''
+  // Batch lens uses the three-column picker. Its '' means every batch, which this
+  // page stores as 'all' ('' here is the server-resolved newest batch). Picking a whole
+  // month is the Month lens on that month, so it switches lens in one navigation.
+  const batchKeys = useMemo(() => (data?.options.batch ?? []).map((o) => o.key), [data])
+  const batchPickValue = selKey === 'all' ? '' : shownKey
+  const pickBatch = (v: string) => {
+    const { batch, month } = parseBatchPick(v)
+    if (month) {
+      setUrl({ view: 'month', period: month === currentKey('month') ? null : month, start: null, end: null })
+      return
+    }
+    setSelKey(batch ?? 'all')
+  }
 
   return (
     <div className="page">
@@ -494,12 +508,24 @@ function ReportInner() {
                  the Batch picker a week out of step with each other. */
               title={view === 'week' ? 'A week is named for the month its last day falls in, matching the team\u2019s batch labels - so W1 Sep runs 31/8 \u2013 6/9. Each option shows its exact dates.' : undefined}>
               {periodLabel}</span>
-            <StyledSelect value={shownKey} onChange={setSelKey} options={periodOptions}
-              placeholder={view === 'batch' ? 'Select a batch' : 'Select'} ariaLabel={periodLabel}
-              // Tinted only when the reader moved off the lens's own default (newest
-              // batch / current period). On batch that default is the resolved key.
-              filter inactiveValue={periodParam == null ? shownKey : '\u0000'}
-              style={{ minWidth: 200 }} />
+            {view === 'batch' ? (
+              <BatchPicker value={batchPickValue} onChange={pickBatch} batches={batchKeys}
+                // The page does not load the team's current batch; the server-resolved
+                // newest batch is already what an untouched picker shows.
+                current={null} allowAll allowMonth ariaLabel="Batch" width={200}
+                // Before the first payload the newest batch is not known yet: say so
+                // rather than flash "All batches".
+                allLabel={!data && selKey === '' ? 'Select a batch' : 'All batches'}
+                // Tinted only when the reader moved off the newest batch.
+                filter={periodParam != null} />
+            ) : (
+              <StyledSelect value={shownKey} onChange={setSelKey} options={periodOptions}
+                placeholder="Select" ariaLabel={periodLabel}
+                // Tinted only when the reader moved off the lens's own default (the
+                // current period).
+                filter inactiveValue={periodParam == null ? shownKey : '\u0000'}
+                style={{ minWidth: 200 }} />
+            )}
           </div>
         )}
         {teamView && <SegGroup label="Title" value={title} onChange={setTitle}

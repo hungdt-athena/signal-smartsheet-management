@@ -29,8 +29,11 @@ const RECORDS = [
   { batch: 'W2 Oct, 2026', evaluator: 'Mitt', updated_at: '2026-10-10T00:00:00Z', sections: [{ id: 's2', feedback: doc('idle pacing'), alikes: [] }] },
 ]
 
+const SEP_RECORD = { batch: 'W4 Sep, 2026', evaluator: 'HuyDD', updated_at: '2026-09-28T00:00:00Z', sections: [{ id: 's3', feedback: doc('older note'), alikes: [] }] }
+
 let hits: string[] = []
 let listOk = true
+let withSep = false
 
 function stubFetch() {
   hits = []
@@ -38,18 +41,21 @@ function stubFetch() {
     const u = String(url)
     hits.push(u)
     if (u.startsWith('/api/weekly-feedback/batches')) {
-      return { ok: true, json: async () => ({ batches: ['W2 Oct, 2026'], allBatches: ['W2 Oct, 2026'], evaluators: ['HuyDD', 'Mitt'] }) } as Response
+      const batches = withSep ? ['W2 Oct, 2026', 'W4 Sep, 2026'] : ['W2 Oct, 2026']
+      return { ok: true, json: async () => ({ batches, allBatches: batches, evaluators: ['HuyDD', 'Mitt'] }) } as Response
     }
     if (u.startsWith('/api/weekly-feedback?')) {
       if (!listOk) return { ok: false, json: async () => ({}) } as Response
-      return { ok: true, json: async () => ({ records: RECORDS }) } as Response
+      const all = withSep ? [...RECORDS, SEP_RECORD] : RECORDS
+      const b = new URL(u, 'http://x').searchParams.get('batch')
+      return { ok: true, json: async () => ({ records: b ? all.filter(r => r.batch === b) : all }) } as Response
     }
     return { ok: true, json: async () => ({}) } as Response
   }) as unknown as typeof fetch
 }
 
 describe('Weekly Feedback', () => {
-  beforeEach(() => { listOk = true; stubFetch() })
+  beforeEach(() => { listOk = true; withSep = false; stubFetch() })
 
   it('counts the records and narrows them by search, with Clear filters to undo', async () => {
     render(<WeeklyFeedbackTab />)
@@ -70,9 +76,25 @@ describe('Weekly Feedback', () => {
     render(<WeeklyFeedbackTab />)
     await waitFor(() => expect(screen.getByText('2 records')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'Batch: All batches' }))
-    fireEvent.click(within(document.querySelector('.ssel-menu') as HTMLElement).getByText('W2 Oct, 2026'))
+    const pop = screen.getByRole('dialog', { name: 'Pick a batch' })
+    fireEvent.click(within(within(pop).getByRole('group', { name: 'Batch' })).getByText('W2 Oct, 2026'))
     await waitFor(() => expect(window.location.search).toContain('batch=W2'))
     await waitFor(() => expect(hits.some(u => u.includes('batch=W2'))).toBe(true))
+  })
+
+  it('picks a whole month: keeps it in the URL and shows only that month\'s batches', async () => {
+    withSep = true
+    render(<WeeklyFeedbackTab />)
+    await waitFor(() => expect(screen.getByText('3 records')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Batch: All batches' }))
+    const pop = screen.getByRole('dialog', { name: 'Pick a batch' })
+    fireEvent.click(within(pop).getByText('All of Oct 2026'))
+    await waitFor(() => expect(window.location.search).toContain('batch=month%3A2026-10'))
+    // A month loads every batch and keeps its own four labels, client-side.
+    await waitFor(() => expect(screen.getByText('2 records')).toBeInTheDocument())
+    expect(screen.queryByText('W4 Sep, 2026')).not.toBeInTheDocument()
+    expect(hits.filter(u => u.startsWith('/api/weekly-feedback?')).every(u => !u.includes('batch='))).toBe(true)
+    expect(screen.getByRole('button', { name: 'Batch: All of Oct 2026' })).toBeInTheDocument()
   })
 
   it('shows a failed load as an error, not as an empty list', async () => {

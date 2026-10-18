@@ -3,6 +3,8 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
+import { BatchPicker, batchPickLabel, parseBatchPick } from '@/components/ui/BatchPicker'
+import { batchLabelsOfMonth } from '@/lib/batch-month'
 import { resolveYtMatches, type YtMatch } from '@/lib/ytb-match'
 import { prettyConclusion, BUCKETS } from '@/lib/buckets'
 import { useConfig } from '@/hooks/useConfig'
@@ -1089,9 +1091,12 @@ function ConfirmAddModal({ game, category, batch, targetBucket, recorders, onCon
   )
 }
 
-function AddGameModal({ category, batch, excludeGameIds, targetBucket, recorders, onAdded, onClose }: {
+function AddGameModal({ category, batch, month = null, excludeGameIds, targetBucket, recorders, onAdded, onClose }: {
   category: string
+  /** The single batch an added game goes into ('' = leave its batch as is). */
   batch: string
+  /** When the view is a whole month: list that month's games, not just `batch`. */
+  month?: string | null
   excludeGameIds: Set<string>
   targetBucket: '5min' | '20min'
   recorders: string[]
@@ -1111,7 +1116,8 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, recorders
   // case is pulling one of those into a bucket without having to type.
   useEffect(() => {
     const params = new URLSearchParams({ category, limit: '500' })
-    if (batch) params.set('batch', batch)
+    if (month) params.set('batch_month', month)
+    else if (batch) params.set('batch', batch)
     fetch(`/api/evaluations?${params}`)
       .then(r => r.ok ? r.json() : { data: [] })
       .then(json => setBatchGames(((json.data || []) as ShortListItem[]).map(g => ({
@@ -1119,7 +1125,7 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, recorders
       }))))
       .catch(() => {})
       .finally(() => setBatchLoading(false))
-  }, [category, batch])
+  }, [category, batch, month])
 
   // Whole-catalog search (game_info) — title substring, or exact resolve when a
   // store URL is pasted. Debounced; ≥2 chars keeps the large catalog snappy.
@@ -1152,7 +1158,8 @@ function AddGameModal({ category, batch, excludeGameIds, targetBucket, recorders
   return (
     <>
       <Modal title={`Add a game to ${targetBucket === '20min' ? '20 MIN' : '5 MIN'}`} onClose={onClose} width={520}
-        sub={searching ? `Search all games · ${category}` : `${batch || 'All batches'} · ${category}`}>
+        sub={searching ? `Search all games · ${category}`
+          : `${month ? batchPickLabel(`month:${month}`) : batch || 'All batches'} · ${category}`}>
         <div className="rec-add-search">
           <SearchInput value={query} onChange={setQuery} autoFocus width="100%"
             placeholder="Search by name or paste a store link" ariaLabel="Search games" />
@@ -1206,11 +1213,14 @@ function RecordTab() {
   // View and filters live in the URL: cat, batch, status.
   const [catParam, setCatParam] = useUrlState('cat', 'puzzle')
   const filterCategory = (BUCKETS as readonly string[]).includes(catParam) ? catParam : 'puzzle'
-  // batch: absent = the server's default batch (once known), 'all' = All batches.
+  // batch: absent = the server's default batch (once known), 'all' = All batches,
+  // `month:YYYY-MM` = every batch of that month.
   const [batchParam, setBatchParam] = useUrlState('batch', '')
   const [defaultBatch, setDefaultBatch] = useState<string | null>(null)
-  const filterBatch = batchParam === 'all' ? '' : (batchParam || defaultBatch || '')
-  const setFilterBatch = (v: string) => setBatchParam(v === '' ? 'all' : v === defaultBatch ? '' : v)
+  const batchPick = batchParam === 'all' ? '' : (batchParam || defaultBatch || '')
+  const setBatchPick = (v: string) => setBatchParam(v === '' ? 'all' : v === defaultBatch ? '' : v)
+  const { batch: pickedBatch, month: filterMonth } = parseBatchPick(batchPick)
+  const filterBatch = pickedBatch ?? ''
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
   const [statusParam, setStatusParam] = useUrlState('status', '')
   const filterStatus: '' | RecordStatus = statusParam in RECORD_STATUS_BADGE ? statusParam as RecordStatus : ''
@@ -1244,7 +1254,8 @@ function RecordTab() {
     try {
       const params = new URLSearchParams({ category: filterCategory, limit: '500' })
       params.set('record_view', '1')
-      if (filterBatch) params.set('batch', filterBatch)
+      if (filterMonth) params.set('batch_month', filterMonth)
+      else if (filterBatch) params.set('batch', filterBatch)
       if (!isManager && userName) params.set('recorder', userName)
       const res = await fetch(`/api/evaluations?${params}`)
       if (!res.ok) throw new Error()
@@ -1267,7 +1278,7 @@ function RecordTab() {
       if (seq === fetchSeqRef.current) setLoadError(true)
     }
     setLoading(false)
-  }, [filterCategory, filterBatch, isManager, userName])
+  }, [filterCategory, filterBatch, filterMonth, isManager, userName])
 
   useEffect(() => {
     fetchData()
@@ -1288,29 +1299,41 @@ function RecordTab() {
   // only — evaluators can't write and see only their own rows.
   useEffect(() => {
     if (!isManager) return
-    const key = `${filterCategory}|${filterBatch}`
+    const key = `${filterCategory}|${batchPick}`
     if (syncedKeyRef.current === key) return
     syncedKeyRef.current = key
+    // The API scopes to one batch (or all). A month runs it once per batch of the
+    // month, one after another, so it never touches games outside the view.
+    const scopes: (string | undefined)[] = filterMonth
+      ? batchLabelsOfMonth(filterMonth)
+      : [filterBatch || undefined]
     let cancelled = false
     ;(async () => {
-      try {
-        const res = await fetch('/api/evaluations/reconcile-recorders', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: 'apply', category: filterCategory, batch: filterBatch || undefined }),
-        })
-        if (!res.ok || cancelled) return
-        const json = await res.json()
-        if (cancelled || (!json.applied && !json.links_applied)) return
-        const parts = []
-        if (json.applied) parts.push(`${json.applied} recorder${json.applied === 1 ? '' : 's'}`)
-        if (json.links_applied) parts.push(`${json.links_applied} YouTube link${json.links_applied === 1 ? '' : 's'}`)
-        toast.success(`Updated ${parts.join(' and ')} from YouTube`)
-        if (json.applied) fetchData()
-      } catch { /* ignore */ }
+      let applied = 0
+      let linksApplied = 0
+      for (const batch of scopes) {
+        try {
+          const res = await fetch('/api/evaluations/reconcile-recorders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'apply', category: filterCategory, batch }),
+          })
+          if (cancelled) return
+          if (!res.ok) continue
+          const json = await res.json()
+          applied += json.applied || 0
+          linksApplied += json.links_applied || 0
+        } catch { /* ignore */ }
+      }
+      if (cancelled || (!applied && !linksApplied)) return
+      const parts = []
+      if (applied) parts.push(`${applied} recorder${applied === 1 ? '' : 's'}`)
+      if (linksApplied) parts.push(`${linksApplied} YouTube link${linksApplied === 1 ? '' : 's'}`)
+      toast.success(`Updated ${parts.join(' and ')} from YouTube`)
+      if (applied) fetchData()
     })()
     return () => { cancelled = true }
-  }, [isManager, filterCategory, filterBatch, fetchData])
+  }, [isManager, filterCategory, batchPick, filterBatch, filterMonth, fetchData])
 
   // Optimistically assign a recorder to a game's bucket and drop it to draft.
   const assignRecorder = useCallback(async (item: ShortListItem, name: string) => {
@@ -1467,6 +1490,12 @@ function RecordTab() {
   const batchOptions = [...availableBatches].sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a))
   if (currentBatch && !batchOptions.includes(currentBatch)) batchOptions.unshift(currentBatch)
   if (filterBatch && !batchOptions.includes(filterBatch)) batchOptions.unshift(filterBatch)
+  // Add game needs one real batch. In a month view: the current batch when it is in
+  // that month, else the month's newest batch with games, else its first batch.
+  const monthLabels = filterMonth ? batchLabelsOfMonth(filterMonth) : []
+  const addBatch = !filterMonth ? filterBatch
+    : (currentBatch && monthLabels.includes(currentBatch)) ? currentBatch
+      : (batchOptions.find(b => monthLabels.includes(b)) ?? monthLabels[0] ?? '')
 
   const totalShown = shown5.length + shown20.length
 
@@ -1504,9 +1533,8 @@ function RecordTab() {
       <FilterBar className="rec-filters">
         <Seg ariaLabel="Category group" value={filterCategory} onChange={setCatParam}
           options={BUCKETS.map(b => ({ value: b, label: b[0].toUpperCase() + b.slice(1) }))} />
-        <StyledSelect filter ariaLabel="Batch" value={filterBatch} onChange={setFilterBatch}
-          inactiveValue={defaultBatch ?? ''} placeholder="All batches" style={{ width: 160 }}
-          options={[{ value: '', label: 'All batches' }, ...batchOptions.map(b => ({ value: b, label: b }))]} />
+        <BatchPicker filter={batchParam !== ''} allowAll allowMonth current={currentBatch}
+          ariaLabel="Batch" value={batchPick} onChange={setBatchPick} batches={batchOptions} width={160} />
         <Seg ariaLabel="Record status" value={filterStatus || 'all'}
           onChange={v => setStatusParam(v === 'all' ? '' : v)}
           options={[
@@ -1552,7 +1580,8 @@ function RecordTab() {
       {addBucket && (
         <AddGameModal
           category={filterCategory}
-          batch={filterBatch}
+          batch={addBatch}
+          month={filterMonth}
           excludeGameIds={new Set(data.map(d => d.game_id))}
           targetBucket={addBucket}
           recorders={recorders}

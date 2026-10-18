@@ -43,7 +43,7 @@ jest.mock('@/hooks/useConfig', () => ({ useConfig: () => ({ conclusion: [], fina
 jest.mock('@/components/EvalDetailPanel', () => ({
   __esModule: true,
   default: () => <div data-testid="eval-panel" />,
-  weekBatches: () => ['W3 Oct, 2026', 'W2 Oct, 2026'],
+  weekBatches: () => ['W4 Oct, 2026', 'W3 Oct, 2026', 'W2 Oct, 2026'],
 }))
 jest.mock('@/components/StyledSelect', () => ({
   StyledSelect: ({ value, onChange, options, placeholder }: {
@@ -76,6 +76,12 @@ const row = (over: Record<string, unknown>) => ({
 const ROWS = [row({ id: 1, game_id: 'g1', title: 'Alpha' }), row({ id: 2, game_id: 'g2', title: 'Beta', final_conclusion: 'Good' })]
 // What the rows endpoint returns right now; a test can shrink it to simulate a reload.
 let rowsNow: ReturnType<typeof row>[] = ROWS
+// Stat card counts: games per batch x final conclusion x category.
+const BREAKDOWN = [
+  { batch: 'W1 Oct, 2026', final_conclusion: 'Insight', category_group: 'puzzle', n: 2 },
+  { batch: 'W2 Oct, 2026', final_conclusion: 'Insight', category_group: 'puzzle', n: 3 },
+  { batch: 'W4 Sep, 2026', final_conclusion: 'Insight', category_group: 'puzzle', n: 5 },
+]
 // Whether POST /api/evaluations/current-batch succeeds.
 let currentBatchOk = true
 // When set, POST /api/evaluations/current-batch waits until the test answers it, so two saves
@@ -106,7 +112,7 @@ function stubFetch() {
     } else if (url.startsWith('/api/evaluations/batch-move')) {
       body = { moved: 2 }
     } else if (url.startsWith('/api/evaluations?')) {
-      body = { data: rowsNow, total: rowsNow.length, applied_month: null }
+      body = { data: rowsNow, total: rowsNow.length, applied_month: null, breakdown: BREAKDOWN }
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response)
   }) as unknown as typeof fetch
@@ -122,6 +128,34 @@ async function open(role = 'admin') {
   return Object.assign(calls, { view })
 }
 const checkboxes = () => screen.queryAllByRole('checkbox')
+
+// A BatchPicker: open it by its label, go to the year and month of a batch ("W2 Oct, 2026")
+// and return that batch's button.
+function batchButton(ariaLabel: string, label: string) {
+  const [, mon, year] = /^W\d (\w{3}), (\d{4})$/.exec(label)!
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${ariaLabel}:`) }))
+  const pop = screen.getByRole('dialog', { name: `Pick a ${ariaLabel.toLowerCase()}` })
+  fireEvent.click(within(within(pop).getByRole('group', { name: 'Year' })).getByRole('button', { name: year }))
+  fireEvent.click(within(within(pop).getByRole('group', { name: 'Month' })).getByRole('button', { name: mon }))
+  return within(within(pop).getByRole('group', { name: 'Batch' })).getByRole('button', { name: new RegExp(`^${label}`) })
+}
+const pickBatch = (ariaLabel: string, label: string) => fireEvent.click(batchButton(ariaLabel, label))
+// Every batch a picker offers, walking each year and month.
+function pickerBatches(ariaLabel: string): string[] {
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${ariaLabel}:`) }))
+  const pop = screen.getByRole('dialog', { name: `Pick a ${ariaLabel.toLowerCase()}` })
+  const out: string[] = []
+  for (const y of within(within(pop).getByRole('group', { name: 'Year' })).getAllByRole('button')) {
+    fireEvent.click(y)
+    for (const m of within(within(pop).getByRole('group', { name: 'Month' })).getAllByRole('button')) {
+      fireEvent.click(m)
+      for (const b of within(within(pop).getByRole('group', { name: 'Batch' })).getAllByRole('button')) {
+        out.push((b.textContent || '').replace(/current$/, ''))
+      }
+    }
+  }
+  return out
+}
 
 describe('Short List select mode', () => {
   it('shows no Select button to an evaluator', async () => {
@@ -178,7 +212,7 @@ describe('Short List select mode', () => {
   it.each([
     ['category', () => fireEvent.click(screen.getByRole('button', { name: 'Arcade' }))],
     ['evaluator', () => fireEvent.change(screen.getByLabelText('All evaluators'), { target: { value: 'PhuongNT1' } })],
-    ['batch', () => fireEvent.change(screen.getByLabelText('All batches'), { target: { value: 'W4 Sep, 2026' } })],
+    ['batch', () => pickBatch('Batch', 'W4 Sep, 2026')],
     // The bar's multi-select is Final conclusions; the cards are shortcuts into the same filter.
     ['final conclusion (menu)', () => fireEvent.change(screen.getByLabelText('Final conclusions'), { target: { value: 'Good' } })],
     // Final conclusion is filtered from the stat cards now, not a select.
@@ -213,7 +247,7 @@ describe('Short List select mode', () => {
     await waitFor(() => expect(screen.queryByText('Beta')).toBeNull())
     expect(screen.getByText('1 selected')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: 'W2 Oct, 2026' } })
+    pickBatch('Move to batch', 'W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Move 1 game' })) })
 
@@ -221,14 +255,18 @@ describe('Short List select mode', () => {
     expect(JSON.parse(String(move.init?.body))).toEqual({ ids: [1], batch: 'W2 Oct, 2026' })
   })
 
-  it('offers every batch that has games as a move target, not only the nearby weeks, newest first', async () => {
+  it('offers every batch that has games as a move target, not only the nearby weeks', async () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: 'Select' }))
     fireEvent.click(screen.getByLabelText('Select all shown'))
-    const select = screen.getByLabelText('Move to batch')
-    const options = within(select).getAllByRole('option').map(o => (o as HTMLOptionElement).value).filter(Boolean)
     // W4 Sep is not in this or next month's weeks; it is offered because games sit in it.
-    expect(options).toEqual(['W3 Oct, 2026', 'W2 Oct, 2026', 'W1 Oct, 2026', 'W4 Sep, 2026'])
+    // The picker lists newest year and month first, W1..W4 inside a month.
+    expect(pickerBatches('Move to batch')).toEqual(['W1 Oct, 2026', 'W2 Oct, 2026', 'W3 Oct, 2026', 'W4 Oct, 2026', 'W4 Sep, 2026'])
+    // The team's current batch is a shortcut on top; there is no All batches or whole month.
+    const pop = screen.getByRole('dialog', { name: 'Pick a move to batch' })
+    expect(within(pop).getByRole('button', { name: 'Current · W2 Oct, 2026' })).toBeInTheDocument()
+    expect(within(pop).queryByRole('button', { name: 'All batches' })).toBeNull()
+    expect(within(pop).queryByRole('button', { name: /^All of/ })).toBeNull()
   })
 
   it('moves the selected games, leaves select mode and reloads the rows and the batch list', async () => {
@@ -236,7 +274,7 @@ describe('Short List select mode', () => {
     const before = rowsCalls(calls).length
     fireEvent.click(screen.getByRole('button', { name: 'Select' }))
     fireEvent.click(screen.getByLabelText('Select all shown'))
-    fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: 'W2 Oct, 2026' } })
+    pickBatch('Move to batch', 'W2 Oct, 2026')
     fireEvent.click(screen.getByRole('button', { name: 'Move' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('1 of them already has a final conclusion and will move too')
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Move 2 games' })) })
@@ -314,13 +352,45 @@ describe('Short List select mode', () => {
     })
   })
 
+  describe('batch filter', () => {
+    const allCard = () => screen.getByRole('button', { name: /^All\s*[\d–]/ }).querySelector('.v')!.textContent
+    it('a whole month sends batch_month (not batch), keeps it in the URL and counts only that month', async () => {
+      const calls = await open()
+      await waitFor(() => expect(allCard()).toBe('2'))
+      fireEvent.click(screen.getByRole('button', { name: /^Batch:/ }))
+      const pop = screen.getByRole('dialog', { name: 'Pick a batch' })
+      fireEvent.click(within(within(pop).getByRole('group', { name: 'Year' })).getByRole('button', { name: '2026' }))
+      fireEvent.click(within(within(pop).getByRole('group', { name: 'Month' })).getByRole('button', { name: 'Oct' }))
+      fireEvent.click(within(pop).getByRole('button', { name: 'All of Oct 2026' }))
+
+      await waitFor(() => {
+        const last = new URL(rowsCalls(calls).at(-1)!.url, 'http://x').searchParams
+        expect(last.get('batch_month')).toBe('2026-10')
+        expect(last.has('batch')).toBe(false)
+      })
+      expect(new URL(window.location.href).searchParams.get('batch')).toBe('month:2026-10')
+      expect(screen.getByRole('button', { name: 'Batch: All of Oct 2026' })).toBeInTheDocument()
+      // W1 + W2 Oct; W4 Sep is another month.
+      await waitFor(() => expect(allCard()).toBe('5'))
+    })
+  })
+
   describe('current batch picker', () => {
     const post = (calls: { url: string; init?: RequestInit }[]) => calls.filter(c => c.url === '/api/evaluations/current-batch' && c.init?.method === 'POST')
     // The picker lives in a popover off the header: open it the first time it is needed.
+    const pickerBtn = () => screen.queryByRole('button', { name: /^Current batch: / })
     const openPopover = () => {
-      if (!screen.queryByLabelText('Not set')) fireEvent.click(screen.getByRole('button', { name: /Current batch/ }))
+      if (!pickerBtn()) fireEvent.click(screen.getByRole('button', { name: /^Current batch(?!:)/ }))
     }
-    const picker = () => { openPopover(); return screen.getByLabelText('Not set') as HTMLSelectElement }
+    // What the picker shows: a batch label, or 'Not set'.
+    const pickerValue = () => { openPopover(); return pickerBtn()!.getAttribute('aria-label')!.replace(/^Current batch: /, '') }
+    // Open the picker outside act (an outer act would hold the renders back), then let the
+    // save settle inside it.
+    const choose = async (v: string) => {
+      openPopover()
+      const b = batchButton('Current batch', v)
+      await act(async () => { fireEvent.click(b) })
+    }
     const ALERT = "Couldn't save the batch. Try again."
     // A failed save is reported as a toast (the Toaster itself is mounted in the root layout).
     let toastError: jest.SpyInstance
@@ -343,74 +413,74 @@ describe('Short List select mode', () => {
 
     it('puts the old value back and says so when the save fails', async () => {
       const calls = await open()
-      await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+      await waitFor(() => expect(pickerValue()).toBe('W2 Oct, 2026'))
       currentBatchOk = false
-      await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
+      await choose('W3 Oct, 2026')
       expect(post(calls)).toHaveLength(1)
-      await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+      await waitFor(() => expect(pickerValue()).toBe('W2 Oct, 2026'))
       expect(toastError).toHaveBeenCalledTimes(1)
       expect(toastError).toHaveBeenCalledWith(ALERT)
     })
 
     it('says so when the next change succeeds', async () => {
       const calls = await open()
-      await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+      await waitFor(() => expect(pickerValue()).toBe('W2 Oct, 2026'))
       currentBatchOk = false
-      await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
+      await choose('W3 Oct, 2026')
       await waitFor(() => expect(toastError).toHaveBeenCalledWith(ALERT))
       currentBatchOk = true
-      await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
+      await choose('W3 Oct, 2026')
       await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Current batch set to W3 Oct, 2026'))
       expect(toastError).toHaveBeenCalledTimes(1)
-      expect(picker().value).toBe('W3 Oct, 2026')
+      expect(pickerValue()).toBe('W3 Oct, 2026')
       expect(post(calls)).toHaveLength(2)
     })
 
     describe('two quick changes', () => {
-      const change = (v: string) => act(async () => { fireEvent.change(picker(), { target: { value: v } }) })
+      const change = choose
       const answer = (i: number, ok: boolean) => act(async () => { pendingPosts[i](ok) })
 
       it('first save fails after the second succeeded: the picker keeps the second pick, no message', async () => {
         await open()
-        await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+        await waitFor(() => expect(pickerValue()).toBe('W2 Oct, 2026'))
         holdCurrentBatch = true
         await change('W3 Oct, 2026')
-        await change('')
+        await change('W4 Oct, 2026')
         expect(pendingPosts).toHaveLength(2)
         await answer(1, true)
         await answer(0, false)
-        expect(picker().value).toBe('')
+        expect(pickerValue()).toBe('W4 Oct, 2026')
         expect(toastError).not.toHaveBeenCalled()
       })
 
       it('second save fails after the first succeeded: the picker goes back to the first pick, with the message', async () => {
         await open()
-        await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+        await waitFor(() => expect(pickerValue()).toBe('W2 Oct, 2026'))
         holdCurrentBatch = true
         await change('W3 Oct, 2026')
-        await change('')
+        await change('W4 Oct, 2026')
         await answer(0, true)
         await answer(1, false)
-        expect(picker().value).toBe('W3 Oct, 2026')
+        expect(pickerValue()).toBe('W3 Oct, 2026')
         expect(toastError).toHaveBeenCalledWith(ALERT)
       })
 
       it('a single failed save still goes back to the value the server confirmed on load', async () => {
         await open()
-        await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
+        await waitFor(() => expect(pickerValue()).toBe('W2 Oct, 2026'))
         holdCurrentBatch = true
         await change('W3 Oct, 2026')
         await answer(0, false)
-        expect(picker().value).toBe('W2 Oct, 2026')
+        expect(pickerValue()).toBe('W2 Oct, 2026')
         expect(toastError).toHaveBeenCalledWith(ALERT)
       })
     })
 
     it('shows no message when the save works', async () => {
       await open()
-      await waitFor(() => expect(picker().value).toBe('W2 Oct, 2026'))
-      await act(async () => { fireEvent.change(picker(), { target: { value: 'W3 Oct, 2026' } }) })
-      expect(picker().value).toBe('W3 Oct, 2026')
+      await waitFor(() => expect(pickerValue()).toBe('W2 Oct, 2026'))
+      await choose('W3 Oct, 2026')
+      expect(pickerValue()).toBe('W3 Oct, 2026')
       expect(toastError).not.toHaveBeenCalled()
     })
   })
@@ -422,7 +492,7 @@ describe('Short List select mode', () => {
       await open()
       fireEvent.click(screen.getByRole('button', { name: 'Select' }))
       fireEvent.click(screen.getByLabelText('Select Alpha'))
-      fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: 'W1 Oct, 2026' } })
+      pickBatch('Move to batch', 'W1 Oct, 2026')
       expect(screen.getByRole('button', { name: 'Move' })).toBeDisabled()
       expect(screen.getByText('They are already in this batch.')).toBeInTheDocument()
     })
@@ -432,7 +502,7 @@ describe('Short List select mode', () => {
       await open()
       fireEvent.click(screen.getByRole('button', { name: 'Select' }))
       fireEvent.click(screen.getByLabelText('Select Alpha'))
-      fireEvent.change(screen.getByLabelText('Move to batch'), { target: { value: 'W3 Oct, 2026' } })
+      pickBatch('Move to batch', 'W3 Oct, 2026')
       fireEvent.click(screen.getByRole('button', { name: 'Move' }))
       expect(screen.getByRole('dialog')).toHaveTextContent('1 of them was evaluated more than 8 days ago.')
     })

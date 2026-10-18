@@ -215,6 +215,31 @@ describe('filter bar in the URL', () => {
     expect(replace.mock.calls[0][0]).toBe('/team-ops?tab=performance&view=week&cat=arcade')
   })
 
+  it('the Batch picker writes the batch, All batches as period=all, and a whole month as the Month lens', async () => {
+    params = new URLSearchParams('tab=performance&cat=arcade')
+    const bundle = teamBundle([person('Alpha'), person('Beta')], {
+      view: 'batch',
+      window: { label: 'W2 Aug, 2026', from: '2026-08-03', to: '2026-08-10', batch: 'W2 Aug, 2026' },
+      options: { week: [], month: [], quarter: [], batch: [
+        { key: 'W2 Aug, 2026', label: 'W2 Aug, 2026 · 3/8 – 9/8' },
+        { key: 'W1 Aug, 2026', label: 'W1 Aug, 2026 · 27/7 – 2/8' },
+      ] },
+    })
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => bundle })
+    render(<ReportView />)
+    await settle()
+    const open = () => fireEvent.click(screen.getByRole('button', { name: 'Batch: W2 Aug, 2026' }))
+    open()
+    fireEvent.click(screen.getByRole('button', { name: 'W1 Aug, 2026' }))
+    expect(replace.mock.calls.at(-1)![0]).toBe('/team-ops?tab=performance&cat=arcade&period=W1+Aug%2C+2026')
+    open()
+    fireEvent.click(screen.getByRole('button', { name: 'All batches' }))
+    expect(replace.mock.calls.at(-1)![0]).toBe('/team-ops?tab=performance&cat=arcade&period=all')
+    open()
+    fireEvent.click(screen.getByRole('button', { name: /^All of Aug/ }))
+    expect(replace.mock.calls.at(-1)![0]).toBe('/team-ops?tab=performance&cat=arcade&view=month&period=2026-08')
+  })
+
   it('Clear filters removes every filter key and keeps the rest of the URL', async () => {
     params = new URLSearchParams('tab=performance&rtab=leaderboard&view=week&period=2026-09-01&cat=all&title=freelancer')
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => teamBundle() })

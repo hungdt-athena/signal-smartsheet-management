@@ -2,6 +2,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
+import { BatchPicker, parseBatchPick } from '@/components/ui/BatchPicker'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Seg, type SegOption } from '@/components/ui/Seg'
 import { FilterBar, FilterSpacer, ClearFilters, FilterCount } from '@/components/ui/FilterBar'
@@ -15,6 +16,7 @@ import { fmtDateTimeVN } from '@/lib/format-date'
 import { SectionEditor } from './SectionEditor'
 import { FeedbackView, FeedbackCell, AlikeCell } from './FeedbackView'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
+import { batchLabelsOfMonth } from '@/lib/batch-month'
 import { Section, newSection } from './types'
 import { isManagerRole } from '@/lib/roles'
 
@@ -117,7 +119,11 @@ export function WeeklyFeedbackTab() {
   const [selectedBatch, setSelectedBatch] = useUrlState('edit', '')
 
   // Overview filters + view options.
+  // batch: '' = all, a label, or `month:YYYY-MM` for a whole month. A single batch is
+  // filtered by the API; a month loads every batch and keeps that month's four labels.
   const [listBatch, setListBatch] = useUrlState('batch', '')
+  const listPick = parseBatchPick(listBatch)
+  const listMonthLabels = listPick.month ? batchLabelsOfMonth(listPick.month) : null
   const [evParam, setListEvaluator] = useUrlState('ev', '')
   const listEvaluator = isManager ? evParam : ''
   // Search keeps its own text while typing and writes ?q= once typing pauses.
@@ -208,7 +214,7 @@ export function WeeklyFeedbackTab() {
     if (view !== 'overview') return
     let live = true
     const qs = new URLSearchParams({ list: '1' })
-    if (listBatch) qs.set('batch', listBatch)
+    if (listPick.batch) qs.set('batch', listPick.batch)
     if (isManager && listEvaluator) qs.set('evaluator', listEvaluator)
     setListLoading(true); setListFailed(false)
     fetch(`/api/weekly-feedback?${qs}`)
@@ -217,16 +223,18 @@ export function WeeklyFeedbackTab() {
       .catch(() => { if (live) { setRecords([]); setListFailed(true) } })
       .finally(() => { if (live) setListLoading(false) })
     return () => { live = false }
-  }, [view, listBatch, listEvaluator, isManager, listReload])
+  }, [view, listPick.batch, listEvaluator, isManager, listReload])
 
-  // Default week-collapse: keep the newest week open, collapse the rest.
+  // Default week-collapse: keep the newest shown week open, collapse the rest.
+  const listMonth = listPick.month
   useEffect(() => {
-    const ws = Array.from(new Set(records.map(r => r.batch)))
+    const keep = listMonth ? batchLabelsOfMonth(listMonth) : null
+    const ws = Array.from(new Set(records.map(r => r.batch).filter(b => !keep || keep.includes(b))))
       .sort((a, b) => weekLabelOrder(b) - weekLabelOrder(a) || b.localeCompare(a))
     const c: Record<string, boolean> = {}
     ws.forEach((b, i) => { c[b] = i !== 0 })
     setCollapsed(c)
-  }, [records])
+  }, [records, listMonth])
 
   // A failed save keeps the changes marked unsaved and says so. Before, the result was
   // never read, so a 500 or a dropped connection still showed "All changes saved".
@@ -320,8 +328,10 @@ export function WeeklyFeedbackTab() {
   // Real feedback = non-empty records (counted, searchable). Empty records are
   // normally hidden; in the personal view they surface (no search) as a single
   // "Tap to add feedback" row so the user sees weeks still to fill — uncounted.
-  const real = records.filter(r => !isEmptyRecord(r) && (!q || recordMatches(r, q)))
-  const empties = overviewPersonal && !q ? records.filter(isEmptyRecord) : []
+  const inPick = (r: WeeklyRecord) => !listMonthLabels || listMonthLabels.includes(r.batch)
+  const pickedRecords = records.filter(inPick)
+  const real = pickedRecords.filter(r => !isEmptyRecord(r) && (!q || recordMatches(r, q)))
+  const empties = overviewPersonal && !q ? pickedRecords.filter(isEmptyRecord) : []
   const visible = [...real, ...empties]
   const groups: { batch: string; rows: WeeklyRecord[] }[] = []
   const groupIdx = new Map<string, number>()
@@ -338,7 +348,7 @@ export function WeeklyFeedbackTab() {
     openRecord(rec)
   }
 
-  const nonEmptyCount = records.filter(r => !isEmptyRecord(r)).length
+  const nonEmptyCount = pickedRecords.filter(r => !isEmptyRecord(r)).length
   const filtered = !!listBatch || !!listEvaluator || q !== ''
   const clearFilters = () => { setQuery(''); setUrlParams({ batch: null, ev: null, q: null }) }
 
@@ -360,10 +370,8 @@ export function WeeklyFeedbackTab() {
 
       {view === 'overview' ? (
         <FilterBar>
-          <div style={{ width: 180 }}>
-            <StyledSelect filter ariaLabel="Batch" value={listBatch} onChange={setListBatch} placeholder="All batches"
-              options={[{ value: '', label: 'All batches' }, ...batches.map(b => ({ value: b, label: b }))]} />
-          </div>
+          <BatchPicker filter allowAll allowMonth ariaLabel="Batch" value={listBatch} onChange={setListBatch}
+            batches={batches} width={180} />
           {isManager && (
             <div style={{ width: 180 }}>
               <StyledSelect filter ariaLabel="Evaluator" value={listEvaluator} onChange={setListEvaluator} placeholder="All evaluators"
@@ -395,10 +403,8 @@ export function WeeklyFeedbackTab() {
                 options={[{ value: '', label: 'My own' }, ...evaluators.map(e => ({ value: e, label: e }))]} />
             </div>
           )}
-          <div style={{ width: 200 }}>
-            <StyledSelect ariaLabel="Batch" value={selectedBatch} onChange={setSelectedBatch} placeholder="Select a batch"
-              options={allBatches.map(b => ({ value: b, label: b }))} />
-          </div>
+          <BatchPicker allowAll={false} allowMonth={false} ariaLabel="Batch" value={selectedBatch}
+            onChange={setSelectedBatch} batches={allBatches} placeholder="Select a batch" width={200} />
         </FilterBar>
       )}
 
