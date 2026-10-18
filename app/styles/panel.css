@@ -49,3 +49,15 @@
   font-size: 11px; font-weight: 600; color: var(--faint);
 }
 .field-clear:hover { color: var(--text); }
+
+/* The panel's one Save: pinned to the bottom of the scrolling modal while the right
+   column is in view, so it is reachable without scrolling back to a card. */
+.eval-savebar {
+  position: sticky; bottom: 0; z-index: 3;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; margin: 0 -2px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 -6px 16px rgba(20, 24, 40, .06);
+}
+.eval-savebar-note { flex: 1; min-width: 0; font-size: var(--fs-12); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eval-savebar .btn { min-width: 96px; justify-content: center; }

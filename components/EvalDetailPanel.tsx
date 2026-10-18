@@ -938,6 +938,31 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   const noteError = canEditEval ? notePartsRequirementError(noteRule) : null
   const missingParts = canEditEval ? missingNoteParts(noteRule) : []
   const noteTooShort = !!noteError
+  // Who gets the Save bar: anyone who can change something on this panel, in this
+  // context (final conclusion only shows on Short List, record cards only where the
+  // host shows them).
+  const recordEditable = !hideRecordSections && !!ev
+    && !!(ev.record_5min_assignee || ev.record_20min_assignee || canEditAssignee)
+    && (canEdit5 || canEdit20 || canEditAssignee)
+  const showSaveBar = canEditGameAlike || (showFinalConclusion && canEditFinalNote) || recordEditable
+
+  // Names of the fields that differ from what was loaded: shown next to Save, and in
+  // the "unsaved changes" popup when leaving.
+  const currentUnsavedFields = (): string[] => {
+    if (!ev) return []
+    const fields = unsavedFields(
+      { noteParts, conclusion, batch, driveLink, gameAlike, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee },
+      {
+        noteParts: notePartsFromRow(ev), initial_conclusion: ev.initial_conclusion, batch: ev.batch, drive_link: ev.drive_link,
+        game_alike: ev.game_alike, final_note: ev.final_note, final_conclusion: ev.final_conclusion,
+        record_5min_drive: ev.record_5min_drive, record_20min_drive: ev.record_20min_drive,
+        record_5min_assignee: ev.record_5min_assignee, record_20min_assignee: ev.record_20min_assignee,
+      },
+      { trendsTouched: trendsTouchedRef.current, stagedShots },
+    )
+    return fields.length > 0 ? fields : ['Other changes']
+  }
+  const pendingFields = needsSave ? currentUnsavedFields() : []
 
   useEffect(() => {
     if (!canEditAssignee) return
@@ -1100,17 +1125,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     const decision = leaveDecision({ dirty: canEdit && needsSave, autoSave, saving })
     if (decision === 'go' || !ev) { proceed(); return }
     if (decision === 'save-then-go') { void saveRef.current().then(ok => { if (ok) proceed() }); return }
-    const fields = unsavedFields(
-      { noteParts, conclusion, batch, driveLink, gameAlike, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee },
-      {
-        noteParts: notePartsFromRow(ev), initial_conclusion: ev.initial_conclusion, batch: ev.batch, drive_link: ev.drive_link,
-        game_alike: ev.game_alike, final_note: ev.final_note, final_conclusion: ev.final_conclusion,
-        record_5min_drive: ev.record_5min_drive, record_20min_drive: ev.record_20min_drive,
-        record_5min_assignee: ev.record_5min_assignee, record_20min_assignee: ev.record_20min_assignee,
-      },
-      { trendsTouched: trendsTouchedRef.current, stagedShots },
-    )
-    setLeave({ action, proceed, fields: fields.length > 0 ? fields : ['Other changes'] })
+    setLeave({ action, proceed, fields: currentUnsavedFields() })
   }
 
   const leaveSave = async () => {
@@ -1564,22 +1579,6 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 </div>
               )}
 
-              {canEditGameAlike && (
-                <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave || noteTooShort}
-                  style={{
-                    width: '100%', justifyContent: 'center', marginTop: 2, gap: 6,
-                    ...(needsSave ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
-                  }}>
-                  {saving ? 'Saving…' : needsSave ? (autoSave ? 'Save now' : 'Save evaluation') : (
-                    <>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                      {autoSave ? 'Auto-save on — saved' : 'Saved — no changes'}
-                    </>
-                  )}
-                </button>
-              )}
             </div>
           </div>
 
@@ -1631,22 +1630,6 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   />
                 </div>
 
-                {canEditFinalNote && (
-                  <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave || noteTooShort}
-                    style={{
-                      width: '100%', justifyContent: 'center', gap: 6,
-                      ...(needsSave ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
-                    }}>
-                    {saving ? 'Saving…' : needsSave ? (autoSave ? 'Save now' : 'Save final conclusion') : (
-                      <>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                        {autoSave ? 'Auto-save on — saved' : 'Saved — no changes'}
-                      </>
-                    )}
-                  </button>
-                )}
               </div>
           </div>
           )}
@@ -1727,22 +1710,22 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             </div>
           )}
 
-          {/* Save button for record changes */}
-          {!hideRecordSections && (ev.record_5min_assignee || ev.record_20min_assignee || canEditAssignee) && (canEdit5 || canEdit20 || canEditAssignee) && (
-            <button className={`btn ${dirty ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !dirty || noteTooShort}
-              style={{
-                width: '100%', justifyContent: 'center', gap: 6,
-                ...(dirty ? {} : { color: 'var(--good)', borderColor: 'var(--good)', background: 'var(--good-weak)' }),
-              }}>
-              {saving ? 'Saving…' : dirty ? 'Save changes' : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                  Saved — no changes
-                </>
-              )}
-            </button>
+          {/* One Save for the whole panel. There used to be a button in each card
+              (initial evaluation, final conclusion, record), but all of them ran the
+              same save() and wrote every changed field, so an admin on Short List or a
+              manager on Evaluate saw two buttons that did one thing. It stays at the
+              bottom of the column while scrolling. The note rule still blocks it. */}
+          {showSaveBar && (
+            <div className="eval-savebar">
+              <span className="eval-savebar-note" aria-live="polite">
+                {saving ? '' : noteTooShort && needsSave ? (noteError ?? '')
+                  : needsSave ? `Unsaved: ${pendingFields.join(', ')}`
+                  : autoSave ? 'Auto-save is on' : 'All changes saved'}
+              </span>
+              <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave || noteTooShort}>
+                {saving ? 'Saving…' : needsSave ? (autoSave ? 'Save now' : 'Save') : 'Saved'}
+              </button>
+            </div>
           )}
 
           {/* Timestamps */}
