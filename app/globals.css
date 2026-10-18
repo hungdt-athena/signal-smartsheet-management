@@ -2954,10 +2954,10 @@ input:checked + .slider:before {
 /* A fixed square, and the image covers it: a source that is not square is cropped,
    never squeezed. The box carries the placeholder tint, so a row still fetching reads
    as a picture on the way rather than a broken one. */
-.rp-review-icon { flex: 0 0 56px; width: 56px; height: 56px; border-radius: 13px; overflow: hidden;
+.rp-review-icon { flex: 0 0 56px; width: 56px; height: 56px; border-radius: 13px; position: relative;
   background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--border); }
-.rp-review-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.rp-review-icon-fallback { width: 100%; height: 100%; }
+.rp-review-icon img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 13px; }
+.rp-review-icon-fallback { width: 100%; height: 100%; border-radius: 13px; background: var(--surface-3); }
 .rp-review-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding-top: 1px; }
 .rp-review-title { font-size: 16px; font-weight: 700; line-height: 1.3; color: var(--text); }
 .rp-review-title a { color: var(--accent); text-decoration: none; }
@@ -3227,3 +3227,13 @@ input:checked + .slider:before {
 .bp-ch { color: var(--faint); }
 .bp-month { color: var(--accent-strong); font-weight: 600; border-bottom: 1px dashed var(--border); border-radius: 6px 6px 0 0; }
 .bp-cur { font-style: normal; font-size: var(--fs-11); font-weight: 700; color: var(--good); background: var(--good-weak); padding: 0 6px; border-radius: 4px; }
+
+/* ===== Game cell (components/ui/GameCell.tsx) ===== */
+.game-cell { display: flex; align-items: flex-start; gap: 12px; }
+.game-cell-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.game-cell-title { display: flex; align-items: center; min-width: 0; font-size: var(--fs-13); line-height: 1.3; }
+.game-cell-meta { font-size: var(--fs-12); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.game-cell-extra { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.game-cell-genres { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+/* Genre: context, not a status. Small and quiet so publisher and date read first. */
+.genre-tag { font-size: var(--fs-11); line-height: 16px; padding: 0 6px; border-radius: 4px; color: var(--faint); border: 1px solid var(--border); white-space: nowrap; }

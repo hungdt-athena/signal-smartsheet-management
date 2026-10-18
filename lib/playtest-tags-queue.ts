@@ -41,6 +41,8 @@ export interface QueueTag {
   title: string
   publisher_name: string | null
   icon_url: string | null
+  /** 'ios' | 'android': drawn as a mark on the game icon. */
+  os: string | null
   initial_evaluator: string | null
   field_value: string
   sub_value_id: number | null
@@ -98,7 +100,7 @@ export async function fetchQueue(
   const rows = await sql`
     SELECT
       pt.id, pt.game_id, pt.field_value, pt.sub_value_id, pt.tagged_at, pt.tagged_by,
-      gi.title, gi.icon_url,
+      gi.title, gi.icon_url, gi.os,
       COALESCE(dev.developer_name, dev.dev_company) AS publisher_name,
       ge.initial_evaluator, ge.category_group AS game_category_group,
       du.name AS tagged_by_name,

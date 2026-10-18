@@ -912,7 +912,11 @@ interface CatalogGame {
   title: string
   app_link: string | null
   icon_url: string | null
+  /** Known for games listed from a batch; absent for catalog search results. */
+  category_group?: string
 }
+
+const CAT_LABEL = (b: string) => b[0].toUpperCase() + b.slice(1)
 
 // Final conclusion each bucket implies, and the reverse (final → bucket) so that
 // changing the final conclusion in the confirm popup re-derives the container.
@@ -1111,6 +1115,9 @@ function AddGameModal({ category, batch, month = null, excludeGameIds, targetBuc
   // The game awaiting confirmation. Picking a game no longer adds it directly —
   // it opens ConfirmAddModal so the adder can review/override its evaluation.
   const [pending, setPending] = useState<CatalogGame | null>(null)
+  // Where an added game goes. With "All" category groups on the page, the adder picks
+  // it here (a game picked from the batch list brings its own group).
+  const [addCat, setAddCat] = useState(category === 'all' ? 'puzzle' : category)
 
   // Default (empty query): the games in the selected batch/category — the common
   // case is pulling one of those into a bucket without having to type.
@@ -1122,6 +1129,7 @@ function AddGameModal({ category, batch, month = null, excludeGameIds, targetBuc
       .then(r => r.ok ? r.json() : { data: [] })
       .then(json => setBatchGames(((json.data || []) as ShortListItem[]).map(g => ({
         game_id: g.game_id, title: g.title, app_link: g.app_link, icon_url: g.icon_url,
+        category_group: g.category_group,
       }))))
       .catch(() => {})
       .finally(() => setBatchLoading(false))
@@ -1158,8 +1166,15 @@ function AddGameModal({ category, batch, month = null, excludeGameIds, targetBuc
   return (
     <>
       <Modal title={`Add a game to ${targetBucket === '20min' ? '20 MIN' : '5 MIN'}`} onClose={onClose} width={520}
-        sub={searching ? `Search all games · ${category}`
-          : `${month ? batchPickLabel(`month:${month}`) : batch || 'All batches'} · ${category}`}>
+        sub={searching ? `Search all games · ${CAT_LABEL(addCat)}`
+          : `${month ? batchPickLabel(`month:${month}`) : batch || 'All batches'} · ${category === 'all' ? 'All category groups' : CAT_LABEL(category)}`}>
+        {category === 'all' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="label">Add to</span>
+            <Seg ariaLabel="Category group for the added game" value={addCat} onChange={setAddCat}
+              options={BUCKETS.map(b => ({ value: b, label: CAT_LABEL(b) }))} />
+          </div>
+        )}
         <div className="rec-add-search">
           <SearchInput value={query} onChange={setQuery} autoFocus width="100%"
             placeholder="Search by name or paste a store link" ariaLabel="Search games" />
@@ -1172,7 +1187,7 @@ function AddGameModal({ category, batch, month = null, excludeGameIds, targetBuc
             <EmptyState>{searching ? 'No game found.' : 'No games in this batch.'}</EmptyState>
           ) : candidates.map(g => (
             <button key={g.game_id} type="button" className="rec-add-row"
-              onClick={() => setPending(g)}>
+              onClick={() => { if (category === 'all' && g.category_group) setAddCat(g.category_group); setPending(g) }}>
               {g.icon_url ? (
                 <img src={g.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
               ) : (
@@ -1188,7 +1203,7 @@ function AddGameModal({ category, batch, month = null, excludeGameIds, targetBuc
       {pending && (
         <ConfirmAddModal
           game={pending}
-          category={category}
+          category={addCat}
           batch={batch}
           targetBucket={targetBucket}
           recorders={recorders}
@@ -1211,8 +1226,9 @@ function RecordTab() {
   const [data, setData] = useState<ShortListItem[]>([])
   const [loading, setLoading] = useState(true)
   // View and filters live in the URL: cat, batch, status.
-  const [catParam, setCatParam] = useUrlState('cat', 'puzzle')
-  const filterCategory = (BUCKETS as readonly string[]).includes(catParam) ? catParam : 'puzzle'
+  // Category group: All by default; one group narrows the containers.
+  const [catParam, setCatParam] = useUrlState('cat', 'all')
+  const filterCategory = (BUCKETS as readonly string[]).includes(catParam) ? catParam : 'all'
   // batch: absent = the server's default batch (once known), 'all' = All batches,
   // `month:YYYY-MM` = every batch of that month.
   const [batchParam, setBatchParam] = useUrlState('batch', '')
@@ -1225,7 +1241,7 @@ function RecordTab() {
   const [statusParam, setStatusParam] = useUrlState('status', '')
   const filterStatus: '' | RecordStatus = statusParam in RECORD_STATUS_BADGE ? statusParam as RecordStatus : ''
   const setParams = useSetUrlParams()
-  const filtersOn = filterCategory !== 'puzzle' || batchParam !== '' || filterStatus !== ''
+  const filtersOn = filterCategory !== 'all' || batchParam !== '' || filterStatus !== ''
   const clearFilters = () => setParams({ cat: null, batch: null, status: null })
   const [recorders, setRecorders] = useState<string[]>([])
   const [ytRows, setYtRows] = useState<YtbRow[]>([])
@@ -1316,7 +1332,7 @@ function RecordTab() {
           const res = await fetch('/api/evaluations/reconcile-recorders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: 'apply', category: filterCategory, batch }),
+            body: JSON.stringify({ mode: 'apply', category: filterCategory === 'all' ? undefined : filterCategory, batch }),
           })
           if (cancelled) return
           if (!res.ok) continue
@@ -1532,7 +1548,7 @@ function RecordTab() {
 
       <FilterBar className="rec-filters">
         <Seg ariaLabel="Category group" value={filterCategory} onChange={setCatParam}
-          options={BUCKETS.map(b => ({ value: b, label: b[0].toUpperCase() + b.slice(1) }))} />
+          options={[{ value: 'all', label: 'All' }, ...BUCKETS.map(b => ({ value: b, label: CAT_LABEL(b) }))]} />
         <BatchPicker filter={batchParam !== ''} allowAll allowMonth current={currentBatch}
           ariaLabel="Batch" value={batchPick} onChange={setBatchPick} batches={batchOptions} width={160} />
         <Seg ariaLabel="Record status" value={filterStatus || 'all'}
@@ -1598,7 +1614,9 @@ function RecordTab() {
               logContext="record"
               initialGameId={detailGameId}
               gameList={data.map(d => ({ game_id: d.game_id, title: d.title }))}
-              category={filterCategory}
+              category={filterCategory === 'all'
+                ? data.find(d => d.game_id === detailGameId)?.category_group
+                : filterCategory}
               role={role}
               userName={userName}
               onClose={() => setDetailGameId(null)}

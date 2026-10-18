@@ -37,6 +37,8 @@ import { useUrlState, useSetUrlParams } from '@/lib/use-url-state'
 import { Seg } from '@/components/ui/Seg'
 import { FilterBar, FilterSpacer, ClearFilters, FilterCount } from '@/components/ui/FilterBar'
 import { SearchInput } from '@/components/ui/SearchInput'
+import { GameCell } from '@/components/ui/GameCell'
+import { GameIcon } from '@/components/ui/GameIcon'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/ui/States'
 
@@ -127,6 +129,7 @@ interface ShortListItem {
   title: string
   icon_url: string | null
   os: string
+  release_date?: string | null
   app_link: string | null
   genre_1: string | null
   genre_2: string | null
@@ -1183,11 +1186,7 @@ function ShortListEvalTab() {
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 230 }}>
-                      {item.icon_url ? (
-                        <img src={item.icon_url} alt="" width={32} height={32} style={{ borderRadius: 7, flexShrink: 0 }} />
-                      ) : (
-                        <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
-                      )}
+                      <GameIcon src={item.icon_url} os={item.os} size={40} />
                       <div style={{ minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center' }}>
                           <span className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</span>
@@ -1198,13 +1197,19 @@ function ShortListEvalTab() {
                           {item.initial_evaluator && <span className="badge neutral">{item.initial_evaluator}</span>}
                           {view === 'monthly' && <span className="badge neutral">{bucketLabel(item.category_group)}</span>}
                         </div>
-                        {item.publisher_name && (
+                        {(item.publisher_name || item.release_date) && (
                           <div style={{ display: 'flex', alignItems: 'center', marginTop: 2 }}>
-                            <span style={{ fontSize: 11, color: 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 230 }}
-                              title={item.publisher_name}>
-                              {item.publisher_name}
-                            </span>
-                            <CopyBtn text={item.publisher_name} />
+                            {item.publisher_name && (
+                              <>
+                                <span className="game-cell-meta" style={{ maxWidth: 230 }} title={item.publisher_name}>{item.publisher_name}</span>
+                                <CopyBtn text={item.publisher_name} />
+                              </>
+                            )}
+                            {item.release_date && (
+                              <span className="game-cell-meta" style={{ marginLeft: item.publisher_name ? 4 : 0 }}>
+                                {item.publisher_name ? '· ' : ''}Released {fmtDateVN(item.release_date)}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1349,33 +1354,13 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen,
           {idx + 1}
         </td>
         <td>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 220 }}>
-            {ev.icon_url ? (
-              <img src={ev.icon_url} alt="" width={32} height={32}
-                style={{ borderRadius: 7, flexShrink: 0 }} />
-            ) : (
-              <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--surface-3)', flexShrink: 0 }} />
-            )}
-            <div style={{ minWidth: 0 }}>
-              <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>
-                <Highlight text={ev.title} term={term} />
-              </div>
-              {idMatched && (
-                <div style={{ fontSize: 11, color: 'var(--faint)', fontFamily: 'var(--num)', marginTop: 2 }}>
-                  <Highlight text={ev.game_id} term={term} />
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
-                <span className="badge neutral">{ev.os?.toUpperCase()}</span>
-                {genres.map(g => <span key={g} className="badge info">{g}</span>)}
-              </div>
-              {ev.publisher_name && (
-                <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {ev.publisher_name}
-                </div>
-              )}
-            </div>
-          </div>
+          <GameCell icon={ev.icon_url} os={ev.os} title={<Highlight text={ev.title} term={term} />}
+            publisher={ev.publisher_name} releaseDate={ev.release_date} genres={genres}
+            extra={idMatched ? (
+              <span style={{ fontSize: 'var(--fs-11)', color: 'var(--faint)', fontFamily: 'var(--num)' }}>
+                <Highlight text={ev.game_id} term={term} />
+              </span>
+            ) : undefined} />
         </td>
         <td style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', color: ev.initial_evaluator ? 'var(--text)' : 'var(--faint)' }}>
           {ev.initial_evaluator || '—'}

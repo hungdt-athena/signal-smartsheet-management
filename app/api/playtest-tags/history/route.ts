@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
         pt.id, pt.game_id, pt.field_value, pt.status, pt.sync_result,
         pt.tagged_at, pt.confirmed_at, pt.removed_at, pt.removed_by,
         pt.review_note, pt.original_captured_at, pt.original_field_value, pt.edited_at,
-        gi.title, gi.icon_url, sv.name AS sub_value_name,
+        gi.title, gi.icon_url, gi.os, sv.name AS sub_value_name,
         osv.name AS original_sub_value_name,
         tagger.name AS tagged_by_name, confirmer.name AS confirmed_by_name,
         editor.name AS edited_by_name,

@@ -29,6 +29,7 @@ import QRCode from 'qrcode'
 import { isManagerRole } from '@/lib/roles'
 import { startView, onVisibility, onInput, snapshot, restartAfterSave, type ViewTimer } from '@/lib/view-timer'
 import type { LogContext } from '@/lib/evaluation-log'
+import { GameIcon } from '@/components/ui/GameIcon'
 import {
   EMPTY_NOTE_PARTS, NOTE_MIN_LEN, isLegacyNote, missingNoteParts, notePartsFromRow, notePartsRequirementError,
   type NoteParts,
@@ -1259,14 +1260,9 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             </div>
 
             <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-              {ev.icon_url ? (
-                // Explicit size + alignSelf: in this flex row the default `stretch` plus the
-                // global `img { height: auto }` stretched the icon to the text column's height.
-                <img src={ev.icon_url} alt="" width={56} height={56}
-                  style={{ width: 56, height: 56, alignSelf: 'flex-start', objectFit: 'cover', borderRadius: 12, flexShrink: 0, border: '1px solid var(--border)' }} />
-              ) : (
-                <div style={{ width: 56, height: 56, borderRadius: 12, background: 'var(--surface-3)', flexShrink: 0 }} />
-              )}
+              {/* alignSelf: in this flex row the default `stretch` would stretch the icon
+                  to the text column's height. */}
+              <span style={{ alignSelf: 'flex-start' }}><GameIcon src={ev.icon_url} os={ev.os} size={56} /></span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   {ev.app_link ? (

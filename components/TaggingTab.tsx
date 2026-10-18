@@ -12,6 +12,7 @@ import { EmptyState, ErrorState, SkeletonRows } from './ui/States'
 import { IconX } from './ui/SearchInput'
 import { BUCKETS, isBucket, type Bucket } from '@/lib/buckets'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
+import { GameIcon } from '@/components/ui/GameIcon'
 import { useUrlState, useSetUrlParams } from '@/lib/use-url-state'
 import { fmtDateVN } from '@/lib/format-date'
 import { toast } from '@/lib/toast'
@@ -29,6 +30,7 @@ interface PendingRow {
   title: string
   publisher_name: string | null
   icon_url: string | null
+  os?: string | null
   initial_evaluator: string | null
   field_value: string
   sub_value_id: number | null
@@ -47,6 +49,7 @@ interface HistoryRow {
   game_id: string
   title: string
   icon_url: string | null
+  os?: string | null
   field_value: string
   sub_value_name: string | null
   tagged_by_name: string | null
@@ -650,10 +653,7 @@ function PendingView({ onOpenGame, isAdmin, categoryGroup, lead }: { onOpenGame:
                 )}
                 <td className="cell-name">
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                    {t.icon_url && (
-                      <img src={t.icon_url} alt="" width={24} height={24}
-                        style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
-                    )}
+                    <GameIcon src={t.icon_url} os={t.os} size={40} />
                     <span style={{ minWidth: 0 }}>
                       <GameButton title={t.title} gameId={t.game_id} onOpen={onOpenGame} list={gameList} />
                       <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--faint)' }}>
@@ -1006,10 +1006,7 @@ function HistoryView({ onOpenGame, isAdmin, categoryGroup, lead }: { onOpenGame:
                   <td className="cell-name" rowSpan={g.rows.length}
                     style={{ verticalAlign: 'top', borderRight: '1px solid var(--border)' }}>
                     <span style={{ display: 'inline-flex', alignItems: 'flex-start', gap: 8 }}>
-                      {r.icon_url && (
-                        <img src={r.icon_url} alt="" width={24} height={24}
-                          style={{ borderRadius: 6, flexShrink: 0, border: '1px solid var(--border)' }} />
-                      )}
+                      <GameIcon src={r.icon_url} os={r.os} size={40} />
                       <span style={{ minWidth: 0 }}>
                         <GameButton title={r.title} gameId={r.game_id} onOpen={onOpenGame} list={gameList} />
                         {g.rows.length > 1 && (

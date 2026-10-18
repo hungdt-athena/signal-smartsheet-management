@@ -1,4 +1,5 @@
 'use client'
+import { PlatformMark } from '@/components/ui/GameIcon'
 import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react'
 import { Lightbox } from '@/components/Lightbox'
 import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
@@ -734,6 +735,7 @@ export function ReviewTable({ evaluator, canSeeTeam, windowFrom = null, windowTo
                       ) : (
                         <div className="rp-review-icon-fallback" />
                       )}
+                      <PlatformMark os={row.os} iconSize={56} />
                     </div>
                     <div className="rp-review-info">
                       <div className="rp-review-title">
