@@ -402,7 +402,7 @@ export function WeeklyFeedbackTab() {
         </FilterBar>
       )}
 
-      <div className="card wf-scroll" style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+      <div className={`card wf-scroll${view === 'editor' ? '' : ' wf-scroll-list'}`} style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
         {view === 'editor' ? (
           !selectedBatch ? (
             allBatches.length === 0 ? (

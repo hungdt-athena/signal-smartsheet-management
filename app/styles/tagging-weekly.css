@@ -46,3 +46,13 @@
 /* "Add" buttons sit at their natural width inside the column layouts. */
 .wf-addgroup-btn, .wf-addmanual-btn { align-self: flex-start; }
 .wf-addmanual-btn { margin-top: 6px; }
+
+/* Overview list: the table fills its card edge to edge. With the card's padding the
+   header sat flush against the top border but 18px in from the sides once it stuck. */
+.card.wf-scroll-list { padding: 0; }
+.wf-scroll-list .wf-list { border: none; }
+/* Header has a fixed height so the batch band can stick right under it. */
+.wf-list.tbl-sticky thead th { height: 34px; padding-top: 0; padding-bottom: 0; vertical-align: middle; }
+/* Batch band: sticks under the header while you scroll that batch's rows; the next
+   batch's band slides up over it when its rows arrive. */
+.wf-list .wf-week-row td { position: sticky; top: 34px; z-index: 5; }

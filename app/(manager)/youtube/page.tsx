@@ -12,9 +12,10 @@ import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
 import { isManagerRole } from '@/lib/roles'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
+import { GameIcon } from '@/components/ui/GameIcon'
 import { useUrlState, useSetUrlParams } from '@/lib/use-url-state'
 import { toast } from '@/lib/toast'
-import { conclusionBadgeClass, finalConclusionStyle, RECORD_STATUS_BADGE, type RecordStatus } from '@/lib/conclusion-badge'
+import { RECORD_STATUS_BADGE, type RecordStatus } from '@/lib/conclusion-badge'
 import { Seg } from '@/components/ui/Seg'
 import { FilterBar, FilterSpacer, ClearFilters, FilterCount } from '@/components/ui/FilterBar'
 import { SearchInput, IconX } from '@/components/ui/SearchInput'
@@ -180,26 +181,54 @@ function formatDayLabel(dayStr: string) {
 
 // ── Time filter (year, then month of that year) ──────────────────────────────
 
-// Two Segs instead of the old year chips with a ▶ expander: the months row shows
-// only once a year is picked, so the bar stays one 32px line most of the time.
-function TimeFilter({ year, month, options, onYear, onMonth }: {
+// Same logic as before the cleanup: one button per year that has uploads, a ▸ that
+// opens that year's months (only months with uploads), click a selected year or
+// month again to clear it. It takes its own line in the filter bar, so new years
+// and months wrap there instead of pushing the other filters out of shape.
+function TimeFilter({ year, month, options, onSelect }: {
   year: string    // '' = any year
   month: string   // 0-11, '' = any month
   options: ReturnType<typeof getFilterOptions>
-  onYear: (y: string) => void
-  onMonth: (m: string) => void
+  onSelect: (year: string, month: string) => void
 }) {
+  const [expanded, setExpanded] = useState<string | null>(year || null)
+  useEffect(() => { if (year) setExpanded(year) }, [year])
   const years = options.years.includes(year) || !year ? options.years : [year, ...options.years]
-  const months = year ? Array.from(new Set([...(options.monthsByYear[year] ?? []), ...(month ? [Number(month)] : [])])).sort((a, b) => a - b) : []
+
   return (
-    <>
-      <Seg ariaLabel="Year" value={year || 'all'} onChange={v => onYear(v === 'all' ? '' : v)}
-        options={[{ value: 'all', label: 'All time' }, ...years.map(y => ({ value: y, label: y }))]} />
-      {year && months.length > 0 && (
-        <Seg ariaLabel="Month" value={month || 'all'} onChange={v => onMonth(v === 'all' ? '' : v)}
-          options={[{ value: 'all', label: 'All months' }, ...months.map(m => ({ value: String(m), label: MONTH_SHORT[m] }))]} />
-      )}
-    </>
+    <div className="tf" role="group" aria-label="Upload month">
+      {years.map(y => {
+        const isYear = year === y
+        const isOpen = expanded === y
+        const months = options.monthsByYear[y] ?? []
+        return (
+          <div key={y} className="tf-item">
+            <button type="button" className="tf-exp" aria-expanded={isOpen}
+              aria-label={`${isOpen ? 'Hide' : 'Show'} months of ${y}`}
+              onClick={() => setExpanded(isOpen ? null : y)}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5l10 7-10 7z" /></svg>
+            </button>
+            <button type="button" className={`tf-year${isYear ? ' on' : ''}`} aria-pressed={isYear}
+              onClick={() => { if (isYear) onSelect('', ''); else { onSelect(y, ''); setExpanded(y) } }}>
+              {y}
+            </button>
+            {isOpen && months.length > 0 && (
+              <div className="tf-months">
+                {months.map(m => {
+                  const on = isYear && month === String(m)
+                  return (
+                    <button key={m} type="button" className={`tf-month${on ? ' on' : ''}`} aria-pressed={on}
+                      onClick={() => onSelect(y, on ? '' : String(m))}>
+                      {MONTH_SHORT[m]}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -296,13 +325,12 @@ function YouTubeTab() {
   }, [yearParam, monthParam, evaluator, duration])
   const filtersOn = yearParam !== cur.year || monthParam !== cur.month || !!evaluator || !!duration
   const clearFilters = () => setParams({ year: null, month: null, ev: null, dur: null })
-  // Picking a year shows all its months (as before); the month is chosen after.
-  const pickYear = (y: string) => setParams(y
-    ? { year: y === cur.year ? null : y, month: 'all' }
-    : { year: 'all', month: null })
-  const pickMonth = (m: string) => {
-    const v = m === '' ? 'all' : String(Number(m) + 1)
-    setParams({ month: v === cur.month ? null : v })
+  // Year and month in one navigation. No key = the current year/month (the default);
+  // 'all' = any. The month key is ignored while the year is "any".
+  const pickYearMonth = (y: string, m: string) => {
+    if (!y) { setParams({ year: 'all', month: null }); return }
+    const mv = m === '' ? 'all' : String(Number(m) + 1)
+    setParams({ year: y === cur.year ? null : y, month: mv === cur.month ? null : mv })
   }
 
   const refresh = useCallback(async () => {
@@ -385,7 +413,7 @@ function YouTubeTab() {
         <FilterBar>
           {filterOptions.years.length > 0 && (
             <TimeFilter year={filters.year} month={filters.month} options={filterOptions}
-              onYear={pickYear} onMonth={pickMonth} />
+              onSelect={pickYearMonth} />
           )}
           <StyledSelect filter ariaLabel="Evaluator" value={evaluator} onChange={setEvaluator}
             options={evaluatorOpts} placeholder="All evaluators" style={{ width: 170 }} />
@@ -698,13 +726,6 @@ function recorderOf(item: ShortListItem): string {
   return (effectiveBucket(item) === '20min' ? item.record_20min_assignee : item.record_5min_assignee) || ''
 }
 
-function osLabel(os: string | null): string {
-  const o = (os || '').toLowerCase()
-  if (o === 'ios') return 'iOS'
-  if (o === 'android') return 'Android'
-  return os ? os.toUpperCase() : '—'
-}
-
 function recordStatus(item: ShortListItem, ytMap: Map<number | string, YtMatch>): { status: RecordStatus; youtubeId?: string; approx?: string } {
   const bucket = effectiveBucket(item)
   const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
@@ -801,7 +822,6 @@ function RecordTable({
               // is locked; no reassigning.
               const assignLocked = status === 'recording' || status === 'recorded'
               const confirming = confirmRemoveId === item.id
-              const fc = item.final_conclusion ? finalConclusionStyle(item.final_conclusion) : null
               return (
                 <tr key={item.id} className={`tbl-row-premium${item.game_id === activeGameId ? ' tbl-row-active' : ''}`}
                   style={{ cursor: isManager ? 'grab' : 'pointer' }}
@@ -811,27 +831,17 @@ function RecordTable({
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 160 }}>
-                      {item.icon_url ? (
-                        <img src={item.icon_url} alt="" width={24} height={24} style={{ borderRadius: 6, flexShrink: 0 }} />
-                      ) : (
-                        <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', flexShrink: 0 }} />
-                      )}
+                      <GameIcon src={item.icon_url} os={item.os} size={40} />
                       <div style={{ minWidth: 0 }}>
                         {/* Row 1: title */}
                         <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
-                        {/* Row 2: evaluator · initial conclusion · final conclusion · platform */}
-                        <div className="rec-meta">
-                          {item.initial_evaluator && (
-                            <span className="rec-meta-name">{item.initial_evaluator}</span>
-                          )}
-                          {item.initial_conclusion && (
-                            <span className={`badge ${conclusionBadgeClass(item.initial_conclusion)}`}>{prettyConclusion(item.initial_conclusion)}</span>
-                          )}
-                          {fc && (
-                            <span className="badge" style={{ background: fc.bg, color: fc.color }}>{item.final_conclusion}</span>
-                          )}
-                          <span className="badge neutral">{osLabel(item.os)}</span>
-                        </div>
+                        {/* Row 2: who evaluated it. The conclusions are left out: every game
+                            here is already List_Idea + Insight / Priority IV (that is how
+                            it got into this container), so they said nothing. The platform
+                            is the mark on the icon. */}
+                        {item.initial_evaluator && (
+                          <div className="rec-meta"><span className="rec-meta-name">{item.initial_evaluator}</span></div>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -1193,7 +1203,7 @@ function RecordTab() {
 
   const [data, setData] = useState<ShortListItem[]>([])
   const [loading, setLoading] = useState(true)
-  // View and filters live in the URL: cat, batch, status, group.
+  // View and filters live in the URL: cat, batch, status.
   const [catParam, setCatParam] = useUrlState('cat', 'puzzle')
   const filterCategory = (BUCKETS as readonly string[]).includes(catParam) ? catParam : 'puzzle'
   // batch: absent = the server's default batch (once known), 'all' = All batches.
@@ -1204,10 +1214,6 @@ function RecordTab() {
   const [currentBatch, setCurrentBatch] = useState<string | null>(null)
   const [statusParam, setStatusParam] = useUrlState('status', '')
   const filterStatus: '' | RecordStatus = statusParam in RECORD_STATUS_BADGE ? statusParam as RecordStatus : ''
-  // Cluster games by recorder within each container (same person adjacent),
-  // matching how Extract Chat groups them. Default on; toggle back to date order.
-  const [groupParam, setGroupParam] = useUrlState('group', '1')
-  const groupByRecorder = groupParam !== '0'
   const setParams = useSetUrlParams()
   const filtersOn = filterCategory !== 'puzzle' || batchParam !== '' || filterStatus !== ''
   const clearFilters = () => setParams({ cat: null, batch: null, status: null })
@@ -1409,17 +1415,17 @@ function RecordTab() {
     return list.filter(d => recordStatus(d, ytMap).status === filterStatus)
   }, [filterStatus, ytMap])
 
-  // Group adjacent by recorder (unassigned last). Stable sort keeps the
-  // server's date order within each recorder group.
+  // Always grouped by recorder (unassigned last), the same way Extract Chat groups
+  // them; there is no toggle any more. Stable sort keeps the server's date order
+  // within each recorder.
   const arrange = useCallback((list: ShortListItem[]) => {
     const filtered = filterByStatus(list)
-    if (!groupByRecorder) return filtered
     return [...filtered].sort((a, b) => {
       const ra = recorderOf(a).toLowerCase() || '￿'
       const rb = recorderOf(b).toLowerCase() || '￿'
       return ra < rb ? -1 : ra > rb ? 1 : 0
     })
-  }, [filterByStatus, groupByRecorder])
+  }, [filterByStatus])
 
   const shown5 = useMemo(() => arrange(list5), [arrange, list5])
   const shown20 = useMemo(() => arrange(list20), [arrange, list20])
@@ -1509,11 +1515,6 @@ function RecordTab() {
               value: k, label: RECORD_STATUS_BADGE[k].label, count: statusCounts[k],
             })),
           ]} />
-        <button type="button" className="btn btn-sm" aria-pressed={groupByRecorder}
-          title={groupByRecorder ? 'Grouped by recorder. Click for date order.' : 'Date order. Click to group by recorder.'}
-          onClick={() => setGroupParam(groupByRecorder ? '0' : '1')}>
-          Group by recorder
-        </button>
         <FilterSpacer />
         <ClearFilters visible={filtersOn} onClear={clearFilters} />
         <FilterCount shown={totalShown} total={data.length} loading={loading && data.length === 0} />

@@ -7,10 +7,12 @@ import path from 'node:path'
 const src = fs.readFileSync(path.join(process.cwd(), 'app/(manager)/youtube/page.tsx'), 'utf8')
 
 describe('YouTube / Record page', () => {
-  it('takes record status and final conclusion colours from lib/conclusion-badge', () => {
+  it('takes record status colours from lib/conclusion-badge, and shows no conclusion badges', () => {
     expect(src).toMatch(/RECORD_STATUS_BADGE\[status\]/)
-    expect(src).toMatch(/finalConclusionStyle\(item\.final_conclusion\)/)
     expect(src).not.toMatch(/FINAL_CONC_STYLES|RECORD_STATUS_STYLES/)
+    // Every game in a container is List_Idea + Insight/Priority IV, so the badges said nothing.
+    expect(src).not.toMatch(/finalConclusionStyle\(item\.final_conclusion\)/)
+    expect(src).toMatch(/<GameIcon src=\{item\.icon_url\} os=\{item\.os\}/)
   })
 
   it('opens every page modal through <Modal>, with no letter "x" close buttons', () => {
@@ -25,7 +27,9 @@ describe('YouTube / Record page', () => {
   })
 
   it('keeps Record filters in the URL and still scopes non-managers to their own rows', () => {
-    for (const key of ['cat', 'batch', 'status', 'group']) expect(src).toContain(`useUrlState('${key}'`)
+    for (const key of ['cat', 'batch', 'status']) expect(src).toContain(`useUrlState('${key}'`)
+    // Grouping by recorder is always on now: no toggle, no URL key.
+    expect(src).not.toContain("useUrlState('group'")
     expect(src).toMatch(/if \(!isManager && userName\) params\.set\('recorder', userName\)/)
   })
 

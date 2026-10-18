@@ -50,3 +50,18 @@
 }
 .rec-add-row:last-child { border-bottom: none; }
 .rec-add-row:hover { background: var(--surface-2); }
+
+/* YouTube year/month filter: its own line at the top of the filter bar, so years
+   and months can grow without breaking the row of other filters. */
+.tf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex-basis: 100%; }
+.tf-item { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.tf-exp { width: 20px; height: 32px; border: 0; background: none; color: var(--faint); cursor: pointer; display: grid; place-items: center; }
+.tf-exp svg { transition: transform .15s; }
+.tf-exp[aria-expanded="true"] svg { transform: rotate(90deg); }
+.tf-year { height: 32px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); font-family: var(--font); font-size: var(--fs-13); font-weight: 600; color: var(--text); cursor: pointer; }
+.tf-year:hover { border-color: var(--accent-border); }
+.tf-year.on { background: var(--accent-weak); border-color: var(--accent-border); color: var(--accent-strong); }
+.tf-months { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; background: var(--surface-3); border: 1px solid var(--border); border-radius: 8px; }
+.tf-month { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: none; font-family: var(--font); font-size: var(--fs-12); font-weight: 600; color: var(--muted); cursor: pointer; }
+.tf-month:hover { color: var(--text); }
+.tf-month.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }

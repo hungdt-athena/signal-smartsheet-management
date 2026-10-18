@@ -170,8 +170,8 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
               <th style={{ width: 160 }}>Value</th>
               {!isHandover && <th className="tnum" style={{ width: 70 }}>Targets</th>}
               <th className="tnum" style={{ width: 70 }}>Games</th>
-              {isHandover && <th style={{ width: 200 }}>Status</th>}
-              <th style={{ width: 90 }} />
+              {isHandover && <th style={{ width: 120 }}>Status</th>}
+              <th aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
@@ -195,20 +195,24 @@ export function OperationHistory({ kind, category, reloadToken, onChanged }: {
                   <td className="tnum" style={{ fontWeight: 600 }}>{r.game_count}</td>
                   {isHandover && (
                     <td>
-                      <span className={`badge ${STATUS_BADGE[r.status] ?? 'neutral'}`}>{r.status}</span>
+                      <span className={`badge ${STATUS_BADGE[r.status] ?? 'neutral'}`}>{r.status.charAt(0).toUpperCase() + r.status.slice(1)}</span>
+                      {isOwn && <span className="ophist-own">your request</span>}
+                    </td>
+                  )}
+                  {/* Status and actions live in separate cells: in one cell the badge and the
+                      two buttons wrapped onto each other. */}
+                  <td>
+                    <span className="ophist-acts">
                       {canResolve && (
-                        <span className="ophist-acts">
+                        <>
                           <button className="btn btn-sm btn-danger" disabled={busyId === r.id}
                             onClick={() => setConfirm({ run: r, action: 'reject' })}>Reject</button>
                           <button className="btn btn-sm btn-primary" disabled={busyId === r.id}
                             onClick={() => setConfirm({ run: r, action: 'approve' })}>Approve</button>
-                        </span>
+                        </>
                       )}
-                      {isOwn && <span className="ophist-own">your request</span>}
-                    </td>
-                  )}
-                  <td style={{ textAlign: 'right' }}>
-                    <button className="btn btn-sm" onClick={() => setDetail(r)}>Details</button>
+                      <button className="btn btn-sm" onClick={() => setDetail(r)}>Details</button>
+                    </span>
                   </td>
                 </tr>
               )

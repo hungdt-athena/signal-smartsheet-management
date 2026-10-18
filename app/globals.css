@@ -3189,3 +3189,12 @@ input:checked + .slider:before {
 
   .filter-row.sl { gap: 8px; }
 }
+
+/* ===== Game icon with platform mark (components/ui/GameIcon.tsx) ===== */
+.game-icon { position: relative; display: inline-block; flex-shrink: 0; }
+.game-icon img, .game-icon-empty { width: 100%; height: 100%; border-radius: 22%; display: block; object-fit: cover; background: var(--surface-3); }
+.game-icon-plat {
+  position: absolute; right: -4px; bottom: -4px; border-radius: 50%;
+  background: var(--surface); box-shadow: 0 0 0 1px var(--border), var(--shadow-sm);
+  display: grid; place-items: center;
+}
