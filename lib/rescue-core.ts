@@ -54,7 +54,14 @@ export async function scanRoster(opts: { category: string; config: RescueConfig;
                  AND (SELECT d FROM today) - ge.assigned_date > ${staleDays}
                  AND ge.game_id NOT IN (SELECT game_id FROM cooled)
                  ${inRange(opts.range)}
-             )::int AS movable
+             )::int AS movable,
+             -- Whole backlog, never narrowed: movable stale games anywhere, cool-down
+             -- still excluded. Same predicate as `movable` minus the range.
+             count(*) FILTER (
+               WHERE ge.assigned_date IS NOT NULL
+                 AND (SELECT d FROM today) - ge.assigned_date > ${staleDays}
+                 AND ge.game_id NOT IN (SELECT game_id FROM cooled)
+             )::int AS movable_all
       FROM game_evaluations ge
       WHERE ge.category_group = ${opts.category}
         AND ge.initial_conclusion IS NULL
@@ -74,6 +81,7 @@ export async function scanRoster(opts: { category: string; config: RescueConfig;
            COALESCE(p.stale, 0) AS stale,
            COALESCE(p.stale_all, 0) AS stale_all,
            COALESCE(p.movable, 0) AS movable,
+           COALESCE(p.movable_all, 0) AS movable_all,
            COALESCE(a.evaluated_recent, 0) AS evaluated_recent
     FROM evaluator_roster r
     LEFT JOIN pend p ON p.name = r.name
@@ -89,6 +97,7 @@ export async function scanRoster(opts: { category: string; config: RescueConfig;
     stale: number
     stale_all: number
     movable: number
+    movable_all: number
     evaluated_recent: number
   }[]
 
@@ -99,8 +108,9 @@ export async function scanRoster(opts: { category: string; config: RescueConfig;
     available: !!r.today_available,
     pending: r.pending,
     stale: r.stale,
-    staleAll: r.stale_all ?? r.stale,
+    staleAll: r.stale_all,
     movable: r.movable,
+    movableAll: r.movable_all,
     evaluatedRecent: r.evaluated_recent,
   }))
 }

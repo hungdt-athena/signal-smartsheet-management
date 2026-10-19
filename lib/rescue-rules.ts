@@ -5,6 +5,8 @@
 //
 // Role rules (knobs documented in lib/rescue-config.ts):
 //   SOURCE   pending >= sourceMinBacklog AND movable > 0
+//            (inside a range, a person who would be a source over the whole backlog
+//            via movableAll is NEUTRAL, never a receiver)
 //   RECEIVER (staleAll ?? stale) <= receiverMaxStale AND evaluatedRecent > 0 AND available
 //   NEUTRAL  everyone else — untouched by the run, with the failing reason shown.
 // A source needs movable > 0 (hence stale > 0) and a receiver needs
@@ -32,6 +34,11 @@ export interface RescueStats {
   // everything on the desk, or a person whose stale pile sits in another batch looks
   // clean here and is handed more games.
   staleAll?: number
+  // The person's movable stale games over the WHOLE backlog (cool-down excluded, no
+  // range clause). Equal to `movable` when no range is selected. It tells a person who
+  // is a source over the whole backlog but holds nothing inside the range: they must
+  // not be handed other people's games while their own stale pile waits.
+  movableAll?: number
   evaluatedRecent: number // games concluded within activeDays
 }
 
@@ -50,6 +57,12 @@ export function classifyRoster(stats: RescueStats[], cfg: RescueConfig): RescueR
       const note = cooling > 0 ? `, ${cooling} in cool-down` : ''
       const scoped = s.staleAll !== undefined && s.staleAll !== s.stale ? ' in range' : ''
       return { ...s, role: 'source', pull: s.movable, reason: `${s.pending} pending, ${s.stale} stale${scoped}${note}` }
+    }
+    // A source over the WHOLE backlog that holds nothing inside this range: they are
+    // not a source here, and must not become a receiver either. With no range this can
+    // never fire (movableAll == movable, so they are already a source above).
+    if (s.pending >= cfg.sourceMinBacklog && (s.movableAll ?? 0) > 0) {
+      return { ...s, role: 'neutral', pull: 0, reason: `${s.movableAll} stale games outside this range to clear first` }
     }
     // Then the receiver gate. Every condition must hold, and the FIRST failure is the
     // reason shown, so the panel always explains its own verdict.

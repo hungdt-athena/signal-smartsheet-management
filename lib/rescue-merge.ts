@@ -10,6 +10,8 @@ export function mergeRosters(perBucket: RescueStats[][]): RescueStats[] {
       // staleAll is read BEFORE `stale` is added to: when the first row carried no
       // staleAll, its `stale` is the whole-stock number.
       cur.staleAll = (cur.staleAll ?? cur.stale) + (r.staleAll ?? r.stale)
+      // Same for movableAll against `movable`.
+      cur.movableAll = (cur.movableAll ?? cur.movable) + (r.movableAll ?? r.movable)
       cur.pending += r.pending
       cur.stale += r.stale
       cur.movable += r.movable

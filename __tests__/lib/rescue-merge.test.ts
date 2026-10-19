@@ -20,4 +20,16 @@ describe('mergeRosters', () => {
     const [a] = mergeRosters([[s('A', { stale: 3 })], [s('A', { stale: 2, staleAll: 6 })]])
     expect(a.staleAll).toBe(9)
   })
+
+  it('adds movableAll across buckets and falls back to movable when it is missing', () => {
+    const [a] = mergeRosters([
+      [s('A', { stale: 3, movable: 2, movableAll: 5 })],
+      [s('A', { stale: 1, movable: 1 })],
+    ])
+    expect(a.movableAll).toBe(6)
+    expect(a.movable).toBe(3)
+    // first row without movableAll: its `movable` is the whole-stock number
+    const [b] = mergeRosters([[s('B', { movable: 4 })], [s('B', { movable: 1, movableAll: 9 })]])
+    expect(b.movableAll).toBe(13)
+  })
 })

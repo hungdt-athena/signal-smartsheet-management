@@ -29,6 +29,7 @@ describe('lib/rescue-core range', () => {
     expect(sqlText()).not.toMatch(/assigned_date >=/)
     expect(sqlText()).not.toMatch(/assigned_date </)
     expect(sqlText()).toContain('stale_all')
+    expect(sqlText()).toContain('movable_all')
   })
 
   it('scanRoster bounds stale and movable by from inclusive and to exclusive', async () => {
@@ -44,13 +45,30 @@ describe('lib/rescue-core range', () => {
     expect(sqlText()).not.toMatch(/assigned_date < /)
   })
 
-  it('maps stale_all, and falls back to stale when the column is absent', async () => {
+  it('maps stale_all', async () => {
     sqlMock.mockImplementation((strings: unknown) =>
       Promise.resolve(Array.isArray(strings) && (strings as string[]).join(' ').includes('FROM evaluator_roster')
         ? [{ name: 'A', game_platform: null, weight: null, today_available: true, pending: 9, stale: 2, stale_all: 7, movable: 2, evaluated_recent: 1 }]
         : []))
     const [row] = await scanRoster({ category: 'puzzle', config: DEFAULT_RESCUE_CONFIG, range: { from: '2026-10-06', to: '2026-10-13' } })
     expect(row).toMatchObject({ stale: 2, staleAll: 7, movable: 2 })
+  })
+
+  it('movable_all never carries the range bound: one bound per narrowed column, none extra', async () => {
+    await scanRoster({ category: 'puzzle', config: DEFAULT_RESCUE_CONFIG, range: { from: '2026-10-06', to: '2026-10-13' } })
+    // stale and movable are narrowed, stale_all and movable_all are not.
+    expect(sqlValues().filter(v => v === '2026-10-06')).toHaveLength(2)
+    expect(sqlValues().filter(v => v === '2026-10-13')).toHaveLength(2)
+    expect(sqlText()).toContain('AS movable_all')
+  })
+
+  it('maps movable_all', async () => {
+    sqlMock.mockImplementation((strings: unknown) =>
+      Promise.resolve(Array.isArray(strings) && (strings as string[]).join(' ').includes('FROM evaluator_roster')
+        ? [{ name: 'A', game_platform: null, weight: null, today_available: true, pending: 9, stale: 2, stale_all: 7, movable: 2, movable_all: 6, evaluated_recent: 1 }]
+        : []))
+    const [a] = await scanRoster({ category: 'puzzle', config: DEFAULT_RESCUE_CONFIG, range: { from: '2026-10-06', to: '2026-10-13' } })
+    expect(a).toMatchObject({ movable: 2, movableAll: 6 })
   })
 
   it('selectStaleGames applies the same bounds', async () => {

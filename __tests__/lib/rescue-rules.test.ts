@@ -81,6 +81,28 @@ describe('lib/rescue-rules classifyRoster', () => {
     expect(r.reason).toContain('30 stale in range')
   })
 
+  it('a whole-backlog source with nothing in this range is not made a receiver', () => {
+    // In range: 0 stale. Whole backlog: 12 movable stale games. A lenient allowance
+    // keeps the receiver gate itself open, so only the new rule can stop this.
+    const lenient = { ...cfg, receiverMaxStale: 20 }
+    const [r] = classifyRoster([stat('Khoa', { pending: 40, stale: 0, staleAll: 12, movable: 0, movableAll: 12, evaluatedRecent: 9 })], lenient)
+    expect(r.role).toBe('neutral')
+    expect(r.pull).toBe(0)
+    expect(r.reason).toBe('12 stale games outside this range to clear first')
+  })
+
+  it('movableAll alone changes nothing for someone below the source minimum', () => {
+    const lenient = { ...cfg, receiverMaxStale: 20 }
+    const [r] = classifyRoster([stat('Tu', { pending: 5, stale: 0, staleAll: 3, movable: 0, movableAll: 3, evaluatedRecent: 9 })], lenient)
+    expect(r.role).toBe('receiver')
+  })
+
+  it('without movableAll nothing changes for a clean receiver under an allowance', () => {
+    const lenient = { ...cfg, receiverMaxStale: 20 }
+    const [r] = classifyRoster([stat('Khoa', { pending: 40, stale: 0, staleAll: 12, movable: 0, evaluatedRecent: 9 })], lenient)
+    expect(r.role).toBe('receiver')
+  })
+
   it('without staleAll nothing changes: stale is the whole-stock number', () => {
     const [r] = classifyRoster([stat('Lan', { pending: 18, stale: 11, movable: 4, evaluatedRecent: 9 })], cfg)
     expect(r.reason).toBe('18 pending, 11 stale, 7 in cool-down')
