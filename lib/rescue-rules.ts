@@ -5,7 +5,7 @@
 //
 // Role rules (knobs documented in lib/rescue-config.ts):
 //   SOURCE   pending >= sourceMinBacklog AND movable > 0
-//   RECEIVER stale <= receiverMaxStale AND evaluatedRecent > 0 AND available
+//   RECEIVER (staleAll ?? stale) <= receiverMaxStale AND evaluatedRecent > 0 AND available
 //   NEUTRAL  everyone else — untouched by the run, with the failing reason shown.
 // A source needs movable > 0 (hence stale > 0) and a receiver needs
 // stale <= receiverMaxStale, so on the default config (0) the two sets cannot overlap.
@@ -27,6 +27,11 @@ export interface RescueStats {
   stale: number // of those, past staleDays with this holder — cool-down INCLUDED,
   //                because a game in cool-down still sits on their shelf
   movable: number // stale MINUS games still inside their cool-down window
+  // The person's stale count over the WHOLE backlog. Only set when a range narrows
+  // `stale` / `movable` to some assigned-date window: the receiver gate must still see
+  // everything on the desk, or a person whose stale pile sits in another batch looks
+  // clean here and is handed more games.
+  staleAll?: number
   evaluatedRecent: number // games concluded within activeDays
 }
 
@@ -43,13 +48,15 @@ export function classifyRoster(stats: RescueStats[], cfg: RescueConfig): RescueR
     if (s.pending >= cfg.sourceMinBacklog && s.movable > 0) {
       const cooling = s.stale - s.movable
       const note = cooling > 0 ? `, ${cooling} in cool-down` : ''
-      return { ...s, role: 'source', pull: s.movable, reason: `${s.pending} pending, ${s.stale} stale${note}` }
+      const scoped = s.staleAll !== undefined && s.staleAll !== s.stale ? ' in range' : ''
+      return { ...s, role: 'source', pull: s.movable, reason: `${s.pending} pending, ${s.stale} stale${scoped}${note}` }
     }
     // Then the receiver gate. Every condition must hold, and the FIRST failure is the
     // reason shown, so the panel always explains its own verdict.
-    if (s.stale > cfg.receiverMaxStale) {
+    const ownStale = s.staleAll ?? s.stale
+    if (ownStale > cfg.receiverMaxStale) {
       const limit = cfg.receiverMaxStale === 0 ? 'own shelf not clean' : `over the ${cfg.receiverMaxStale} stale allowance`
-      return { ...s, role: 'neutral', pull: 0, reason: `${s.stale} stale of their own — ${limit}` }
+      return { ...s, role: 'neutral', pull: 0, reason: `${ownStale} stale of their own — ${limit}` }
     }
     if (s.evaluatedRecent <= 0) {
       return { ...s, role: 'neutral', pull: 0, reason: `nothing concluded in ${cfg.activeDays}d — low backlog is not speed` }

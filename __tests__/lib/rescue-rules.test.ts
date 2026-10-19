@@ -66,6 +66,25 @@ describe('lib/rescue-rules classifyRoster', () => {
     expect(r.role).toBe('neutral')
     expect(r.reason).toContain('own shelf not clean')
   })
+
+  it('does not let a range hide a stale pile elsewhere: receiver gate uses staleAll', () => {
+    // 0 stale inside the selected range, 40 stale outside it.
+    const [r] = classifyRoster([stat('Mai', { pending: 60, stale: 0, staleAll: 40, movable: 0, evaluatedRecent: 9 })], cfg)
+    expect(r.role).toBe('neutral')
+    expect(r.reason).toContain('40 stale of their own')
+  })
+
+  it('a range-narrowed source still pulls only the in-range games and says so', () => {
+    const [r] = classifyRoster([stat('Binh', { pending: 50, stale: 30, staleAll: 45, movable: 30, evaluatedRecent: 4 })], cfg)
+    expect(r.role).toBe('source')
+    expect(r.pull).toBe(30)
+    expect(r.reason).toContain('30 stale in range')
+  })
+
+  it('without staleAll nothing changes: stale is the whole-stock number', () => {
+    const [r] = classifyRoster([stat('Lan', { pending: 18, stale: 11, movable: 4, evaluatedRecent: 9 })], cfg)
+    expect(r.reason).toBe('18 pending, 11 stale, 7 in cool-down')
+  })
 })
 
 describe('lib/rescue-rules waterfillQuotas', () => {
