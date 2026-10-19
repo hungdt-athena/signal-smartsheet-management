@@ -24,7 +24,9 @@ interface ScanRow {
   today_available?: boolean
   pending?: number
   stale?: number
+  stale_all?: number
   movable?: number
+  movable_all?: number
   evaluated_recent?: number
 }
 
@@ -38,7 +40,9 @@ function setupSql(opts: { scan: ScanRow[]; stale?: Record<string, Record<string,
     today_available: r.today_available ?? true,
     pending: r.pending ?? 0,
     stale: r.stale ?? 0,
+    stale_all: r.stale_all ?? r.stale ?? 0,
     movable: r.movable ?? 0,
+    movable_all: r.movable_all ?? r.movable ?? 0,
     evaluated_recent: r.evaluated_recent ?? 0,
   }))
   sqlMock.mockReset()
@@ -179,7 +183,7 @@ describe('POST /api/operations/rescue', () => {
   })
 
   it('commit moves the games and logs to both audit trails', async () => {
-    setupSql({ scan: ROSTER, stale: { Hung: HUNG_GAMES } })
+    setupSql({ scan: ROSTER.map(r => (r.name === 'Hung' ? { ...r, stale_all: 30 } : r)), stale: { Hung: HUNG_GAMES } })
     const json = await (await post({
       action: 'commit', category: 'puzzle', sources: ['Hung'], receivers: ['Minh'],
     })).json()
@@ -195,6 +199,10 @@ describe('POST /api/operations/rescue', () => {
     expect(kinds.length).toBeGreaterThan(0)
     const actions = sqlMock.mock.calls.flatMap(c => c.slice(1)).filter(v => v === 'reassign')
     expect(actions.length).toBeGreaterThan(0)
+    // the audit row keeps both the in-range and the whole-backlog stale counts
+    expect(bindValues()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source_stale: 21, source_stale_all: 30 }),
+    ]))
   })
 
   it('commit counts only games the UPDATE moved', async () => {

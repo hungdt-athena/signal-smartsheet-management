@@ -255,6 +255,7 @@ export async function POST(req: NextRequest) {
           // reconstruct the backlog they had at the time.
           source_pending: stats?.pending ?? null,
           source_stale: stats?.stale ?? null,
+          source_stale_all: stats?.staleAll ?? null,
           selected_evaluators: Object.keys(s.per_evaluator),
         },
         snapshot,
