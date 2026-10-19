@@ -23,6 +23,17 @@ describe('lib/rescue-range parseAssignedRange', () => {
     expect(parseAssignedRange('2026-10-06', 'soon').ok).toBe(false)
   })
 
+  it('rejects a non-string side instead of treating it as absent', () => {
+    expect(parseAssignedRange(['2026-10-06', '2026-10-07'], null).ok).toBe(false)
+    expect(parseAssignedRange(20261006, null).ok).toBe(false)
+    expect(parseAssignedRange(null, {}).ok).toBe(false)
+  })
+
+  it('rejects a one-sided malformed day', () => {
+    expect(parseAssignedRange('soon', null).ok).toBe(false)
+    expect(parseAssignedRange(null, '2026-13-01').ok).toBe(false)
+  })
+
   it('rejects an empty or inverted range', () => {
     expect(parseAssignedRange('2026-10-13', '2026-10-13').ok).toBe(false)
     expect(parseAssignedRange('2026-10-13', '2026-10-06').ok).toBe(false)

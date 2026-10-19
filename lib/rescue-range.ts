@@ -28,6 +28,12 @@ export function parseAssignedRange(
   from: unknown,
   to: unknown,
 ): { ok: true; range: AssignedRange | null } | { ok: false; error: string } {
+  // Raw request input can be an array (repeated query param), a number or an object.
+  // Those are not "absent", so they are rejected rather than read as no range.
+  const notText = (v: unknown) => v !== undefined && v !== null && typeof v !== 'string'
+  if (notText(from) || notText(to)) {
+    return { ok: false, error: 'assigned range must be YYYY-MM-DD days' }
+  }
   const f = clean(from)
   const t = clean(to)
   if (f === null && t === null) return { ok: true, range: null }
