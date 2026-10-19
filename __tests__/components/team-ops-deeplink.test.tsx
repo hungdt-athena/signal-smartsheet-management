@@ -182,6 +182,50 @@ describe('team-ops deep links', () => {
     expect(scanBody()).toHaveProperty('config.staleDays', 30)
   })
 
+  // A range is a view selector like the genre: it picks which games the scan is about
+  // and is never written to app_config, so it may ride in a URL.
+  const RANGE_URL = 'tab=rescue&cat=puzzle&assignedFrom=2026-10-06&assignedTo=2026-10-13'
+  const rescueGets = () =>
+    (global.fetch as jest.Mock).mock.calls.map(([u]) => String(u)).filter(u => u.startsWith('/api/operations/rescue?'))
+
+  it('opens Rescue on the range in the URL and asks the API for it', async () => {
+    params = new URLSearchParams(RANGE_URL)
+    render(<TeamOpsPage />)
+    // `to` is exclusive, so the chip names the last INCLUDED day: 12 Oct
+    await screen.findByText('Only games assigned 06 Oct to 12 Oct')
+    const url = rescueGets()[0]
+    expect(url).toContain('assignedFrom=2026-10-06')
+    expect(url).toContain('assignedTo=2026-10-13')
+  })
+
+  it('sends the range with a scan, and "Show all backlog" drops it for good', async () => {
+    params = new URLSearchParams(RANGE_URL)
+    render(<TeamOpsPage />)
+    await screen.findByText(/Only games assigned/)
+    // the button reads "Scanning…" until the initial load lands
+    fireEvent.click(await screen.findByRole('button', { name: /^Scan$/i }))
+    await waitFor(() => expect(scanBody()).toBeTruthy())
+    expect(scanBody()).toHaveProperty('range', { from: '2026-10-06', to: '2026-10-13' })
+
+    fireEvent.click(screen.getByText('Show all backlog'))
+    await waitFor(() => expect(rescueGets().at(-1)).not.toContain('assignedFrom'))
+    expect(screen.queryByText(/Only games assigned/)).toBeNull()
+
+    ;(global.fetch as jest.Mock).mockClear()
+    fireEvent.click(await screen.findByRole('button', { name: /^Scan$/i }))
+    await waitFor(() => expect(scanBody()).toBeTruthy())
+    expect(scanBody().range).toBeNull()
+  })
+
+  it('ignores a malformed range instead of scanning something else', async () => {
+    params = new URLSearchParams('tab=rescue&cat=puzzle&assignedFrom=nope')
+    render(<TeamOpsPage />)
+    await waitFor(() => expect(rescueGets().length).toBeGreaterThan(0))
+    expect(rescueGets()[0]).not.toContain('assignedFrom')
+    expect(rescueGets()[0]).not.toContain('assignedTo')
+    expect(screen.queryByText(/Only games assigned/)).toBeNull()
+  })
+
   it('switching category group writes ?cat= and drops ?from= and ?flash=', async () => {
     params = new URLSearchParams('tab=reassign&from=PhuongNT1&flash=X')
     // The URL is written with history.replaceState from the live location.

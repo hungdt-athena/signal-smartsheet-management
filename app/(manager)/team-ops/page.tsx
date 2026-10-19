@@ -10,6 +10,7 @@ import { HandoverPanel } from '@/components/HandoverPanel'
 import { ReportView } from '@/components/report/ReportView'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { isBucket, type Bucket } from '@/lib/buckets'
+import { parseAssignedRange } from '@/lib/rescue-range'
 import { useSetUrlParams } from '@/lib/use-url-state'
 
 type Tab = 'assign' | 'reassign' | 'rescue' | 'handover' | 'performance'
@@ -78,6 +79,10 @@ function TeamOpsInner() {
   // rather than opening on a genre nobody asked for.
   const catParam = searchParams.get('cat')
   const category: Bucket = isBucket(catParam) ? catParam : 'puzzle'
+  // Same reasoning as the category: a range picks which games the screen is about and
+  // is never saved, so it may ride in the URL. A malformed one is dropped, not repaired.
+  const parsedRange = parseAssignedRange(searchParams.get('assignedFrom'), searchParams.get('assignedTo'))
+  const initialRange = parsedRange.ok ? parsedRange.range : null
   // Switching genre also drops ?from= and ?flash=: both named people in the genre
   // the link was about, and would preselect or ring them in the new one.
   const setCategory = useCallback((b: Bucket) => {
@@ -96,7 +101,7 @@ function TeamOpsInner() {
       {active === 'reassign' && (
         <ReassignPanel initialFrom={fromParam} category={category} onCategoryChange={setCategory} />
       )}
-      {active === 'rescue' && <RescuePanel flash={flash} category={category} onCategoryChange={setCategory} />}
+      {active === 'rescue' && <RescuePanel flash={flash} category={category} onCategoryChange={setCategory} initialRange={initialRange} />}
       {active === 'handover' && <HandoverPanel category={category} onCategoryChange={setCategory} />}
     </div>
   )

@@ -28,6 +28,7 @@ import { EmptyState, ErrorState } from '@/components/ui/States'
 // The "?" popover used across the Report tab — same idiom, same CSS (.rp-qtip).
 import { InfoTip } from '@/components/report/charts'
 import { DEFAULT_RESCUE_CONFIG, type RescueConfig } from '@/lib/rescue-config'
+import { rangeKey, type AssignedRange } from '@/lib/rescue-range'
 
 interface ScanRow {
   name: string
@@ -129,10 +130,15 @@ const RESULT_MSG: Record<NonNullable<RescueResult['reason']>, string> = {
 // written back to app_config — so unlike a threshold it is safe in a URL. Without
 // it a reader on Arcade landed on a puzzle scan where none of the flashed names
 // appear and none of the numbers in the sentence exist.
-export function RescuePanel({ flash = [], category, onCategoryChange }: {
+//
+// initialRange: the assigned-date range the Report's number was counted over, so the
+// scan reads the same games. Same kind of thing as the category: a view selector, never
+// saved and never part of the thresholds. "Show all backlog" drops it.
+export function RescuePanel({ flash = [], category, onCategoryChange, initialRange = null }: {
   flash?: string[]
   category: Bucket
   onCategoryChange: (b: Bucket) => void
+  initialRange?: AssignedRange | null
 }) {
   const { data: session, status } = useSession()
   const isEvaluator = session?.user?.role === 'evaluator'
@@ -158,13 +164,29 @@ export function RescuePanel({ flash = [], category, onCategoryChange }: {
   return (
     <>
       {bucketBar}
-      <RescueRunner flash={flash} category={category} />
+      <RescueRunner flash={flash} category={category} initialRange={initialRange} />
     </>
   )
 }
 
-function RescueRunner({ flash, category }: { flash: string[]; category: Bucket }) {
+// `to` is exclusive, so the last day shown is the day before it.
+function fmtDays(r: AssignedRange): string {
+  const d = (s: string) => new Date(`${s}T00:00:00Z`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' })
+  const last = (s: string) => d(new Date(Date.parse(`${s}T00:00:00Z`) - 864e5).toISOString().slice(0, 10))
+  if (r.from && r.to) return `${d(r.from)} to ${last(r.to)}`
+  if (r.from) return `from ${d(r.from)}`
+  return `before ${d(r.to!)}`
+}
+
+function RescueRunner({ flash, category, initialRange }: { flash: string[]; category: Bucket; initialRange: AssignedRange | null }) {
   const [config, setConfig] = useState<RescueConfig>(DEFAULT_RESCUE_CONFIG)
+  // The range the scan is limited to, or null for the whole backlog. The load effect
+  // reads it through a ref and re-runs on its key, so a new object with the same days
+  // does not refetch.
+  const [range, setRange] = useState<AssignedRange | null>(initialRange)
+  const rKey = rangeKey(range)
+  const rangeRef = useRef(range)
+  rangeRef.current = range
   const [rows, setRows] = useState<ScanRow[] | null>(null)
   const [pickedSources, setPickedSources] = useState<Record<string, boolean>>({})
   const [pickedReceivers, setPickedReceivers] = useState<Record<string, boolean>>({})
@@ -211,7 +233,11 @@ function RescueRunner({ flash, category }: { flash: string[]; category: Bucket }
   useEffect(() => {
     let alive = true
     setRows(null); setResult(null); setLoadError(false); setScanning(true)
-    fetch(`/api/operations/rescue?category=${category}`, { cache: 'no-store' })
+    const qs = new URLSearchParams({ category })
+    const r = rangeRef.current
+    if (r?.from) qs.set('assignedFrom', r.from)
+    if (r?.to) qs.set('assignedTo', r.to)
+    fetch(`/api/operations/rescue?${qs}`, { cache: 'no-store' })
       .then(res => { if (!res.ok) throw new Error(); return res.json() })
       .then(json => {
         if (!alive) return
@@ -221,10 +247,10 @@ function RescueRunner({ flash, category }: { flash: string[]; category: Bucket }
       .catch(() => { if (alive) setLoadError(true) })
       .finally(() => { if (alive) setScanning(false) })
     return () => { alive = false }
-  }, [category, applyRows, loadTick])
+  }, [category, rKey, applyRows, loadTick])
 
   async function post(action: 'scan' | 'preview' | 'commit') {
-    const body = { action, category, config, ...picks() }
+    const body = { action, category, config, range, ...picks() }
     const res = await fetch('/api/operations/rescue', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })
@@ -324,6 +350,12 @@ function RescueRunner({ flash, category }: { flash: string[]; category: Bucket }
   return (
     <>
       <div className="card">
+        {range && (
+          <p className="ops-hint">
+            Only games assigned {fmtDays(range)}
+            <button type="button" className="btn btn-link btn-sm" onClick={() => setRange(null)}>Show all backlog</button>
+          </p>
+        )}
         <div className="ops-knobs">
           {KNOBS.map(k => (
             <div className="field" key={k.key} style={{ width: 178 }}>
