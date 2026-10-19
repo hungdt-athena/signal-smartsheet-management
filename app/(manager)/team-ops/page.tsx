@@ -1,5 +1,5 @@
 'use client'
-import { Suspense, useCallback, useState } from 'react'
+import { Suspense, useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { AssignSetup } from '@/components/AssignSetup'
@@ -10,7 +10,7 @@ import { HandoverPanel } from '@/components/HandoverPanel'
 import { ReportView } from '@/components/report/ReportView'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { isBucket, type Bucket } from '@/lib/buckets'
-import { parseAssignedRange } from '@/lib/rescue-range'
+import { parseAssignedRange, type AssignedRange } from '@/lib/rescue-range'
 import { useSetUrlParams } from '@/lib/use-url-state'
 
 type Tab = 'assign' | 'reassign' | 'rescue' | 'handover' | 'performance'
@@ -80,9 +80,17 @@ function TeamOpsInner() {
   const catParam = searchParams.get('cat')
   const category: Bucket = isBucket(catParam) ? catParam : 'puzzle'
   // Same reasoning as the category: a range picks which games the screen is about and
-  // is never saved, so it may ride in the URL. A malformed one is dropped, not repaired.
+  // is never saved, so it lives in the URL. A malformed one is dropped, not repaired.
   const parsedRange = parseAssignedRange(searchParams.get('assignedFrom'), searchParams.get('assignedTo'))
-  const initialRange = parsedRange.ok ? parsedRange.range : null
+  const rFrom = parsedRange.ok ? parsedRange.range?.from ?? null : null
+  const rTo = parsedRange.ok ? parsedRange.range?.to ?? null : null
+  // Rebuilt only when a day changes, so the panel's load effect does not refire.
+  const range = useMemo<AssignedRange | null>(
+    () => (rFrom || rTo ? { from: rFrom, to: rTo } : null),
+    [rFrom, rTo],
+  )
+  // "Show all backlog" clears it from the URL, so reload and Back agree with the screen.
+  const clearRange = useCallback(() => setUrl({ assignedFrom: null, assignedTo: null }), [setUrl])
   // Switching genre also drops ?from= and ?flash=: both named people in the genre
   // the link was about, and would preselect or ring them in the new one.
   const setCategory = useCallback((b: Bucket) => {
@@ -101,7 +109,7 @@ function TeamOpsInner() {
       {active === 'reassign' && (
         <ReassignPanel initialFrom={fromParam} category={category} onCategoryChange={setCategory} />
       )}
-      {active === 'rescue' && <RescuePanel flash={flash} category={category} onCategoryChange={setCategory} initialRange={initialRange} />}
+      {active === 'rescue' && <RescuePanel flash={flash} category={category} onCategoryChange={setCategory} range={range} onClearRange={clearRange} />}
       {active === 'handover' && <HandoverPanel category={category} onCategoryChange={setCategory} />}
     </div>
   )

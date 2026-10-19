@@ -198,7 +198,7 @@ describe('team-ops deep links', () => {
     expect(url).toContain('assignedTo=2026-10-13')
   })
 
-  it('sends the range with a scan, and "Show all backlog" drops it for good', async () => {
+  it('sends the range with a scan', async () => {
     params = new URLSearchParams(RANGE_URL)
     render(<TeamOpsPage />)
     await screen.findByText(/Only games assigned/)
@@ -206,15 +206,48 @@ describe('team-ops deep links', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Scan$/i }))
     await waitFor(() => expect(scanBody()).toBeTruthy())
     expect(scanBody()).toHaveProperty('range', { from: '2026-10-06', to: '2026-10-13' })
+  })
 
+  it('"Show all backlog" clears the range from the URL, refetches without it, and later scans send none', async () => {
+    params = new URLSearchParams(RANGE_URL)
+    window.history.replaceState(null, '', `/team-ops?${RANGE_URL}`)
+    // The URL is the state: stand in for Next's patched replaceState, which re-renders
+    // useSearchParams with whatever was just written.
+    const realReplace = window.history.replaceState.bind(window.history)
+    let view: ReturnType<typeof render>
+    const hist = jest.spyOn(window.history, 'replaceState').mockImplementation((data, unused, url) => {
+      realReplace(data, unused, url)
+      params = new URLSearchParams(String(url).split('?')[1] ?? '')
+      view.rerender(<TeamOpsPage />)
+    })
+    view = render(<TeamOpsPage />)
+    await screen.findByText(/Only games assigned/)
     fireEvent.click(screen.getByText('Show all backlog'))
+
+    const written = String(hist.mock.calls.at(-1)?.[2])
+    hist.mockRestore()
+    expect(written).not.toContain('assignedFrom')
+    expect(written).not.toContain('assignedTo')
+    expect(written).toContain('tab=rescue')
+
     await waitFor(() => expect(rescueGets().at(-1)).not.toContain('assignedFrom'))
+    expect(rescueGets().at(-1)).not.toContain('assignedTo')
     expect(screen.queryByText(/Only games assigned/)).toBeNull()
 
     ;(global.fetch as jest.Mock).mockClear()
     fireEvent.click(await screen.findByRole('button', { name: /^Scan$/i }))
     await waitFor(() => expect(scanBody()).toBeTruthy())
     expect(scanBody().range).toBeNull()
+  })
+
+  it('follows a range that changes in the URL while Rescue stays open', async () => {
+    params = new URLSearchParams('tab=rescue&cat=puzzle')
+    const view = render(<TeamOpsPage />)
+    await waitFor(() => expect(rescueGets().length).toBe(1))
+    params = new URLSearchParams(RANGE_URL)
+    view.rerender(<TeamOpsPage />)
+    await screen.findByText('Only games assigned 06 Oct to 12 Oct')
+    await waitFor(() => expect(rescueGets().at(-1)).toContain('assignedFrom=2026-10-06'))
   })
 
   it('ignores a malformed range instead of scanning something else', async () => {

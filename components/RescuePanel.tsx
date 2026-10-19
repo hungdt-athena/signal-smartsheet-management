@@ -131,14 +131,16 @@ const RESULT_MSG: Record<NonNullable<RescueResult['reason']>, string> = {
 // it a reader on Arcade landed on a puzzle scan where none of the flashed names
 // appear and none of the numbers in the sentence exist.
 //
-// initialRange: the assigned-date range the Report's number was counted over, so the
-// scan reads the same games. Same kind of thing as the category: a view selector, never
-// saved and never part of the thresholds. "Show all backlog" drops it.
-export function RescuePanel({ flash = [], category, onCategoryChange, initialRange = null }: {
+// range: the assigned-date range the Report's number was counted over, so the scan reads
+// the same games. Same kind of thing as the category: a view selector kept in the URL
+// by the page, never saved and never part of the thresholds. onClearRange ("Show all
+// backlog") removes it from the URL.
+export function RescuePanel({ flash = [], category, onCategoryChange, range = null, onClearRange }: {
   flash?: string[]
   category: Bucket
   onCategoryChange: (b: Bucket) => void
-  initialRange?: AssignedRange | null
+  range?: AssignedRange | null
+  onClearRange: () => void
 }) {
   const { data: session, status } = useSession()
   const isEvaluator = session?.user?.role === 'evaluator'
@@ -164,7 +166,7 @@ export function RescuePanel({ flash = [], category, onCategoryChange, initialRan
   return (
     <>
       {bucketBar}
-      <RescueRunner flash={flash} category={category} initialRange={initialRange} />
+      <RescueRunner flash={flash} category={category} range={range} onClearRange={onClearRange} />
     </>
   )
 }
@@ -178,12 +180,13 @@ function fmtDays(r: AssignedRange): string {
   return `before ${d(r.to!)}`
 }
 
-function RescueRunner({ flash, category, initialRange }: { flash: string[]; category: Bucket; initialRange: AssignedRange | null }) {
+function RescueRunner({ flash, category, range, onClearRange }: {
+  flash: string[]; category: Bucket; range: AssignedRange | null; onClearRange: () => void
+}) {
   const [config, setConfig] = useState<RescueConfig>(DEFAULT_RESCUE_CONFIG)
   // The range the scan is limited to, or null for the whole backlog. The load effect
   // reads it through a ref and re-runs on its key, so a new object with the same days
   // does not refetch.
-  const [range, setRange] = useState<AssignedRange | null>(initialRange)
   const rKey = rangeKey(range)
   const rangeRef = useRef(range)
   rangeRef.current = range
@@ -353,7 +356,7 @@ function RescueRunner({ flash, category, initialRange }: { flash: string[]; cate
         {range && (
           <p className="ops-hint">
             Only games assigned {fmtDays(range)}
-            <button type="button" className="btn btn-link btn-sm" onClick={() => setRange(null)}>Show all backlog</button>
+            <button type="button" className="btn btn-link btn-sm" onClick={onClearRange}>Show all backlog</button>
           </p>
         )}
         <div className="ops-knobs">
