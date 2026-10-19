@@ -56,7 +56,7 @@ export async function scanRoster(opts: { category: string; config: RescueConfig;
                  ${inRange(opts.range)}
              )::int AS movable,
              -- Whole backlog, never narrowed: movable stale games anywhere, cool-down
-             -- still excluded. Same predicate as `movable` minus the range.
+             -- still excluded. Same predicate as movable, minus the range.
              count(*) FILTER (
                WHERE ge.assigned_date IS NOT NULL
                  AND (SELECT d FROM today) - ge.assigned_date > ${staleDays}
