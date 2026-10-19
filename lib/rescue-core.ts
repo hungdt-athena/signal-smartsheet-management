@@ -10,11 +10,19 @@ import { sql } from '@/lib/db'
 import type { Candidate } from '@/lib/reassign-core'
 import type { RescueConfig } from '@/lib/rescue-config'
 import type { RescueStats } from '@/lib/rescue-rules'
+import type { AssignedRange } from '@/lib/rescue-range'
+
+// The selected assigned-date window as an AND-able fragment. `to` is exclusive: the
+// game assigned ON the day the next batch starts belongs to that next batch.
+function inRange(range: AssignedRange | null | undefined) {
+  return sql`${range?.from ? sql`AND ge.assigned_date >= ${range.from}::date` : sql``}
+             ${range?.to ? sql`AND ge.assigned_date < ${range.to}::date` : sql``}`
+}
 
 // One pass over the bucket: pending / stale / movable / recent-activity per roster
 // member. LEFT JOINed onto the roster so someone holding nothing still appears — as a
 // receiver candidate, or as neutral with the reason why not.
-export async function scanRoster(opts: { category: string; config: RescueConfig }): Promise<RescueStats[]> {
+export async function scanRoster(opts: { category: string; config: RescueConfig; range?: AssignedRange | null }): Promise<RescueStats[]> {
   const { staleDays, cooldownDays, activeDays } = opts.config
   const rows = (await sql`
     WITH today AS (SELECT (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS d),
@@ -34,11 +42,18 @@ export async function scanRoster(opts: { category: string; config: RescueConfig 
              count(*) FILTER (
                WHERE ge.assigned_date IS NOT NULL
                  AND (SELECT d FROM today) - ge.assigned_date > ${staleDays}
+                 ${inRange(opts.range)}
              )::int AS stale,
+             -- Whole backlog, never narrowed: the receiver gate reads this one.
+             count(*) FILTER (
+               WHERE ge.assigned_date IS NOT NULL
+                 AND (SELECT d FROM today) - ge.assigned_date > ${staleDays}
+             )::int AS stale_all,
              count(*) FILTER (
                WHERE ge.assigned_date IS NOT NULL
                  AND (SELECT d FROM today) - ge.assigned_date > ${staleDays}
                  AND ge.game_id NOT IN (SELECT game_id FROM cooled)
+                 ${inRange(opts.range)}
              )::int AS movable
       FROM game_evaluations ge
       WHERE ge.category_group = ${opts.category}
@@ -57,6 +72,7 @@ export async function scanRoster(opts: { category: string; config: RescueConfig 
     SELECT r.name, r.game_platform, r.weight, r.today_available,
            COALESCE(p.pending, 0) AS pending,
            COALESCE(p.stale, 0) AS stale,
+           COALESCE(p.stale_all, 0) AS stale_all,
            COALESCE(p.movable, 0) AS movable,
            COALESCE(a.evaluated_recent, 0) AS evaluated_recent
     FROM evaluator_roster r
@@ -71,6 +87,7 @@ export async function scanRoster(opts: { category: string; config: RescueConfig 
     today_available: boolean
     pending: number
     stale: number
+    stale_all: number
     movable: number
     evaluated_recent: number
   }[]
@@ -82,6 +99,7 @@ export async function scanRoster(opts: { category: string; config: RescueConfig 
     available: !!r.today_available,
     pending: r.pending,
     stale: r.stale,
+    staleAll: r.stale_all ?? r.stale,
     movable: r.movable,
     evaluatedRecent: r.evaluated_recent,
   }))
@@ -95,6 +113,7 @@ export async function selectStaleGames(opts: {
   from: string
   config: RescueConfig
   limit?: number | null
+  range?: AssignedRange | null
 }): Promise<Candidate[]> {
   const { staleDays, cooldownDays } = opts.config
   const limit = opts.limit && opts.limit > 0 ? sql`LIMIT ${opts.limit}` : sql``
@@ -114,6 +133,7 @@ export async function selectStaleGames(opts: {
       AND ge.initial_conclusion IS NULL
       AND ge.assigned_date IS NOT NULL
       AND (SELECT d FROM today) - ge.assigned_date > ${staleDays}
+      ${inRange(opts.range)}
       AND ge.game_id NOT IN (SELECT game_id FROM cooled)
     ORDER BY ge.assigned_date, ge.id
     ${limit}
