@@ -233,6 +233,9 @@ export async function GET(req: NextRequest) {
     // The Rescue sentence follows the window on screen. Stale games have no
     // evaluate_date, so the window is applied to when they were ASSIGNED. All-time has
     // no bounds at all and scans the whole backlog, as before.
+    // Rescue's range is date-only (from / to), while the other backlog queries use
+    // `winOn`, where a batch label wins. Harmless: pending games almost never carry a
+    // batch label, so the two cut the same games.
     const rescueRange: AssignedRange | null = win.from || win.to
       ? { from: win.from || null, to: win.to || null }
       : null
@@ -1495,8 +1498,9 @@ export async function GET(req: NextRequest) {
       age: { a0: s0?.a0 ?? 0, a1: s0?.a1 ?? 0, a2: s0?.a2 ?? 0, a3: s0?.a3 ?? 0 },
     }
 
-    // Top level, NOT inside `pipeline`: the scan reads "right now" and has no window
-    // in it at all. `stock` was hoisted out of `pipeline` for exactly this reason on
+    // Top level, NOT inside `pipeline`: the scan reads "right now" - it is narrowed to
+    // the Report window's assigned dates when one is selected, but it is not the
+    // pipeline's evaluate_date window. `stock` was hoisted out of `pipeline` for exactly this reason on
     // 2026-09-21, and the batch view lost three chips the day it was not.
     const rescueRows = !scoped ? classifyRoster(rescueStats, rescueCfg) : []
     const rescue = !scoped ? {

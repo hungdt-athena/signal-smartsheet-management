@@ -29,10 +29,12 @@ export interface RescueStats {
   stale: number // of those, past staleDays with this holder — cool-down INCLUDED,
   //                because a game in cool-down still sits on their shelf
   movable: number // stale MINUS games still inside their cool-down window
-  // The person's stale count over the WHOLE backlog. Only set when a range narrows
-  // `stale` / `movable` to some assigned-date window: the receiver gate must still see
+  // The person's stale count over the WHOLE backlog. scanRoster always sets it; it
+  // differs from `stale` only when a range narrows `stale` / `movable` to some
+  // assigned-date window. The receiver gate reads this one: it must still see
   // everything on the desk, or a person whose stale pile sits in another batch looks
-  // clean here and is handed more games.
+  // clean here and is handed more games. Optional only so hand-built stats (tests,
+  // merges) may omit it, in which case `stale` is the whole-stock number.
   staleAll?: number
   // The person's movable stale games over the WHOLE backlog (cool-down excluded, no
   // range clause). Equal to `movable` when no range is selected. It tells a person who
