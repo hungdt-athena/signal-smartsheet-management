@@ -3,6 +3,7 @@ import { requireManager } from '@/lib/auth-guard'
 import { isBucket } from '@/lib/buckets'
 import { commitAssignment, distribute, type Candidate } from '@/lib/reassign-core'
 import { scanRoster, selectStaleGames } from '@/lib/rescue-core'
+import { parseAssignedRange, type AssignedRange } from '@/lib/rescue-range'
 import { classifyRoster, waterfillQuotas, type RescueRow } from '@/lib/rescue-rules'
 import { clampRescueConfig, type RescueConfig } from '@/lib/rescue-config'
 import { loadRescueConfig, saveRescueConfig } from '@/lib/rescue-config-db'
@@ -35,6 +36,7 @@ interface Body {
   config?: Partial<RescueConfig>
   sources?: string[] // subset of the scan's SOURCE rows to pull from
   receivers?: string[] // subset of the scan's RECEIVER rows to hand games to
+  range?: { from?: string | null; to?: string | null } // assigned-date window; absent = whole backlog
 }
 
 // The scan is always recomputed server-side and the client's picks are intersected
@@ -56,11 +58,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'category must be puzzle, arcade or simulation' }, { status: 400 })
   }
 
+  const parsed = parseAssignedRange(
+    req.nextUrl.searchParams.get('assignedFrom'),
+    req.nextUrl.searchParams.get('assignedTo'),
+  )
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+  const range = parsed.range
+
   try {
     const config = await loadRescueConfig()
-    const rows = classifyRoster(await scanRoster({ category, config }), config)
+    const rows = classifyRoster(await scanRoster({ category, config, range }), config)
     return NextResponse.json(
-      { ok: true, category, config, rows },
+      { ok: true, category, config, rows, range },
       { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch (err) {
@@ -90,40 +99,51 @@ export async function POST(req: NextRequest) {
   }
   const config = clampRescueConfig(body.config)
 
+  // The body is raw JSON, so `range` can be anything. A present-but-not-an-object value
+  // is a malformed range (400), never "no range": that would silently scan the whole
+  // backlog under a number the caller did not ask for.
+  const rawRange: unknown = body.range
+  if (rawRange !== undefined && rawRange !== null && (typeof rawRange !== 'object' || Array.isArray(rawRange))) {
+    return NextResponse.json({ error: 'range must be an object with from and to' }, { status: 400 })
+  }
+  const parsed = parseAssignedRange(body.range?.from, body.range?.to)
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+  const range: AssignedRange | null = parsed.range
+
   try {
     // Scan runs on every action: preview and commit must both be judged against the
     // live state, not against whatever the browser last saw.
-    const rows = classifyRoster(await scanRoster({ category, config }), config)
+    const rows = classifyRoster(await scanRoster({ category, config, range }), config)
 
     if (action === 'scan') {
       // The knobs the manager just scanned with become the stored defaults.
       await saveRescueConfig(config)
-      return NextResponse.json({ ok: true, action, category, config, rows })
+      return NextResponse.json({ ok: true, action, category, config, rows, range })
     }
 
     const sources = pickRoles(rows, body.sources, 'source')
     const receivers = pickRoles(rows, body.receivers, 'receiver')
 
     if (sources.length === 0) {
-      return NextResponse.json({ ok: true, action, category, config, rows, reason: 'no_sources', candidate_count: 0 })
+      return NextResponse.json({ ok: true, action, category, config, rows, range, reason: 'no_sources', candidate_count: 0 })
     }
     if (receivers.length === 0) {
       // Deliberately not a fallback to "whoever is left": dumping stale games on
       // someone who is also behind just renames the holder.
-      return NextResponse.json({ ok: true, action, category, config, rows, reason: 'no_receivers', candidate_count: 0 })
+      return NextResponse.json({ ok: true, action, category, config, rows, range, reason: 'no_receivers', candidate_count: 0 })
     }
 
     // Pull each source's stale games, capped at the pull its role computed.
     const perSource: { name: string; candidates: Candidate[] }[] = []
     for (const s of sources) {
-      const candidates = await selectStaleGames({ category, from: s.name, config, limit: s.pull })
+      const candidates = await selectStaleGames({ category, from: s.name, config, limit: s.pull, range })
       if (candidates.length > 0) perSource.push({ name: s.name, candidates })
     }
     const allCandidates = perSource.flatMap(s => s.candidates)
     const { by_platform: byPlatform, by_date: byDate } = sourceBreakdowns(allCandidates)
 
     if (allCandidates.length === 0) {
-      return NextResponse.json({ ok: true, action, category, config, rows, reason: 'no_stale_games', candidate_count: 0 })
+      return NextResponse.json({ ok: true, action, category, config, rows, range, reason: 'no_stale_games', candidate_count: 0 })
     }
 
     // Level the receivers' shelves, then let the existing weighted, platform-aware
@@ -160,6 +180,7 @@ export async function POST(req: NextRequest) {
       category,
       config,
       rows,
+      range,
       candidate_count: allCandidates.length,
       assignable: assignment.size,
       unassignable: allCandidates.length - assignment.size,
@@ -228,6 +249,8 @@ export async function POST(req: NextRequest) {
           source_min_backlog: config.sourceMinBacklog,
           receiver_max_stale: config.receiverMaxStale,
           active_days: config.activeDays,
+          assigned_from: range?.from ?? null,
+          assigned_to: range?.to ?? null,
           // Snapshot of why this person qualified, so a later review does not have to
           // reconstruct the backlog they had at the time.
           source_pending: stats?.pending ?? null,

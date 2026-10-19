@@ -12,7 +12,7 @@ jest.mock('@/lib/db', () => {
 })
 jest.mock('next-auth', () => ({ getServerSession: jest.fn(() => Promise.resolve(null)) }))
 
-import { POST } from '@/app/api/operations/rescue/route'
+import { GET, POST } from '@/app/api/operations/rescue/route'
 import { sql } from '@/lib/db'
 
 const sqlMock = sql as unknown as jest.Mock
@@ -65,6 +65,14 @@ function post(body: unknown) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   }))
+}
+
+function get(qs: string) {
+  return GET(new NextRequest(`http://localhost/api/operations/rescue?${qs}`))
+}
+
+function bindValues() {
+  return sqlMock.mock.calls.flatMap(c => c.slice(1))
 }
 
 function joinedSql() {
@@ -198,5 +206,124 @@ describe('POST /api/operations/rescue', () => {
       .flatMap(c => c.slice(1))
     expect(JSON.stringify(histBinds)).toContain('g1')
     expect(JSON.stringify(histBinds)).not.toContain('g2')
+  })
+})
+
+// The assigned-date range is a view selector: it scopes the scan and the pull, travels in
+// the request, is echoed on EVERY JSON response and is never persisted as a threshold.
+describe('/api/operations/rescue assigned-date range', () => {
+  const realSkip = process.env.SKIP_AUTH
+  beforeAll(() => { process.env.SKIP_AUTH = 'true' })
+  afterAll(() => { process.env.SKIP_AUTH = realSkip })
+
+  const RANGE = { from: '2026-10-06', to: '2026-10-13' }
+
+  it('GET without a range echoes null', async () => {
+    setupSql({ scan: ROSTER })
+    const res = await get('category=puzzle')
+    expect(res.status).toBe(200)
+    expect((await res.json()).range).toBeNull()
+  })
+
+  it('GET with a range scans inside it and echoes it', async () => {
+    setupSql({ scan: ROSTER })
+    const res = await get('category=puzzle&assignedFrom=2026-10-06&assignedTo=2026-10-13')
+    expect(res.status).toBe(200)
+    expect((await res.json()).range).toEqual(RANGE)
+    expect(bindValues()).toEqual(expect.arrayContaining(['2026-10-06', '2026-10-13']))
+  })
+
+  it('GET with a malformed range is 400, not the whole backlog', async () => {
+    setupSql({ scan: ROSTER })
+    const res = await get('category=puzzle&assignedFrom=yesterday')
+    expect(res.status).toBe(400)
+    expect(sqlMock).not.toHaveBeenCalled()
+  })
+
+  it('POST scan with an inverted range is 400 and never saves the config', async () => {
+    setupSql({ scan: ROSTER })
+    const res = await post({ action: 'scan', category: 'puzzle', range: { from: '2026-10-13', to: '2026-10-06' } })
+    expect(res.status).toBe(400)
+    expect(sqlMock).not.toHaveBeenCalled()
+  })
+
+  it('POST with a range that is not an object of day strings is 400, not "no range"', async () => {
+    for (const range of ['2026-10-06', 5, true, [1], { from: 20261006 }, { to: ['2026-10-13'] }]) {
+      setupSql({ scan: ROSTER })
+      const res = await post({ action: 'scan', category: 'puzzle', range })
+      expect(res.status).toBe(400)
+      expect(sqlMock).not.toHaveBeenCalled()
+    }
+  })
+
+  it('POST scan echoes the range, or null when there is none', async () => {
+    setupSql({ scan: ROSTER })
+    const withRange = await post({ action: 'scan', category: 'puzzle', range: RANGE })
+    expect(withRange.status).toBe(200)
+    expect((await withRange.json()).range).toEqual(RANGE)
+    setupSql({ scan: ROSTER })
+    expect((await (await post({ action: 'scan', category: 'puzzle' })).json()).range).toBeNull()
+  })
+
+  it('POST accepts a half-open range', async () => {
+    setupSql({ scan: ROSTER })
+    const json = await (await post({ action: 'scan', category: 'puzzle', range: { from: '2026-10-06' } })).json()
+    expect(json.range).toEqual({ from: '2026-10-06', to: null })
+  })
+
+  it('the early-return reasons carry the range', async () => {
+    setupSql({ scan: ROSTER.filter(r => r.name !== 'Hung') })
+    const noSources = await (await post({ action: 'preview', category: 'puzzle', range: RANGE })).json()
+    expect(noSources.reason).toBe('no_sources')
+    expect(noSources.range).toEqual(RANGE)
+
+    setupSql({ scan: ROSTER.filter(r => r.name !== 'Minh') })
+    const noReceivers = await (await post({ action: 'preview', category: 'puzzle', range: RANGE })).json()
+    expect(noReceivers.reason).toBe('no_receivers')
+    expect(noReceivers.range).toEqual(RANGE)
+
+    setupSql({ scan: ROSTER, stale: { Hung: [] } })
+    const noGames = await (await post({
+      action: 'preview', category: 'puzzle', sources: ['Hung'], receivers: ['Minh'], range: RANGE,
+    })).json()
+    expect(noGames.reason).toBe('no_stale_games')
+    expect(noGames.range).toEqual(RANGE)
+  })
+
+  it('preview pulls inside the range and echoes it', async () => {
+    setupSql({ scan: ROSTER, stale: { Hung: HUNG_GAMES } })
+    const json = await (await post({
+      action: 'preview', category: 'puzzle', sources: ['Hung'], receivers: ['Minh'], range: RANGE,
+    })).json()
+    expect(json.range).toEqual(RANGE)
+    // The range reaches SQL as a fragment (a nested sql`` call) once per query: the two
+    // roster-scan queries and the stale-game pull, so at least three of each bound.
+    const frag = (op: string, day: string) => sqlMock.mock.calls.filter(c =>
+      Array.isArray(c[0]) && (c[0] as string[]).join(' ').includes(`ge.assigned_date ${op}`) && c[1] === day)
+    expect(frag('>=', '2026-10-06').length).toBeGreaterThanOrEqual(3)
+    expect(frag('<', '2026-10-13').length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('commit echoes the range and records it on the operation run', async () => {
+    setupSql({ scan: ROSTER, stale: { Hung: HUNG_GAMES } })
+    const json = await (await post({
+      action: 'commit', category: 'puzzle', sources: ['Hung'], receivers: ['Minh'], range: RANGE,
+    })).json()
+    expect(json.dryRun).toBe(false)
+    expect(json.range).toEqual(RANGE)
+    expect(bindValues()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ assigned_from: '2026-10-06', assigned_to: '2026-10-13' }),
+    ]))
+  })
+
+  it('commit without a range records null bounds', async () => {
+    setupSql({ scan: ROSTER, stale: { Hung: HUNG_GAMES } })
+    const json = await (await post({
+      action: 'commit', category: 'puzzle', sources: ['Hung'], receivers: ['Minh'],
+    })).json()
+    expect(json.range).toBeNull()
+    expect(bindValues()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ assigned_from: null, assigned_to: null }),
+    ]))
   })
 })
