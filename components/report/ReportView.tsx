@@ -110,6 +110,14 @@ function catParam(d: Bundle): string {
   return isBucket(d.category) ? `&cat=${d.category}` : ''
 }
 
+// Carries the window the sentence was counted over. Named assignedFrom / assignedTo
+// because `from` is Reassign's evaluator name on the same page.
+function rangeParam(d: Bundle): string {
+  const r = d.rescue?.range
+  if (!r) return ''
+  return `${r.from ? `&assignedFrom=${r.from}` : ''}${r.to ? `&assignedTo=${r.to}` : ''}`
+}
+
 function windowNoun(d: Bundle): string {
   if (d.window.batch) return 'batch'
   if (!d.window.from) return 'window'
@@ -252,6 +260,9 @@ interface Bundle {
     sources: Array<{ name: string; stale: number; movable: number }>
     receivers: Array<{ name: string; pending: number; evaluatedRecent: number }>
     movableTotal: number
+    // Set when the Report window narrowed the scan: the days the games were assigned in
+    // (`to` exclusive).
+    range?: { from: string | null; to: string | null } | null
   }
   // Per person, per bucket: what they FINISHED (by how old it was when they judged it)
   // against what only got OLDER on their desk. Both sides count events, so both are
@@ -1212,7 +1223,7 @@ function Overview({ d }: { d: Bundle }) {
       // over a `why` counting five people and a bigger total is three numbers that do
       // not reconcile, and reconciling them is the first thing a manager does.
       rest: <>{fmt.int(moving)} stale games from {names} to the {rbRecv.length === 1 ? 'evaluator' : `${rbRecv.length} evaluators`} Rescue picked</>,
-      why: <>{rbSources.length === 1 ? 'One person holds' : `${rbSources.length} people hold`} {fmt.int(staleHeld)} games that have been in their backlog for more than {rb.staleDays} days{rbSources.length > top.length ? <>, most of them these {top.length}</> : null}. Rescue found {rbRecv.length === 1 ? 'one evaluator' : `${rbRecv.length} evaluators`} who can take them.</>,
+      why: <>{rbSources.length === 1 ? 'One person holds' : `${rbSources.length} people hold`} {fmt.int(staleHeld)} {rb.range ? <>games assigned in this {windowNoun(d)}, waiting more than {rb.staleDays} days</> : <>games that have been in their backlog for more than {rb.staleDays} days</>}{rbSources.length > top.length ? <>, most of them these {top.length}</> : null}. Rescue found {rbRecv.length === 1 ? 'one evaluator' : `${rbRecv.length} evaluators`} who can take them.</>,
       // The moved games measured against the people who will actually eat them: the
       // receivers' share of the team's pace. The WHOLE team's pace would say the stale
       // work is gone in a fraction of the time, on the assumption that everybody drops
@@ -1233,7 +1244,7 @@ function Overview({ d }: { d: Bundle }) {
       // rewrite the admin's saved settings just by being clicked.
       cta: {
         label: 'Open Rescue',
-        href: `/team-ops?tab=rescue${catParam(d)}&flash=${encodeURIComponent([...top.map((s2) => s2.name), ...rbRecv.slice(0, 4).map((r) => r.name)].join(','))}`,
+        href: `/team-ops?tab=rescue${catParam(d)}${rangeParam(d)}&flash=${encodeURIComponent([...top.map((s2) => s2.name), ...rbRecv.slice(0, 4).map((r) => r.name)].join(','))}`,
       },
     })
   }

@@ -918,6 +918,57 @@ describe('Overview tab', () => {
     expect(rescue.getAttribute('href')).not.toMatch(/staleDays|days=/)
   })
 
+  /* The Rescue scan can be narrowed to the days the games were assigned in (`range`).
+     The sentence then says so, and the button opens Rescue on the same days. The
+     params are `assignedFrom` / `assignedTo`, never `from`: `from` is Reassign's
+     evaluator name on the same page. */
+  function rebalanceableInRange(): Bundle {
+    const b = rebalanceable()
+    return { ...b, rescue: { ...b.rescue!, range: { from: '2026-10-06', to: '2026-10-13' } } }
+  }
+
+  it('Open Rescue carries the range the sentence was counted over', async () => {
+    await renderTab(rebalanceableInRange())
+    const link = screen.getByText('Open Rescue') as HTMLAnchorElement
+    expect(link.getAttribute('href')).toBe(
+      '/team-ops?tab=rescue&cat=puzzle&assignedFrom=2026-10-06&assignedTo=2026-10-13&flash=PhuongNT1%2CThuDT%2CHaiNM%2CLinhPT')
+    expect(link.getAttribute('href')).not.toMatch(/&from=|staleDays|days=/)
+  })
+
+  it('carries only the end of the range when the range has no start', async () => {
+    const b = rebalanceable()
+    await renderTab({ ...b, rescue: { ...b.rescue!, range: { from: null, to: '2026-10-13' } } })
+    const href = (screen.getByText('Open Rescue') as HTMLAnchorElement).getAttribute('href')!
+    expect(href).toContain('&assignedTo=2026-10-13')
+    expect(href).not.toContain('assignedFrom')
+  })
+
+  it('says the games were assigned in this window', async () => {
+    const { container } = await renderTab(rebalanceableInRange())
+    const move = actions(container).find((a) => a.do.startsWith('Move '))!
+    expect(move.why).toMatch(/hold 800 games assigned in this \w+, waiting more than 8 days/)
+    expect(move.why).not.toContain('in their backlog')
+    expect(move.why).toContain('Rescue found 2 evaluators who can take them.')
+    expect(move.why.length).toBeLessThanOrEqual(150)
+  })
+
+  it('keeps the evidence under 150 characters with a range and more holders than names', async () => {
+    const b = rebalanceableInRange()
+    const bundle = { ...b, rescue: { ...b.rescue!,
+      sources: [
+        { name: 'PhuongNT1', stale: 5000, movable: 480 }, { name: 'ThuDT', stale: 3000, movable: 280 },
+        { name: 'QuangVN', stale: 2000, movable: 100 }, { name: 'HuyDD', stale: 1000, movable: 50 },
+        { name: 'VinhTD', stale: 900, movable: 40 },
+      ],
+      receivers: [1, 2, 3, 4, 5, 6].map((i) => ({ name: `Recv${i}`, pending: 1, evaluatedRecent: 100 })),
+    } }
+    const { container } = await renderTab(bundle)
+    const move = actions(container).find((a) => a.do.startsWith('Move '))!
+    expect(move.why).toContain('most of them these 3')
+    expect(move.why).toContain('assigned in this')
+    expect(move.why.length).toBeLessThanOrEqual(150)
+  })
+
   // The pace link is an href, not an in-page tab switch: `focus` is read from the URL
   // once at mount, so a switch made in the page would arrive without it.
   it('links the pace remedy at the Leaderboard column that answers it', async () => {
