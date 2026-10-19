@@ -18,7 +18,11 @@ function writeQuery(pathname: string, patch: Record<string, string | null>) {
     else live.set(k, v)
   }
   const qs = live.toString()
-  window.history.replaceState(window.history.state, '', qs ? `${pathname}?${qs}` : pathname)
+  // Pass null, never window.history.state: Next marks its own entries with __NA, and
+  // its patched replaceState skips the router update for data carrying that mark. So
+  // passing the current state changed the URL but not useSearchParams, and a filter
+  // click did nothing until reload. Next copies its internal state over by itself.
+  window.history.replaceState(null, '', qs ? `${pathname}?${qs}` : pathname)
 }
 
 export function useUrlState(key: string, fallback: string): [string, (next: string) => void] {
