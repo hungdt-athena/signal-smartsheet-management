@@ -952,6 +952,24 @@ describe('Overview tab', () => {
     expect(move.why.length).toBeLessThanOrEqual(150)
   })
 
+  // A windowed view counts Rescue over the days the games were assigned in. When that
+  // window holds nothing stale there is no rebalance line - and the whole-backlog holders
+  // line ("the 178 games ... of the team's 249") must not step in, because it reads a
+  // population the window did not select and the report may not talk about it.
+  it('shows neither the rebalance nor the whole-backlog holders line on a windowed view with nothing stale in range', async () => {
+    const { container } = await renderTab(withPatch({
+      rescue: { staleDays: 8, movableTotal: 0, sources: [], receivers: [], range: { from: '2026-10-13', to: '2026-10-20' } },
+      backlogBy: [
+        { key: 'k0', name: 'Alpha', n: 400, a0: 100, a1: 50, a2: 200, a3: 50, oldest: 30, stale: 250 },
+        { key: 'k1', name: 'Beta', n: 300, a0: 300, a1: 0, a2: 0, a3: 0, oldest: 2, stale: 0 },
+      ],
+    }))
+    expect(screen.queryByText('Open Rescue')).toBeNull()
+    expect(actions(container).find((a) => a.do.includes('Alpha'))).toBeUndefined()
+    expect(screen.queryByText(/first in the next assign run/)).toBeNull()
+    expect(container.textContent).not.toMatch(/games that have waited more than 8 days with/)
+  })
+
   it('keeps the evidence under 150 characters with a range and more holders than names', async () => {
     const b = rebalanceableInRange()
     const bundle = { ...b, rescue: { ...b.rescue!,

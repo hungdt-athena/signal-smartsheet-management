@@ -1282,7 +1282,10 @@ function Overview({ d }: { d: Bundle }) {
   // has nobody to move the games to, and the roster screen sets WHO gets work, not the
   // order a run hands it out in - so there is no screen this line could open that would
   // do what it asks. Law 4: a button has to be something the reader can actually run.
-  if (oldHolders.length > 0 && !canRebalance) acts.push({
+  // Not on a windowed view: when Rescue is narrowed to a range (`rb.range`), this line
+  // would print whole-backlog numbers the window did not select, and the report does not
+  // talk about games outside the window.
+  if (oldHolders.length > 0 && !canRebalance && !rb?.range) acts.push({
     sev: 3, key: 'holders', topic: 'age', family: 'backlog',
     lead: 'Put',
     // Says so when the three names are not all of them. On the real payload it read
