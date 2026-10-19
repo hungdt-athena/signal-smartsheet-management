@@ -331,7 +331,9 @@ function RescueRunner({ flash, category, range, onClearRange }: {
   // Editing a threshold invalidates the scanned table; changing the ticks invalidates
   // the preview built from them.
   const configDirty = scannedKey !== JSON.stringify(config)
-  const pickKey = JSON.stringify(picks())
+  // The range is part of what a preview was built from: one made under another range
+  // describes different games.
+  const pickKey = JSON.stringify({ ...picks(), r: rKey })
   const previewStale = !!result && result.dryRun && previewKey !== pickKey
 
   // The count the preview says will move: the button and the confirm both say it.
@@ -356,7 +358,7 @@ function RescueRunner({ flash, category, range, onClearRange }: {
         {range && (
           <p className="ops-hint">
             Only games assigned {fmtDays(range)}
-            <button type="button" className="btn btn-link btn-sm" onClick={onClearRange}>Show all backlog</button>
+            <button type="button" className="btn btn-link btn-sm" disabled={previewing || committing} onClick={onClearRange}>Show all backlog</button>
           </p>
         )}
         <div className="ops-knobs">

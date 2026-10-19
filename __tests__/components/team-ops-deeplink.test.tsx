@@ -240,6 +240,84 @@ describe('team-ops deep links', () => {
     expect(scanBody().range).toBeNull()
   })
 
+  // Preview and Commit re-scan on the server with whatever range they are POSTed, so
+  // each one has to carry the range the table on screen was counted over.
+  function postBodies(action: string) {
+    return (global.fetch as jest.Mock).mock.calls
+      .filter(([u, init]) => String(u).startsWith('/api/operations/rescue') && (init as RequestInit | undefined)?.method === 'POST')
+      .map(([, init]) => JSON.parse((init as RequestInit).body as string))
+      .filter(b => b.action === action)
+  }
+  function previewable() {
+    const base = global.fetch as jest.Mock
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith('/api/operations/rescue') && init?.method === 'POST') {
+        return Promise.resolve({ ok: true, json: async () => ({ rows: RESCUE_ROWS, config: RESCUE_CONFIG, assignable: 20, assigned: 20, per_source: [] }) } as Response)
+      }
+      return base(input, init)
+    }) as unknown as typeof fetch
+  }
+
+  it('sends the range with a Preview and with a Commit', async () => {
+    params = new URLSearchParams(RANGE_URL)
+    previewable()
+    render(<TeamOpsPage />)
+    await screen.findByText(/Only games assigned/)
+    fireEvent.click(await screen.findByRole('button', { name: /^Preview$/i }))
+    await waitFor(() => expect(postBodies('preview')).toHaveLength(1))
+    expect(postBodies('preview')[0]).toHaveProperty('range', { from: '2026-10-06', to: '2026-10-13' })
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Move 20 games$/i }))
+    const buttons = await screen.findAllByRole('button', { name: /^Move 20 games$/i })
+    fireEvent.click(buttons[buttons.length - 1])
+    await waitFor(() => expect(postBodies('commit')).toHaveLength(1))
+    expect(postBodies('commit')[0]).toHaveProperty('range', { from: '2026-10-06', to: '2026-10-13' })
+  })
+
+  it('sends a null range with a Preview and a Commit when no range is in the URL', async () => {
+    params = new URLSearchParams('tab=rescue&cat=puzzle')
+    previewable()
+    render(<TeamOpsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Preview$/i }))
+    await waitFor(() => expect(postBodies('preview')).toHaveLength(1))
+    expect(postBodies('preview')[0].range).toBeNull()
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Move 20 games$/i }))
+    const buttons = await screen.findAllByRole('button', { name: /^Move 20 games$/i })
+    fireEvent.click(buttons[buttons.length - 1])
+    await waitFor(() => expect(postBodies('commit')).toHaveLength(1))
+    expect(postBodies('commit')[0].range).toBeNull()
+  })
+
+  it('disables "Show all backlog" while a Preview is running', async () => {
+    params = new URLSearchParams(RANGE_URL)
+    const base = global.fetch as jest.Mock
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).startsWith('/api/operations/rescue') && init?.method === 'POST'
+        ? new Promise<Response>(() => {}) // never settles: the preview stays in flight
+        : base(input, init)) as unknown as typeof fetch
+    render(<TeamOpsPage />)
+    await screen.findByText(/Only games assigned/)
+    expect(screen.getByText('Show all backlog')).not.toBeDisabled()
+    fireEvent.click(await screen.findByRole('button', { name: /^Preview$/i }))
+    await waitFor(() => expect(screen.getByText('Show all backlog')).toBeDisabled())
+  })
+
+  it('a Preview built under another range is stale once the range changes', async () => {
+    params = new URLSearchParams(RANGE_URL)
+    previewable()
+    const view = render(<TeamOpsPage />)
+    await screen.findByText(/Only games assigned/)
+    fireEvent.click(await screen.findByRole('button', { name: /^Preview$/i }))
+    await screen.findByRole('button', { name: /^Move 20 games$/i })
+    // The URL changes the range under the open panel: the table reloads and the old
+    // preview must not stay committable against it.
+    params = new URLSearchParams('tab=rescue&cat=puzzle&assignedFrom=2026-10-13&assignedTo=2026-10-20')
+    view.rerender(<TeamOpsPage />)
+    await screen.findByText('Only games assigned 13 Oct to 19 Oct')
+    expect(screen.queryByRole('button', { name: /^Move 20 games$/i })).toBeNull()
+  })
+
   it('follows a range that changes in the URL while Rescue stays open', async () => {
     params = new URLSearchParams('tab=rescue&cat=puzzle')
     const view = render(<TeamOpsPage />)
@@ -250,7 +328,7 @@ describe('team-ops deep links', () => {
     await waitFor(() => expect(rescueGets().at(-1)).toContain('assignedFrom=2026-10-06'))
   })
 
-  it('ignores a malformed range instead of scanning something else', async () => {
+  it('drops a malformed range: no chip, and the scan carries no range', async () => {
     params = new URLSearchParams('tab=rescue&cat=puzzle&assignedFrom=nope')
     render(<TeamOpsPage />)
     await waitFor(() => expect(rescueGets().length).toBeGreaterThan(0))
