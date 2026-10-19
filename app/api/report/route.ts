@@ -14,6 +14,8 @@ import { getSession } from '@/lib/session'
 import { loadRescueConfig } from '@/lib/rescue-config-db'
 import { scanRoster } from '@/lib/rescue-core'
 import { classifyRoster, type RescueStats } from '@/lib/rescue-rules'
+import { mergeRosters } from '@/lib/rescue-merge'
+import type { AssignedRange } from '@/lib/rescue-range'
 import type { RescueConfig } from '@/lib/rescue-config'
 import { BUCKETS } from '@/lib/buckets'
 
@@ -48,30 +50,15 @@ export const dynamic = 'force-dynamic'
    Cost: three queries instead of one, issued inside the SAME `Promise.all` as
    everything else on this route. The app and the database are on different
    continents, so the unit that hurts is the round trip, not the query - and these
-   three share one. See [[app-db-region-latency]]. */
-async function scanRescueRoster(category: string, config: RescueConfig): Promise<RescueStats[]> {
+   three share one. See [[app-db-region-latency]].
+
+   `range` narrows `stale` / `movable` only; `staleAll` is summed too so the receiver
+   gate still sees a person's whole stock. */
+async function scanRescueRoster(category: string, config: RescueConfig, range: AssignedRange | null): Promise<RescueStats[]> {
   // Same test the rest of this route's `catF` uses, so the scan and every other
   // query on the page agree about what the filter means.
-  if (category !== 'all') return scanRoster({ category, config })
-  const perBucket = await Promise.all(BUCKETS.map((b) => scanRoster({ category: b, config })))
-  const by = new Map<string, RescueStats>()
-  for (const rows of perBucket) {
-    for (const r of rows) {
-      const cur = by.get(r.name)
-      if (!cur) { by.set(r.name, { ...r }); continue }
-      cur.pending += r.pending
-      cur.stale += r.stale
-      cur.movable += r.movable
-      cur.evaluatedRecent += r.evaluatedRecent
-      // Available on ANY roster they are on: today_available is a fact about the
-      // person's day, not about a genre, and a roster row that omits it should not
-      // veto one that has it.
-      cur.available = cur.available || r.available
-      cur.platform = cur.platform ?? r.platform
-      cur.weight = cur.weight ?? r.weight
-    }
-  }
-  return Array.from(by.values())
+  if (category !== 'all') return scanRoster({ category, config, range })
+  return mergeRosters(await Promise.all(BUCKETS.map((b) => scanRoster({ category: b, config, range }))))
 }
 
 // Lowercase names kept out of every report aggregation (evaluation + recording).
@@ -243,6 +230,12 @@ export async function GET(req: NextRequest) {
     const win = batchSpan
       ? { ...winBase, from: batchSpan.from, to: batchSpan.to, fromAt: batchSpan.fromAt as string | null, toAt: batchSpan.toAt }
       : { ...winBase, fromAt: null as string | null, toAt: null as string | null }
+    // The Rescue sentence follows the window on screen. Stale games have no
+    // evaluate_date, so the window is applied to when they were ASSIGNED. All-time has
+    // no bounds at all and scans the whole backlog, as before.
+    const rescueRange: AssignedRange | null = win.from || win.to
+      ? { from: win.from || null, to: win.to || null }
+      : null
 
     // WHERE fragments shared by evaluation queries.
     const catF = category !== 'all' ? sql`AND ge.category_group = ${category}` : sql``
@@ -975,7 +968,7 @@ export async function GET(req: NextRequest) {
       stockPromise,
       // The Rescue scan itself. Guarded so an evaluator never pays for a query whose
       // result is thrown away below (rescue is manager-only).
-      !scoped ? scanRescueRoster(category, rescueCfg) : Promise.resolve([]),
+      !scoped ? scanRescueRoster(category, rescueCfg, rescueRange) : Promise.resolve([]),
       personBacklogPromise,
       movedInPromise,
     ])
@@ -1508,6 +1501,7 @@ export async function GET(req: NextRequest) {
     const rescueRows = !scoped ? classifyRoster(rescueStats, rescueCfg) : []
     const rescue = !scoped ? {
       staleDays: rescueCfg.staleDays,
+      range: rescueRange,
       sources: rescueRows.filter((r) => r.role === 'source')
         .map((r) => ({ name: r.name, stale: r.stale, movable: r.movable }))
         .sort((a, b) => b.movable - a.movable),
