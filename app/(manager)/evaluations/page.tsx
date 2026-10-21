@@ -666,8 +666,9 @@ function ShortListEvalTab() {
   const setUrl = useSetUrlParams()
   const [viewParam] = useUrlState('view', 'batch')
   const view: 'shortlist' | 'monthly' = viewParam === 'monthly' ? 'monthly' : 'shortlist'
-  const [categoryParam, setFilterCategory] = useUrlState('bucket', 'puzzle')
-  const filterCategory = isBucket(categoryParam) || (view === 'monthly' && categoryParam === 'all') ? categoryParam : 'puzzle'
+  // bucket: the category group. Absent = All, in both views; a shared link names one group.
+  const [categoryParam, setFilterCategory] = useUrlState('bucket', 'all')
+  const filterCategory = isBucket(categoryParam) ? categoryParam : 'all'
   // batch: absent = the default batch (Short List) or the whole month (Monthly); 'all' = All
   // batches, written out so a shared "All batches" link is not turned into the current batch.
   const [batchParam, setBatchParam] = useUrlState('batch', '')
@@ -950,18 +951,18 @@ function ShortListEvalTab() {
     exitSelectMode()
     if (next === 'monthly') {
       shortListScope.current = { category: filterCategory, batch: batchParam, final: finalParam }
-      setUrl({ view: 'monthly', bucket: 'all', batch: null, final: null, month: monthKeyOfBatch(currentBatch) ?? vnMonthKey() })
+      setUrl({ view: 'monthly', bucket: null, batch: null, final: null, month: monthKeyOfBatch(currentBatch) ?? vnMonthKey() })
     } else {
       const s = shortListScope.current
       setUrl({
         view: null, month: null,
-        bucket: s && s.category !== 'puzzle' && s.category !== 'all' ? s.category : null,
+        bucket: s && s.category !== 'all' ? s.category : null,
         batch: s?.batch || null, final: s?.final || null,
       })
     }
   }
 
-  const categoryChoices = view === 'monthly' ? [{ value: 'all', label: 'All' }, ...BUCKET_OPTIONS] : BUCKET_OPTIONS
+  const categoryChoices = [{ value: 'all', label: 'All' }, ...BUCKET_OPTIONS]
 
   // Clear filters resets the narrowing filters. The category group is the scope and the
   // date range is component state (see above), so neither is touched.
