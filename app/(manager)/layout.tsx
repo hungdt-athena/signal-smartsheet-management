@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { signOut, useSession } from 'next-auth/react'
 import { MissingDemoPrompt } from '@/components/MissingDemoPrompt'
+import { RecordQueueBadge } from '@/components/RecordQueueBadge'
 import { isBucket } from '@/lib/buckets'
 
 function SIcon({ d, size = 17 }: { d: string | string[]; size?: number }) {
@@ -31,7 +32,7 @@ const ICONS: Record<string, string | string[]> = {
   chart:  ['M3 3v18h18', 'M7 15l3-4 3 3 4-6'],
 }
 
-interface NavChild { href: string; label: string; roles?: string[]; external?: boolean }
+interface NavChild { href: string; label: string; roles?: string[]; external?: boolean; badge?: 'record' }
 interface NavItem { href: string; label: string; icon: keyof typeof ICONS; roles?: string[]; external?: boolean; children?: NavChild[] }
 
 const NAV_ITEMS: NavItem[] = [
@@ -61,7 +62,7 @@ const NAV_ITEMS: NavItem[] = [
     { href: '/youtube?tab=youtube', label: 'YouTube' },
     // Evaluators see Record too, scoped to the rows where they are the recorder
     // (the Record tab asks the API with ?recorder=). middleware.ts lets them through.
-    { href: '/youtube?tab=record_video', label: 'Record' },
+    { href: '/youtube?tab=record_video', label: 'Record', badge: 'record' },
   ]},
   { href: '/admin',           label: 'Users Management', icon: 'shield', roles: ['admin', 'moderator'] },
   { href: '/config',          label: 'Config',     icon: 'sliders', roles: ['admin', 'moderator'] },
@@ -172,6 +173,11 @@ function ManagerLayoutInner({ children }: { children: React.ReactNode }) {
                               className={subClass}>
                               {sub.label}
                             </a>
+                          ) : sub.badge === 'record' ? (
+                            <div key={sub.href} className="sb-sub-wrap">
+                              <Link href={sub.href} className={subClass}>{sub.label}</Link>
+                              <RecordQueueBadge />
+                            </div>
                           ) : (
                             <Link key={sub.href} href={sub.href} className={subClass}>
                               {sub.label}
