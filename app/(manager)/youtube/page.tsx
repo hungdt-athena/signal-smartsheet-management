@@ -5,7 +5,7 @@ import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { BatchPicker, batchPickLabel, parseBatchPick } from '@/components/ui/BatchPicker'
 import { batchLabelsOfMonth } from '@/lib/batch-month'
-import { resolveYtMatches, type YtMatch } from '@/lib/ytb-match'
+import { resolveYtMatches, type YtGame, type YtMatch } from '@/lib/ytb-match'
 import { prettyConclusion, BUCKETS } from '@/lib/buckets'
 import { useConfig } from '@/hooks/useConfig'
 import { LockIcon, UserIcon } from '@/components/icons'
@@ -1245,6 +1245,8 @@ function RecordTab() {
   const clearFilters = () => setParams({ cat: null, batch: null, status: null })
   const [recorders, setRecorders] = useState<string[]>([])
   const [ytRows, setYtRows] = useState<YtbRow[]>([])
+  // Every Record-view game, unfiltered: what the YouTube matcher resolves over.
+  const [recordGames, setRecordGames] = useState<YtGame[]>([])
   const [detailGameId, setDetailGameId] = useState<string | null>(null)
   const [showExtract, setShowExtract] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -1273,12 +1275,17 @@ function RecordTab() {
       if (filterMonth) params.set('batch_month', filterMonth)
       else if (filterBatch) params.set('batch', filterBatch)
       if (!isManager && userName) params.set('recorder', userName)
-      const res = await fetch(`/api/evaluations?${params}`)
+      const [res, gamesRes] = await Promise.all([
+        fetch(`/api/evaluations?${params}`),
+        fetch('/api/evaluations/record-games', { cache: 'no-store' }).catch(() => null),
+      ])
       if (!res.ok) throw new Error()
       const json = await res.json()
+      const games: YtGame[] | null = gamesRes?.ok ? await gamesRes.json().catch(() => null) : null
       if (seq !== fetchSeqRef.current) return
       setLoadError(false)
       setData(json.data || [])
+      if (games) setRecordGames(games)
       if (json.available_batches) setAvailableBatches(json.available_batches)
       if (json.current_batch !== undefined) {
         setCurrentBatch(json.current_batch)
@@ -1440,10 +1447,16 @@ function RecordTab() {
 
   // Each game's YouTube upload: exact title+bucket first, then the closest
   // unclaimed upload (typo, dropped subtitle, wrong duration) — see lib/ytb-match.
-  const ytMap = useMemo(() => resolveYtMatches(
-    data.map(d => ({ key: d.id, title: d.title, bucket: effectiveBucket(d), recorder: recorderOf(d) })),
-    ytRows,
-  ), [data, ytRows])
+  // Resolved over every Record-view game, not just this batch or recorder: an
+  // upload is "unclaimed" only if no game anywhere in Record owns it. The rows on
+  // screen override their entry so a drag to the other bucket re-matches at once.
+  const ytMap = useMemo(() => {
+    const games = new Map<number | string, YtGame>(recordGames.map(g => [g.key, g]))
+    for (const d of data) {
+      games.set(d.id, { key: d.id, title: d.title, bucket: effectiveBucket(d), recorder: recorderOf(d), since: games.get(d.id)?.since })
+    }
+    return resolveYtMatches(Array.from(games.values()), ytRows)
+  }, [recordGames, data, ytRows])
 
   // Split into the two buckets by effective bucket, then apply the status filter.
   const list5 = useMemo(() => data.filter(d => effectiveBucket(d) === '5min'), [data])

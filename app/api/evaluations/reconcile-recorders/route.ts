@@ -3,6 +3,7 @@ import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getYtbUploaded } from '@/lib/ytb-cache'
 import { buildYtMap, ytLookup, resolveYtMatches, normalizeName, type Bucket } from '@/lib/ytb-match'
+import { recordViewRows, recordBucketOf, toYtGame } from '@/lib/record-view-games'
 
 export const dynamic = 'force-dynamic'
 
@@ -109,44 +110,24 @@ export async function POST(req: NextRequest) {
     // 3. Candidate rows: Record-view membership, optional category/batch scope.
     //    A batch scope still includes manually-bucketed games regardless of batch
     //    (they may belong to another batch), matching /api/evaluations record view.
-    const categoryFilter = category ? sql`AND ge.category_group = ${category}` : sql``
-    const batchFilter = batch
-      ? sql`AND (ge.batch = ${batch} OR ge.record_bucket IN ('5min','20min'))`
-      : sql``
-    const rows = await sql`
-      SELECT ge.id, ge.game_id, ge.batch, gi.title, ge.record_bucket, ge.final_conclusion,
-        ge.record_5min_assignee, ge.record_20min_assignee, ge.youtube_link,
-        to_char(ge.youtube_uploaded_at AT TIME ZONE ${VN}, 'YYYY-MM-DD HH24:MI:SS') AS uploaded_local
-      FROM game_evaluations ge
-      JOIN game_info gi ON ge.game_id = gi.game_id
-      WHERE (ge.record_bucket IN ('5min','20min')
-             OR (ge.record_bucket IS NULL AND ge.final_conclusion IN ('Insight','Priority IV')))
-        ${categoryFilter}
-        ${batchFilter}
-    `
+    //    The scope only picks which rows get written: matching runs over the whole
+    //    Record view, or the uploads of games outside the scope look unclaimed and
+    //    a game inside takes them (W3 Oct "Car Loop Puzzle" got W1 Oct's "Car Loop").
+    const all = await recordViewRows()
+    const rows = all.filter(r =>
+      (!category || r.category_group === category) &&
+      (!batch || r.batch === batch || r.record_bucket === '5min' || r.record_bucket === '20min'))
 
     const changes: Change[] = []
     const unmatched: Unmatched[] = []
     const linkChanges: LinkChange[] = []
 
-    // The bucket the game sits in, same rule as the Record tab.
-    const bucketOf = (row: typeof rows[number]): Bucket =>
-      row.record_bucket === '5min' || row.record_bucket === '20min'
-        ? row.record_bucket
-        : (row.final_conclusion === 'Priority IV' ? '20min' : '5min')
-
     // Exact title+bucket first, then an unclaimed upload that is close enough
     // (typo / dropped subtitle / wrong duration) — same resolver as the Record tab.
-    const resolved = resolveYtMatches(
-      rows.map(r => {
-        const b = bucketOf(r)
-        return { key: r.id, title: r.title, bucket: b, recorder: b === '5min' ? r.record_5min_assignee : r.record_20min_assignee }
-      }),
-      ytRows,
-    )
+    const resolved = resolveYtMatches(all.map(toYtGame), ytRows)
 
     for (const row of rows) {
-      const bucket = bucketOf(row)
+      const bucket = recordBucketOf(row)
       const own = resolved.get(row.id)
 
       // Demo link: 20min preferred (the full gameplay record beats the 5-min clip).

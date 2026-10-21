@@ -137,12 +137,31 @@ export function ytLookup(map: Map<string, YtMatch>, title: string, bucket: Bucke
 //
 // Never steals: only uploads no game matched exactly are candidates, and one
 // upload never serves two different titles (a tie is dropped, not guessed).
+// "No game matched exactly" is only true when `games` holds EVERY game in the
+// Record view: pass a batch or a recorder's slice and the uploads of the games
+// left out look unclaimed, and a game in the slice takes them. Resolve over all
+// of them, then read off the ones you show.
 
 export interface YtGame {
   key: number | string
   title: string
   bucket: Bucket
   recorder?: string | null   // assignee of the game's own bucket
+  // The day the game was first assigned (VN date, 'YYYY-MM-DD'). An upload from
+  // before it can't be this game's video, so an approximate match skips it.
+  since?: string | null
+}
+
+// Words that say nothing about which game it is. Tier B counts shared words, and
+// without this "Climb the Wall" and "Blast the Wall" share 2 of 3.
+const FILLER_WORDS = new Set(['the', 'a', 'an', 'of', 'and', 'in', 'on', 'to', 'for', 'my', 'is', 'it', 'game', '3d'])
+
+// Earliest upload time a game may take approximately. A day of slack: sheet
+// times are bare VN timestamps that each runtime parses in its own timezone, so
+// only the date is trustworthy.
+function sinceRank(since: string | null | undefined): number {
+  const ms = since ? Date.parse(`${since.slice(0, 10)}T00:00:00Z`) : NaN
+  return Number.isFinite(ms) ? ms - 24 * 3600 * 1000 : Number.NEGATIVE_INFINITY
 }
 
 function levenshtein(a: string, b: string): number {
@@ -174,12 +193,13 @@ function similarity(game: string, upload: string, sameRecorder: boolean): 0 | 1 
     if (short.length > 1 || sameRecorder) return Math.min(gl.length, ul.length) >= 4 ? 1 : null
   }
   if (Math.min(gl.length, ul.length) >= 6 && levenshtein(gl, ul) <= Math.max(1, Math.floor(Math.min(gl.length, ul.length) / 10))) return 1
-  if (sameRecorder && ut.length >= 2) {
-    const gs = new Set(gt)
-    const shared = ut.filter(t => gs.has(t)).length
+  const gw = gt.filter(t => !FILLER_WORDS.has(t)), uw = ut.filter(t => !FILLER_WORDS.has(t))
+  if (sameRecorder && uw.length >= 2) {
+    const gs = new Set(gw)
+    const shared = uw.filter(t => gs.has(t)).length
     // Measured against the longer side, so a short title can't ride on two
     // common words ("Word Jam Sort" vs "Jelly Color Jam: Color Sort").
-    if (shared >= 2 && shared / Math.max(gt.length, ut.length) >= 0.6) return 2
+    if (shared >= 2 && shared / Math.max(gw.length, uw.length) >= 0.6) return 2
   }
   return null
 }
@@ -228,7 +248,9 @@ export function resolveYtMatches(games: YtGame[], rows: YtbMatchRow[]): Map<numb
   for (const g of left) {
     let best: { poolKey: string; rank: number } | null = null
     let tie = false
+    const earliest = sinceRank(g.since)
     for (const [poolKey, { row, bucket }] of Array.from(pool)) {
+      if (timeRank(row.time) < earliest) continue
       const sameRecorder = !!g.recorder && !!row.pic && normalizeName(g.recorder) === normalizeName(row.pic)
       const cross = bucket !== g.bucket
       const sim = similarity(g.title, row.gameTitle, sameRecorder)

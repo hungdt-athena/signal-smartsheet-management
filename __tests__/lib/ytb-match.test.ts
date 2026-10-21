@@ -157,4 +157,32 @@ describe('resolveYtMatches', () => {
   it('records which upload title an approximate match came from', () => {
     expect(one('Yarn Drop', '20min', 'K', [up('Yan Drop', '20', 'K', 'a')])?.approx).toBe('Yan Drop')
   })
+
+  // W3 Oct 2026: "Climb the Wall" took the August upload of "Blast the Wall"
+  // on "the" + "wall" (2 of 3 words).
+  it('tier B does not count filler words like "the"', () => {
+    expect(one('Climb the Wall', '20min', 'KietCD', [up('Blast the Wall', '20', 'KietCD', 'a')])).toBeUndefined()
+    // real words still carry it
+    expect(one('Pixel Gem Loop - Diamond Sort', '20min', 'ThuDT', [up('Pixel Gem Loop - Sort Flow', '20', 'ThuDT', 'a')])?.id).toBe('a')
+  })
+
+  // W3 Oct 2026: "Car Loop Puzzle" (first assigned 13/10) took the 07/10 upload of
+  // "Car Loop", a W1 Oct game the batch-scoped auto-sync could not see.
+  it('an upload older than the day the game was first assigned is never its video', () => {
+    const rows = [up('Car Loop', '20', 'KietCD', 'a', '2026-10-07 09:02:02')]
+    const at = (since: string | null) =>
+      resolveYtMatches([{ key: 1, title: 'Car Loop Puzzle', bucket: '20min', recorder: 'KietCD', since }], rows).get(1)
+    expect(at('2026-10-13')).toBeUndefined()
+    expect(at('2026-10-06')?.id).toBe('a')
+    expect(at('2026-10-07')?.id).toBe('a')   // same day, whatever the timezone
+    expect(at(null)?.id).toBe('a')           // no date, no gate
+  })
+
+  it('the gate only guards approximate matches, never an exact title', () => {
+    const out = resolveYtMatches(
+      [{ key: 1, title: 'Car Loop', bucket: '20min', recorder: 'KietCD', since: '2026-10-13' }],
+      [up('Car Loop', '20', 'KietCD', 'a', '2026-10-07 09:02:02')],
+    )
+    expect(out.get(1)?.id).toBe('a')
+  })
 })
