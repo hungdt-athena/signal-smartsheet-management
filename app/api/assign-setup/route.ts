@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   const name = typeof b.name === 'string' ? b.name.trim() : ''
   if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 })
 
-  const platform = PLATFORMS.includes(b.game_platform) ? b.game_platform : 'all'
+  const requestedPlatform = PLATFORMS.includes(b.game_platform) ? b.game_platform : 'all'
   const category = normalizeCategory(b.game_category)
   const weight = isWeight(b.weight) ? b.weight : 100
 
@@ -76,13 +76,20 @@ export async function POST(req: NextRequest) {
         ON CONFLICT (email) DO NOTHING
       `
     }
-    // Availability is inherited from any row this person already has, so adding
-    // a genre to someone who is off today does not quietly bring them back.
-    const [existing] = await sql<{ today_available: boolean }[]>`
-      SELECT today_available FROM evaluator_roster
-      WHERE list_type = ${b.list_type} AND name = ${name} LIMIT 1
+    // Availability and platform are inherited from any row this person already
+    // has, so adding a genre to someone who is off today does not quietly bring
+    // them back, and an android-only evaluator does not come in as 'all' (the
+    // reassign and the cron both read platform per genre row, so a new row that
+    // defaulted to 'all' handed MinhLQ1 88 ios games in arcade). The first row in
+    // genre order wins, the same as the Assign table shows it.
+    const [existing] = await sql<{ today_available: boolean; game_platform: string | null }[]>`
+      SELECT today_available, game_platform FROM evaluator_roster
+      WHERE list_type = ${b.list_type} AND name = ${name}
+      ORDER BY array_position(ARRAY['puzzle','arcade','simulation']::text[], category_group)
+      LIMIT 1
     `
     const available = existing ? existing.today_available : (b.today_available === false ? false : true)
+    const platform = existing ? (existing.game_platform || 'all') : requestedPlatform
 
     const values = groups.map(g => ({
       list_type: b.list_type, category_group: g, name,

@@ -117,6 +117,34 @@ describe('/api/assign-setup', () => {
     expect(await res.json()).toEqual({ ok: true, inserted: 2 })
   })
 
+  // Regression: MinhLQ1 was android on puzzle; adding arcade wrote 'all' (the form
+  // default), so a reassign in arcade handed an android-only evaluator 88 ios games.
+  // Platform is a fact about the person, so a new genre row inherits it.
+  it('POST thêm genre cho người đã có thì kế thừa platform, không lấy mặc định của form', async () => {
+    sqlMock.mockImplementation((first: unknown) =>
+      Array.isArray(first) && (first as string[]).join(' ').includes('SELECT')
+        ? Promise.resolve([{ today_available: true, game_platform: 'android' }])
+        : Promise.resolve([]))
+    const res = await POST(req('/api/assign-setup', {
+      method: 'POST',
+      body: JSON.stringify({ list_type: 'initial', name: 'MinhLQ1', category_groups: ['arcade'], game_platform: 'all' }),
+    }))
+    expect(res.status).toBe(200)
+    const inserted = sqlMock.mock.calls.map(c => c[0]).find(a => Array.isArray(a) && typeof a[0] === 'object') as { game_platform: string }[]
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0].game_platform).toBe('android')
+  })
+
+  it('POST người mới dùng platform trong form', async () => {
+    sqlMock.mockResolvedValue([])
+    await POST(req('/api/assign-setup', {
+      method: 'POST',
+      body: JSON.stringify({ list_type: 'initial', name: 'NewGuy', category_groups: ['arcade'], game_platform: 'ios' }),
+    }))
+    const inserted = sqlMock.mock.calls.map(c => c[0]).find(a => Array.isArray(a) && typeof a[0] === 'object') as { game_platform: string }[]
+    expect(inserted[0].game_platform).toBe('ios')
+  })
+
   it('POST rejects khi category_groups rỗng hoặc toàn genre lạ', async () => {
     const empty = await POST(req('/api/assign-setup', {
       method: 'POST', body: JSON.stringify({ list_type: 'initial', name: 'Ann', category_groups: [] }),
