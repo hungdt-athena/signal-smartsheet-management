@@ -93,19 +93,19 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     expect(t).not.toMatch(/COALESCE\(\$, (?!ge\.)[a-z_]+\)/)
   })
 
-  it('logs a recorder change on a confirmed row as record_assign (logged_rec), in the same statement', async () => {
+  it('logs a recorder change on a confirmed bucket as record_assign (logged_rec), in the same statement', async () => {
     routeSql()
     sessionMock.mockResolvedValue({ user: { role: 'moderator', name: 'VinhTD' } })
     const res = await patch({ id: 1, record_20min_assignee: 'Bob' })
     expect(res.status).toBe(200)
     const w = writeCall()
-    // the old CTE reads the recorder columns and the confirmation
-    expect(w.text).toMatch(/evaluate_date, batch, drive_link,\s+record_5min_assignee, record_20min_assignee, record_confirmed_at\s+FROM game_evaluations WHERE id = \$/)
+    // the old CTE reads the recorder columns and each bucket's confirmation
+    expect(w.text).toMatch(/evaluate_date, batch, drive_link,\s+record_5min_assignee, record_20min_assignee, record_5min_confirmed_at, record_20min_confirmed_at\s+FROM game_evaluations WHERE id = \$/)
     expect(w.text).toMatch(/\), logged_rec AS \(/)
     expect(w.text).toMatch(/'record_assign', v\.bucket, v\.before, v\.after,\s+NULL::int, NULL::int, NULL::int, old\.batch, upd\.batch/)
-    expect(w.text).toMatch(/CROSS JOIN LATERAL \(VALUES \('5min', old\.record_5min_assignee, upd\.record_5min_assignee\),\s+\('20min', old\.record_20min_assignee, upd\.record_20min_assignee\)\) AS v\(bucket, before, after\)/)
-    // draft rows log nothing; only a change to a non-NULL recorder logs
-    expect(w.text).toMatch(/WHERE old\.record_confirmed_at IS NOT NULL\s+AND v\.after IS NOT NULL\s+AND lower\(v\.before\) IS DISTINCT FROM lower\(v\.after\)/)
+    expect(w.text).toMatch(/CROSS JOIN LATERAL \(VALUES \('5min', old\.record_5min_assignee, upd\.record_5min_assignee, old\.record_5min_confirmed_at\),\s+\('20min', old\.record_20min_assignee, upd\.record_20min_assignee, old\.record_20min_confirmed_at\)\) AS v\(bucket, before, after, confirmed_at\)/)
+    // draft buckets log nothing; only a change to a non-NULL recorder logs
+    expect(w.text).toMatch(/WHERE v\.confirmed_at IS NOT NULL\s+AND v\.after IS NOT NULL\s+AND lower\(v\.before\) IS DISTINCT FROM lower\(v\.after\)/)
     // both INSERTs join the UPDATE's RETURNING
     expect(w.text.match(/FROM old JOIN upd ON upd\.id = old\.id/g)).toHaveLength(2)
   })

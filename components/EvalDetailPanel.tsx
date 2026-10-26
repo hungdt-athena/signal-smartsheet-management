@@ -10,7 +10,7 @@ import { registerUnsavedGuard } from '@/lib/unsaved-guard'
 import { UnsavedChangesDialog } from '@/components/UnsavedChangesDialog'
 import { leaveDecision, type LeaveAction } from '@/lib/leave-decision'
 import { unsavedFields } from '@/lib/unsaved-fields'
-import { buildYtMap, ytLookup, type YtMatch } from '@/lib/ytb-match'
+import { buildYtMap, ytLookup, recordBucketOf, extractYtId, type YtMatch } from '@/lib/ytb-match'
 import { useConfig } from '@/hooks/useConfig'
 import { prettyConclusion } from '@/lib/buckets'
 import { conclusionBadgeClass, RECORD_STATUS_BADGE, type RecordStatus } from '@/lib/conclusion-badge'
@@ -71,6 +71,15 @@ export interface EvalDetail {
   drive_link: string | null
   drive_date: string | null
   youtube_link: string | null
+  record_bucket: string | null
+  // One round per bucket (migration 051): the game can be recorded 5 min in one
+  // batch and 20 min in a later one, each with its own Confirm and video.
+  record_5min_confirmed_at: string | null
+  record_20min_confirmed_at: string | null
+  youtube_5min_link: string | null
+  youtube_20min_link: string | null
+  youtube_5min_uploaded_local: string | null
+  youtube_20min_uploaded_local: string | null
   imported_at: string
   updated_at: string
   updated_by: string | null
@@ -915,12 +924,27 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // 5/20-min recordings are always YouTube uploads, matched live (title + duration).
   const m5 = ev ? ytLookup(ytMap, ev.title, '5min') : undefined
   const m20 = ev ? ytLookup(ytMap, ev.title, '20min') : undefined
-  const yt5 = m5?.id
-  const yt20 = m20?.id
+  // Each bucket shows its own round's video. The live lookup only matches by
+  // title; near matches (typo, dropped subtitle) need every Record game at once,
+  // so they come from the link the reconcile stored for that bucket, which also
+  // keeps a finished round's video after the game moved to the other bucket.
+  // The bucket the game is in now prefers the live match (fresh, as the Record
+  // tab). A bucket it is not in takes the live match only for a round it really
+  // had (a recorder): a same-title game on the other OS has its own videos. A card
+  // only appears for a round this row has (recorder or stored video), never for a
+  // title match alone: the Android twin of a recorded iOS game is not recorded.
+  const ownBucket = ev ? recordBucketOf(ev) : '5min'
+  const stored5 = extractYtId(ev?.youtube_5min_link) || undefined
+  const stored20 = extractYtId(ev?.youtube_20min_link) || undefined
+  const yt5 = ownBucket === '5min' ? (m5?.id || stored5) : (stored5 || (ev?.record_5min_assignee ? m5?.id : undefined))
+  const yt20 = ownBucket === '20min' ? (m20?.id || stored20) : (stored20 || (ev?.record_20min_assignee ? m20?.id : undefined))
   // When the recording was uploaded (sheet `time`), for the "Video Uploaded" step.
-  const ytUploadedAt = m5?.time || m20?.time || null
-  // Once confirmed, the recorder is locked — no reassigning.
-  const recordConfirmed = !!ev?.record_confirmed_at
+  const timeOf = (yt: string | undefined, live: YtMatch | undefined, stored: string | null | undefined) =>
+    !yt ? null : live?.id === yt ? live.time : (stored || null)
+  const ytUploadedAt = timeOf(yt5, m5, ev?.youtube_5min_uploaded_local) || timeOf(yt20, m20, ev?.youtube_20min_uploaded_local)
+  // Once a bucket is confirmed, its recorder is locked — no reassigning.
+  const confirmed5 = !!ev?.record_5min_confirmed_at
+  const confirmed20 = !!ev?.record_20min_confirmed_at
   // Final conclusion options (managed from the Config tab).
   const { final_conclusion: finalConclusionOptions } = useConfig()
   // Re-assigning recorders is a manager action, enabled per-context.
@@ -1082,7 +1106,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   }
 
   // Reset (recording → draft): un-confirm so a manager can pick a different
-  // recorder. Only offered while confirmed and not yet recorded (no YouTube).
+  // recorder. Only offered on the bucket the game is in, while confirmed and not
+  // yet recorded (no YouTube): the route resets that bucket's Confirm.
   const resetRecordConfirm = async () => {
     if (!ev) return
     try {
@@ -1570,16 +1595,6 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 )}
               </div>
 
-              {ev.youtube_link && (
-                <div className="field">
-                  <span className="label">YouTube Link</span>
-                  <a href={ev.youtube_link} target="_blank" rel="noopener"
-                    style={{ fontSize: 13, color: 'var(--accent)', wordBreak: 'break-all' }}>
-                    {ev.youtube_link}
-                  </a>
-                </div>
-              )}
-
             </div>
           </div>
 
@@ -1636,15 +1651,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           )}
 
           {/* Record Video — 5 min */}
-          {!hideRecordSections && (ev.record_5min_assignee || canEditAssignee) && (
+          {!hideRecordSections && (ev.record_5min_assignee || canEditAssignee || stored5) && (
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 5 min</span>
-                <RecordBadge status={recordStatusOf(yt5, ev.record_5min_assignee, recordConfirmed)} youtubeId={yt5} />
+                <RecordBadge status={recordStatusOf(yt5, ev.record_5min_assignee, confirmed5)} youtubeId={yt5} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  {canEditAssignee && !recordConfirmed ? (
+                  {canEditAssignee && !confirmed5 ? (
                     <div className="field">
                       <span className="label">Assignee</span>
                       <StyledSelect value={rec5Assignee}
@@ -1652,11 +1667,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                         placeholder="—" options={recOpts} />
                     </div>
                   ) : (
-                    <InfoField label="Assignee" value={ev.record_5min_assignee} icon={recordConfirmed && ev.record_5min_assignee ? <LockIcon /> : undefined} />
+                    <InfoField label="Assignee" value={ev.record_5min_assignee} icon={confirmed5 && ev.record_5min_assignee ? <LockIcon /> : undefined} />
                   )}
                   <InfoField label="Assigned" value={fmtDateVN(ev.record_5min_date)} />
                 </div>
-                {canEditAssignee && recordConfirmed && !yt5 && (
+                {canEditAssignee && confirmed5 && !yt5 && ownBucket === '5min' && (
                   <button className="btn btn-sm btn-ghost" onClick={resetRecordConfirm}
                     style={{ alignSelf: 'flex-start' }}>
                     ↺ Reset — un-confirm to reassign
@@ -1674,15 +1689,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           )}
 
           {/* Record Video — 20 min */}
-          {!hideRecordSections && (ev.record_20min_assignee || canEditAssignee) && (
+          {!hideRecordSections && (ev.record_20min_assignee || canEditAssignee || stored20) && (
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 20 min</span>
-                <RecordBadge status={recordStatusOf(yt20, ev.record_20min_assignee, recordConfirmed)} youtubeId={yt20} />
+                <RecordBadge status={recordStatusOf(yt20, ev.record_20min_assignee, confirmed20)} youtubeId={yt20} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  {canEditAssignee && !recordConfirmed ? (
+                  {canEditAssignee && !confirmed20 ? (
                     <div className="field">
                       <span className="label">Assignee</span>
                       <StyledSelect value={rec20Assignee}
@@ -1690,11 +1705,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                         placeholder="—" options={recOpts} />
                     </div>
                   ) : (
-                    <InfoField label="Assignee" value={ev.record_20min_assignee} icon={recordConfirmed && ev.record_20min_assignee ? <LockIcon /> : undefined} />
+                    <InfoField label="Assignee" value={ev.record_20min_assignee} icon={confirmed20 && ev.record_20min_assignee ? <LockIcon /> : undefined} />
                   )}
                   <InfoField label="Assigned" value={fmtDateVN(ev.record_20min_date)} />
                 </div>
-                {canEditAssignee && recordConfirmed && !yt20 && (
+                {canEditAssignee && confirmed20 && !yt20 && ownBucket === '20min' && (
                   <button className="btn btn-sm btn-ghost" onClick={resetRecordConfirm}
                     style={{ alignSelf: 'flex-start' }}>
                     ↺ Reset — un-confirm to reassign
@@ -1714,8 +1729,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           {/* One Save for the whole panel. There used to be a button in each card
               (initial evaluation, final conclusion, record), but all of them ran the
               same save() and wrote every changed field, so an admin on Short List or a
-              manager on Evaluate saw two buttons that did one thing. It stays at the
-              bottom of the column while scrolling. The note rule still blocks it. */}
+              manager on Evaluate saw two buttons that did one thing. It sits below the
+              last card, not pinned. The note rule still blocks it. */}
           {showSaveBar && (
             <div className="eval-savebar">
               <span className="eval-savebar-note" aria-live="polite">

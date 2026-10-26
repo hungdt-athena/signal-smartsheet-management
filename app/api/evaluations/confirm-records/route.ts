@@ -3,6 +3,7 @@ import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { isMissingLogTable, EVALUATION_LOG_MISSING } from '@/lib/evaluation-log'
+import { ownBucketSql } from '@/lib/record-slots'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,14 +16,21 @@ export async function POST(req: NextRequest) {
     if (list.length === 0) {
       return NextResponse.json({ error: 'ids array is required' }, { status: 400 })
     }
+    // The Confirm belongs to the round in the game's own bucket (migration 051);
+    // record_confirmed_at, which the WHEREs read, is kept equal to it by the trigger.
+    const own = ownBucketSql()
+    const stamp = (v: ReturnType<typeof sql>) => sql`
+        record_5min_confirmed_at = CASE WHEN ${own} = '5min' THEN ${v} ELSE ge.record_5min_confirmed_at END,
+        record_20min_confirmed_at = CASE WHEN ${own} = '20min' THEN ${v} ELSE ge.record_20min_confirmed_at END`
+
     // Reset (recording → draft): clear the confirmation so the recorder can be
     // reassigned. The dropdown unlocks client-side once confirmed_at is null.
     // Not logged: the assignment is logged when it is confirmed again.
     if (unset) {
       const result = await sql`
-        UPDATE game_evaluations
-        SET record_confirmed_at = NULL
-        WHERE id IN ${sql(list)} AND record_confirmed_at IS NOT NULL
+        UPDATE game_evaluations ge
+        SET ${stamp(sql`NULL`)}
+        WHERE ge.id IN ${sql(list)} AND ge.record_confirmed_at IS NOT NULL
       `
       return NextResponse.json({ reset: result.count })
     }
@@ -47,7 +55,7 @@ export async function POST(req: NextRequest) {
         FOR NO KEY UPDATE
       ), upd AS (
         UPDATE game_evaluations ge
-        SET record_confirmed_at = NOW()
+        SET ${stamp(sql`NOW()`)}
         -- The join is what makes the locked read of "old" run first (see the PATCH).
         FROM old WHERE ge.id = old.id
         RETURNING ge.id

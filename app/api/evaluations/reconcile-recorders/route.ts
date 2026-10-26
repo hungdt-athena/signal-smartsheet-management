@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getYtbUploaded } from '@/lib/ytb-cache'
-import { buildYtMap, ytLookup, resolveYtMatches, normalizeName, type Bucket } from '@/lib/ytb-match'
+import { buildYtMap, ytLookup, resolveYtMatches, normalizeName, extractYtId, type Bucket } from '@/lib/ytb-match'
 import { recordViewRows, recordBucketOf, toYtGame } from '@/lib/record-view-games'
 
 export const dynamic = 'force-dynamic'
@@ -25,9 +25,11 @@ export const dynamic = 'force-dynamic'
 //
 // The same pass also persists the matched upload's YouTube link into
 // `game_evaluations.youtube_link` (20min upload preferred over 5min). The link
-// shown on the Record card is matched live from the sheet and never stored, so
-// downstream consumers joining by game_id (Signal Sense's playtest overlay)
-// would otherwise see NULL.
+// shown on the Record card is matched live from the sheet, so downstream
+// consumers joining by game_id (Signal Sense's playtest overlay) would otherwise
+// see NULL. The own bucket's video and upload time go into that bucket's columns
+// (youtube_<b>_link / youtube_<b>_uploaded_at, migration 051), where they stay
+// when the game is later pulled into Record again for the other bucket.
 
 interface Change {
   id: number
@@ -61,19 +63,11 @@ interface LinkChange {
   from: string | null   // current DB youtube_link
   to: string            // https://youtu.be/<id> of the matched upload
   uploaded_at: string | null  // own-bucket record video, VN local; null = none
+  own_bucket: Bucket
+  own_link: string | null     // https://youtu.be/<id> of the own-bucket video; null = none
 }
 
 const VN = 'Asia/Ho_Chi_Minh'
-
-// Bare 11-char YouTube id from any stored form (youtu.be/…, watch?v=…, embed,
-// shorts, or already-bare id) — used to compare stored links by identity so a
-// format difference alone doesn't count as a change.
-function extractYtId(link: string): string | null {
-  const s = (link || '').trim()
-  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s
-  const m = s.match(/(?:youtu\.be\/|[?&]v=|\/embed\/|\/shorts\/|\/live\/)([A-Za-z0-9_-]{11})/)
-  return m ? m[1] : null
-}
 
 // The sheet `time` is a bare local timestamp ("2026-08-07 15:52:41", hour
 // sometimes unpadded) in VN time; normalised to 'YYYY-MM-DD HH:MM:SS' so it
@@ -140,13 +134,17 @@ export async function POST(req: NextRequest) {
       const yt5 = bucket === '5min' ? own : ytLookup(ytMap, row.title, '5min')
       const ytLink = yt20 || yt5
       const ownAt = own ? vnStamp(own.time) : null
-      if (ytLink?.id && (extractYtId(row.youtube_link || '') !== ytLink.id || (row.uploaded_local ?? null) !== ownAt)) {
+      const ownStored = bucket === '5min' ? row.youtube_5min_link : row.youtube_20min_link
+      if (ytLink?.id && (extractYtId(row.youtube_link || '') !== ytLink.id || (row.uploaded_local ?? null) !== ownAt
+          || extractYtId(ownStored) !== (own?.id ?? null))) {
         linkChanges.push({
           id: row.id, game_id: row.game_id, title: row.title, batch: row.batch,
           bucket: yt20 ? '20min' : '5min',
           from: row.youtube_link || null,
           to: `https://youtu.be/${ytLink.id}`,
           uploaded_at: ownAt,
+          own_bucket: bucket,
+          own_link: own ? `https://youtu.be/${own.id}` : null,
         })
       }
       // Recorder: only the bucket the game sits in. Uploads are matched by title
@@ -210,11 +208,18 @@ export async function POST(req: NextRequest) {
     const appliedLinks: LinkChange[] = []
     for (const lc of linkChanges) {
       if (idFilter && !idFilter.has(lc.id)) continue
-      const res = await sql`
-        UPDATE game_evaluations
-        SET youtube_link = ${lc.to},
-            youtube_uploaded_at = ${lc.uploaded_at}::timestamp AT TIME ZONE ${VN}
-        WHERE id = ${lc.id}`
+      // Only the own bucket's columns: the other bucket's round, if it had one, keeps
+      // its video. youtube_uploaded_at follows the own bucket's (051 trigger).
+      const at = sql`${lc.uploaded_at}::timestamp AT TIME ZONE ${VN}`
+      const res = lc.own_bucket === '5min'
+        ? await sql`
+            UPDATE game_evaluations
+            SET youtube_link = ${lc.to}, youtube_5min_link = ${lc.own_link}, youtube_5min_uploaded_at = ${at}
+            WHERE id = ${lc.id}`
+        : await sql`
+            UPDATE game_evaluations
+            SET youtube_link = ${lc.to}, youtube_20min_link = ${lc.own_link}, youtube_20min_uploaded_at = ${at}
+            WHERE id = ${lc.id}`
       linksApplied += res.count
       if (res.count > 0) appliedLinks.push(lc)
     }

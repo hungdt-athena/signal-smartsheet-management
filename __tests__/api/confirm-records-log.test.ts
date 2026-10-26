@@ -14,13 +14,35 @@ import { sql } from '@/lib/db'
 import { getSession } from '@/lib/session'
 
 const sqlMock = sql as unknown as jest.Mock
-let calls: { text: string; binds: unknown[] }[] = []
+type Call = { text: string; binds: unknown[] }
+let calls: Call[] = []
+// Fragments (the per-bucket SET, the own-bucket CASE) come back as marker objects and
+// are inlined into the statement that uses them, so assertions read the whole statement.
+function render(strings: readonly string[], binds: unknown[]): Call {
+  let text = strings[0]
+  const flat: unknown[] = []
+  binds.forEach((b, i) => {
+    if (b && typeof b === 'object' && 'frag' in (b as object)) {
+      const f = (b as { frag: Call }).frag
+      text += f.text
+      flat.push(...f.binds)
+    } else {
+      text += '$'
+      flat.push(b)
+    }
+    text += strings[i + 1]
+  })
+  return { text, binds: flat }
+}
+const isStatement = (text: string) => /^\s*(WITH|UPDATE|SELECT|INSERT)\b/.test(text)
 function routeSql(rows: unknown = [{ confirmed: 2 }]) {
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
     // sql(list) helper call: not a tagged template
     if (!Array.isArray(strings) || !('raw' in (strings as object))) return { list: strings }
-    calls.push({ text: (strings as string[]).join('$'), binds })
+    const c = render(strings as string[], binds)
+    if (!isStatement(c.text)) return { frag: c }
+    calls.push(c)
     const r = Object.assign(Array.isArray(rows) ? [...rows] : [], { count: 2 })
     return Promise.resolve(r)
   })
@@ -40,7 +62,10 @@ describe('POST /api/evaluations/confirm-records — evaluation_log', () => {
     const t = calls[0].text
     expect(t).toMatch(/FOR NO KEY UPDATE/)
     expect(t).toMatch(/record_confirmed_at IS NULL/)
-    expect(t).toMatch(/SET record_confirmed_at = NOW\(\)/)
+    // the Confirm lands in the own bucket's column; record_confirmed_at follows (051 trigger)
+    expect(t).toMatch(/record_5min_confirmed_at = CASE WHEN \(CASE[\s\S]*?END\) = '5min' THEN NOW\(\) ELSE ge\.record_5min_confirmed_at END/)
+    expect(t).toMatch(/record_20min_confirmed_at = CASE WHEN \(CASE[\s\S]*?END\) = '20min' THEN NOW\(\) ELSE ge\.record_20min_confirmed_at END/)
+    expect(t).not.toMatch(/SET record_confirmed_at/)
     expect(t).toMatch(/FROM old WHERE ge\.id = old\.id/)
     expect(t).toMatch(/FROM old JOIN upd ON upd\.id = old\.id/)
     expect(t).toMatch(/INSERT INTO evaluation_log/)
@@ -87,7 +112,9 @@ describe('POST /api/evaluations/confirm-records — evaluation_log', () => {
     const res = await post({ ids: [1, 2], unset: true })
     expect(await res.json()).toEqual({ reset: 2 })
     expect(calls).toHaveLength(1)
-    expect(calls[0].text).toMatch(/SET record_confirmed_at = NULL/)
+    expect(calls[0].text).toMatch(/record_5min_confirmed_at = CASE WHEN \(CASE[\s\S]*?END\) = '5min' THEN NULL/)
+    expect(calls[0].text).toMatch(/record_20min_confirmed_at = CASE WHEN \(CASE[\s\S]*?END\) = '20min' THEN NULL/)
+    expect(calls[0].text).toMatch(/ge\.record_confirmed_at IS NOT NULL/)
     expect(calls[0].text).not.toMatch(/evaluation_log/)
   })
 
@@ -98,8 +125,10 @@ describe('POST /api/evaluations/confirm-records — evaluation_log', () => {
   })
 
   it('returns a readable error when migration 046 is missing', async () => {
-    sqlMock.mockImplementation((strings: unknown) => {
+    sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
       if (!Array.isArray(strings) || !('raw' in (strings as object))) return { list: strings }
+      const c = render(strings as string[], binds)
+      if (!isStatement(c.text)) return { frag: c }
       return Promise.reject(Object.assign(new Error('relation "evaluation_log" does not exist'), { code: '42P01' }))
     })
     const res = await post({ ids: [1] })

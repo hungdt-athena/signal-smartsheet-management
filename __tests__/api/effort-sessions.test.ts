@@ -25,7 +25,7 @@ function setupSql(people: unknown[], rows: unknown[] = [], records: unknown[] = 
     if (!/SELECT/.test(text)) return { fragment: text, binds }
     queries.push({ text, binds })
     if (text.includes('FROM dashboard_users')) return Promise.resolve(people)
-    if (text.includes('record_confirmed_at')) return Promise.resolve(records)
+    if (text.includes('record_5min_confirmed_at')) return Promise.resolve(records)
     return Promise.resolve(rows)
   })
 }
@@ -155,8 +155,12 @@ describe('GET /api/external/effort-sessions', () => {
   it('counts only confirmed record assignments, filtered on the assignment date', async () => {
     setupSql([{ employee_id: 'abc', name: 'AbcXY' }])
     await get('from=2026-09-01&to=2026-09-03')
-    const recQ = queries.find(q => q.text.includes('record_confirmed_at'))!
-    expect(recQ.text).toMatch(/record_confirmed_at IS NOT NULL/)
+    const recQ = queries.find(q => q.text.includes('record_5min_confirmed_at'))!
+    // each bucket by its own Confirm (migration 051): a 20' round is not confirmed by the 5' one
+    expect(recQ.text).toMatch(/\(ge\.record_5min_assignee, ge\.record_5min_date, 5, ge\.record_5min_confirmed_at\)/)
+    expect(recQ.text).toMatch(/\(ge\.record_20min_assignee, ge\.record_20min_date, 20, ge\.record_20min_confirmed_at\)/)
+    expect(recQ.text).toMatch(/WHERE s\.confirmed_at IS NOT NULL/)
+    expect(recQ.text).not.toMatch(/ge\.record_confirmed_at/)
     expect(recQ.text).toMatch(/slot\.assigned_at >=/)
     expect(recQ.text).not.toMatch(/youtube/)
   })

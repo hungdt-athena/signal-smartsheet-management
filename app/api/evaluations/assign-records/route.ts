@@ -47,10 +47,14 @@ export async function POST(req: NextRequest) {
             WHEN ${has20} AND ${r20}::text IS NULL THEN NULL
             WHEN ${has20} AND ${r20}::text IS NOT NULL AND record_20min_assignee IS NULL THEN NOW()
             ELSE record_20min_date END,
-          record_confirmed_at = CASE
-            WHEN (${has5} AND ${r5} IS DISTINCT FROM record_5min_assignee)
-              OR (${has20} AND ${r20} IS DISTINCT FROM record_20min_assignee)
-            THEN NULL ELSE record_confirmed_at END
+          -- A new recorder for a bucket needs a new Confirm for that bucket only. The
+          -- old record_confirmed_at follows the own bucket's (051 trigger).
+          record_5min_confirmed_at = CASE
+            WHEN ${has5} AND ${r5} IS DISTINCT FROM record_5min_assignee THEN NULL
+            ELSE record_5min_confirmed_at END,
+          record_20min_confirmed_at = CASE
+            WHEN ${has20} AND ${r20} IS DISTINCT FROM record_20min_assignee THEN NULL
+            ELSE record_20min_confirmed_at END
         WHERE id = ${a.id}
       `
       updated += result.count

@@ -1376,6 +1376,8 @@ function RecordTab() {
 
   // Move a game to another bucket. Optimistic: set record_bucket and carry the
   // current effective recorder into the target duration column, clear the other.
+  // Then take the row the server saved: it keeps a round that already has its
+  // video (and the target's own recorder and Confirm), which the guess cannot know.
   const moveBucket = useCallback(async (id: number, bucket: '5min' | '20min') => {
     setData(prev => prev.map(d => {
       if (d.id !== id) return d
@@ -1394,7 +1396,16 @@ function RecordTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, bucket }),
       })
-      if (!res.ok) await fetchData()
+      const json = res.ok ? await res.json().catch(() => null) : null
+      if (!json?.data) { await fetchData(); return }
+      const saved = json.data as Partial<ShortListItem>
+      setData(prev => prev.map(d => d.id === id ? {
+        ...d,
+        record_bucket: saved.record_bucket ?? null,
+        record_5min_assignee: saved.record_5min_assignee ?? null,
+        record_20min_assignee: saved.record_20min_assignee ?? null,
+        record_confirmed_at: saved.record_confirmed_at ?? null,
+      } : d))
     } catch { await fetchData() }
   }, [fetchData])
 
@@ -1453,7 +1464,8 @@ function RecordTab() {
   const ytMap = useMemo(() => {
     const games = new Map<number | string, YtGame>(recordGames.map(g => [g.key, g]))
     for (const d of data) {
-      games.set(d.id, { key: d.id, title: d.title, bucket: effectiveBucket(d), recorder: recorderOf(d), since: games.get(d.id)?.since })
+      const known = games.get(d.id)
+      games.set(d.id, { key: d.id, title: d.title, bucket: effectiveBucket(d), recorder: recorderOf(d), since: known?.since, heldVideo: known?.heldVideo })
     }
     return resolveYtMatches(Array.from(games.values()), ytRows)
   }, [recordGames, data, ytRows])

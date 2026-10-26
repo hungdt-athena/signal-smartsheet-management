@@ -70,6 +70,24 @@ export function normalizeName(s: string): string {
   return normalizeTitle(s)
 }
 
+// The bucket a game's own record video sits in, same rule as the Record tab: the
+// stored record_bucket, else Priority IV → 20min and everything else 5min.
+export function recordBucketOf(row: { record_bucket: string | null; final_conclusion: string | null }): Bucket {
+  return row.record_bucket === '5min' || row.record_bucket === '20min'
+    ? row.record_bucket
+    : (row.final_conclusion === 'Priority IV' ? '20min' : '5min')
+}
+
+// Bare 11-char YouTube id from any stored form (youtu.be/…, watch?v=…, embed,
+// shorts, or already-bare id) — used to compare stored links by identity so a
+// format difference alone doesn't count as a change.
+export function extractYtId(link: string | null | undefined): string | null {
+  const s = (link || '').trim()
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s
+  const m = s.match(/(?:youtu\.be\/|[?&]v=|\/embed\/|\/shorts\/|\/live\/)([A-Za-z0-9_-]{11})/)
+  return m ? m[1] : null
+}
+
 export function ytKey(title: string, bucket: Bucket): string {
   return `${normalizeTitle(title)}|${bucket}`
 }
@@ -150,6 +168,11 @@ export interface YtGame {
   // The day the game was first assigned (VN date, 'YYYY-MM-DD'). An upload from
   // before it can't be this game's video, so an approximate match skips it.
   since?: string | null
+  // The YouTube id the game holds for its OTHER bucket (a finished earlier round,
+  // migration 051). Once the game moves on, that upload no longer matches its
+  // title+bucket key and would look unclaimed: a game recorded 5' and pulled in for
+  // 20' would take its own 5' video as the 20' one ("wrong duration" is allowed).
+  heldVideo?: string | null
 }
 
 // Words that say nothing about which game it is. Tier B counts shared words, and
@@ -230,10 +253,13 @@ export function resolveYtMatches(games: YtGame[], rows: YtbMatchRow[]): Map<numb
   }
   if (left.length === 0) return out
 
-  // Unclaimed uploads: earliest per title+bucket, none that duplicate a claimed one.
+  // Unclaimed uploads: earliest per title+bucket, none that duplicate a claimed one,
+  // none a game holds for its other bucket. Exact matches above still see those: a
+  // same-title game on the other OS shares the video, as it always has.
+  const held = new Set(games.map(g => g.heldVideo).filter((v): v is string => !!v))
   const pool = new Map<string, { row: YtbMatchRow; bucket: Bucket }>()
   for (const row of rows) {
-    if (!row.gameTitle || !row.youtubeId) continue
+    if (!row.gameTitle || !row.youtubeId || held.has(row.youtubeId)) continue
     const bucket = durationBucket(row.duration)
     const k = ytKey(row.gameTitle, bucket)
     const lk = looseKey(row.gameTitle, bucket)

@@ -14,6 +14,13 @@ const sqlMock = sql as unknown as jest.Mock
 type Call = { text: string; binds: unknown[] }
 let calls: Call[] = []
 let found: Record<string, unknown>[] = []
+// A row as the route reads it: per-bucket Confirm, date and whether the round has its video.
+const row = (r: Record<string, unknown>) => ({
+  record_bucket: null, record_5min_assignee: null, record_20min_assignee: null, final_conclusion: null,
+  record_5min_confirmed_at: null, record_20min_confirmed_at: null, record_5min_date: null, record_20min_date: null,
+  done_5min: false, done_20min: false, ...r,
+})
+const CONF = new Date('2026-10-01T03:00:00Z'), ASSIGNED = new Date('2026-09-30T03:00:00Z')
 
 // Fragments (the SET list) come back as marker objects; the outer statement's text is
 // rebuilt with them inlined, so assertions read the whole statement.
@@ -35,7 +42,7 @@ function render(strings: readonly string[], binds: unknown[]): Call {
 }
 beforeEach(() => {
   calls = []
-  found = [{ record_bucket: null, record_5min_assignee: null, record_20min_assignee: 'MyTL', final_conclusion: 'Priority IV' }]
+  found = [row({ record_20min_assignee: 'MyTL', final_conclusion: 'Priority IV', record_20min_confirmed_at: CONF, record_20min_date: ASSIGNED })]
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: readonly string[], ...binds: unknown[]) => {
     const c = render(strings, binds)
@@ -66,16 +73,41 @@ describe('POST /api/evaluations/record-bucket — evaluation_log', () => {
     // actor, role, kind, bucket_before, bucket_after, recorder_before, recorder_after
     const tail = w.binds.slice(-7)
     expect(tail).toEqual(['VinhTD', 'moderator', 'record_move', '20min', '5min', 'MyTL', 'MyTL'])
-    // the SET carries MyTL into the 5min column and clears 20min
-    expect(w.binds.slice(0, 3)).toEqual(['5min', 'MyTL', null])
+    // the SET carries MyTL, the Confirm and the date into 5min and clears 20min
+    expect(w.binds.slice(0, 7)).toEqual(['5min', 'MyTL', CONF, ASSIGNED, null, null, null])
+    // the old record_confirmed_at is the trigger's: a write to it would land in a bucket
+    expect(w.text).not.toMatch(/record_confirmed_at =/)
+  })
+
+  it('a move keeps a finished round where it is: the game starts a new round in the target', async () => {
+    found = [row({ record_20min_assignee: 'MyTL', final_conclusion: 'Priority IV', record_20min_confirmed_at: CONF, record_20min_date: ASSIGNED, done_20min: true })]
+    await post({ id: 7, bucket: '5min' })
+    const w = writeCall()
+    expect(w.binds.slice(0, 7)).toEqual(['5min', null, null, null, 'MyTL', CONF, ASSIGNED])
+    expect(w.binds.slice(-7)).toEqual(['VinhTD', 'moderator', 'record_move', '20min', '5min', 'MyTL', null])
   })
 
   it('a remove logs record_remove: old bucket and recorder, nothing after', async () => {
     await post({ id: 7, bucket: 'none' })
     const w = writeCall()
-    expect(w.text).toMatch(/record_bucket = 'none'/)
-    expect(w.text).toMatch(/record_confirmed_at = NULL/)
+    expect(w.binds.slice(0, 7)).toEqual(['none', null, null, null, null, null, null])
     expect(w.binds.slice(-7)).toEqual(['VinhTD', 'moderator', 'record_remove', '20min', null, 'MyTL', null])
+  })
+
+  it('a move never carries over a finished round in the target', async () => {
+    found = [row({ record_bucket: '20min', record_5min_assignee: 'Bob', record_5min_confirmed_at: CONF, record_5min_date: ASSIGNED, done_5min: true,
+      record_20min_assignee: 'MyTL' })]
+    await post({ id: 7, bucket: '5min' })
+    const w = writeCall()
+    expect(w.binds.slice(0, 7)).toEqual(['5min', 'Bob', CONF, ASSIGNED, null, null, null])
+    expect(w.binds.slice(-7)).toEqual(['VinhTD', 'moderator', 'record_move', '20min', '5min', 'MyTL', 'Bob'])
+  })
+
+  it('a remove keeps a round that already has its video, clears the open one', async () => {
+    found = [row({ record_bucket: '20min', record_5min_assignee: 'Bob', record_5min_confirmed_at: CONF, record_5min_date: ASSIGNED, done_5min: true,
+      record_20min_assignee: 'MyTL', record_20min_confirmed_at: CONF, record_20min_date: ASSIGNED })]
+    await post({ id: 7, bucket: 'none' })
+    expect(writeCall().binds.slice(0, 7)).toEqual(['none', 'Bob', CONF, ASSIGNED, null, null, null])
   })
 
   it('picking the same bucket again is a plain UPDATE with no log row', async () => {
@@ -86,7 +118,7 @@ describe('POST /api/evaluations/record-bucket — evaluation_log', () => {
   })
 
   it('removing a game that is not in Record logs nothing', async () => {
-    found = [{ record_bucket: null, record_5min_assignee: null, record_20min_assignee: null, final_conclusion: null }]
+    found = [row({})]
     await post({ id: 7, bucket: 'none' })
     const w = writeCall()
     expect(w.text).toMatch(/^\s*UPDATE game_evaluations SET/)
@@ -94,7 +126,7 @@ describe('POST /api/evaluations/record-bucket — evaluation_log', () => {
   })
 
   it('a manual bucket is the current bucket, whatever the final conclusion says', async () => {
-    found = [{ record_bucket: '5min', record_5min_assignee: 'Bob', record_20min_assignee: null, final_conclusion: 'Priority IV' }]
+    found = [row({ record_bucket: '5min', record_5min_assignee: 'Bob', final_conclusion: 'Priority IV' })]
     await post({ id: 7, bucket: '20min' })
     expect(writeCall().binds.slice(-7)).toEqual(['VinhTD', 'moderator', 'record_move', '5min', '20min', 'Bob', 'Bob'])
   })

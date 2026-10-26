@@ -18,6 +18,7 @@ import { mergeRosters } from '@/lib/rescue-merge'
 import type { AssignedRange } from '@/lib/rescue-range'
 import type { RescueConfig } from '@/lib/rescue-config'
 import { BUCKETS } from '@/lib/buckets'
+import { recordSlot } from '@/lib/record-slots'
 
 export const dynamic = 'force-dynamic'
 
@@ -344,32 +345,39 @@ export async function GET(req: NextRequest) {
       ? sql`AND lower(ge.${sql.unsafe(col)}) = ANY(${roster})`
       : sql`AND lower(ge.${sql.unsafe(col)}) <> ALL(${EXCLUDED})`
 
-    // When a recording is DONE. The Record tab treats a matching YouTube upload
-    // as the truth and the manual Confirm as a weaker "recording" state; Report
-    // used to read only the Confirm, so the same game showed Recorded on one
-    // screen and Pending on the other. Both now resolve to the same moment: the
-    // upload if we have one (migration 034), otherwise the Confirm click.
-    const recAt = sql`COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at)`
-    // The slot a game is recorded in, same rule as the Record tab: a manual
-    // record_bucket wins, else Priority IV is 20', everything else 5'. Only this
-    // slot is credited. The other slot's column can hold a stray name (the
-    // recorder sync used to fill it from a same-title game on the other OS).
-    const ownSlot = (slot: '5min' | '20min') => sql`AND (CASE
-      WHEN ge.record_bucket IN ('5min','20min') THEN ge.record_bucket
-      WHEN ge.final_conclusion = 'Priority IV' THEN '20min' ELSE '5min' END) = ${slot}`
-    // Only ever used as a FILTER, so it compares the raw column against VN-local
-    // boundaries rather than casting the column to a VN date -- same reason as vnBound
-    // above, plus it makes idx_game_evaluations_recorded_at (which indexes exactly this
-    // COALESCE) usable instead of dead weight.
-    // The stored link is the game's DEMO video: shared by title across Android and
-    // iOS, 20' preferred. youtube_uploaded_at is set only when the game's own-slot
-    // record video exists, so the queue shows the link as "Recorded" only then.
-    const ownVideoLink = sql`CASE WHEN ge.youtube_uploaded_at IS NOT NULL THEN ge.youtube_link END`
-    const recAtFrom = (d: string) => sql`AND ${recAt} >= ${vnBound(d)}`
-    const recAtTo   = (d: string) => sql`AND ${recAt} < ${vnBound(d)}`
-    // The recording date is a timestamp too, so a batch window cuts it at the same instant.
-    const recWinFrom = win.fromAt ? sql`AND ${recAt} >= ${win.fromAt}::timestamptz` : win.from ? recAtFrom(win.from) : sql``
-    const recWinTo = win.toAt ? sql`AND ${recAt} < ${win.toAt}::timestamptz` : win.fromAt ? sql`` : win.to ? recAtTo(win.to) : sql``
+    // Recording is counted per bucket (lib/record-slots, migration 051): a game
+    // recorded 5' in one batch and 20' in a later one is two recordings, each for
+    // its own recorder, in its own batch, done at its own moment. The Record tab
+    // treats a matching YouTube upload as the truth and the manual Confirm as a
+    // weaker "recording" state; both screens resolve "done" to the same moment, the
+    // Confirm if there is one, else the upload (migration 034).
+    const rec5 = recordSlot('5min'), rec20 = recordSlot('20min')
+    // The done moment is only ever used as a FILTER, so it compares the raw columns
+    // against VN-local boundaries rather than casting to a VN date -- same reason as
+    // vnBound above, plus it keeps idx_game_evaluations_recorded_<slot>_at usable. A
+    // batch window cuts it at the same instant. Batch views go by the round's batch.
+    const recWinOn = (s: ReturnType<typeof recordSlot>) => {
+      const dates = sql`
+        ${win.fromAt ? sql`AND ${s.doneAt} >= ${win.fromAt}::timestamptz` : win.from ? sql`AND ${s.doneAt} >= ${vnBound(win.from)}` : sql``}
+        ${win.toAt ? sql`AND ${s.doneAt} < ${win.toAt}::timestamptz` : win.fromAt ? sql`` : win.to ? sql`AND ${s.doneAt} < ${vnBound(win.to)}` : sql``}`
+      return legacyBatch
+        ? sql`AND ${s.batch} = ${legacyBatch}`
+        : winLabel ? sql`AND (${s.batch} = ${winLabel} OR ((${s.batch} IS NULL OR ${s.batch} <> ALL(${knownBatches}::text[])) ${dates}))` : dates
+    }
+    // One bucket's done recordings in the window, per recorder.
+    const recDoneRows = (s: ReturnType<typeof recordSlot>, slot: '5min' | '20min') => sql`
+          SELECT lower(${s.assignee}) AS k, ${s.assignee} AS name, ${slot}::text AS slot
+          FROM game_evaluations ge
+          WHERE ${s.doneAt} IS NOT NULL AND ${s.assignee} IS NOT NULL AND ${s.assignee} <> ''
+            ${recOk(s.assigneeCol)} ${s.credited}
+            ${catF}
+            ${recWinOn(s)}`
+    // One bucket's rounds for the recording queue, open or done; windowed by the caller.
+    const recQueueRows = (s: ReturnType<typeof recordSlot>, slot: '5min' | '20min') => sql`
+          SELECT lower(${s.assignee}) AS k, ${slot}::text AS slot, ge.game_id, gi.title, gi.os,
+                 ${s.batch} AS batch, ${s.confirmedAt} AS record_confirmed_at, ${s.videoLink} AS youtube_link, ${s.doneAt} AS rec_at
+          FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
+          WHERE ${s.assignee} IS NOT NULL AND ${s.assignee} <> '' ${recOk(s.assigneeCol)} ${s.credited} ${catF}`
 
     // "Judged" as every other number on the report counts it. Link_dead and
     // Stale_release are housekeeping, not decisions, and leaving them in made the
@@ -804,23 +812,9 @@ export async function GET(req: NextRequest) {
       // moment (upload, else manual Confirm) or batch
       sql`
         WITH rec AS (
-          SELECT lower(ge.record_5min_assignee) AS k, ge.record_5min_assignee AS name, '5min' AS slot
-          FROM game_evaluations ge
-          WHERE ${recAt} IS NOT NULL AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
-            ${recOk('record_5min_assignee')} ${ownSlot('5min')}
-            ${catF}
-            ${winOn(sql`
-              ${recWinFrom}
-              ${recWinTo}`)}
+          ${recDoneRows(rec5, '5min')}
           UNION ALL
-          SELECT lower(ge.record_20min_assignee), ge.record_20min_assignee, '20min'
-          FROM game_evaluations ge
-          WHERE ${recAt} IS NOT NULL AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
-            ${recOk('record_20min_assignee')} ${ownSlot('20min')}
-            ${catF}
-            ${winOn(sql`
-              ${recWinFrom}
-              ${recWinTo}`)}
+          ${recDoneRows(rec20, '20min')}
         )
         SELECT k, mode() WITHIN GROUP (ORDER BY name) AS name,
           count(*)::int AS recorded,
@@ -854,15 +848,9 @@ export async function GET(req: NextRequest) {
       // no video yet) - the same three states the Record tab shows.
       sql`
         WITH rec AS (
-          SELECT lower(ge.record_5min_assignee) AS k, '5min' AS slot, ge.game_id, gi.title, gi.os,
-                 ge.batch, ge.record_confirmed_at, ${ownVideoLink} AS youtube_link, ${recAt} AS rec_at
-          FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-          WHERE ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> '' ${recOk('record_5min_assignee')} ${ownSlot('5min')} ${catF}
+          ${recQueueRows(rec5, '5min')}
           UNION ALL
-          SELECT lower(ge.record_20min_assignee), '20min', ge.game_id, gi.title, gi.os,
-                 ge.batch, ge.record_confirmed_at, ${ownVideoLink}, ${recAt}
-          FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-          WHERE ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> '' ${recOk('record_20min_assignee')} ${ownSlot('20min')} ${catF}
+          ${recQueueRows(rec20, '20min')}
         )
         SELECT k, slot, game_id, title, os, batch,
           (rec_at AT TIME ZONE ${VN})::date::text AS recorded_on,

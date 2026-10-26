@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
+import { recordSlot } from '@/lib/record-slots'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -14,7 +15,7 @@ export const maxDuration = 120
 // by the current read path.
 //
 // POST /api/cron/report-rollup — (re)compute the report_rollup table. Weeks are anchored on real timestamps (evaluate_date for the
-// evaluation domain, record_confirmed_at for recording), truncated to the Monday
+// evaluation domain, each bucket's recording done-time for recording), truncated to the Monday
 // of the ISO week in Asia/Ho_Chi_Minh.
 //
 // Freeze model: past weeks are immutable once computed; only the current run's
@@ -133,40 +134,31 @@ export async function POST(req: NextRequest) {
 
       // ---- RECORDING domain ----
       // Recorders live in record_5min_assignee / record_20min_assignee (the flat
-      // record_assignee column is unused in prod). A game can in principle be
-      // recorded in both slots, so we UNION the two — each filled slot is one
-      // credited record. Completion is the upload if one was matched, else the
-      // manual Confirm (same rule as /api/report and the Record tab — migration
-      // 034); there is no assign-date for recording, so turnaround is left null
-      // (0/0). bucket = the slot.
-      const recAt = sql`COALESCE(ge.record_confirmed_at, ge.youtube_uploaded_at)`
-      // Only the game's own slot is credited (manual record_bucket, else P-IV = 20',
-      // else 5'), same as the Record tab. The other slot can hold a stray name.
-      const ownSlot = (slot: '5min' | '20min') => sql`AND (CASE
-        WHEN ge.record_bucket IN ('5min','20min') THEN ge.record_bucket
-        WHEN ge.final_conclusion = 'Priority IV' THEN '20min' ELSE '5min' END) = ${slot}`
+      // record_assignee column is unused in prod). A game can be recorded once per
+      // bucket (5' in one batch, 20' in a later one), so we UNION the two, each
+      // bucket with its own Confirm and upload (lib/record-slots, migration 051).
+      // Completion is the Confirm, else the matched upload (same rule as /api/report
+      // and the Record tab — migration 034); there is no assign-date for recording,
+      // so turnaround is left null (0/0). bucket = the slot.
+      const recSlotRows = (slot: '5min' | '20min') => {
+        const s = recordSlot(slot)
+        return sql`
+          SELECT (${s.doneAt} AT TIME ZONE ${VN})::date AS ev_date,
+            ${weekOf(s.doneAt)} AS wk,
+            lower(${s.assignee}) AS ekey, ${s.assignee} AS ename,
+            ge.category_group AS cat, ${slot}::text AS bucket
+          FROM game_evaluations ge
+          WHERE ${s.doneAt} IS NOT NULL
+            AND ${s.assignee} IS NOT NULL AND ${s.assignee} <> ''
+            AND lower(${s.assignee}) <> ALL(${EXCLUDED}) ${s.credited}
+            AND ${sourcePred(s.doneAt)}`
+      }
       await tx`DELETE FROM report_rollup WHERE domain = 'recording' AND ${rowPred()}`
       const recRows = await tx`
         WITH base AS (
-          SELECT (${recAt} AT TIME ZONE ${VN})::date AS ev_date,
-            ${weekOf(recAt)} AS wk,
-            lower(ge.record_5min_assignee) AS ekey, ge.record_5min_assignee AS ename,
-            ge.category_group AS cat, '5min' AS bucket
-          FROM game_evaluations ge
-          WHERE ${recAt} IS NOT NULL
-            AND ge.record_5min_assignee IS NOT NULL AND ge.record_5min_assignee <> ''
-            AND lower(ge.record_5min_assignee) <> ALL(${EXCLUDED}) ${ownSlot('5min')}
-            AND ${sourcePred(recAt)}
+          ${recSlotRows('5min')}
           UNION ALL
-          SELECT (${recAt} AT TIME ZONE ${VN})::date AS ev_date,
-            ${weekOf(recAt)} AS wk,
-            lower(ge.record_20min_assignee) AS ekey, ge.record_20min_assignee AS ename,
-            ge.category_group AS cat, '20min' AS bucket
-          FROM game_evaluations ge
-          WHERE ${recAt} IS NOT NULL
-            AND ge.record_20min_assignee IS NOT NULL AND ge.record_20min_assignee <> ''
-            AND lower(ge.record_20min_assignee) <> ALL(${EXCLUDED}) ${ownSlot('20min')}
-            AND ${sourcePred(recAt)}
+          ${recSlotRows('20min')}
         ),
         buck AS (
           SELECT wk, cat, ekey, bucket, count(*)::int AS n

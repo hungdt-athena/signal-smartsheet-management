@@ -29,7 +29,7 @@ const VN = 'Asia/Ho_Chi_Minh'
 //   add-to-record still moves it as before. Measured panel time lives in evaluation_log
 //   (/api/admin/evaluation-hours).
 // - records: Record tab assignments, dated by when the game was assigned
-//   (record_<n>min_date). Only confirmed ones (record_confirmed_at): a draft is
+//   (record_<n>min_date). Only confirmed ones (record_<n>min_confirmed_at): a draft is
 //   still the admin arranging, the recorder has not been handed it. A change of
 //   recorder clears the confirmation, so it drops out until re-confirmed.
 //   duration_min is the bucket (5 or 20), not the real video length.
@@ -71,20 +71,21 @@ export async function GET(req: NextRequest) {
       ORDER BY ge.evaluate_date, ge.game_id
     `
 
-    // One row per assigned duration: a game can hold both a 5- and a 20-min slot.
-    // A bucket move carries the recorder but not the date, so fall back to the
-    // confirmation time rather than dropping the row.
+    // One row per assigned duration: a game can hold both a 5- and a 20-min slot,
+    // each with its own confirmation (migration 051). A bucket move carries the
+    // recorder but not always the date, so fall back to the confirmation time
+    // rather than dropping the row.
     const recordsQ = keys.length === 0 ? Promise.resolve([]) : sql<RecordRow[]>`
       WITH slot AS (
-        SELECT ge.game_id, ge.category_group, ge.record_confirmed_at,
+        SELECT ge.game_id, ge.category_group,
                s.assignee, s.duration_min,
-               COALESCE(s.assigned_at, ge.record_confirmed_at) AS assigned_at
+               COALESCE(s.assigned_at, s.confirmed_at) AS assigned_at
         FROM game_evaluations ge
         CROSS JOIN LATERAL (VALUES
-          (ge.record_5min_assignee, ge.record_5min_date, 5),
-          (ge.record_20min_assignee, ge.record_20min_date, 20)
-        ) AS s(assignee, assigned_at, duration_min)
-        WHERE ge.record_confirmed_at IS NOT NULL
+          (ge.record_5min_assignee, ge.record_5min_date, 5, ge.record_5min_confirmed_at),
+          (ge.record_20min_assignee, ge.record_20min_date, 20, ge.record_20min_confirmed_at)
+        ) AS s(assignee, assigned_at, duration_min, confirmed_at)
+        WHERE s.confirmed_at IS NOT NULL
           AND s.assignee IS NOT NULL
           AND lower(s.assignee) = ANY(${keys})
       )

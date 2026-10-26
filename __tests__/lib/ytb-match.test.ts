@@ -178,6 +178,26 @@ describe('resolveYtMatches', () => {
     expect(at(null)?.id).toBe('a')           // no date, no gate
   })
 
+  // A game recorded 5' in one batch and pulled into Record again for 20': its 5'
+  // upload no longer matches its own title+bucket and looked unclaimed, so the
+  // "wrong duration" rule handed it to the 20' round (migration 051).
+  it('a game never takes the video it holds for its other bucket', () => {
+    const rows = [up('Bus Flow 3D', '5', 'MYTL', 'five')]
+    const as = (heldVideo: string | null) =>
+      resolveYtMatches([{ key: 1, title: 'Bus Flow 3D', bucket: '20min', recorder: 'HuyDD', heldVideo }], rows).get(1)
+    expect(as(null)?.id).toBe('five')      // the old behavior: wrong duration wins
+    expect(as('five')).toBeUndefined()
+  })
+
+  it('a held video is still shared by exact title (the same game on the other OS)', () => {
+    const out = resolveYtMatches([
+      { key: 1, title: 'Bus Flow 3D', bucket: '20min', heldVideo: 'five' },
+      { key: 2, title: 'Bus Flow 3D', bucket: '5min' },
+    ], [up('Bus Flow 3D', '5', 'MYTL', 'five')])
+    expect(out.get(2)?.id).toBe('five')
+    expect(out.get(1)).toBeUndefined()
+  })
+
   it('the gate only guards approximate matches, never an exact title', () => {
     const out = resolveYtMatches(
       [{ key: 1, title: 'Car Loop', bucket: '20min', recorder: 'KietCD', since: '2026-10-13' }],
