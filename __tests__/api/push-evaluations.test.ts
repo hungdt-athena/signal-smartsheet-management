@@ -29,6 +29,9 @@ function setupSql({
   pushWindow = null as string | null,
 } = {}) {
   sqlMock.mockReset()
+  // sql.begin hands the callback a transaction; the lock statement goes through it and
+  // everything else still goes through `sql`, so one mock records the order of both.
+  ;(sqlMock as unknown as { begin: unknown }).begin = jest.fn((fn: (tx: unknown) => unknown) => fn(sqlMock))
   sqlMock.mockImplementation((strings: unknown, ...values: unknown[]) => {
     if (!Array.isArray(strings)) return Promise.resolve([])
     const q = (strings as string[]).join(' ')
@@ -100,6 +103,29 @@ describe('POST /api/cron/push-evaluations', () => {
     expect(q).toContain('INSERT INTO game_evaluations (game_id, category_group, genre_1, genre_2)')
     expect(q).toContain("gi.metadata -> 'categories' ->> 0")
     expect(q).toContain("gi.metadata -> 'categories' ->> 1")
+  })
+
+  // Two genre pushes that overlap both pass the NOT EXISTS (neither sees the other's
+  // uncommitted rows) and a game that is Casual + Action ends up with a row in each genre.
+  // UNIQUE (game_id, category_group) cannot stop that. The lock makes the second push wait
+  // until the first has committed, so its NOT EXISTS sees the rows.
+  describe('push lock', () => {
+    const texts = () => sqlMock.mock.calls.map(c => (Array.isArray(c[0]) ? c[0].join(' ') : ''))
+
+    it('takes the advisory lock before it inserts', async () => {
+      setupSql({ pushed: [{ game_id: 'g1' }] })
+      await post({ category: 'puzzle', categories: ['puzzle'] })
+      const lock = texts().findIndex(q => q.includes('pg_advisory_xact_lock'))
+      const insert = texts().findIndex(q => q.includes('INSERT INTO game_evaluations'))
+      expect(lock).toBeGreaterThanOrEqual(0)
+      expect(lock).toBeLessThan(insert)
+    })
+
+    it('dryRun writes nothing, so it does not wait for the lock', async () => {
+      setupSql({ pushed: [{ game_id: 'g1' }] })
+      await post({ category: 'puzzle', categories: ['puzzle'], dryRun: true })
+      expect(queries()).not.toContain('pg_advisory_xact_lock')
+    })
   })
 
   it('dryRun selects without inserting', async () => {

@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { pushSourceFilter } from '@/lib/push-sources'
 import { BUCKETS } from '@/lib/buckets'
+import { withPushLock } from '@/lib/push-lock'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -157,36 +158,43 @@ async function run(req: NextRequest, write: boolean) {
   const maxReleaseAgeDays =
     Number(body.maxReleaseAgeDays) > 0 ? Number(body.maxReleaseAgeDays) : DEFAULT_MAX_RELEASE_AGE_DAYS
 
-  const rows = await computeEligible(pairs, windowDays, maxReleaseAgeDays)
-  // One row per game, in the first bucket (BUCKETS order) that matched it.
-  const rank = (b: string) => { const i = (BUCKETS as readonly string[]).indexOf(b); return i < 0 ? BUCKETS.length : i }
-  const firstBucket = new Map<string, EligibleRow>()
-  for (const r of rows) {
-    if (r.already_in_db) continue
-    const seen = firstBucket.get(r.game_id)
-    if (!seen || rank(r.category_group) < rank(seen.category_group)) firstBucket.set(r.game_id, r)
-  }
-  const toInsert = Array.from(firstBucket.values())
+  // Compute and insert under one lock: `already_in_db` is read in computeEligible, so a
+  // push that overlapped this one would otherwise be invisible to it (lib/push-lock.ts).
+  // A dry run writes nothing and does not wait.
+  const work = async () => {
+    const rows = await computeEligible(pairs, windowDays, maxReleaseAgeDays)
+    // One row per game, in the first bucket (BUCKETS order) that matched it.
+    const rank = (b: string) => { const i = (BUCKETS as readonly string[]).indexOf(b); return i < 0 ? BUCKETS.length : i }
+    const firstBucket = new Map<string, EligibleRow>()
+    for (const r of rows) {
+      if (r.already_in_db) continue
+      const seen = firstBucket.get(r.game_id)
+      if (!seen || rank(r.category_group) < rank(seen.category_group)) firstBucket.set(r.game_id, r)
+    }
+    const toInsert = Array.from(firstBucket.values())
 
-  let inserted = 0
-  if (!dryRun && toInsert.length > 0) {
-    const res = await sql`
-      INSERT INTO game_evaluations ${sql(
-        toInsert.map((r) => ({
-          game_id: r.game_id,
-          category_group: r.category_group,
-          genre_1: r.genre_1,
-          genre_2: r.genre_2,
-        })),
-        'game_id',
-        'category_group',
-        'genre_1',
-        'genre_2',
-      )}
-      ON CONFLICT (game_id, category_group) DO NOTHING
-    `
-    inserted = res.count
+    let inserted = 0
+    if (!dryRun && toInsert.length > 0) {
+      const res = await sql`
+        INSERT INTO game_evaluations ${sql(
+          toInsert.map((r) => ({
+            game_id: r.game_id,
+            category_group: r.category_group,
+            genre_1: r.genre_1,
+            genre_2: r.genre_2,
+          })),
+          'game_id',
+          'category_group',
+          'genre_1',
+          'genre_2',
+        )}
+        ON CONFLICT (game_id, category_group) DO NOTHING
+      `
+      inserted = res.count
+    }
+    return { rows, toInsert, inserted }
   }
+  const { rows, toInsert, inserted } = await (dryRun ? work() : withPushLock(work))
 
   return NextResponse.json({
     dryRun,

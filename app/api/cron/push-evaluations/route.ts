@@ -6,6 +6,7 @@ import { loadGenreTargets } from '@/lib/genre-config-db'
 import { loadPushWindowConfig } from '@/lib/push-window-db'
 import { pushWindowFor } from '@/lib/push-window'
 import { pushSourceFilter } from '@/lib/push-sources'
+import { withPushLock } from '@/lib/push-lock'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -123,7 +124,8 @@ export async function POST(req: NextRequest) {
           )
       `
     } else {
-      rows = await sql<{ game_id: string }[]>`
+      // Serialised with every other push: see lib/push-lock.ts for why NOT EXISTS alone is not enough.
+      rows = await withPushLock(() => sql<{ game_id: string }[]>`
         INSERT INTO game_evaluations (game_id, category_group, genre_1, genre_2)
         -- genre_1/genre_2 mirror the first two entries of metadata->'categories', the
         -- shape the Smartsheet-era import used. Without them the Evaluate panel shows an
@@ -153,7 +155,7 @@ export async function POST(req: NextRequest) {
           )
         ON CONFLICT (game_id, category_group) DO NOTHING
         RETURNING game_id
-      `
+      `)
     }
 
     return NextResponse.json({
