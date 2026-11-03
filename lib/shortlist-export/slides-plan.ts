@@ -43,8 +43,9 @@ function topPicksScale(n: number, box: Box, size: number, pitch: number): { s: n
   return { s: 0.05, cols: grid(0.05).cols }
 }
 
-// Oswald bold, the template font: measured 0.43-0.50 em per character on real names.
-const CHAR_EM = 0.46
+// Oswald bold, the template font. Real names wrapped at ~0.50 em per character on average
+// ("Sand ASMR Coloring"); capitals run wider, so estimate on the safe side.
+const CHAR_EM = 0.55
 const MIN_FONT = 0.6
 /** Font size that fits `text` on one line of `boxW` EMU, or null when the template size fits. */
 function fitFont(text: string, boxW: number, fontPt: number): number | null {
@@ -126,10 +127,11 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
           }
           replace(id(c.nameId, n), c.nameId, g.title)
           link(id(c.nameId, n), g.storeUrl)
-          // Long name: keep the template size and grow the box right, up to the "-" before
-          // Gameplay. Shrink the font only if it still does not fit.
+          // Keep the template size and grow the box right, up to the "-" before Gameplay --
+          // always: a wider box costs nothing, and the width estimate is only an estimate.
+          // Shrink the font only if the name still does not fit.
           let boxW = c.nameBoxW
-          if (fitFont(g.title, boxW, c.nameFontPt) && c.sepX != null) {
+          if (c.sepX != null) {
             const room = c.sepX - c.nameBox.x - 4 * 12700
             if (room > boxW) {
               const k = room / boxW

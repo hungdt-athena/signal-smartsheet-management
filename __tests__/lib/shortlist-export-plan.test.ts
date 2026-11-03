@@ -234,10 +234,14 @@ describe('planSlides', () => {
         grow: kinds(plan.structure, 'updatePageElementTransform').find((u: any) => u.objectId === c.nameId),
       }
     }
-    // short: nothing changes
-    expect(run('Off You Go!')).toEqual({ font: undefined, grow: undefined })
+    // every name box grows to the "-": a short name keeps its size
+    const short = run('Off You Go!')
+    expect(short.font).toBeUndefined()
+    expect(short.grow.transform.scaleX).toBeGreaterThan(1)
+    // the case that wrapped in the real deck: 18 characters, wide capitals
+    expect(run('Sand ASMR Coloring').font).toBeUndefined()
     // fits once the box is wider: original font size kept
-    const mid = run('Circle Release: Ring Puzzle')
+    const mid = run('Screw Shot: Bolt Puzzle')
     expect(mid.font).toBeUndefined()
     expect(mid.grow.applyMode).toBe('RELATIVE')
     const k = mid.grow.transform.scaleX
@@ -247,6 +251,9 @@ describe('planSlides', () => {
     // the widened box stops before the "-"
     expect(c.nameBox.x + c.nameBoxW * k).toBeLessThan(c.sepX!)
     // too long even when wider: shrink, never below 60%
+    // wrapped at full size in the real deck even after widening: must shrink
+    const bunny = run('Bunny Sort: Color Sort Games')
+    expect(bunny.font.style.fontSize.magnitude).toBeLessThan(c.nameFontPt)
     const long = run('Ants Eat Dragons - Color Match and a very long subtitle that goes on')
     expect(long.grow).toBeDefined()
     expect(long.font!.style.fontSize.magnitude).toBeGreaterThanOrEqual(c.nameFontPt * 0.6 - 0.1)
