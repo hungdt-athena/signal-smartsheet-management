@@ -108,9 +108,14 @@ describe('planSlides', () => {
     expect(c.created).toHaveLength(0)
     expect(allMedia(c.plan).filter(r => r.replaceImage && tp.iconIds.includes(r.replaceImage.imageObjectId!))).toHaveLength(20)
     expect(c.font).toBeUndefined()
-    // 12 games: 8 unused template slots deleted
+    // 12 games: 8 unused template slots deleted, after the icon group is ungrouped --
+    // emptying a group down to one element deletes the group, kept icon included
     const d = planSlides(MAP, p4(12), WEEK, ['priority_iv'])
     expect(deleted(d.structure)).toEqual(expect.arrayContaining(tp.iconIds.slice(12)))
+    const iUngroup = d.structure.findIndex(r => r.ungroupObjects?.objectIds?.includes('g38976c7624e_1_27'))
+    const iDelete = d.structure.findIndex(r => r.deleteObject?.objectId === tp.iconIds[12])
+    expect(iUngroup).toBeGreaterThanOrEqual(0)
+    expect(iUngroup).toBeLessThan(iDelete)
   })
 
   it('insight only drops top picks and detail; p4 only drops insight', () => {
@@ -136,7 +141,10 @@ describe('planSlides', () => {
     expect(ids).not.toContain(card.releasedById)
     expect(ids).not.toContain(d.dateId)
     const links = kinds(plan.structure, 'updateTextStyle').filter((u: any) => u.fields === 'link')
-    expect(links).toHaveLength(0)
+    // no url anywhere, and the template's own sample link is cleared on name, gameplay and date
+    expect(links.every((l: any) => !l.style.link)).toBe(true)
+    const cleared = links.map((l: any) => l.objectId)
+    expect(cleared).toEqual(expect.arrayContaining([card.nameId, card.gameplayId, d.nameId, d.dateId]))
     expect(plan.images).toHaveLength(0)
     expect(inserts(plan.structure).map(i => i.text)).toContain('Add recording video')
     expect(deleted(plan.structure)).toContain(d.videoId)
@@ -172,6 +180,13 @@ describe('planSlides', () => {
     const links = kinds(plan.structure, 'updateTextStyle').filter((u: any) => u.fields === 'link')
     expect(links.find((l: any) => l.objectId === c.gameplayId).style.link.url).toBe('https://youtu.be/abcdefghijk')
     expect(inserts(plan.structure).map(i => i.objectId)).not.toContain(c.gameplayId)
+  })
+
+  it('clears an inherited link on text that gets no link of its own', () => {
+    const plan = planSlides(MAP, ins(1), WEEK, ['insight'])
+    const c = MAP.insight!.cards[0]
+    const links = kinds(plan.structure, 'updateTextStyle').filter((u: any) => u.fields === 'link' && u.objectId === c.releasedById)
+    expect(links).toEqual([expect.objectContaining({ style: {}, textRange: { type: 'ALL' } })])
   })
 
   it('replaces text by insert-then-delete', () => {

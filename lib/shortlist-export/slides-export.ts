@@ -17,11 +17,19 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await fn()
     } catch (e) {
-      const code = (e as { code?: number; status?: number }).code ?? (e as { status?: number }).status
+      const code = codeOf(e)
       if ((code === 429 || code === 503) && attempt < 3) { await sleep(15_000 * (attempt + 1)); continue }
       throw e
     }
   }
+}
+
+const codeOf = (e: unknown) => (e as { code?: number; status?: number }).code ?? (e as { status?: number }).status
+
+/** Auth, quota (after retries) and server errors stop the export; anything else is one bad URL. */
+function isFatal(e: unknown): boolean {
+  const c = codeOf(e)
+  return c === 401 || c === 403 || c === 429 || (typeof c === 'number' && c >= 500)
 }
 
 function warningFor(item: MediaItem): string {
@@ -49,14 +57,27 @@ export async function exportSlides(
 
     for (let i = 0; i < plan.structure.length; i += CHUNK) await send(plan.structure.slice(i, i + CHUNK))
 
-    if (plan.images.length) {
+    // One bad URL fails the whole batch. The error names the request ("Invalid requests[37]…"):
+    // drop that game, warn, resend the rest. Without an index, fall back to one game per call.
+    let items = plan.images
+    while (items.length) {
       try {
-        await send(plan.images.flatMap(i => i.requests))
-      } catch {
-        // One bad URL fails the whole batch: retry each game alone and name the ones that fail.
-        for (const item of plan.images) {
-          try { await send(item.requests) } catch { warnings.push(warningFor(item)) }
+        await send(items.flatMap(i => i.requests))
+        break
+      } catch (e) {
+        if (isFatal(e)) throw e
+        const m = /requests\[(\d+)\]/.exec(String((e as Error).message ?? ''))
+        if (!m) {
+          for (const item of items) {
+            try { await send(item.requests) } catch (e2) { if (isFatal(e2)) throw e2; warnings.push(warningFor(item)) }
+          }
+          break
         }
+        let at = parseInt(m[1], 10)
+        const bad = items.findIndex(i => (at -= i.requests.length) < 0)
+        if (bad < 0) throw e
+        warnings.push(warningFor(items[bad]))
+        items = items.filter((_, i) => i !== bad)
       }
     }
     return { fileId, url: `https://docs.google.com/presentation/d/${fileId}/edit`, warnings }

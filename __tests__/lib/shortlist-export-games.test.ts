@@ -31,12 +31,15 @@ function row(over: Record<string, unknown> = {}) {
 }
 
 describe('loadExportGames', () => {
-  it('passes labels and conclusions as binds', async () => {
-    db([])
-    await loadExportGames(['W3 Oct, 2026'], ['insight'])
+  it('dedupes over both conclusions whatever the Games choice, then filters', async () => {
+    // newest row of g1 is Priority IV: an Insight-only export must leave g1 out, the same
+    // way "Both" lists it once under Priority IV -- so the dialog count matches the file
+    db([row({ game_id: 'g1', final_conclusion: 'Priority IV' }), row({ game_id: 'g2' })])
+    const out = await loadExportGames(['W3 Oct, 2026'], ['insight'])
+    expect(out.map(g => g.gameId)).toEqual(['g2'])
     expect(queries).toHaveLength(1)
     const { text, binds } = queries[0]
-    expect(binds).toContainEqual(['Insight'])
+    expect(binds).toContainEqual(['Insight', 'Priority IV'])
     expect(binds).toContainEqual(['W3 Oct, 2026'])
     expect(text).toContain('DISTINCT ON (ge.game_id)')
     expect(text).toContain('ORDER BY ge.game_id, ge.evaluate_date DESC')

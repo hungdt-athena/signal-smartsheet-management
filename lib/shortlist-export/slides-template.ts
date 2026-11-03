@@ -23,7 +23,7 @@ export interface TemplateMap {
   textLen: Record<string, number>
   insight: { slideId: string; cards: InsightCard[] } | null
   trendingSlideId: string | null
-  topPicks: { slideId: string; iconIds: string[]; iconBox: Box; iconSize: number; iconPitch: number; nameColumnIds: [string, string]; nameFontPt: number } | null
+  topPicks: { slideId: string; iconIds: string[]; iconGroupIds: string[]; iconBox: Box; iconSize: number; iconPitch: number; nameColumnIds: [string, string]; nameFontPt: number } | null
   detail: { slideId: string; nameId: string; iconId: string; dateId: string; videoId: string | null; videoBox: Box | null } | null
   dropSlideIds: string[]
 }
@@ -116,6 +116,7 @@ function readTopPicks(slide: Slide, f: Flat[]): TemplateMap['topPicks'] {
   return {
     slideId: slide.objectId!,
     iconIds: icons.map(i => i.id),
+    iconGroupIds: Array.from(new Set(icons.filter(i => i.top !== i.el).map(i => i.top.objectId!))),
     iconBox: union(icons.map(i => i.box)),
     iconSize: icons[0].box!.w,
     iconPitch: icons.length > 1 && Math.abs(icons[1].box!.y - icons[0].box!.y) <= 5 * PT ? icons[1].box!.x - icons[0].box!.x : icons[0].box!.w * 1.25,

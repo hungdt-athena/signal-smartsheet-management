@@ -77,3 +77,27 @@ it('passes plan warnings through', async () => {
   const out = await exportSlides({} as any, 'x', p4, WEEK, ['priority_iv'])
   expect(out.warnings).toEqual(['More than 40 Top Picks: list packed as small as it goes, check it by hand'])
 })
+
+it('drops only the item the error names and resends the rest', async () => {
+  let imageBatches = 0
+  presBatch.mockImplementation(({ requestBody }: any) => {
+    const rs = requestBody.requests
+    if (!JSON.stringify(rs).includes('replaceImage')) return Promise.resolve({ data: {} })
+    imageBatches++
+    const iB = rs.findIndex((r: any) => r.replaceImage?.url?.endsWith('/B.png'))
+    if (iB >= 0) return Promise.reject(Object.assign(new Error(`Invalid requests[${iB}].replaceImage: The provided image was not found.`), { code: 400 }))
+    return Promise.resolve({ data: {} })
+  })
+  const out = await exportSlides({} as any, 'x', [game('A'), game('B'), game('C')], WEEK, ['insight'])
+  expect(out.warnings).toEqual(['Icon not loaded: Game B'])
+  expect(imageBatches).toBe(2)
+})
+
+it('stops on a permission error in the image batch and trashes the deck', async () => {
+  presBatch.mockImplementation(({ requestBody }: any) =>
+    JSON.stringify(requestBody.requests).includes('replaceImage')
+      ? Promise.reject(Object.assign(new Error('The caller does not have permission'), { code: 403 }))
+      : Promise.resolve({ data: {} }))
+  await expect(exportSlides({} as any, 'x', [game('A')], WEEK, ['insight'])).rejects.toThrow('permission')
+  expect(filesUpdate).toHaveBeenCalledWith({ fileId: 'deck1', requestBody: { trashed: true }, supportsAllDrives: true })
+})

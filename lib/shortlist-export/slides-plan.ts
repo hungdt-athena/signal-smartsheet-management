@@ -63,8 +63,10 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
     fills.push({ insertText: { objectId, insertionIndex: len, text } })
     if (len > 0) fills.push({ deleteText: { objectId, textRange: { type: 'FIXED_RANGE', startIndex: 0, endIndex: len } } })
   }
+  // Set the link, or clear it: text inserted at the end inherits the run before it, so a
+  // sample link in the template would otherwise stay on a game that has none.
   const link = (objectId: string, url: string | null) => {
-    if (url) fills.push({ updateTextStyle: { objectId, style: { link: { url } }, textRange: { type: 'ALL' }, fields: 'link' } })
+    fills.push({ updateTextStyle: { objectId, style: url ? { link: { url } } : {}, textRange: { type: 'ALL' }, fields: 'link' } })
   }
   const duplicate = (slideId: string, ids: string[], copies: number) => {
     for (let n = 1; n < copies; n++) {
@@ -111,7 +113,10 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
           }
           replace(id(c.nameId, n), c.nameId, g.title)
           link(id(c.nameId, n), g.storeUrl)
-          if (c.releasedById && g.publisher) replace(id(c.releasedById, n), c.releasedById, `${g.title} released by ${g.publisher}`)
+          if (c.releasedById && g.publisher) {
+            replace(id(c.releasedById, n), c.releasedById, `${g.title} released by ${g.publisher}`)
+            link(id(c.releasedById, n), null)
+          }
           link(id(c.gameplayId, n), g.youtubeUrl)
           iconImage(g, id(c.iconId, n))
         })
@@ -136,7 +141,7 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
       const cols = [lines.slice(0, half), lines.slice(half)]
       const { s, cols: gridCols } = topPicksScale(p4.length, tp.iconBox, tp.iconSize, tp.iconPitch)
       tp.nameColumnIds.forEach((colId, i) => {
-        if (cols[i].length) replace(colId, colId, cols[i].join('\n'))
+        if (cols[i].length) { replace(colId, colId, cols[i].join('\n')); link(colId, null) }
         else deletes.push(colId)
         fills.push({ deleteParagraphBullets: { objectId: colId, textRange: { type: 'ALL' } } })
         if (s < 1 && cols[i].length) {
@@ -149,6 +154,9 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
           if (g) iconImage(g, iconId)
           else deletes.push(iconId)
         })
+        // A delete that leaves a group with one element removes the group -- and with it the
+        // icon still to fill. Ungroup first so each slot stands alone.
+        if (p4.length < tp.iconIds.length && tp.iconGroupIds.length) fills.push({ ungroupObjects: { objectIds: tp.iconGroupIds } })
       } else {
         deletes.push(...tp.iconIds)
         const size = tp.iconSize * s, pitch = tp.iconPitch * s
@@ -188,6 +196,7 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
         replace(id(d.nameId, n), d.nameId, g.title)
         link(id(d.nameId, n), g.storeUrl)
         if (g.releaseDate) replace(id(d.dateId, n), d.dateId, g.releaseDate)
+        link(id(d.dateId, n), null)
         iconImage(g, id(d.iconId, n))
         if (!d.videoId || !d.videoBox) return
         const elementProperties = {

@@ -45,8 +45,12 @@ function timeOf(v: string | Date | null): number {
  *  the period (cross-genre duplicate rows, or both conclusions) appears once, under its
  *  latest evaluation. Ordered by batch (order of `labels`), then evaluate time. */
 export async function loadExportGames(labels: string[], types: ExportType[]): Promise<ExportGame[]> {
-  const conclusions = types.map(t => CONCLUSION_OF[t])
-  if (!labels.length || !conclusions.length) return []
+  const chosen = new Set(types.map(t => CONCLUSION_OF[t]))
+  if (!labels.length || !chosen.size) return []
+  // Dedupe over BOTH conclusions, then keep the chosen ones: a game whose newest row is
+  // Priority IV stays out of an Insight-only export, exactly as "Both" lists it once under
+  // Priority IV -- so the dialog's count (always both) matches every file.
+  const conclusions = Object.values(CONCLUSION_OF)
 
   const rows = await sql<Row[]>`
     SELECT DISTINCT ON (ge.game_id)
@@ -62,7 +66,7 @@ export async function loadExportGames(labels: string[], types: ExportType[]): Pr
     ORDER BY ge.game_id, ge.evaluate_date DESC NULLS LAST, ge.id DESC`
 
   const rank = new Map(labels.map((l, i) => [l, i]))
-  const sorted = [...rows].sort((a, b) =>
+  const sorted = rows.filter(r => chosen.has(r.final_conclusion as ExportGame['conclusion'])).sort((a, b) =>
     (rank.get(a.batch) ?? 1e9) - (rank.get(b.batch) ?? 1e9) || timeOf(a.evaluate_date) - timeOf(b.evaluate_date))
 
   return sorted.map(r => {
