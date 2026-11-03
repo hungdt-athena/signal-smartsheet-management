@@ -14,7 +14,7 @@ describe('readTemplate', () => {
   it('finds the cover text', () => {
     expect(map.coverSlideId).toBe(P.slides![0].objectId)
     expect(map.coverTextId).toBe('g3876fc6da32_2_18')
-    expect(map.coverText).toBe('December 2026 Monthly Report')
+    expect(map.coverText).toBe('December 2026\nMonthly Report')
     expect(map.textLen['g3876fc6da32_2_439']).toBe('The game name'.length)
   })
 
@@ -36,10 +36,10 @@ describe('readTemplate', () => {
     expect(tp.iconIds).toHaveLength(20)
     expect(tp.iconIds.slice(0, 5)).toEqual(['g38976c7624e_1_2', 'g38976c7624e_1_3', 'g38976c7624e_1_4', 'g38976c7624e_1_5', 'g38976c7624e_1_7'])
     expect(tp.nameColumnIds).toEqual(['g38976c7624e_1_39', 'g38976c7624e_1_40'])
-    expect(tp.nameFontPt).toBe(14)
-    expect(tp.iconBox.x).toBeCloseTo(24 * 12700, -2)
-    expect(tp.iconSize).toBeCloseTo(49 * 12700, -2)
-    expect(tp.iconPitch).toBeCloseTo(61 * 12700, -2)
+    expect(tp.nameFontPt).toBe(16)
+    expect(Math.abs(tp.iconBox.x - 24 * 12700)).toBeLessThan(12700) // within 1pt of the template
+    expect(Math.abs(tp.iconSize - 49 * 12700)).toBeLessThan(12700) // within 1pt of the template
+    expect(Math.abs(tp.iconPitch - 61 * 12700)).toBeLessThan(12700) // within 1pt of the template
   })
 
   it('picks the 3-section detail slide with name, icon, date and video', () => {

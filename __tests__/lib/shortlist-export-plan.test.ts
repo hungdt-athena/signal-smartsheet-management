@@ -118,6 +118,19 @@ describe('planSlides', () => {
     expect(iUngroup).toBeLessThan(iDelete)
   })
 
+  it('shrinks the name columns so every line fits the box height', () => {
+    const tp = MAP.topPicks!
+    const fontAt = (k: number) => kinds(planSlides(MAP, p4(k), MONTH, ['priority_iv']).structure, 'updateTextStyle')
+      .find((u: any) => u.objectId === tp.nameColumnIds[0] && u.fields === 'fontSize')?.style.fontSize.magnitude as number | undefined
+    const lines = (k: number) => Math.ceil(k / 2)
+    // a line takes about 1.8x its font size in this template
+    for (const k of [25, 35, 76]) {
+      const f = fontAt(k)!
+      expect(lines(k) * f * 1.8 * 12700).toBeLessThanOrEqual(tp.nameBoxH + 1)
+    }
+    expect(fontAt(76)!).toBeLessThan(tp.nameFontPt * 0.5)
+  })
+
   it('insight only drops top picks and detail; p4 only drops insight', () => {
     const a = planSlides(MAP, [...ins(2), ...p4(2)], WEEK, ['insight'])
     expect(deleted(a.structure)).toEqual(expect.arrayContaining([MAP.topPicks!.slideId, MAP.detail!.slideId]))
@@ -187,6 +200,19 @@ describe('planSlides', () => {
     const c = MAP.insight!.cards[0]
     const links = kinds(plan.structure, 'updateTextStyle').filter((u: any) => u.fields === 'link' && u.objectId === c.releasedById)
     expect(links).toEqual([expect.objectContaining({ style: {}, textRange: { type: 'ALL' } })])
+  })
+
+  it('shrinks a long Insight name to fit its box, never below 60%', () => {
+    const c = MAP.insight!.cards[0]
+    const font = (title: string) => {
+      const plan = planSlides(MAP, [g(1, 'Insight', { title })], WEEK, ['insight'])
+      return kinds(plan.structure, 'updateTextStyle').find((u: any) => u.objectId === c.nameId && u.fields === 'fontSize')
+    }
+    expect(font('Off You Go!')).toBeUndefined()
+    const mid = font('Sushi Loop: Order up!')!
+    expect(mid.style.fontSize.magnitude).toBeLessThan(c.nameFontPt)
+    expect(mid.style.fontSize.magnitude).toBeGreaterThanOrEqual(c.nameFontPt * 0.6)
+    expect(font('Ants Eat Dragons - Color Match and a very long subtitle')!.style.fontSize.magnitude).toBeCloseTo(c.nameFontPt * 0.6, 1)
   })
 
   it('replaces text by insert-then-delete', () => {

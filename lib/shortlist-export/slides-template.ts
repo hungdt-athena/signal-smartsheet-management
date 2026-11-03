@@ -12,7 +12,7 @@ type Slide = slides_v1.Schema$Page
 /** In EMU, page coordinates. */
 export type Box = { x: number; y: number; w: number; h: number }
 
-export interface InsightCard { groupId: string; box: Box; iconId: string; nameId: string; gameplayId: string; releasedById: string | null }
+export interface InsightCard { groupId: string; box: Box; iconId: string; nameId: string; nameBoxW: number; nameFontPt: number; gameplayId: string; releasedById: string | null }
 
 export interface TemplateMap {
   coverSlideId: string
@@ -23,7 +23,7 @@ export interface TemplateMap {
   textLen: Record<string, number>
   insight: { slideId: string; cards: InsightCard[] } | null
   trendingSlideId: string | null
-  topPicks: { slideId: string; iconIds: string[]; iconGroupIds: string[]; iconBox: Box; iconSize: number; iconPitch: number; nameColumnIds: [string, string]; nameFontPt: number } | null
+  topPicks: { slideId: string; iconIds: string[]; iconGroupIds: string[]; iconBox: Box; iconSize: number; iconPitch: number; nameColumnIds: [string, string]; nameFontPt: number; nameBoxH: number } | null
   detail: { slideId: string; nameId: string; iconId: string; dateId: string; videoId: string | null; videoBox: Box | null } | null
   dropSlideIds: string[]
 }
@@ -92,7 +92,11 @@ function readInsight(slide: Slide, f: Flat[]): TemplateMap['insight'] {
     const gameplay = kids.find(e => e.text === 'Gameplay')
     const icon = kids.find(e => e.el.image)
     if (!name || !gameplay || !icon) continue
-    cards.push({ groupId: g.id, box: union(kids.map(k => k.box)), iconId: icon.id, nameId: name.id, gameplayId: gameplay.id, releasedById: null })
+    cards.push({
+      groupId: g.id, box: union(kids.map(k => k.box)), iconId: icon.id, nameId: name.id,
+      nameBoxW: name.box?.w ?? 0, nameFontPt: fontOf(name.el),
+      gameplayId: gameplay.id, releasedById: null,
+    })
   }
   cards.sort((a, b) => rowMajor(a.box, b.box))
   const lines = f.filter(e => e.depth === 0 && e.box && e.text.includes('released by'))
@@ -108,11 +112,14 @@ function readInsight(slide: Slide, f: Flat[]): TemplateMap['insight'] {
   return { slideId: slide.objectId!, cards }
 }
 
+function fontOf(el: El): number {
+  return el.shape?.text?.textElements?.find(t => t.textRun)?.textRun?.style?.fontSize?.magnitude ?? 14
+}
+
 function readTopPicks(slide: Slide, f: Flat[]): TemplateMap['topPicks'] {
   const icons = f.filter(e => e.depth > 0 && e.el.image && e.box).sort((a, b) => rowMajor(a.box!, b.box!))
   const cols = f.filter(e => e.el.shape && e.box && e.text.startsWith('Game')).sort((a, b) => a.box!.x - b.box!.x)
   if (!icons.length || cols.length < 2) return null
-  const run = cols[0].el.shape?.text?.textElements?.find(t => t.textRun)?.textRun
   return {
     slideId: slide.objectId!,
     iconIds: icons.map(i => i.id),
@@ -121,7 +128,8 @@ function readTopPicks(slide: Slide, f: Flat[]): TemplateMap['topPicks'] {
     iconSize: icons[0].box!.w,
     iconPitch: icons.length > 1 && Math.abs(icons[1].box!.y - icons[0].box!.y) <= 5 * PT ? icons[1].box!.x - icons[0].box!.x : icons[0].box!.w * 1.25,
     nameColumnIds: [cols[0].id, cols[1].id],
-    nameFontPt: run?.style?.fontSize?.magnitude ?? 14,
+    nameFontPt: fontOf(cols[0].el),
+    nameBoxH: cols[0].box!.h,
   }
 }
 

@@ -43,6 +43,19 @@ function topPicksScale(n: number, box: Box, size: number, pitch: number): { s: n
   return { s: 0.05, cols: grid(0.05).cols }
 }
 
+// Oswald, the template's font, runs about half an em per character.
+const CHAR_EM = 0.5
+const MIN_FONT = 0.6
+/** Font size that fits `text` on one line of `boxW` EMU, or null when the template size fits. */
+function fitFont(text: string, boxW: number, fontPt: number): number | null {
+  const need = text.length * CHAR_EM * fontPt * 12700
+  if (!boxW || need <= boxW) return null
+  return Math.round(Math.max(fontPt * MIN_FONT, fontPt * boxW / need) * 10) / 10
+}
+
+// A Top Picks line (text + paragraph spacing) takes about 1.8x its font size in this template.
+const LINE_EM = 1.8
+
 const id = (src: string, copy: number) => (copy === 0 ? src : `${src}_x${copy}`)
 const emu = (v: number) => ({ magnitude: Math.round(v), unit: 'EMU' })
 
@@ -113,6 +126,8 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
           }
           replace(id(c.nameId, n), c.nameId, g.title)
           link(id(c.nameId, n), g.storeUrl)
+          const fit = fitFont(g.title, c.nameBoxW, c.nameFontPt)
+          if (fit) fills.push({ updateTextStyle: { objectId: id(c.nameId, n), style: { fontSize: { magnitude: fit, unit: 'PT' } }, textRange: { type: 'ALL' }, fields: 'fontSize' } })
           if (c.releasedById && g.publisher) {
             replace(id(c.releasedById, n), c.releasedById, `${g.title} released by ${g.publisher}`)
             link(id(c.releasedById, n), null)
@@ -140,12 +155,15 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
       const lines = p4.map((g, i) => `${i + 1}. ${g.title}`)
       const cols = [lines.slice(0, half), lines.slice(half)]
       const { s, cols: gridCols } = topPicksScale(p4.length, tp.iconBox, tp.iconSize, tp.iconPitch)
+      // Same step as the icons, smaller still when the lines would not fit the column's height.
+      const linesFit = tp.nameBoxH / (tp.nameFontPt * LINE_EM * 12700)
+      const fontScale = Math.min(s, linesFit / half)
       tp.nameColumnIds.forEach((colId, i) => {
         if (cols[i].length) { replace(colId, colId, cols[i].join('\n')); link(colId, null) }
         else deletes.push(colId)
         fills.push({ deleteParagraphBullets: { objectId: colId, textRange: { type: 'ALL' } } })
-        if (s < 1 && cols[i].length) {
-          fills.push({ updateTextStyle: { objectId: colId, style: { fontSize: { magnitude: Math.round(tp.nameFontPt * s * 10) / 10, unit: 'PT' } }, textRange: { type: 'ALL' }, fields: 'fontSize' } })
+        if (fontScale < 1 && cols[i].length) {
+          fills.push({ updateTextStyle: { objectId: colId, style: { fontSize: { magnitude: Math.floor(tp.nameFontPt * fontScale * 10) / 10, unit: 'PT' } }, textRange: { type: 'ALL' }, fields: 'fontSize' } })
         }
       })
       if (s === 1) {
@@ -217,6 +235,8 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
           fills.push({ deleteObject: { objectId: id(d.videoId, n) } })
           fills.push({ createShape: { objectId: ph, shapeType: 'ROUND_RECTANGLE', elementProperties } })
           fills.push({ insertText: { objectId: ph, insertionIndex: 0, text: 'Add recording video' } })
+          fills.push({ updateTextStyle: { objectId: ph, style: { fontFamily: 'Oswald', fontSize: { magnitude: 18, unit: 'PT' } }, textRange: { type: 'ALL' }, fields: 'fontFamily,fontSize' } })
+          fills.push({ updateParagraphStyle: { objectId: ph, style: { alignment: 'CENTER' }, textRange: { type: 'ALL' }, fields: 'alignment' } })
         }
       })
     }
