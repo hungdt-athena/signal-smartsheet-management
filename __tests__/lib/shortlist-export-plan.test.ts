@@ -118,6 +118,29 @@ describe('planSlides', () => {
     expect(iUngroup).toBeLessThan(iDelete)
   })
 
+  it('gives both name columns the same line count so their tops line up', () => {
+    const tp = MAP.topPicks!
+    const plan = planSlides(MAP, p4(21), WEEK, ['priority_iv'])
+    const cols = inserts(plan.structure).filter(i => tp.nameColumnIds.includes(i.objectId))
+    expect(cols[0].text.split('\n')).toHaveLength(11)
+    expect(cols[1].text.split('\n')).toHaveLength(11)
+    expect(cols[1].text.split('\n')[10]).toBe('')
+  })
+
+  it('centres a shrunk Top Picks grid in the icon area', () => {
+    const tp = MAP.topPicks!
+    const plan = planSlides(MAP, p4(25), WEEK, ['priority_iv'])
+    const boxes = allMedia(plan).filter(r => r.createImage?.elementProperties?.pageObjectId === tp.slideId)
+      .map(r => { const e = r.createImage!.elementProperties!; return { x: e.transform!.translateX!, y: e.transform!.translateY!, s: e.size!.width!.magnitude! } })
+    const top = Math.min(...boxes.map(b => b.y)) - tp.iconBox.y
+    const bottom = tp.iconBox.y + tp.iconBox.h - Math.max(...boxes.map(b => b.y + b.s))
+    const left = Math.min(...boxes.map(b => b.x)) - tp.iconBox.x
+    const right = tp.iconBox.x + tp.iconBox.w - Math.max(...boxes.map(b => b.x + b.s))
+    expect(Math.abs(top - bottom)).toBeLessThan(12700)
+    expect(Math.abs(left - right)).toBeLessThan(12700)
+    expect(top).toBeGreaterThanOrEqual(0)
+  })
+
   it('shrinks the name columns so every line fits the box height', () => {
     const tp = MAP.topPicks!
     const fontAt = (k: number) => kinds(planSlides(MAP, p4(k), MONTH, ['priority_iv']).structure, 'updateTextStyle')
@@ -202,17 +225,32 @@ describe('planSlides', () => {
     expect(links).toEqual([expect.objectContaining({ style: {}, textRange: { type: 'ALL' } })])
   })
 
-  it('shrinks a long Insight name to fit its box, never below 60%', () => {
+  it('widens a long Insight name up to the "-" before Gameplay, and only then shrinks it', () => {
     const c = MAP.insight!.cards[0]
-    const font = (title: string) => {
+    const run = (title: string) => {
       const plan = planSlides(MAP, [g(1, 'Insight', { title })], WEEK, ['insight'])
-      return kinds(plan.structure, 'updateTextStyle').find((u: any) => u.objectId === c.nameId && u.fields === 'fontSize')
+      return {
+        font: kinds(plan.structure, 'updateTextStyle').find((u: any) => u.objectId === c.nameId && u.fields === 'fontSize'),
+        grow: kinds(plan.structure, 'updatePageElementTransform').find((u: any) => u.objectId === c.nameId),
+      }
     }
-    expect(font('Off You Go!')).toBeUndefined()
-    const mid = font('Sushi Loop: Order up!')!
-    expect(mid.style.fontSize.magnitude).toBeLessThan(c.nameFontPt)
-    expect(mid.style.fontSize.magnitude).toBeGreaterThanOrEqual(c.nameFontPt * 0.6)
-    expect(font('Ants Eat Dragons - Color Match and a very long subtitle')!.style.fontSize.magnitude).toBeCloseTo(c.nameFontPt * 0.6, 1)
+    // short: nothing changes
+    expect(run('Off You Go!')).toEqual({ font: undefined, grow: undefined })
+    // fits once the box is wider: original font size kept
+    const mid = run('Circle Release: Ring Puzzle')
+    expect(mid.font).toBeUndefined()
+    expect(mid.grow.applyMode).toBe('RELATIVE')
+    const k = mid.grow.transform.scaleX
+    expect(k).toBeGreaterThan(1)
+    // the left edge stays put: x' = k*x + (1-k)*tx maps tx to itself
+    expect(mid.grow.transform.translateX).toBeCloseTo((1 - k) * c.nameTx, 0)
+    // the widened box stops before the "-"
+    expect(c.nameBox.x + c.nameBoxW * k).toBeLessThan(c.sepX!)
+    // too long even when wider: shrink, never below 60%
+    const long = run('Ants Eat Dragons - Color Match and a very long subtitle that goes on')
+    expect(long.grow).toBeDefined()
+    expect(long.font!.style.fontSize.magnitude).toBeGreaterThanOrEqual(c.nameFontPt * 0.6 - 0.1)
+    expect(long.font!.style.fontSize.magnitude).toBeLessThan(c.nameFontPt)
   })
 
   it('replaces text by insert-then-delete', () => {

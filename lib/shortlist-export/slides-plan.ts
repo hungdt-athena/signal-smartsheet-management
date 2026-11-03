@@ -43,8 +43,8 @@ function topPicksScale(n: number, box: Box, size: number, pitch: number): { s: n
   return { s: 0.05, cols: grid(0.05).cols }
 }
 
-// Oswald, the template's font, runs about half an em per character.
-const CHAR_EM = 0.5
+// Oswald bold, the template font: measured 0.43-0.50 em per character on real names.
+const CHAR_EM = 0.46
 const MIN_FONT = 0.6
 /** Font size that fits `text` on one line of `boxW` EMU, or null when the template size fits. */
 function fitFont(text: string, boxW: number, fontPt: number): number | null {
@@ -126,7 +126,21 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
           }
           replace(id(c.nameId, n), c.nameId, g.title)
           link(id(c.nameId, n), g.storeUrl)
-          const fit = fitFont(g.title, c.nameBoxW, c.nameFontPt)
+          // Long name: keep the template size and grow the box right, up to the "-" before
+          // Gameplay. Shrink the font only if it still does not fit.
+          let boxW = c.nameBoxW
+          if (fitFont(g.title, boxW, c.nameFontPt) && c.sepX != null) {
+            const room = c.sepX - c.nameBox.x - 4 * 12700
+            if (room > boxW) {
+              const k = room / boxW
+              fills.push({ updatePageElementTransform: {
+                objectId: id(c.nameId, n), applyMode: 'RELATIVE',
+                transform: { scaleX: k, scaleY: 1, shearX: 0, shearY: 0, translateX: Math.round((1 - k) * c.nameTx), translateY: 0, unit: 'EMU' },
+              } })
+              boxW = room
+            }
+          }
+          const fit = fitFont(g.title, boxW, c.nameFontPt)
           if (fit) fills.push({ updateTextStyle: { objectId: id(c.nameId, n), style: { fontSize: { magnitude: fit, unit: 'PT' } }, textRange: { type: 'ALL' }, fields: 'fontSize' } })
           if (c.releasedById && g.publisher) {
             replace(id(c.releasedById, n), c.releasedById, `${g.title} released by ${g.publisher}`)
@@ -153,7 +167,10 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
       order.push(tp.slideId)
       const half = Math.ceil(p4.length / 2)
       const lines = p4.map((g, i) => `${i + 1}. ${g.title}`)
-      const cols = [lines.slice(0, half), lines.slice(half)]
+      // Pad the right column to the left one's length: the boxes are centred vertically, so
+      // an odd count would otherwise start the right list half a line lower.
+      const right = lines.slice(half)
+      const cols = [lines.slice(0, half), right.length ? [...right, ...Array(half - right.length).fill('')] : right]
       const { s, cols: gridCols } = topPicksScale(p4.length, tp.iconBox, tp.iconSize, tp.iconPitch)
       // Same step as the icons, smaller still when the lines would not fit the column's height.
       const linesFit = tp.nameBoxH / (tp.nameFontPt * LINE_EM * 12700)
@@ -178,6 +195,11 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
       } else {
         deletes.push(...tp.iconIds)
         const size = tp.iconSize * s, pitch = tp.iconPitch * s
+        // Centre the grid in the template's icon area, both ways.
+        const usedCols = Math.min(gridCols, p4.length)
+        const usedRows = Math.ceil(p4.length / gridCols)
+        const x0 = tp.iconBox.x + (tp.iconBox.w - ((usedCols - 1) * pitch + size)) / 2
+        const y0 = tp.iconBox.y + (tp.iconBox.h - ((usedRows - 1) * pitch + size)) / 2
         p4.forEach((g, i) => {
           if (!g.iconUrl) return
           images.push({
@@ -189,8 +211,8 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
                   size: { width: emu(size), height: emu(size) },
                   transform: {
                     scaleX: 1, scaleY: 1, unit: 'EMU',
-                    translateX: Math.round(tp.iconBox.x + (i % gridCols) * pitch),
-                    translateY: Math.round(tp.iconBox.y + Math.floor(i / gridCols) * pitch),
+                    translateX: Math.round(x0 + (i % gridCols) * pitch),
+                    translateY: Math.round(y0 + Math.floor(i / gridCols) * pitch),
                   },
                 },
               },

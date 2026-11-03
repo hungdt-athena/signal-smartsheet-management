@@ -12,7 +12,14 @@ type Slide = slides_v1.Schema$Page
 /** In EMU, page coordinates. */
 export type Box = { x: number; y: number; w: number; h: number }
 
-export interface InsightCard { groupId: string; box: Box; iconId: string; nameId: string; nameBoxW: number; nameFontPt: number; gameplayId: string; releasedById: string | null }
+export interface InsightCard {
+  groupId: string; box: Box; iconId: string; gameplayId: string; releasedById: string | null
+  nameId: string; nameBox: Box; nameBoxW: number; nameFontPt: number
+  /** The name box's own translateX (in its group's space), for growing it from its left edge. */
+  nameTx: number
+  /** Page x of the "-" before Gameplay: the name box may grow up to it. */
+  sepX: number | null
+}
 
 export interface TemplateMap {
   coverSlideId: string
@@ -93,10 +100,12 @@ function readInsight(slide: Slide, f: Flat[]): TemplateMap['insight'] {
     const name = kids.find(e => e.text === 'The game name')
     const gameplay = kids.find(e => e.text === 'Gameplay')
     const icon = kids.find(e => e.el.image)
+    const sep = kids.find(e => e.text === '-' && e.box)
     if (!name || !gameplay || !icon) continue
     cards.push({
       groupId: g.id, box: union(kids.map(k => k.box)), iconId: icon.id, nameId: name.id,
-      nameBoxW: name.box?.w ?? 0, nameFontPt: fontOf(name.el),
+      nameBox: name.box ?? { x: 0, y: 0, w: 0, h: 0 }, nameBoxW: name.box?.w ?? 0, nameFontPt: fontOf(name.el),
+      nameTx: name.el.transform?.translateX ?? 0, sepX: sep?.box?.x ?? null,
       gameplayId: gameplay.id, releasedById: null,
     })
   }
