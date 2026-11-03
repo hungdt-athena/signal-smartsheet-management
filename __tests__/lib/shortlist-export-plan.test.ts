@@ -225,6 +225,19 @@ describe('planSlides', () => {
     expect(links).toEqual([expect.objectContaining({ style: {}, textRange: { type: 'ALL' } })])
   })
 
+  it('picks the largest size that fits, in 0.5pt steps, from real Oswald widths', () => {
+    // the cases checked by hand on the W4 Oct deck (template size 13pt)
+    const c = MAP.insight!.cards[0]
+    const size = (title: string) => {
+      const plan = planSlides(MAP, [g(1, 'Insight', { title })], WEEK, ['insight'])
+      return kinds(plan.structure, 'updateTextStyle').find((u: any) => u.objectId === c.nameId && u.fields === 'fontSize')?.style.fontSize.magnitude ?? c.nameFontPt
+    }
+    expect(size('Idle Missile - Evolve Game')).toBeCloseTo(c.nameFontPt, 1)   // 13 fits
+    expect(size('Circle Release: Ring Puzzle')).toBeCloseTo(c.nameFontPt, 1)
+    expect(size('Find The Suspect - Clue Puzzle')).toBe(12)                    // 13 wraps, 12 fits
+    expect(size('Bunny Sort: Color Sort Games')).toBe(12)
+  })
+
   it('widens a long Insight name up to the "-" before Gameplay, and only then shrinks it', () => {
     const c = MAP.insight!.cards[0]
     const run = (title: string) => {

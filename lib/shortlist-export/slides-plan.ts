@@ -10,6 +10,7 @@
 import type { slides_v1 } from 'googleapis'
 import { extractYtId } from '@/lib/ytb-match'
 import type { Box, TemplateMap } from './slides-template'
+import { textWidthPt } from './oswald-widths'
 import type { ExportGame, ExportScope, ExportType } from './types'
 
 type R = slides_v1.Schema$Request
@@ -43,15 +44,22 @@ function topPicksScale(n: number, box: Box, size: number, pitch: number): { s: n
   return { s: 0.05, cols: grid(0.05).cols }
 }
 
-// Oswald bold, the template font. Real names wrapped at ~0.50 em per character on average
-// ("Sand ASMR Coloring"); capitals run wider, so estimate on the safe side.
-const CHAR_EM = 0.55
+// Name fitting: real Oswald Bold widths (./oswald-widths) against the box width less Slides'
+// default text inset (0.1in each side). Checked on the W4 Oct deck: "Idle Missile - Evolve
+// Game" keeps 13pt, "Find The Suspect - Clue Puzzle" needs 12pt.
+const TEXT_INSET_PT = 7.2 * 2 + 1 // + 1pt of safety
 const MIN_FONT = 0.6
-/** Font size that fits `text` on one line of `boxW` EMU, or null when the template size fits. */
+const FONT_STEP = 0.5
+/** Largest size, in 0.5pt steps down from the template's, at which `text` fits one line of
+ *  `boxW` EMU (floor 60%); null when the template size already fits. */
 function fitFont(text: string, boxW: number, fontPt: number): number | null {
-  const need = text.length * CHAR_EM * fontPt * 12700
-  if (!boxW || need <= boxW) return null
-  return Math.round(Math.max(fontPt * MIN_FONT, fontPt * boxW / need) * 10) / 10
+  const room = boxW / 12700 - TEXT_INSET_PT
+  if (!boxW || textWidthPt(text, fontPt) <= room) return null
+  const floor = fontPt * MIN_FONT
+  for (let f = Math.floor(fontPt / FONT_STEP) * FONT_STEP; f > floor; f -= FONT_STEP) {
+    if (f < fontPt && textWidthPt(text, f) <= room) return f
+  }
+  return Math.round(floor * 10) / 10
 }
 
 // A Top Picks line (text + paragraph spacing) takes about 1.8x its font size in this template.
