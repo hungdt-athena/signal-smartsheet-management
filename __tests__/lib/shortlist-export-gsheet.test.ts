@@ -44,7 +44,7 @@ describe('sheetRequests', () => {
     const bold = fmt.filter((f: any) => f.repeatCell)
     const frozen = fmt.filter((f: any) => f.updateSheetProperties)
     expect(bold.map((f: any) => f.repeatCell.range.sheetId)).toEqual([11, 22])
-    expect(bold[0].repeatCell.cell.userEnteredFormat.textFormat.bold).toBe(true)
+    expect((bold[0] as any).repeatCell.cell.userEnteredFormat.textFormat.bold).toBe(true)
     expect(frozen.map((f: any) => f.updateSheetProperties.properties.gridProperties.frozenRowCount)).toEqual([1, 1])
   })
 })
