@@ -28,7 +28,8 @@ import { saveDriveLink } from '@/lib/drive-link-client'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
 import { saveCurrentBatch, loadCurrentBatchStart } from '@/lib/current-batch-client'
 import { BatchMoveBar } from '@/components/BatchMoveBar'
-import { BatchPicker, parseBatchPick } from '@/components/ui/BatchPicker'
+import { BatchPicker, parseBatchPick, monthPick } from '@/components/ui/BatchPicker'
+import { ShortListExportButton } from '@/components/ShortListExportDialog'
 import { batchLabelsOfMonth, monthKeyOfBatch, monthKeyLabel } from '@/lib/batch-month'
 import { conclusionBadgeClass, finalConclusionStyle } from '@/lib/conclusion-badge'
 import { fmtDateVN, fmtDateTimeVN } from '@/lib/format-date'
@@ -1045,6 +1046,7 @@ function ShortListEvalTab() {
             <CurrentBatchMenu value={currentBatch} options={currentBatchOptions} startsAt={currentBatchStart}
               onChange={handleCurrentBatchChange} onStartChange={handleCurrentBatchStartChange} />
           )}
+          <ShortListExportButton role={role} defaultPick={view === 'monthly' ? (monthKey ? monthPick(monthKey) : '') : pickedBatch} />
         </>}
       />
 
