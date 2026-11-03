@@ -28,6 +28,8 @@ describe('sheetRequests', () => {
   it('adds one sheet per tab, in order', () => {
     const r = sheetRequests(TABS)
     expect(r.addSheets.map((a: any) => a.addSheet.properties.title)).toEqual(['Priority IV', 'Insight'])
+    // only the five columns, no empty F..Z
+    expect(r.addSheets.map((a: any) => a.addSheet.properties.gridProperties.columnCount)).toEqual([5, 5])
   })
 
   it('writes header first and links as HYPERLINK formulas', () => {
@@ -50,9 +52,21 @@ describe('sheetRequests', () => {
     expect(r.values[0].values[0]).toEqual(HEADER)
   })
 
+  it('sizes the columns, clips the links and adds a filter on every tab', () => {
+    const fmt = sheetRequests(TABS).format({ 'Priority IV': 11, Insight: 22 }) as any[]
+    const widths = fmt.filter(f => f.updateDimensionProperties?.range.sheetId === 11)
+    expect(widths.map(w => w.updateDimensionProperties.range.startIndex)).toEqual([0, 1, 2, 3, 4])
+    expect(widths.every(w => w.updateDimensionProperties.properties.pixelSize >= 140)).toBe(true)
+    const clip = fmt.find(f => f.repeatCell?.range.sheetId === 11 && f.repeatCell.fields.includes('wrapStrategy'))
+    expect(clip.repeatCell.cell.userEnteredFormat.wrapStrategy).toBe('CLIP')
+    expect(fmt.filter(f => f.setBasicFilter).map(f => f.setBasicFilter.filter.range.sheetId)).toEqual([11, 22])
+    const head = fmt.find(f => f.repeatCell?.range.sheetId === 11 && f.repeatCell.range.endRowIndex === 1)
+    expect(head.repeatCell.cell.userEnteredFormat.backgroundColor).toBeDefined()
+  })
+
   it('bolds and freezes the header of every tab', () => {
     const fmt = sheetRequests(TABS).format({ 'Priority IV': 11, Insight: 22 })
-    const bold = fmt.filter((f: any) => f.repeatCell)
+    const bold = fmt.filter((f: any) => f.repeatCell && f.repeatCell.range.endRowIndex === 1)
     const frozen = fmt.filter((f: any) => f.updateSheetProperties)
     expect(bold.map((f: any) => f.repeatCell.range.sheetId)).toEqual([11, 22])
     expect((bold[0] as any).repeatCell.cell.userEnteredFormat.textFormat.bold).toBe(true)

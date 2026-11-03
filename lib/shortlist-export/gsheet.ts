@@ -11,10 +11,14 @@ const hyperlink = (url: string) => `=HYPERLINK("${quote(url)}","${quote(url)}")`
 // Sheets does not show it.
 const asText = (v: string) => (/^[\d=+\-@]/.test(v) ? `'${v}` : v)
 
+// id, title, publisher, android, ios -- wide enough for a bundle id and a full title.
+const COLUMN_PX = [260, 280, 200, 320, 320]
+const HEADER_BG = { red: 0.85, green: 0.92, blue: 0.83 }
+
 /** The requests that fill a new spreadsheet. `format` needs the sheet ids the add step returns. */
 export function sheetRequests(tabs: SheetTab[]) {
   return {
-    addSheets: tabs.map(t => ({ addSheet: { properties: { title: t.name } } })),
+    addSheets: tabs.map(t => ({ addSheet: { properties: { title: t.name, gridProperties: { columnCount: t.header.length, rowCount: Math.max(t.rows.length + 1, 2) } } } })),
     values: tabs.map(t => ({
       range: `'${t.name}'!A1`,
       values: [
@@ -26,10 +30,26 @@ export function sheetRequests(tabs: SheetTab[]) {
       {
         repeatCell: {
           range: { sheetId: sheetIds[t.name], startRowIndex: 0, endRowIndex: 1 },
-          cell: { userEnteredFormat: { textFormat: { bold: true } } },
-          fields: 'userEnteredFormat.textFormat.bold',
+          cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: HEADER_BG } },
+          fields: 'userEnteredFormat.textFormat.bold,userEnteredFormat.backgroundColor',
         },
       },
+      // Long store links stay inside their own column instead of running over the next one.
+      {
+        repeatCell: {
+          range: { sheetId: sheetIds[t.name], startRowIndex: 1, endRowIndex: t.rows.length + 1, startColumnIndex: 0, endColumnIndex: 5 },
+          cell: { userEnteredFormat: { wrapStrategy: 'CLIP', verticalAlignment: 'MIDDLE' } },
+          fields: 'userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment',
+        },
+      },
+      ...COLUMN_PX.map((pixelSize, i) => ({
+        updateDimensionProperties: {
+          range: { sheetId: sheetIds[t.name], dimension: 'COLUMNS', startIndex: i, endIndex: i + 1 },
+          properties: { pixelSize },
+          fields: 'pixelSize',
+        },
+      })),
+      { setBasicFilter: { filter: { range: { sheetId: sheetIds[t.name], startRowIndex: 0, endRowIndex: t.rows.length + 1, startColumnIndex: 0, endColumnIndex: 5 } } } },
       {
         updateSheetProperties: {
           properties: { sheetId: sheetIds[t.name], gridProperties: { frozenRowCount: 1 } },

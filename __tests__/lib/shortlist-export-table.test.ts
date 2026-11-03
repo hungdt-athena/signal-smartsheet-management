@@ -56,6 +56,8 @@ describe('buildXlsx', () => {
     const ins = wb.getWorksheet('Insight')!
     expect(ins.getRow(1).font?.bold ?? ins.getCell('A1').font?.bold).toBe(true)
     expect(ins.views[0].state).toBe('frozen')
+    expect(ins.autoFilter).toBeTruthy()
+    expect((ins.getCell('A1').fill as any)?.fgColor?.argb).toBeTruthy()
     const url = 'https://play.google.com/store/apps/details?id=g1'
     expect(ins.getCell('D2').value).toEqual({ text: url, hyperlink: url })
     expect(ins.getCell('E2').value).toBeFalsy()
