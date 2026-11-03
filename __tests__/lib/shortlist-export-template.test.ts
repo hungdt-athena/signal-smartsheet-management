@@ -42,10 +42,10 @@ describe('readTemplate', () => {
     expect(Math.abs(tp.iconPitch - 61 * 12700)).toBeLessThan(12700) // within 1pt of the template
   })
 
-  it('picks the 3-section detail slide with name, icon, date and video', () => {
+  it('picks the 2-section detail slide with name, icon, date and video', () => {
     expect(map.detail).toMatchObject({
-      slideId: 'g3876fc6da32_2_896', nameId: 'g3876fc6da32_2_901', iconId: 'g3876fc6da32_2_902',
-      dateId: 'g3876fc6da32_2_903', videoId: 'g3876fc6da32_2_904',
+      slideId: 'g3876fc6da32_2_692', nameId: 'g3876fc6da32_2_697', iconId: 'g3876fc6da32_2_800',
+      dateId: 'g38977b77997_0_0', videoId: 'g3876fc6da32_2_812',
     })
     expect(map.detail!.videoBox!.w).toBeGreaterThan(0)
   })
@@ -53,7 +53,7 @@ describe('readTemplate', () => {
   it('finds trending and drops every other slide', () => {
     expect(map.trendingSlideId).toBe('g3876fc6da32_2_0')
     expect(map.dropSlideIds).toHaveLength(9 - 5)
-    expect(map.dropSlideIds).toEqual(expect.arrayContaining(['g38d2f5437e4_0_0', 'g3876fc6da32_0_798', 'g3876fc6da32_2_692', 'g3876fc6da32_2_936']))
+    expect(map.dropSlideIds).toEqual(expect.arrayContaining(['g38d2f5437e4_0_0', 'g3876fc6da32_0_798', 'g3876fc6da32_2_896', 'g3876fc6da32_2_936']))
   })
 
   it('returns null parts when a slide is missing', () => {
@@ -62,6 +62,6 @@ describe('readTemplate', () => {
     const m = readTemplate(p)
     expect(m.trendingSlideId).toBeNull()
     expect(m.insight!.cards).toHaveLength(8)
-    expect(m.detail!.slideId).toBe('g3876fc6da32_2_896')
+    expect(m.detail!.slideId).toBe('g3876fc6da32_2_692')
   })
 })

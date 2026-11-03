@@ -30,6 +30,8 @@ export interface TemplateMap {
 
 const PT = 12700
 const DATE = /^\d{4}-\d{2}-\d{2}$/
+/** Detail layout: number of "+" between sections (1 = the 2-section slide). */
+const DETAIL_PLUS = 1
 
 interface Flat { el: El; id: string; box: Box | null; depth: number; top: El; text: string }
 
@@ -170,7 +172,8 @@ export function readTemplate(p: slides_v1.Schema$Presentation): TemplateMap {
     if (!map.insight && hasText(f, 'Insight')) { map.insight = readInsight(s, f); used = !!map.insight?.cards.length }
     else if (!map.trendingSlideId && hasText(f, 'Trending!')) { map.trendingSlideId = s.objectId!; used = true }
     else if (!map.topPicks && hasText(f, 'TOP PICKS!')) { map.topPicks = readTopPicks(s, f); used = !!map.topPicks }
-    else if (!map.detail && hasText(f, 'Core Gameplay') && !hasText(f, 'NEW GAMEPLAY') && plus === 2) { map.detail = readDetail(s, f); used = !!map.detail }
+    // The 2-section layout (one "+"): user decision 2026-11-03, after first choosing 3 sections.
+    else if (!map.detail && hasText(f, 'Core Gameplay') && !hasText(f, 'NEW GAMEPLAY') && plus === DETAIL_PLUS) { map.detail = readDetail(s, f); used = !!map.detail }
     if (!used) map.dropSlideIds.push(s.objectId!)
   }
   if (map.insight && !map.insight.cards.length) map.insight = null

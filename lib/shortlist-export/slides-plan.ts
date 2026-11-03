@@ -202,7 +202,7 @@ export function planSlides(map: TemplateMap, games: ExportGame[], scope: ExportS
     }
   }
 
-  // Detail: one 3-section slide per Priority IV game
+  // Detail: one 2-section slide per Priority IV game
   if (map.detail) {
     const d = map.detail
     if (!p4.length) deletes.push(d.slideId)

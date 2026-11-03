@@ -93,7 +93,7 @@ Fill **only**:
 | Cover | month + week (`October 2026` / `W3 Report`; month export: no week line or "Monthly Report") | rest |
 | Insight (8 cards / slide, duplicate the slide when > 8, delete unused cards on the last) | game name (hyperlink → store), icon, "X released by Y", "Gameplay" hyperlink → YouTube **5 min** link if any | "- Like", Mech, Genre, Theme |
 | Top Picks (Priority IV) | numbered list of names, icons | — |
-| Detail, one per Priority IV game (use the **3-section** layout, user decision 2026-11-03) | game name (hyperlink → store), icon, release date (`YYYY-MM-DD`), video → YouTube **20 min** link if any; no link → keep "Add recording video" | core gameplay lines, sections (Control / Mechanic / Game board / Theme / Game Name) |
+| Detail, one per Priority IV game (use the **2-section** layout, user decision 2026-11-03 (changed from 3-section the same day)) | game name (hyperlink → store), icon, release date (`YYYY-MM-DD`), video → YouTube **20 min** link if any; no link → keep "Add recording video" | core gameplay lines, sections (Control / Mechanic / Game board / Theme / Game Name) |
 
 - Insight only → drop Top Picks + detail slides. Priority IV only → drop the
   Insight slide. **Trending slide: kept untouched in Month exports, dropped in
