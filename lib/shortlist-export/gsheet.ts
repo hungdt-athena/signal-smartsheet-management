@@ -6,6 +6,10 @@ import { LINK_COLUMNS, type SheetTab } from './table'
 
 const quote = (s: string) => s.replace(/"/g, '""')
 const hyperlink = (url: string) => `=HYPERLINK("${quote(url)}","${quote(url)}")`
+// Values go in as USER_ENTERED (so the HYPERLINK formulas work), which would also turn an
+// iOS id into a number and read "=Fun Game" as a formula. A leading ' keeps the cell text;
+// Sheets does not show it.
+const asText = (v: string) => (/^[\d=+\-@]/.test(v) ? `'${v}` : v)
 
 /** The requests that fill a new spreadsheet. `format` needs the sheet ids the add step returns. */
 export function sheetRequests(tabs: SheetTab[]) {
@@ -15,7 +19,7 @@ export function sheetRequests(tabs: SheetTab[]) {
       range: `'${t.name}'!A1`,
       values: [
         [...t.header] as string[],
-        ...t.rows.map(r => r.map((v, i) => ((LINK_COLUMNS as readonly number[]).includes(i) && v ? hyperlink(v) : v))),
+        ...t.rows.map(r => r.map((v, i) => ((LINK_COLUMNS as readonly number[]).includes(i) ? (v ? hyperlink(v) : '') : asText(v)))),
       ],
     })),
     format: (sheetIds: Record<string, number>) => tabs.flatMap(t => [

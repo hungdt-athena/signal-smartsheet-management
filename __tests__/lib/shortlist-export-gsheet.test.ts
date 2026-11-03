@@ -39,6 +39,17 @@ describe('sheetRequests', () => {
     expect(r.values[1].values[1][4]).toBe('')
   })
 
+  it('keeps numeric ids and formula-looking text as text', () => {
+    const r = sheetRequests([{ name: 'Insight', header: HEADER, rows: [
+      ['6812649735', '=Fun Game', '+Plus Studio', '', 'https://apps.apple.com/x'],
+      ['com.a.b', '2048 Merge', '-Minus', 'https://play.google.com/y', ''],
+    ] }])
+    expect(r.values[0].values[1].slice(0, 3)).toEqual(["'6812649735", "'=Fun Game", "'+Plus Studio"])
+    expect(r.values[0].values[2].slice(0, 3)).toEqual(['com.a.b', "'2048 Merge", "'-Minus"])
+    expect(r.values[0].values[1][4]).toMatch(/^=HYPERLINK\(/)
+    expect(r.values[0].values[0]).toEqual(HEADER)
+  })
+
   it('bolds and freezes the header of every tab', () => {
     const fmt = sheetRequests(TABS).format({ 'Priority IV': 11, Insight: 22 })
     const bold = fmt.filter((f: any) => f.repeatCell)
