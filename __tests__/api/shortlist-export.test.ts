@@ -10,14 +10,18 @@ jest.mock('@/lib/shortlist-export/games', () => ({
   ...jest.requireActual('@/lib/shortlist-export/games'),
   listExportLabels: jest.fn(), loadExportGames: jest.fn(),
 }))
-jest.mock('@/lib/shortlist-export/google', () => ({ getExportAuth: jest.fn(() => ({ sa: true })) }))
+jest.mock('@/lib/shortlist-export/google', () => ({
+  ...jest.requireActual('@/lib/shortlist-export/google'),
+  getExportAuth: jest.fn(() => ({ sa: true })), findExport: jest.fn(),
+}))
 jest.mock('@/lib/shortlist-export/slides-export', () => ({ exportSlides: jest.fn() }))
 jest.mock('@/lib/shortlist-export/gsheet', () => ({ createExportSheet: jest.fn() }))
 
 import { GET, POST } from '@/app/api/shortlist-export/route'
+import { GET as GET_EXISTING } from '@/app/api/shortlist-export/existing/route'
 import { getServerSession } from 'next-auth'
 import { listExportLabels, loadExportGames } from '@/lib/shortlist-export/games'
-import { getExportAuth } from '@/lib/shortlist-export/google'
+import { getExportAuth, findExport } from '@/lib/shortlist-export/google'
 import { exportSlides } from '@/lib/shortlist-export/slides-export'
 import { createExportSheet } from '@/lib/shortlist-export/gsheet'
 import type { ExportGame } from '@/lib/shortlist-export/types'
@@ -28,6 +32,7 @@ const load = loadExportGames as jest.Mock
 const slides = exportSlides as jest.Mock
 const sheet = createExportSheet as jest.Mock
 const auth = getExportAuth as jest.Mock
+const find = findExport as jest.Mock
 
 const LABELS = ['W4 Oct, 2026', 'W3 Oct, 2026', 'W2 Oct, 2026', 'W1 Oct, 2026']
 const game = (id: string, conclusion: ExportGame['conclusion']): ExportGame => ({
@@ -105,6 +110,7 @@ it('returns the Sheets link', async () => {
   const res = await post({ pick: 'W3 Oct, 2026', types: ['insight', 'priority_iv'], format: 'sheets' })
   expect(await res.json()).toEqual({ url: 'https://docs.google.com/spreadsheets/d/s1/edit', warnings: [] })
   expect(sheet.mock.calls[0][2].map((t: any) => t.name)).toEqual(['Priority IV', 'Insight'])
+  expect(sheet.mock.calls[0][3]).toBe('W3 Oct, 2026|insight,priority_iv')
 })
 
 it('refuses an empty period', async () => {
@@ -120,4 +126,39 @@ it('passes a Google failure through as 500', async () => {
   const res = await post({ pick: 'W3 Oct, 2026', types: ['insight'], format: 'slides' })
   expect(res.status).toBe(500)
   expect((await res.json()).error).toBe('The caller does not have permission')
+})
+
+describe('GET /api/shortlist-export/existing', () => {
+  const ex = (qs: string) => GET_EXISTING(new NextRequest(`http://localhost/api/shortlist-export/existing?${qs}`))
+
+  it('blocks an evaluator', async () => {
+    session.mockResolvedValue({ user: { name: 'PhuongNT1', role: 'evaluator' } })
+    expect((await ex('pick=W3%20Oct%2C%202026&types=insight&format=slides')).status).toBe(403)
+  })
+
+  it('returns the earlier file for the same choices', async () => {
+    find.mockResolvedValue({ url: 'https://docs.google.com/presentation/d/d1/edit', createdTime: '2026-11-03T10:00:00Z' })
+    const res = await ex('pick=W3%20Oct%2C%202026&types=insight,priority_iv&format=slides')
+    expect(await res.json()).toEqual({ existing: { url: 'https://docs.google.com/presentation/d/d1/edit', createdTime: '2026-11-03T10:00:00Z' } })
+    expect(find.mock.calls[0][2]).toEqual(['insight', 'priority_iv'])
+    expect(find.mock.calls[0][3]).toBe('slides')
+    expect(find.mock.calls[0][4]).toBe('Oct 2026 W3 Report')
+  })
+
+  it('answers null for xlsx without asking Google', async () => {
+    const res = await ex('pick=W3%20Oct%2C%202026&types=insight&format=xlsx')
+    expect(await res.json()).toEqual({ existing: null })
+    expect(find).not.toHaveBeenCalled()
+  })
+
+  it('answers null instead of failing when Drive cannot be asked', async () => {
+    find.mockRejectedValue(new Error('boom'))
+    const res = await ex('pick=W3%20Oct%2C%202026&types=insight&format=sheets')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ existing: null })
+  })
+
+  it('rejects a bad pick', async () => {
+    expect((await ex('pick=W3%20Feb%2C%202026&types=insight&format=slides')).status).toBe(400)
+  })
 })

@@ -8,11 +8,13 @@ import { Seg } from '@/components/ui/Seg'
 import { BatchPicker, parseBatchPick } from '@/components/ui/BatchPicker'
 import { batchLabelsOfMonth } from '@/lib/batch-month'
 import { isManagerRole } from '@/lib/roles'
+import { fmtDateTimeVN } from '@/lib/format-date'
 import type { ExportFormat, ExportType } from '@/lib/shortlist-export/types'
 
 type Games = 'insight' | 'priority_iv' | 'both'
 type Counts = { insight: number; priorityIV: number }
 type Done = { url: string; warnings: string[] }
+type Existing = { url: string; createdTime: string | null }
 
 const API = '/api/shortlist-export'
 
@@ -52,6 +54,8 @@ export function ShortListExportDialog({ onClose, defaultPick }: { onClose: () =>
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState<Done | null>(null)
+  // A deck / sheet already exported for these exact choices: open it instead of building twice.
+  const [existing, setExisting] = useState<Existing | null>(null)
 
   useEffect(() => {
     let live = true
@@ -75,6 +79,17 @@ export function ShortListExportDialog({ onClose, defaultPick }: { onClose: () =>
     }).catch(() => { if (live) setError('Could not count the games') })
     return () => { live = false }
   }, [pick])
+
+  useEffect(() => {
+    setExisting(null)
+    if (!pick || format === 'xlsx') return
+    let live = true
+    const qs = new URLSearchParams({ pick, types: typesOf(games).join(','), format })
+    fetch(`${API}/existing?${qs}`).then(r => r.json()).then((d: { existing?: Existing | null }) => {
+      if (live) setExisting(d.existing ?? null)
+    }).catch(() => { /* no hint is fine: the user can still export */ })
+    return () => { live = false }
+  }, [pick, games, format])
 
   const total = counts ? countOf(games, counts) : 0
 
@@ -103,7 +118,9 @@ export function ShortListExportDialog({ onClose, defaultPick }: { onClose: () =>
         onClose()
         return
       }
-      setDone(await r.json() as Done)
+      const d = await r.json() as Done
+      setDone(d)
+      setExisting(null)
     } catch {
       setError('Export failed. Check your connection and try again.')
     } finally {
@@ -116,7 +133,7 @@ export function ShortListExportDialog({ onClose, defaultPick }: { onClose: () =>
       footer={<>
         <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
         <button type="button" className="btn btn-primary" onClick={run} disabled={busy || !counts || total === 0}>
-          {busy ? 'Building…' : 'Export'}
+          {busy ? 'Building…' : existing ? 'Export again' : 'Export'}
         </button>
       </>}>
       <div style={{ display: 'grid', gap: 14 }}>
@@ -140,6 +157,12 @@ export function ShortListExportDialog({ onClose, defaultPick }: { onClose: () =>
         </p>
         {busy && format === 'slides' && <p className="h-sub">A month can take a minute or two.</p>}
         {error && <p role="alert" style={{ color: 'var(--danger, #c0392b)' }}>{error}</p>}
+        {existing && !done && (
+          <div style={{ display: 'grid', gap: 6 }}>
+            <p className="h-sub">Already exported {fmtDateTimeVN(existing.createdTime)}. Open it, or export again for a new file.</p>
+            <a href={existing.url} target="_blank" rel="noreferrer" className="btn btn-sm">Open file</a>
+          </div>
+        )}
         {done && (
           <div style={{ display: 'grid', gap: 6 }}>
             <a href={done.url} target="_blank" rel="noreferrer" className="btn btn-sm">Open file</a>

@@ -83,10 +83,10 @@ describe('createExportSheet', () => {
       .mockResolvedValueOnce({ data: { replies: [{ addSheet: { properties: { sheetId: 11, title: 'Priority IV' } } }, { addSheet: { properties: { sheetId: 22, title: 'Insight' } } }, {}] } })
       .mockResolvedValueOnce({ data: {} })
     valuesBatchUpdate.mockResolvedValue({ data: {} })
-    const out = await createExportSheet({} as any, 'Oct 2026 W3 Report', TABS)
+    const out = await createExportSheet({} as any, 'Oct 2026 W3 Report', TABS, 'W3 Oct, 2026|insight,priority_iv')
     expect(out).toEqual({ fileId: 'f1', url: 'https://docs.google.com/spreadsheets/d/f1/edit' })
     expect(filesCreate.mock.calls[0][0]).toMatchObject({
-      requestBody: { name: 'Oct 2026 W3 Report', mimeType: 'application/vnd.google-apps.spreadsheet', parents: [EXPORT_FOLDER_ID] },
+      requestBody: { name: 'Oct 2026 W3 Report', mimeType: 'application/vnd.google-apps.spreadsheet', parents: [EXPORT_FOLDER_ID], appProperties: { slExport: 'W3 Oct, 2026|insight,priority_iv' } },
       supportsAllDrives: true,
     })
     expect(valuesBatchUpdate.mock.calls[0][0].requestBody.valueInputOption).toBe('USER_ENTERED')
@@ -97,7 +97,7 @@ describe('createExportSheet', () => {
     filesUpdate.mockResolvedValue({ data: {} })
     const boom = new Error('quota')
     sheetsBatchUpdate.mockRejectedValue(boom)
-    await expect(createExportSheet({} as any, 'x', TABS)).rejects.toBe(boom)
+    await expect(createExportSheet({} as any, 'x', TABS, 'k')).rejects.toBe(boom)
     expect(filesUpdate).toHaveBeenCalledWith({ fileId: 'f1', requestBody: { trashed: true }, supportsAllDrives: true })
   })
 })

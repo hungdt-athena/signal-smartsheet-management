@@ -1,7 +1,7 @@
 // Sheet tabs -> a Google Sheet in the export folder.
 
 import { google } from 'googleapis'
-import { EXPORT_FOLDER_ID, trashFile, type ExportAuth } from './google'
+import { EXPORT_FOLDER_ID, EXPORT_PROP, trashFile, type ExportAuth } from './google'
 import { LINK_COLUMNS, type SheetTab } from './table'
 
 const quote = (s: string) => s.replace(/"/g, '""')
@@ -60,11 +60,12 @@ export function sheetRequests(tabs: SheetTab[]) {
   }
 }
 
-export async function createExportSheet(auth: ExportAuth, name: string, tabs: SheetTab[]): Promise<{ fileId: string; url: string }> {
+/** `key`: exportKey() of this export, stored on the file so the dialog can find it again. */
+export async function createExportSheet(auth: ExportAuth, name: string, tabs: SheetTab[], key: string): Promise<{ fileId: string; url: string }> {
   const drive = google.drive({ version: 'v3', auth })
   const sheets = google.sheets({ version: 'v4', auth })
   const created = await drive.files.create({
-    requestBody: { name, mimeType: 'application/vnd.google-apps.spreadsheet', parents: [EXPORT_FOLDER_ID] },
+    requestBody: { name, mimeType: 'application/vnd.google-apps.spreadsheet', parents: [EXPORT_FOLDER_ID], appProperties: { [EXPORT_PROP]: key } },
     supportsAllDrives: true,
     fields: 'id',
   })

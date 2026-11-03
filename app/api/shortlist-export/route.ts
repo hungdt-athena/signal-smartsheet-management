@@ -4,7 +4,7 @@ import { countExportGames, listExportLabels, loadExportGames } from '@/lib/short
 import { exportFileName, resolveScope } from '@/lib/shortlist-export/scope'
 import { buildTabs } from '@/lib/shortlist-export/table'
 import { buildXlsx } from '@/lib/shortlist-export/xlsx'
-import { getExportAuth } from '@/lib/shortlist-export/google'
+import { exportKey, getExportAuth } from '@/lib/shortlist-export/google'
 import { exportSlides } from '@/lib/shortlist-export/slides-export'
 import { createExportSheet } from '@/lib/shortlist-export/gsheet'
 import { EXPORT_FORMATS, EXPORT_TYPES, type ExportFormat, type ExportType } from '@/lib/shortlist-export/types'
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     }
     const auth = getExportAuth()
     if (format === 'sheets') {
-      const { url } = await createExportSheet(auth, name, buildTabs(games, chosen))
+      const { url } = await createExportSheet(auth, name, buildTabs(games, chosen), exportKey(scope, chosen))
       return NextResponse.json({ url, warnings: [] })
     }
     const { url, warnings } = await exportSlides(auth, name, games, scope, chosen)

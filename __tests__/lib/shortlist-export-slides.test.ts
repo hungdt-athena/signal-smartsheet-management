@@ -40,7 +40,9 @@ it('copies the template into the export folder and returns the link', async () =
   presBatch.mockResolvedValue({ data: {} })
   const out = await exportSlides({} as any, 'Oct 2026 W3 Report', [game('A'), game('B')], WEEK, ['insight'])
   expect(filesCopy).toHaveBeenCalledWith(expect.objectContaining({
-    fileId: MASTER_TEMPLATE_ID, requestBody: { name: 'Oct 2026 W3 Report', parents: [EXPORT_FOLDER_ID] }, supportsAllDrives: true,
+    fileId: MASTER_TEMPLATE_ID,
+    requestBody: { name: 'Oct 2026 W3 Report', parents: [EXPORT_FOLDER_ID], appProperties: { slExport: 'W3 Oct, 2026|insight' } },
+    supportsAllDrives: true,
   }))
   expect(presGet.mock.calls[0][0].presentationId).toBe('deck1')
   expect(out).toEqual({ fileId: 'deck1', url: 'https://docs.google.com/presentation/d/deck1/edit', warnings: [] })

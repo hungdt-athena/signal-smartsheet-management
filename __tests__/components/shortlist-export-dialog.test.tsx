@@ -13,14 +13,17 @@ function res(body: unknown, status = 200, headers: Record<string, string> = { 'c
   } as unknown as Response
 }
 let counts = { insight: 8, priorityIV: 21 }
+let existing: { url: string; createdTime: string } | null = null
 let postRes: () => Promise<Response>
 const fetchMock = jest.fn()
 
 beforeEach(() => {
   counts = { insight: 8, priorityIV: 21 }
+  existing = null
   postRes = async () => res({ url: 'https://docs.google.com/presentation/d/d1/edit', warnings: ['Icon not loaded: Game B'] })
   fetchMock.mockReset()
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+    if (String(url).includes('/existing')) return Promise.resolve(res({ existing }))
     if (!init || init.method !== 'POST') {
       return Promise.resolve(res({ labels: LABELS, counts: url.includes('pick=') ? counts : null }))
     }
@@ -92,5 +95,26 @@ it('hides Export for an evaluator', () => {
   const { container } = render(<ShortListExportButton role="evaluator" defaultPick="W3 Oct, 2026" />)
   expect(container).toBeEmptyDOMElement()
   render(<ShortListExportButton role="moderator" defaultPick="W3 Oct, 2026" />)
+  expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument()
+})
+
+it('shows the earlier export and offers Export again', async () => {
+  existing = { url: 'https://docs.google.com/presentation/d/old/edit', createdTime: '2026-11-03T10:12:00Z' }
+  open()
+  const link = await screen.findByRole('link', { name: 'Open file' })
+  expect(link).toHaveAttribute('href', 'https://docs.google.com/presentation/d/old/edit')
+  expect(screen.getByText(/Already exported/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Export again' })).toBeInTheDocument()
+  const q = fetchMock.mock.calls.map(c => String(c[0])).find(u => u.includes('/existing'))!
+  expect(q).toContain('types=insight%2Cpriority_iv')
+  expect(q).toContain('format=slides')
+})
+
+it('does not look for an earlier file for xlsx', async () => {
+  existing = { url: 'https://docs.google.com/spreadsheets/d/old/edit', createdTime: '2026-11-03T10:12:00Z' }
+  open()
+  await screen.findByText('8 Insight · 21 Priority IV')
+  fireEvent.click(screen.getByRole('button', { name: 'xlsx' }))
+  await waitFor(() => expect(screen.queryByRole('link', { name: 'Open file' })).toBeNull())
   expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument()
 })

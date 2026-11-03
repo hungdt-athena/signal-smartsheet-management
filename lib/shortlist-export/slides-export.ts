@@ -1,7 +1,7 @@
 // Build the deck: copy the Master Template into the export folder, read the copy, send the plan.
 
 import { google, type slides_v1 } from 'googleapis'
-import { EXPORT_FOLDER_ID, MASTER_TEMPLATE_ID, trashFile, type ExportAuth } from './google'
+import { EXPORT_FOLDER_ID, EXPORT_PROP, MASTER_TEMPLATE_ID, exportKey, trashFile, type ExportAuth } from './google'
 import { readTemplate } from './slides-template'
 import { planSlides, type MediaItem } from './slides-plan'
 import type { ExportGame, ExportScope, ExportType } from './types'
@@ -43,7 +43,7 @@ export async function exportSlides(
   const slides = google.slides({ version: 'v1', auth })
   const copy = await drive.files.copy({
     fileId: MASTER_TEMPLATE_ID,
-    requestBody: { name, parents: [EXPORT_FOLDER_ID] },
+    requestBody: { name, parents: [EXPORT_FOLDER_ID], appProperties: { [EXPORT_PROP]: exportKey(scope, types) } },
     supportsAllDrives: true,
     fields: 'id',
   })
