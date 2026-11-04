@@ -8,10 +8,11 @@ interface Expected { code: string | null; title: string | null }
 interface Mismatch { fileName: string; expected: Expected }
 
 export function demoLinkWarningText(fileName: string, expected: Expected): string {
-  const what = expected.code
-    ? `mã ${expected.code} hay tên game "${expected.title ?? ''}"`
-    : `tên game "${expected.title ?? ''}"`
-  return `Tên file là "${fileName}", không khớp ${what}. Kiểm tra lại link.`
+  const what = [
+    expected.code ? `code ${expected.code}` : null,
+    expected.title ? `game "${expected.title}"` : null,
+  ].filter(Boolean).join(' or ')
+  return `File name "${fileName}" does not match ${what}. Check the link.`
 }
 
 /** Asks the server whether a demo link's Drive file is named after the game. Never throws:

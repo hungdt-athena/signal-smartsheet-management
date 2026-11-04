@@ -25,11 +25,11 @@ async function wait(ms: number) {
 describe('demoLinkWarningText', () => {
   it('names the code and the title', () => {
     expect(demoLinkWarningText('Ocean Crown.mp4', { code: 'QD6SF3', title: 'Pocket Front PVP' }))
-      .toBe('Tên file là "Ocean Crown.mp4", không khớp mã QD6SF3 hay tên game "Pocket Front PVP". Kiểm tra lại link.')
+      .toBe('File name "Ocean Crown.mp4" does not match code QD6SF3 or game "Pocket Front PVP". Check the link.')
   })
   it('leaves out the code when the game has none', () => {
     expect(demoLinkWarningText('Ocean Crown.mp4', { code: null, title: 'Pocket Front PVP' }))
-      .toBe('Tên file là "Ocean Crown.mp4", không khớp tên game "Pocket Front PVP". Kiểm tra lại link.')
+      .toBe('File name "Ocean Crown.mp4" does not match game "Pocket Front PVP". Check the link.')
   })
 })
 
@@ -43,7 +43,7 @@ describe('DemoLinkWarning', () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/evaluations/check-demo-link')
     expect(JSON.parse(init.body)).toEqual({ gameId: 'g1', link: LINK })
-    expect(screen.getByRole('status').textContent).toContain('không khớp mã QD6SF3')
+    expect(screen.getByRole('status').textContent).toContain('does not match code QD6SF3')
   })
 
   it('shows nothing for ok or unknown', async () => {
