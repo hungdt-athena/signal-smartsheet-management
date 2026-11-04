@@ -23,12 +23,16 @@ async function ensureCode(col: CodeColumn, gameId: string): Promise<string | nul
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const code = generateCode()
     try {
+      // Demo and record files share one Drive folder, so a code must be unique across BOTH
+      // columns (the unique indexes cover each column alone).
       const updated = await sql`
         UPDATE game_info SET ${sql(col)} = ${code}
         WHERE game_id = ${gameId} AND ${sql(col)} IS NULL
+          AND NOT EXISTS (SELECT 1 FROM game_info WHERE demo_code = ${code} OR record_code = ${code})
         RETURNING ${sql(col)} AS code`
       if (updated.length > 0) return code
-      // 0 rows: someone set it first (or the row vanished). Return theirs.
+      // 0 rows: someone set it first (return theirs), the row vanished (null), or the code is
+      // already used by a game in either column (still NULL here: loop with a fresh code).
       const again = await readCode(col, gameId)
       if (!again.found) return null
       if (again.code) return again.code

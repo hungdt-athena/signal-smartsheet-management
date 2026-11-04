@@ -142,6 +142,19 @@ describe('drive-video-link-sync [by-code] workflow', () => {
       expect((out.titleFiles as Row[]).map(f => f.name)).not.toContain('K7M2QX.mp4')
     })
 
+    it('a code that is a demo code AND a record code: ambiguous_code, nothing written or renamed, file left alone', () => {
+      const out = classify([demoRow({ in_record: true })])
+      expect(out.notices).toEqual([expect.objectContaining({ status: 'ambiguous_code', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'K7M2QX.mp4' })])
+      expect(out.writes).toEqual([])
+      expect(out.writeSql).toBe('SELECT 1 AS none')
+      expect(out.renames).toEqual([])
+      expect((out.titleFiles as Row[]).map(f => f.name)).not.toContain('K7M2QX.mp4')
+      // the same holds when the link is already this file (no rename retry either)
+      const again = classify([demoRow({ in_record: true, can_write: false, link_is_this_file: true })])
+      expect(again.renames).toEqual([])
+      expect((again.notices as Row[]).map(n => n.status)).toEqual(['ambiguous_code'])
+    })
+
     it('a link that already points at this very file means only the rename is missing: retried, not reported', () => {
       const out = classify([demoRow({ can_write: false, link_is_this_file: true })])
       expect(out.writes).toEqual([])
@@ -302,6 +315,15 @@ describe('drive-video-link-sync [by-code] workflow', () => {
     })
     it('emits nothing when there is nothing to report', () => {
       expect(run('Code Notices', [{}], { 'Classify Codes': { notices: [] } })).toEqual([])
+    })
+    it('an ambiguous_code notice is logged and posted with its own status and a plain text', () => {
+      const amb = [{ status: 'ambiguous_code', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1', game_id: 'g-1', title: 'Nail Box Sort' }]
+      const out = run('Code Notices', [{}], { 'Classify Codes': { notices: amb } })
+      expect(out).toHaveLength(1)
+      expect(out[0].status).toBe('ambiguous_code')
+      expect(out[0].text).toContain('K7M2QX.mp4')
+      expect(out[0].text).toMatch(/both a demo code and a record code/)
+      expect(out[0].text).toMatch(/left as it is/)
     })
     it('posts to the agreed Chat space and logs to the same sheet as the existing flow_log node', () => {
       expect(node('Chat Code Notice').parameters.spaceId).toBe('spaces/AAQAYTKWM1I')

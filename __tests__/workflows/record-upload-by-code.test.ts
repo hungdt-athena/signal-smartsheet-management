@@ -287,6 +287,17 @@ describe('Append Sheet [by-code] workflow', () => {
       expect(n).toEqual([expect.objectContaining({ status: 'wrong_folder', code: 'K7M2QX', file: 'K7M2QX.mp4' })])
     })
 
+    it('a record code that is also a demo code -> ambiguous_code, no rename, never reaches the legacy path', () => {
+      const out = classify([hit({ in_demo: true })])
+      const n = only(out)
+      expect(n).toEqual([expect.objectContaining({ status: 'ambiguous_code', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1', game_id: 'com.nail.box' })])
+      expect((out.legacyFiles as Row[]).map(f => f.name)).not.toContain('K7M2QX.mp4')
+      const { collected } = legacyAfter(out)
+      expect(collected.map(c => c.name)).not.toContain('K7M2QX.mp4')
+      // even when nothing else would hold it
+      expect(only(classify([hit({ in_demo: true, confirmed: false })]))[0].status).toBe('ambiguous_code')
+    })
+
     it('a code in neither column -> code_not_found (an ERROR here, record names never look like a code)', () => {
       const n = only(classify([hit({ game_id: null, title: null, in_demo: false, eval_id: null, bucket: null, recorder: null, confirmed: null })]))
       expect(n).toEqual([expect.objectContaining({ status: 'code_not_found', code: 'K7M2QX', file: 'K7M2QX.mp4' })])
@@ -383,6 +394,15 @@ describe('Append Sheet [by-code] workflow', () => {
 
     it('emits nothing when there is nothing to report', () => {
       expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices: [] } })).toEqual([])
+    })
+
+    it('an ambiguous_code notice gets its own plain text', () => {
+      const amb = [{ status: 'ambiguous_code', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1', game_id: 'g-1', title: 'T1' }]
+      const out = run('Record Code Notices', [{}], { 'Classify Record Codes': { notices: amb } })
+      expect(out.map(o => o.status)).toEqual(['ambiguous_code'])
+      expect(out[0].text).toContain('K7M2QX.mp4')
+      expect(out[0].text).toMatch(/both a record code and a demo code/)
+      expect(out[0].text).toMatch(/left as it is/)
     })
 
     it('posts to the agreed Chat space and logs to the existing flow_log sheet', () => {

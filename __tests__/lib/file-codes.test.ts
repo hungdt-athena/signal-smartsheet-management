@@ -48,6 +48,11 @@ beforeEach(() => {
       const [code, gameId] = vals as [string, string]
       if (updateHook) updateHook(col, code)
       if (uniqueTaken.has(code)) return Promise.reject(uniqueViolation())
+      // Cross-column guard: the code is free only if no game uses it as a demo OR record code.
+      if (/NOT EXISTS\s*\(\s*SELECT 1 FROM game_info WHERE demo_code = \$ OR record_code = \$\s*\)/.test(text)) {
+        const used = [...table.values()].some((r) => r.demo_code === code || r.record_code === code)
+        if (used) return Promise.resolve([])
+      }
       const row = table.get(gameId)
       if (!row || row[col] !== null) return Promise.resolve([])
       row[col] = code
@@ -94,10 +99,36 @@ describe('ensureDemoCode / ensureRecordCode', () => {
     expect(results).toEqual(['WINNR2', 'WINNR2'])
     // both saw NULL on the first read, both UPDATEd, the second matched 0 rows and re-read
     const updates = statements.filter((s) => /UPDATE/.test(s)).length
-    const selects = statements.filter((s) => /SELECT/.test(s)).length
+    const selects = statements.filter((s) => /^\s*SELECT/.test(s)).length
     expect(updates).toBe(2)
     expect(selects).toBe(3)
     expect(table.get('g1')!.demo_code).toBe('WINNR2')
+  })
+
+  it('(f) a code another game uses in the other column is not reused: retried with a fresh one', async () => {
+    table.set('g1', { demo_code: null, record_code: null })
+    table.set('g2', { demo_code: null, record_code: 'K7M2QX' })
+    genMock.mockReturnValueOnce('K7M2QX').mockReturnValueOnce('FRESH3')
+    expect(await ensureDemoCode('g1')).toBe('FRESH3')
+    expect(table.get('g1')!.demo_code).toBe('FRESH3')
+    expect(genMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('(g) same for a record code that is another game demo code', async () => {
+    table.set('g1', { demo_code: null, record_code: null })
+    table.set('g2', { demo_code: 'K7M2QX', record_code: null })
+    genMock.mockReturnValueOnce('K7M2QX').mockReturnValueOnce('FRESH3')
+    expect(await ensureRecordCode('g1')).toBe('FRESH3')
+    expect(table.get('g2')!.demo_code).toBe('K7M2QX')
+  })
+
+  it('(h) throws after 5 cross-column collisions in a row', async () => {
+    table.set('g1', { demo_code: null, record_code: null })
+    table.set('g2', { demo_code: 'DUPDUP', record_code: null })
+    genMock.mockReturnValue('DUPDUP')
+    await expect(ensureRecordCode('g1')).rejects.toThrow(/could not allocate/)
+    expect(genMock).toHaveBeenCalledTimes(5)
+    expect(table.get('g1')!.record_code).toBeNull()
   })
 
   it('(e) throws after 5 consecutive unique violations', async () => {

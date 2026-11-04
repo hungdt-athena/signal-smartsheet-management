@@ -87,6 +87,8 @@ CLASSIFY_JS = r'''// Decide, per code file, what happens. Order of preference:
 //   known demo code, link already this file -> only the rename is retried
 //   known demo code, game already has a link -> link_exists (file untouched, flow_log + Chat)
 //   code only in record_code                -> wrong_folder (file untouched, flow_log + Chat)
+//   code in demo_code AND in record_code    -> ambiguous_code (file untouched, flow_log + Chat): the file
+//                                              could be either video, so nothing is written
 //   code in neither table                   -> NOT an error: the file stays on the title path
 //                                              (a real title like "Racket" is 6 letters long)
 const split = $('Split Code Files').first().json;
@@ -114,6 +116,10 @@ for (const c of split.codeFiles) {
     continue;
   }
   const entry = { ...base, game_id: gameId, title: r.demo_title, file_name: c.name };
+  if (inRecord) {
+    notices.push({ ...entry, status: 'ambiguous_code', reason: 'the code is both a demo code and a record code' });
+    continue;
+  }
   if (seenCode.has(c.code)) {
     notices.push({ ...entry, status: 'link_exists', reason: 'another file with this code was handled in the same run' });
     continue;
@@ -195,9 +201,14 @@ NOTICES_JS = r'''// One flow_log row + one Chat message per code file that was l
 const notices = $('Classify Codes').first().json.notices || [];
 return notices.map(n => {
   const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';
-  const text = n.status === 'wrong_folder'
-    ? `drive-video-link-sync: ${n.file} is a RECORD code (${n.code}) but was dropped in the demo folder. File left as it is; move it to the record folder.`
-    : `drive-video-link-sync: ${n.file} carries code ${n.code} for ${label}, which already has a demo link. File left as it is; clear the old link to process it again.`;
+  let text;
+  if (n.status === 'wrong_folder') {
+    text = `drive-video-link-sync: ${n.file} is a RECORD code (${n.code}) but was dropped in the demo folder. File left as it is; move it to the record folder.`;
+  } else if (n.status === 'ambiguous_code') {
+    text = `drive-video-link-sync: ${n.file} carries code ${n.code}, which is both a demo code and a record code (demo code of ${label}). File left as it is; the code must be fixed in the database before this file is processed.`;
+  } else {
+    text = `drive-video-link-sync: ${n.file} carries code ${n.code} for ${label}, which already has a demo link. File left as it is; clear the old link to process it again.`;
+  }
   return { json: {
     name: 'drive-video-link-sync',
     status: n.status,

@@ -117,6 +117,7 @@ CLASSIFY_JS = r'''// Decide, per code file, what happens. Input: the ytb_uploade
 //   record code, the bucket already has a YouTube link, or the
 //     sheet already has an upload of this game + bucket          -> held_youtube_live (file untouched)
 //   code only in demo_code                                       -> wrong_folder
+//   code in record_code AND in demo_code                         -> ambiguous_code (file untouched)
 //   code in neither column                                       -> code_not_found
 //   lookup failed (error item / no rows)                         -> code_lookup_failed, nothing renamed
 // Files that are not codes go on to the legacy path exactly as Search Drive gave them.
@@ -159,6 +160,10 @@ for (const c of codeFiles) {
   }
   const gameId = String(r.game_id);
   const entry = { ...base, game_id: gameId, title: r.title || null };
+  if (r.in_demo) {
+    notices.push({ ...entry, status: 'ambiguous_code', reason: 'the code is both a record code and a demo code' });
+    continue;
+  }
   if (r.eval_id == null) {
     notices.push({ ...entry, status: 'held_not_confirmed', reason: 'the game is not in the Record tab (removed, or not Insight / Priority IV)' });
     continue;
@@ -250,6 +255,8 @@ for (const n of notices) {
     text = `append-sheet: ${n.file} is named by code ${n.code}, which no game has as a record code. File left as it is; check the code in the Record tab and rename the file.`;
   } else if (n.status === 'wrong_folder') {
     text = `append-sheet: ${n.file} carries the DEMO code ${n.code}, not a record code. File left as it is; a record video needs the record code shown in the Record tab.`;
+  } else if (n.status === 'ambiguous_code') {
+    text = `append-sheet: ${n.file} carries code ${n.code}, which is both a record code and a demo code (record code of ${label}). File left as it is; the code must be fixed in the database before this file is processed.`;
   } else if (n.status === 'held_not_confirmed') {
     text = `append-sheet: ${n.file} (code ${n.code}) is for ${label}, but ${n.reason}. File left as it is; it is processed on a later run once the record bucket is Confirmed with a recorder.`;
   } else if (n.status === 'held_youtube_live') {
