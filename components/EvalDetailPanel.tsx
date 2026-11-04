@@ -21,6 +21,7 @@ import { Switch } from '@/components/ui/Switch'
 import { IconX } from '@/components/ui/SearchInput'
 import { LockIcon, UserIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
+import { DemoLinkWarning } from '@/components/DemoLinkWarning'
 import { type ReviewChange, type ReviewTag } from './TrendTagReview'
 import { applyExistingChange, type ExistingTagChange } from './ExistingTrendTags'
 import { TrendTagsField, type TrendTag, type ExistingTrendTag } from './TrendTagsField'
@@ -1605,6 +1606,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   placeholder="https://drive.google.com/..."
                   disabled={!canEditEval}
                 />
+                <DemoLinkWarning gameId={ev.game_id} value={driveLink} savedValue={ev.drive_link} />
                 {ev.drive_link && (
                   <a href={ev.drive_link} target="_blank" rel="noopener"
                     style={{ fontSize: 12, color: 'var(--accent)', wordBreak: 'break-all' }}>

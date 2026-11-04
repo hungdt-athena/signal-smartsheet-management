@@ -179,6 +179,11 @@ body {
 .code-chip:hover { background: var(--surface-3); }
 .code-chip-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 600; letter-spacing: .04em; user-select: all; }
 .code-chip-note { color: var(--good); font-size: 11px; font-weight: 600; }
+
+/* Demo link name check (components/DemoLinkWarning.tsx): the Drive file looks like another game's. Never blocks a save. */
+.demo-link-warn { font-size: 12px; line-height: 1.4; color: var(--warn); margin-top: 4px; white-space: normal; overflow-wrap: anywhere; }
+.demo-cell { display: inline-flex; flex-direction: column; align-items: flex-start; }
+.demo-cell .demo-link-warn { font-size: 11px; max-width: 240px; }
 .code-chip.is-copied { border-color: var(--good); }
 .rq-empty { margin: 0; padding: 14px 10px; color: var(--muted); }
 .rq-foot { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding: 8px 10px 6px; }

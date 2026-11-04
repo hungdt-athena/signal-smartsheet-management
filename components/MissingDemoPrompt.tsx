@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { saveDriveLink } from '@/lib/drive-link-client'
 import { CodeChip, fetchDemoCode } from '@/components/CodeChip'
+import { DemoLinkWarning } from '@/components/DemoLinkWarning'
 
 interface Item {
   id: number
@@ -248,6 +249,8 @@ export function MissingDemoPrompt() {
                                   {saving.has(r.id) ? 'Saving…' : confirming ? 'Confirm' : 'Save'}
                                 </button>
                               </div>
+                              {/* The auto-sync suggestion counts as already saved: only a link typed over it is checked. */}
+                              <DemoLinkWarning gameId={r.game_id} value={value} savedValue={r.suggested_link} />
                               {failed.has(r.id) && <div className="mdp-err">Couldn&apos;t save, try again</div>}
                             </div>
                           )}

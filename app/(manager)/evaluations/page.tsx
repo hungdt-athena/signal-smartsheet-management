@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
-import type { CSSProperties, MouseEvent as ReactMouseEvent, RefObject } from 'react'
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useSession } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
@@ -25,6 +25,7 @@ import { TrendTagCell, type GameTrendTag } from '@/components/TrendTagCell'
 import type { GameAlikeGame } from '@/components/weekly-feedback/types'
 import { isManagerRole } from '@/lib/roles'
 import { saveDriveLink } from '@/lib/drive-link-client'
+import { DemoLinkWarning } from '@/components/DemoLinkWarning'
 import { requestLeaveUnsaved } from '@/lib/unsaved-guard'
 import { saveCurrentBatch, loadCurrentBatchStart } from '@/lib/current-batch-client'
 import { BatchMoveBar } from '@/components/BatchMoveBar'
@@ -321,8 +322,16 @@ function DemoVideoCell({ item, onSaved }: {
     setEditing(false)
   }
 
+  // The warning sits outside the branches so it stays mounted (and visible) after Save closes the input.
+  const wrap = (content: ReactNode) => (
+    <span className="demo-cell">
+      {content}
+      <DemoLinkWarning gameId={item.game_id} value={val} savedValue={item.drive_link} />
+    </span>
+  )
+
   if (editing) {
-    return (
+    return wrap(
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={e => e.stopPropagation()}>
         <input
           autoFocus
@@ -336,12 +345,12 @@ function DemoVideoCell({ item, onSaved }: {
         />
         <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={saving} title="Save link" aria-label="Save link">✓</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={cancel} disabled={saving} title="Cancel" aria-label="Cancel">✕</button>
-      </span>
+      </span>,
     )
   }
 
   if (item.drive_link) {
-    return (
+    return wrap(
       <span style={{ display: 'inline-flex', alignItems: 'center' }}>
         <a href={item.drive_link} target="_blank" rel="noopener" onClick={e => e.stopPropagation()} className="drive-btn">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -356,7 +365,7 @@ function DemoVideoCell({ item, onSaved }: {
           </svg>
         </button>
         <CopyBtn text={item.drive_link} />
-      </span>
+      </span>,
     )
   }
 
