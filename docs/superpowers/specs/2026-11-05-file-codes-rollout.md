@@ -1,27 +1,35 @@
 # File codes — rollout checklist
 
 Branch `feat/file-codes`. Spec: `2026-11-05-file-codes-design.md`. Plan: `../plans/2026-11-05-file-codes.md`.
-Nothing below has been done. n8n copies exist but are **inactive**.
 
-## Order
+## Done (2026-11-05)
 
-1. **Build check in a real checkout.** `NEXT_DIST_DIR=.next-check npx next build` (the worktree this was built in lacks `exceljs`, so the build never ran). Then `git checkout tsconfig.json`.
-2. **Migration 052** on prod (adds `game_info.demo_code`, `game_info.record_code` and two partial unique indexes; catalog-only, safe to re-run). Optional sanity check first, expected 0 rows: `SELECT game_id, count(*) FROM game_info GROUP BY 1 HAVING count(*) > 1`.
-3. **Merge/push, Republish Replit.** Existing "Recording" games get a record code the first time the Record tab shows them (lazy `POST /api/evaluations/record-code`). Existing List_Idea games without a link get a demo code when the panel or the missing-demo popup shows them.
-4. **One shared Drive folder.** Demo and record workflows share `[Signal] Video` by design; the code tells them apart. Codes are unique across `demo_code` and `record_code`. Each workflow silently ignores the other's codes (no notice, no write, file untouched). Codes mix letters and digits (at least 2 of each), so a game title never looks like a code. Consequence: only the record workflow reports an unknown code (`code_not_found`); the demo workflow lets it fall through to title matching, so exactly one workflow reports a typo. A code in both columns is reported by the demo workflow as `ambiguous_code`.
-5. **Drive permission.** The n8n OAuth account must be Editor on the shared folder. Test by renaming a throwaway file with the Drive node. A 403 here means every rename fails.
-6. **Sheet.** Add a `game_id` header in tab `ytb_uploaded` of `[Signal] Logging`, in the first empty column after H (never inside A:H, the app reads those by position). Do this before activating the record workflow.
-7. **Demo workflow.** Import `workflows/drive-video-link-sync-by-code.json` through the n8n UI (the API did not keep node-level `onError` on the Postgres nodes, so copy `oA27SA3ikkJ7Wxya` lacks it). **Migration 052 (item 2) must already be applied: without it the lookup query fails and every file falls back to title matching.** Turn OFF `drive-video-link-sync` (`M7zaWUQxsjqAJxfG`, 4 chains, 2 hourly with older title logic), turn ON the new one. Glance at the first run: the `{{ $json.sql }}` query field has no leading `=`, same as the live node today.
-8. **Record workflow.** `Append Sheet [by-code]` (`7XuNrY3m8QjZ4DJH`; source `workflows/record-upload-by-code.json`). It runs from the Scanner Trigger every 10 minutes (Drive trigger disabled in the copy so two pollers cannot double-append). That is about 144 executions a day: check the n8n Cloud quota. **Migration 052 (item 2) must already be applied: without it the lookup query fails and code files are never renamed (legacy matching only).** Turn OFF `Append Sheet` (`Hz0noofKB64VPRyq`, same webhook path) and ON the new one. `Upload Youtube` (`gFnZgEix9Phn3m37`) is unchanged and is called by it.
-9. **Smoke test.** Set a game to List_Idea, copy its demo code, drop `<CODE>.mp4` in `[Signal] Video`: link set, file renamed to the title. Confirm a record bucket, copy its code from the Record tab or the queue popover, drop `<CODE>.mp4` in the same folder: renamed to `Title_Recorder_Nmins`, sheet row with `game_id`, YouTube upload.
-10. Tell evaluators and recorders: copy the chip, name the file with it.
+- **Migration 052 applied on prod** (693,844 `game_info` rows, 0 duplicate `game_id`; two nullable columns + two partial unique indexes).
+- **Both n8n copies live in project Production, inactive**, credentials re-selected in the UI after the transfer, node-level `onError` set on the code lookups:
+  - demo `drive-video-link-sync [by-code]` (`oA27SA3ikkJ7Wxya`)
+  - record `Append Sheet [by-code]` (`7XuNrY3m8QjZ4DJH`), calling the production `Upload Youtube` (`gFnZgEix9Phn3m37`), notices to `spaces/AAQAYTKWM1I`
+- **Sheet header** `game_id` added in tab `ytb_uploaded` of `[Signal] Logging`, after column H.
+- **End-to-end tests on real data, both passed** (manual Execute of the inactive copies):
+  - demo: Ocean Crown, file renamed to code `QD6SF3.mp4`, link cleared → n8n wrote the link and renamed the file to `Ocean Crown.mp4`; no other game touched.
+  - record: ArrowIt, 3-second test clip `7WD5F4.mp4` → renamed to `ArrowIt_TienNH_5mins.mp4`, sheet row with `game_id`, unlisted YouTube upload, DONE notice. The old `Append Sheet` saw the code-named file and ignored it.
+  - Drive rename works with the n8n OAuth account (no 403).
+
+## Still to do, in order
+
+1. **Build check in a real checkout.** `NEXT_DIST_DIR=.next-check npx next build` (the worktree lacks `exceljs`, so the build never ran there). Then `git checkout tsconfig.json`.
+2. **Merge/push, Republish Replit.** Existing "Recording" games get a record code the first time the Record tab shows them (lazy `POST /api/evaluations/record-code`, writes to prod). Existing List_Idea games without a link get a demo code when the panel or the missing-demo popup shows them.
+3. **Record workflow, before switching on.** Open node `[NEW] Append PENDING` and refresh its column list. The first test run failed there with "Column names were updated after the node's setup" right after the `game_id` header was added; a retry from that node succeeded. Then turn OFF `Append Sheet` (`Hz0noofKB64VPRyq`, same webhook path) and ON `Append Sheet [by-code]`. It polls every 10 minutes from the Scanner Trigger (Drive trigger disabled in the copy so two pollers cannot double-append): about 144 executions a day, check the n8n Cloud quota.
+4. **Demo workflow.** Turn OFF `drive-video-link-sync` (`M7zaWUQxsjqAJxfG`, 4 chains, 2 hourly with older title logic), turn ON `drive-video-link-sync [by-code]`. It only fires on a new file (Drive trigger `fileCreated`); a renamed old file needs a manual Execute.
+5. Tell evaluators and recorders: copy the chip, name the file with it.
 
 ## Behaviour to know
 
-- Codes never change once set. A code mixes letters and digits (min 2 each), so a title like "Racket" is never a code. An unknown code falls through to title matching in the demo workflow (silent); the record workflow reports it as `code_not_found`.
+- Demo and record share `[Signal] Video` by design; the code tells them apart. Codes are unique across `demo_code` and `record_code`; each workflow silently ignores the other's codes.
+- Codes never change once set. A code mixes letters and digits (min 2 each) from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`, so a title like "Racket" is never a code. An unknown code falls through to title matching in the demo workflow (silent); the record workflow reports it as `code_not_found`. A code in both columns is reported by the demo workflow as `ambiguous_code`.
 - A game that already has a `drive_link` is never overwritten: the file stays, `flow_log` gets `link_exists`, Chat is told. To re-record a demo, clear the link first.
 - Record holds (game not Confirmed, or already has a live upload): file untouched, retried every 10 minutes while it is within the last ~2 days of the folder listing. To re-record, clear the old YouTube link and remove the old `ytb_uploaded` row.
+- If a rename succeeds and the sheet append fails, the next run appends the (now legacy-named) file; when it is a retry of the same execution the `game_id` is kept, a fresh run would append it without `game_id`.
 - Rows written before this change carry no `game_id`, so the sheet-hold guard does not see them.
 - Notices (`link_exists`, `ambiguous_code`, `code_not_found`, `rename_failed`) are deduped per file and status using workflow static data.
 - Codes are generated by a separate statement after the save, not in the same transaction; a failure is logged and the lazy endpoints fill the gap.
-- The code lookups name `game_info.demo_code` / `record_code` directly (partial unique indexes, ~1 s on prod). Migration 052 must therefore be applied before either workflow is activated; without it the lookups fail and the workflows fall back to title / legacy matching.
+- The code lookups name `game_info.demo_code` / `record_code` directly (partial unique indexes, ~2 s on prod including connection). Migration 052 is required (applied).
