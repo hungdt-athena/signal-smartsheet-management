@@ -4,6 +4,7 @@ import { sql } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { isMissingLogTable, EVALUATION_LOG_MISSING } from '@/lib/evaluation-log'
 import { ownBucketSql } from '@/lib/record-slots'
+import { ensureRecordCode } from '@/lib/file-codes'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
         SET ${stamp(sql`NOW()`)}
         -- The join is what makes the locked read of "old" run first (see the PATCH).
         FROM old WHERE ge.id = old.id
-        RETURNING ge.id
+        RETURNING ge.id, ge.game_id
       ), cur AS (
         SELECT old.id, old.game_id, old.initial_evaluator, old.batch, eb.bucket,
           CASE eb.bucket WHEN '5min' THEN old.record_5min_assignee
@@ -82,8 +83,18 @@ export async function POST(req: NextRequest) {
         -- Same person is the same person whatever the casing (MyTL / mytl).
         WHERE cur.recorder IS NOT NULL AND lower(cur.recorder) IS DISTINCT FROM lower(cur.prev_recorder)
       )
-      SELECT count(*)::int AS confirmed FROM upd
+      SELECT count(*)::int AS confirmed, array_agg(DISTINCT game_id) AS game_ids FROM upd
     `
+    // A game in the Record tab gets its file code here. A separate idempotent statement per
+    // game: a failure is logged and swallowed, never the reason a confirm fails.
+    const gameIds: string[] = (result[0]?.game_ids ?? []).filter(Boolean)
+    for (const gameId of gameIds) {
+      try {
+        await ensureRecordCode(gameId)
+      } catch (err) {
+        console.error('POST /api/evaluations/confirm-records: record code failed for', gameId, err)
+      }
+    }
     return NextResponse.json({ confirmed: result[0]?.confirmed ?? 0 })
   } catch (err) {
     if (isMissingLogTable(err)) {

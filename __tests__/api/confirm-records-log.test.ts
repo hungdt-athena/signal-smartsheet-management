@@ -70,7 +70,7 @@ describe('POST /api/evaluations/confirm-records — evaluation_log', () => {
     expect(t).toMatch(/FROM old JOIN upd ON upd\.id = old\.id/)
     expect(t).toMatch(/INSERT INTO evaluation_log/)
     expect(t).toMatch(/'record_tab',\s+'record_assign'/)
-    expect(t).toMatch(/SELECT count\(\*\)::int AS confirmed FROM upd/)
+    expect(t).toMatch(/SELECT count\(\*\)::int AS confirmed, array_agg\(DISTINCT game_id\) AS game_ids FROM upd/)
   })
 
   it('reads the effective bucket and the recorder in it', async () => {
