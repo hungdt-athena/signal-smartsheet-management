@@ -345,12 +345,23 @@ def main():
     cols['schema'].append({'id': 'game_id', 'displayName': 'game_id', 'required': False, 'defaultMatch': False,
                            'display': True, 'type': 'string', 'canBeUsedToMatch': True})
 
+    # Held files must be retried on a schedule, not only when another file lands. The legacy path is idempotent
+    # under repeated runs (Compare - Find New passes on only fileIds that have no ytb_uploaded row in any status,
+    # and nothing downstream runs without such a file), so the existing, disconnected Scanner Trigger becomes the
+    # one poller, every 10 minutes. The Drive trigger is disabled rather than kept beside it: two pollers firing
+    # in the same minute could both read the sheet before either appended and append one file twice. One poller
+    # leaves the same overlap profile the legacy Drive trigger had (plus the webhook, unchanged).
+    scanner = by_name['[NEW] Scanner Trigger']
+    scanner['parameters'] = {'rule': {'interval': [{'field': 'minutes', 'minutesInterval': 10}]}}
+    trigger['disabled'] = True
+
     wf['nodes'] = wf['nodes'] + nodes
 
     def link(*targets):
         return {'main': [[{'node': t, 'type': 'main', 'index': 0} for t in targets]]}
 
     c = wf['connections']
+    c['[NEW] Scanner Trigger'] = copy.deepcopy(c['Google Drive Trigger'])
     c['[NEW] Search Drive'] = link('Split Record Codes')
     c['Split Record Codes'] = link('Lookup Record Codes')
     c['Lookup Record Codes'] = link('Read Upload Rows')

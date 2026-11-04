@@ -7,7 +7,7 @@
           "interval": [
             {
               "field": "minutes",
-              "minutesInterval": 30
+              "minutesInterval": 10
             }
           ]
         }
@@ -473,7 +473,8 @@
           "id": "ZMDZzSCOielVihYl",
           "name": "HungDT"
         }
-      }
+      },
+      "disabled": true
     },
     {
       "parameters": {
@@ -769,7 +770,18 @@
   "connections": {
     "[NEW] Scanner Trigger": {
       "main": [
-        []
+        [
+          {
+            "node": "[NEW] Search Drive",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "[NEW] Get Existing Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "[NEW] Search Drive": {

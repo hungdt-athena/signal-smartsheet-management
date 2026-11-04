@@ -68,10 +68,10 @@ const legacyAfter = (cls: Row, renameFails = false) => {
 }
 
 describe('Append Sheet [by-code] workflow', () => {
-  it('has its own name and keeps every legacy node except Append PENDING byte-identical', () => {
+  it('has its own name and keeps every legacy node except Append PENDING and the Scanner Trigger byte-identical', () => {
     expect(wf.name).toBe('Append Sheet [by-code]')
     for (const b of base.nodes as N[]) {
-      if (b.name === '[NEW] Append PENDING') continue
+      if (b.name === '[NEW] Append PENDING' || b.name === '[NEW] Scanner Trigger') continue
       const n = node(b.name)
       expect([b.name, n.parameters]).toEqual([b.name, b.parameters])
       expect(n.credentials).toEqual(b.credentials)
@@ -392,6 +392,88 @@ describe('Append Sheet [by-code] workflow', () => {
       expect(log.parameters.documentId).toEqual(b.parameters.documentId)
       expect(log.parameters.sheetName).toEqual(b.parameters.sheetName)
       expect(log.credentials).toEqual({ googleSheetsOAuth2Api: { id: 'UMl5XCc7aOcf9yi3', name: 'HandoverRequest-HungDT' } })
+    })
+  })
+
+  describe('held files are retried on a schedule, and repeated runs are idempotent', () => {
+    it('the Scanner Trigger polls every 10 minutes into the same nodes the Drive trigger fed; the Drive trigger is disabled (one poller)', () => {
+      const s = node('[NEW] Scanner Trigger')
+      expect(s.type).toBe('n8n-nodes-base.scheduleTrigger')
+      expect(s.parameters).toEqual({ rule: { interval: [{ field: 'minutes', minutesInterval: 10 }] } })
+      expect(s.disabled).toBeUndefined()
+      expect(wf.connections['[NEW] Scanner Trigger']).toEqual(base.connections['Google Drive Trigger'])
+      expect(node('Google Drive Trigger').disabled).toBe(true)
+      expect(baseNode('Google Drive Trigger').disabled).toBeUndefined()
+    })
+
+    it('only Compare output 0 ("In A only", by fileId) reaches Append PENDING, and only Append PENDING calls Upload Youtube', () => {
+      const cmp = node('[NEW] Compare - Find New')
+      expect(cmp.type).toBe('n8n-nodes-base.compareDatasets')
+      expect(cmp.parameters).toEqual({ mergeByFields: { values: [{ field1: 'fileId', field2: 'fileId' }] }, options: {} })
+      expect(wf.connections['[NEW] Compare - Find New'].main).toEqual([[{ node: '[NEW] Append PENDING', type: 'main', index: 0 }]])
+      const into = (target: string) => Object.entries(wf.connections as Record<string, { main: { node: string }[][] }>)
+        .filter(([, v]) => v.main.some(out => (out || []).some(c => c.node === target))).map(([k]) => k)
+      expect(into('[NEW] Append PENDING')).toEqual(['[NEW] Compare - Find New'])
+      expect(into("Call 'Upload Youtube'")).toEqual(['[NEW] Append PENDING'])
+      expect(node('[NEW] Append PENDING').parameters.operation).toBe('append')
+    })
+
+    // One whole run of the patched path over a Drive listing and the ytb_uploaded rows. Compare Datasets is a
+    // built-in node: "In A only" = Parse/Attach items whose fileId has no sheet row (emulated here).
+    const fullRun = (driveFiles: Row[], sheet: Row[], lookup: Row[], st: Row) => {
+      const split = run('Split Record Codes', driveFiles)[0]
+      const cls = run('Classify Record Codes', sheet, { 'Split Record Codes': split, 'Lookup Record Codes': split.codeFiles.length ? lookup : { no_codes: 1 } })[0]
+      const notices = run('Record Code Notices', [{}], { 'Classify Record Codes': cls }, st)
+      const { attached } = legacyAfter(cls)
+      const known = new Set(sheet.map(r => String(r.fileId)))
+      const appended = attached.filter(a => !known.has(String(a.fileId)))
+      return { cls, notices, appended }
+    }
+    // What the run leaves behind: renamed Drive files, and the appended rows (Upload Youtube then moves them on).
+    const apply = (driveFiles: Row[], sheet: Row[], r: ReturnType<typeof fullRun>, status = 'PENDING') => ({
+      drive: driveFiles.map(f => {
+        const ren = (r.cls.renames as Row[]).find(x => x.fileId === f.id)
+        return ren ? { ...f, name: ren.newName } : f
+      }),
+      sheet: [...sheet, ...r.appended.map(a => ({ fileId: a.fileId, fileName: a.fileName, status, game_id: a.game_id }))],
+    })
+
+    it.each(['PENDING', 'IN_BATCH', 'PROCESSING', 'DONE', 'FAILED'])(
+      'second pass over the same files with the first pass\'s rows at %s appends nothing, renames nothing, reports nothing',
+      status => {
+        const drive0 = [drive('K7M2QX.mp4', 'F1'), drive('Nail Box_VinhTD_5mins.mp4', 'F2'), drive('GHJKMN.mp4', 'F5'), drive('random clip.mp4', 'F3')]
+        const lookup = [hit(), hit({ code: 'GHJKMN', game_id: 'g-5', title: 'Held', confirmed: false })]
+        const st: Row = {}
+        const first = fullRun(drive0, [], lookup, st)
+        expect(first.appended.map(a => [a.fileId, a.fileName, a.game_id])).toEqual([
+          ['F2', 'Nail Box_VinhTD_5mins.mp4', ''], ['F1', 'Nail Box Sort_VinhTD_5mins.mp4', 'com.nail.box'],
+        ])
+        expect(first.notices.map(n => n.status)).toEqual(['held_not_confirmed'])
+
+        const after = apply(drive0, [], first, status)
+        const second = fullRun(after.drive, after.sheet, lookup, st)
+        expect(second.appended).toEqual([]) // Append PENDING and Call 'Upload Youtube' do not run
+        expect(second.cls.renames).toEqual([])
+        expect(second.notices).toEqual([]) // the still-held file is not reported again
+        // the renamed file is a legacy name now: it is never looked up as a code again
+        expect(run('Split Record Codes', after.drive)[0].codeFiles.map((c: Row) => c.id)).toEqual(['F5'])
+      },
+    )
+
+    it('a held file is picked up by a later scheduled run once it is Confirmed, with nothing new in the folder', () => {
+      const drive0 = [drive('GHJKMN.mp4', 'F5')]
+      const st: Row = {}
+      const held = fullRun(drive0, [], [hit({ code: 'GHJKMN', game_id: 'g-5', title: 'Held', confirmed: false })], st)
+      expect(held.appended).toEqual([])
+      const later = fullRun(drive0, [], [hit({ code: 'GHJKMN', game_id: 'g-5', title: 'Held', confirmed: true })], st)
+      expect(later.appended.map(a => [a.fileId, a.fileName, a.game_id])).toEqual([['F5', 'Held_VinhTD_5mins.mp4', 'g-5']])
+    })
+
+    it('a run with no new files appends nothing', () => {
+      const files = [drive('Nail Box_VinhTD_5mins.mp4', 'F2')]
+      const r = fullRun(files, [{ fileId: 'F2', fileName: 'Nail Box_VinhTD_5mins.mp4', status: 'DONE', game_id: '' }], [], {})
+      expect(r.appended).toEqual([])
+      expect(r.notices).toEqual([])
     })
   })
 
