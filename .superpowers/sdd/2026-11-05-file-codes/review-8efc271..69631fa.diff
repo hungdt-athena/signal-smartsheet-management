@@ -1,0 +1,384 @@
+# Review package: 8efc271..69631fa
+
+## Commits
+69631fa feat(codes): generate codes on List_Idea and on record confirm
+
+## Files changed
+ __tests__/api/confirm-records-log.test.ts    |   2 +-
+ __tests__/api/demo-code-on-list-idea.test.ts |  84 +++++++++++++++++++++++++++
+ __tests__/api/demo-code-route.test.ts        |  54 +++++++++++++++++
+ __tests__/api/record-code-on-confirm.test.ts |  69 ++++++++++++++++++++++
+ app/api/evaluations/confirm-records/route.ts |  15 ++++-
+ app/api/evaluations/demo-code/route.ts       |  28 +++++++++
+ app/api/evaluations/route.ts                 | Bin 42728 -> 43229 bytes
+ 7 files changed, 249 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/__tests__/api/confirm-records-log.test.ts b/__tests__/api/confirm-records-log.test.ts
+index 8b20bd0..6534db3 100644
+--- a/__tests__/api/confirm-records-log.test.ts
++++ b/__tests__/api/confirm-records-log.test.ts
+@@ -63,21 +63,21 @@ describe('POST /api/evaluations/confirm-records — evaluation_log', () => {
+     expect(t).toMatch(/FOR NO KEY UPDATE/)
+     expect(t).toMatch(/record_confirmed_at IS NULL/)
+     // the Confirm lands in the own bucket's column; record_confirmed_at follows (051 trigger)
+     expect(t).toMatch(/record_5min_confirmed_at = CASE WHEN \(CASE[\s\S]*?END\) = '5min' THEN NOW\(\) ELSE ge\.record_5min_confirmed_at END/)
+     expect(t).toMatch(/record_20min_confirmed_at = CASE WHEN \(CASE[\s\S]*?END\) = '20min' THEN NOW\(\) ELSE ge\.record_20min_confirmed_at END/)
+     expect(t).not.toMatch(/SET record_confirmed_at/)
+     expect(t).toMatch(/FROM old WHERE ge\.id = old\.id/)
+     expect(t).toMatch(/FROM old JOIN upd ON upd\.id = old\.id/)
+     expect(t).toMatch(/INSERT INTO evaluation_log/)
+     expect(t).toMatch(/'record_tab',\s+'record_assign'/)
+-    expect(t).toMatch(/SELECT count\(\*\)::int AS confirmed FROM upd/)
++    expect(t).toMatch(/SELECT count\(\*\)::int AS confirmed, array_agg\(DISTINCT game_id\) AS game_ids FROM upd/)
+   })
+ 
+   it('reads the effective bucket and the recorder in it', async () => {
+     await post({ ids: [1] })
+     const t = calls[0].text
+     expect(t).toMatch(/WHEN old\.record_bucket IN \('5min', '20min'\) THEN old\.record_bucket/)
+     expect(t).toMatch(/WHEN old\.final_conclusion = 'Priority IV' THEN '20min'/)
+     expect(t).toMatch(/WHEN old\.final_conclusion = 'Insight' THEN '5min'/)
+     expect(t).toMatch(/WHEN '5min' THEN old\.record_5min_assignee/)
+     expect(t).toMatch(/WHEN '20min' THEN old\.record_20min_assignee/)
+diff --git a/__tests__/api/demo-code-on-list-idea.test.ts b/__tests__/api/demo-code-on-list-idea.test.ts
+new file mode 100644
+index 0000000..e587200
+--- /dev/null
++++ b/__tests__/api/demo-code-on-list-idea.test.ts
+@@ -0,0 +1,84 @@
++/**
++ * @jest-environment node
++ */
++import { NextRequest } from 'next/server'
++
++jest.mock('@/lib/db', () => {
++  const fn = jest.fn() as jest.Mock & { json: jest.Mock; begin: jest.Mock }
++  fn.json = jest.fn((v: unknown) => v)
++  fn.begin = jest.fn((cb: (t: unknown) => unknown) => Promise.resolve(cb(fn)))
++  return { sql: fn }
++})
++jest.mock('next-auth', () => ({ getServerSession: jest.fn() }))
++jest.mock('@/lib/auth', () => ({ authOptions: {} }))
++jest.mock('@/lib/config', () => ({
++  getConfigValues: jest.fn(async () => ['List_Idea', 'Link_dead', 'Bypass', 'Pass']),
++}))
++jest.mock('@/lib/file-codes', () => ({
++  ensureDemoCode: jest.fn(async () => 'ABC234'),
++  ensureRecordCode: jest.fn(async () => 'XYZ234'),
++}))
++
++import { PATCH } from '@/app/api/evaluations/route'
++import { sql } from '@/lib/db'
++import { ensureDemoCode } from '@/lib/file-codes'
++import { getServerSession } from 'next-auth'
++
++const sqlMock = sql as unknown as jest.Mock
++const ensure = ensureDemoCode as jest.Mock
++
++const patchReq = (body: unknown) =>
++  new NextRequest('http://localhost/api/evaluations', { method: 'PATCH', body: JSON.stringify(body) } as never)
++
++function routeSql() {
++  sqlMock.mockReset()
++  sqlMock.mockImplementation((strings: unknown) => {
++    if (!Array.isArray(strings)) return Promise.resolve([])
++    const text = (strings as string[]).join(' ')
++    if (/SELECT\s+initial_conclusion\b[^]*FROM game_evaluations/.test(text)) {
++      return Promise.resolve([{ initial_conclusion: null, initial_note: null, initial_gameplay: null }])
++    }
++    return Promise.resolve([{ id: 1, game_id: 'g-42' }])
++  })
++}
++
++describe('PATCH /api/evaluations: demo code on List_Idea', () => {
++  const realSkip = process.env.SKIP_AUTH
++  beforeAll(() => { process.env.SKIP_AUTH = undefined })
++  afterAll(() => { process.env.SKIP_AUTH = realSkip })
++  beforeEach(() => {
++    ensure.mockClear()
++    ensure.mockImplementation(async () => 'ABC234')
++    routeSql()
++    ;(getServerSession as jest.Mock).mockResolvedValue({ user: { role: 'admin', name: 'VinhTD' } })
++  })
++
++  const NOTE = 'Core loop is fine, meta is thin'
++
++  it('ensures a demo code for the saved game when the conclusion is List_Idea', async () => {
++    const res = await PATCH(patchReq({ id: 1, initial_conclusion: 'List_Idea', initial_note: NOTE }))
++    expect(res.status).toBe(200)
++    expect(ensure).toHaveBeenCalledTimes(1)
++    expect(ensure).toHaveBeenCalledWith('g-42')
++  })
++
++  it('does not for another conclusion', async () => {
++    await PATCH(patchReq({ id: 1, initial_conclusion: 'Pass', initial_note: NOTE }))
++    expect(ensure).not.toHaveBeenCalled()
++  })
++
++  it('does not when the conclusion is not in the request', async () => {
++    await PATCH(patchReq({ id: 1, final_note: 'admin says hi' }))
++    expect(ensure).not.toHaveBeenCalled()
++  })
++
++  it('a throwing helper never fails the save', async () => {
++    ensure.mockRejectedValueOnce(new Error('boom'))
++    const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
++    const res = await PATCH(patchReq({ id: 1, initial_conclusion: 'List_Idea', initial_note: NOTE }))
++    expect(res.status).toBe(200)
++    expect((await res.json()).data.id).toBe(1)
++    expect(spy).toHaveBeenCalled()
++    spy.mockRestore()
++  })
++})
+diff --git a/__tests__/api/demo-code-route.test.ts b/__tests__/api/demo-code-route.test.ts
+new file mode 100644
+index 0000000..e03b4d6
+--- /dev/null
++++ b/__tests__/api/demo-code-route.test.ts
+@@ -0,0 +1,54 @@
++/**
++ * @jest-environment node
++ */
++import { NextRequest, NextResponse } from 'next/server'
++
++jest.mock('@/lib/auth-guard', () => ({ requireAuth: jest.fn(async () => null) }))
++jest.mock('@/lib/file-codes', () => ({
++  ensureDemoCode: jest.fn(),
++  ensureRecordCode: jest.fn(),
++}))
++
++import { POST } from '@/app/api/evaluations/demo-code/route'
++import { requireAuth } from '@/lib/auth-guard'
++import { ensureDemoCode } from '@/lib/file-codes'
++
++const ensure = ensureDemoCode as jest.Mock
++const post = (body: unknown) => POST(new NextRequest('http://localhost/api/evaluations/demo-code', {
++  method: 'POST', body: JSON.stringify(body),
++} as never))
++
++describe('POST /api/evaluations/demo-code', () => {
++  beforeEach(() => { ensure.mockReset(); (requireAuth as jest.Mock).mockResolvedValue(null) })
++
++  it('401 without a session', async () => {
++    ;(requireAuth as jest.Mock).mockResolvedValueOnce(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
++    const res = await post({ gameId: 'g-1' })
++    expect(res.status).toBe(401)
++    expect(ensure).not.toHaveBeenCalled()
++  })
++
++  it('returns the code for a valid game, uncached', async () => {
++    ensure.mockResolvedValue('ABC234')
++    const res = await post({ gameId: 'g-1' })
++    expect(res.status).toBe(200)
++    expect(await res.json()).toEqual({ code: 'ABC234' })
++    expect(res.headers.get('Cache-Control')).toBe('no-store')
++    expect(ensure).toHaveBeenCalledWith('g-1')
++  })
++
++  it('returns null for an unknown game', async () => {
++    ensure.mockResolvedValue(null)
++    const res = await post({ gameId: 'nope' })
++    expect(res.status).toBe(200)
++    expect(await res.json()).toEqual({ code: null })
++  })
++
++  it('400 without a string gameId', async () => {
++    for (const body of [{}, { gameId: 5 }, { gameId: '' }]) {
++      const res = await post(body)
++      expect(res.status).toBe(400)
++    }
++    expect(ensure).not.toHaveBeenCalled()
++  })
++})
+diff --git a/__tests__/api/record-code-on-confirm.test.ts b/__tests__/api/record-code-on-confirm.test.ts
+new file mode 100644
+index 0000000..5e6ec5b
+--- /dev/null
++++ b/__tests__/api/record-code-on-confirm.test.ts
+@@ -0,0 +1,69 @@
++/**
++ * @jest-environment node
++ */
++import { NextRequest } from 'next/server'
++
++jest.mock('@/lib/db', () => ({ sql: jest.fn() }))
++jest.mock('@/lib/auth-guard', () => ({ requireManager: jest.fn(async () => null) }))
++jest.mock('@/lib/session', () => ({ getSession: jest.fn(async () => ({ user: { name: 'VinhTD', role: 'moderator' } })) }))
++jest.mock('@/lib/file-codes', () => ({
++  ensureDemoCode: jest.fn(),
++  ensureRecordCode: jest.fn(async () => 'XYZ234'),
++}))
++
++import { POST } from '@/app/api/evaluations/confirm-records/route'
++import { sql } from '@/lib/db'
++import { ensureRecordCode } from '@/lib/file-codes'
++
++const sqlMock = sql as unknown as jest.Mock
++const ensure = ensureRecordCode as jest.Mock
++
++function routeSql(rows: unknown[]) {
++  sqlMock.mockReset()
++  sqlMock.mockImplementation((strings: unknown) => {
++    if (!Array.isArray(strings) || !('raw' in (strings as object))) return { list: strings }
++    const text = (strings as string[]).join(' ')
++    if (!/^\s*(WITH|UPDATE|SELECT|INSERT)\b/.test(text)) return { frag: true }
++    return Promise.resolve(Object.assign([...rows], { count: 2 }))
++  })
++}
++const post = (body: unknown) => POST(new NextRequest('http://localhost/api/evaluations/confirm-records', {
++  method: 'POST', body: JSON.stringify(body),
++} as never))
++
++describe('POST confirm-records: record code', () => {
++  beforeEach(() => { ensure.mockClear(); ensure.mockImplementation(async () => 'XYZ234') })
++
++  it('ensures a record code once per distinct confirmed game', async () => {
++    routeSql([{ confirmed: 3, game_ids: ['g-1', 'g-2'] }])
++    const res = await post({ ids: [1, 2, 3] })
++    expect(await res.json()).toEqual({ confirmed: 3 })
++    expect(ensure).toHaveBeenCalledTimes(2)
++    expect(ensure).toHaveBeenCalledWith('g-1')
++    expect(ensure).toHaveBeenCalledWith('g-2')
++  })
++
++  it('does nothing on unset (reset to draft)', async () => {
++    routeSql([])
++    await post({ ids: [1, 2], unset: true })
++    expect(ensure).not.toHaveBeenCalled()
++  })
++
++  it('nothing confirmed, no codes', async () => {
++    routeSql([{ confirmed: 0, game_ids: null }])
++    const res = await post({ ids: [1] })
++    expect(res.status).toBe(200)
++    expect(ensure).not.toHaveBeenCalled()
++  })
++
++  it('a throwing helper never fails the confirm', async () => {
++    ensure.mockRejectedValue(new Error('boom'))
++    const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
++    routeSql([{ confirmed: 2, game_ids: ['g-1', 'g-2'] }])
++    const res = await post({ ids: [1, 2] })
++    expect(res.status).toBe(200)
++    expect(await res.json()).toEqual({ confirmed: 2 })
++    expect(ensure).toHaveBeenCalledTimes(2)
++    spy.mockRestore()
++  })
++})
+diff --git a/app/api/evaluations/confirm-records/route.ts b/app/api/evaluations/confirm-records/route.ts
+index 7d46973..39ca57d 100644
+--- a/app/api/evaluations/confirm-records/route.ts
++++ b/app/api/evaluations/confirm-records/route.ts
+@@ -1,16 +1,17 @@
+ import { NextRequest, NextResponse } from 'next/server'
+ import { requireManager } from '@/lib/auth-guard'
+ import { sql } from '@/lib/db'
+ import { getSession } from '@/lib/session'
+ import { isMissingLogTable, EVALUATION_LOG_MISSING } from '@/lib/evaluation-log'
+ import { ownBucketSql } from '@/lib/record-slots'
++import { ensureRecordCode } from '@/lib/file-codes'
+ 
+ export const dynamic = 'force-dynamic'
+ 
+ export async function POST(req: NextRequest) {
+   const guard = await requireManager()
+   if (guard) return guard
+   try {
+     const { ids, unset } = await req.json()
+     const list = Array.isArray(ids) ? ids.map(Number).filter(Boolean) : []
+     if (list.length === 0) {
+@@ -51,21 +52,21 @@ export async function POST(req: NextRequest) {
+         SELECT id, game_id, initial_evaluator, batch, record_bucket, final_conclusion,
+           record_5min_assignee, record_20min_assignee
+         FROM game_evaluations
+         WHERE id IN ${sql(list)} AND record_confirmed_at IS NULL
+         FOR NO KEY UPDATE
+       ), upd AS (
+         UPDATE game_evaluations ge
+         SET ${stamp(sql`NOW()`)}
+         -- The join is what makes the locked read of "old" run first (see the PATCH).
+         FROM old WHERE ge.id = old.id
+-        RETURNING ge.id
++        RETURNING ge.id, ge.game_id
+       ), cur AS (
+         SELECT old.id, old.game_id, old.initial_evaluator, old.batch, eb.bucket,
+           CASE eb.bucket WHEN '5min' THEN old.record_5min_assignee
+                          WHEN '20min' THEN old.record_20min_assignee END AS recorder,
+           (SELECT l.recorder_after FROM evaluation_log l
+            WHERE l.game_evaluation_id = old.id
+              AND l.kind IN ('record_assign', 'record_move', 'record_remove')
+            ORDER BY l.id DESC LIMIT 1) AS prev_recorder
+         FROM old JOIN upd ON upd.id = old.id
+         CROSS JOIN LATERAL (SELECT CASE
+@@ -75,22 +76,32 @@ export async function POST(req: NextRequest) {
+         END AS bucket) eb
+       ), logged AS (
+         INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
+           kind, bucket_after, recorder_before, recorder_after, batch_before, batch_after)
+         SELECT cur.id, cur.game_id, ${actor}::text, ${role}::text, cur.initial_evaluator, 'record_tab',
+           'record_assign', cur.bucket, cur.prev_recorder, cur.recorder, cur.batch, cur.batch
+         FROM cur
+         -- Same person is the same person whatever the casing (MyTL / mytl).
+         WHERE cur.recorder IS NOT NULL AND lower(cur.recorder) IS DISTINCT FROM lower(cur.prev_recorder)
+       )
+-      SELECT count(*)::int AS confirmed FROM upd
++      SELECT count(*)::int AS confirmed, array_agg(DISTINCT game_id) AS game_ids FROM upd
+     `
++    // A game in the Record tab gets its file code here. A separate idempotent statement per
++    // game: a failure is logged and swallowed, never the reason a confirm fails.
++    const gameIds: string[] = (result[0]?.game_ids ?? []).filter(Boolean)
++    for (const gameId of gameIds) {
++      try {
++        await ensureRecordCode(gameId)
++      } catch (err) {
++        console.error('POST /api/evaluations/confirm-records: record code failed for', gameId, err)
++      }
++    }
+     return NextResponse.json({ confirmed: result[0]?.confirmed ?? 0 })
+   } catch (err) {
+     if (isMissingLogTable(err)) {
+       console.error('POST /api/evaluations/confirm-records: evaluation_log missing — apply migration 046')
+       return NextResponse.json({ error: EVALUATION_LOG_MISSING }, { status: 500 })
+     }
+     console.error('POST /api/evaluations/confirm-records error:', err)
+     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+   }
+ }
+diff --git a/app/api/evaluations/demo-code/route.ts b/app/api/evaluations/demo-code/route.ts
+new file mode 100644
+index 0000000..067c8c7
+--- /dev/null
++++ b/app/api/evaluations/demo-code/route.ts
+@@ -0,0 +1,28 @@
++import { NextRequest, NextResponse } from 'next/server'
++import { requireAuth } from '@/lib/auth-guard'
++import { ensureDemoCode } from '@/lib/file-codes'
++
++export const dynamic = 'force-dynamic'
++
++// POST /api/evaluations/demo-code { gameId } -> { code: string | null }
++//
++// Returns the game's demo file code, creating it on first ask. This covers games that were
++// marked List_Idea before codes existed, or whose code write failed at save time.
++// null = no game_info row for that id.
++export async function POST(req: NextRequest) {
++  const guard = await requireAuth()
++  if (guard) return guard
++
++  let body: { gameId?: unknown } = {}
++  try { body = await req.json() } catch { /* handled below */ }
++  const gameId = typeof body.gameId === 'string' ? body.gameId.trim() : ''
++  if (!gameId) return NextResponse.json({ error: 'gameId is required' }, { status: 400 })
++
++  try {
++    const code = await ensureDemoCode(gameId)
++    return NextResponse.json({ code }, { headers: { 'Cache-Control': 'no-store' } })
++  } catch (err) {
++    console.error('POST /api/evaluations/demo-code error:', err)
++    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
++  }
++}
+diff --git a/app/api/evaluations/route.ts b/app/api/evaluations/route.ts
+index bef70cb..810bb2d 100644
+Binary files a/app/api/evaluations/route.ts and b/app/api/evaluations/route.ts differ

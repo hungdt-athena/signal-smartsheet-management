@@ -1,0 +1,358 @@
+# Review package: 69631fa..66a7bef
+
+## Commits
+66a7bef feat(codes): expose demo_code and record_code to the UI
+
+## Files changed
+ __tests__/api/evaluations-missing-demo.test.ts |   2 +-
+ __tests__/api/missing-demo-code.test.ts        |  52 +++++++++++++++++++++++++
+ __tests__/api/record-my-queue.test.ts          |  12 +++++-
+ app/api/evaluations/[gameId]/route.ts          |   1 +
+ app/api/evaluations/missing-demo/route.ts      |   6 ++-
+ app/api/evaluations/route.ts                   | Bin 43229 -> 43269 bytes
+ lib/record-queue.ts                            |   3 +-
+ lib/record-view-games.ts                       |   3 +-
+ 8 files changed, 73 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/__tests__/api/evaluations-missing-demo.test.ts b/__tests__/api/evaluations-missing-demo.test.ts
+index b1c46a2..34d5e7b 100644
+--- a/__tests__/api/evaluations-missing-demo.test.ts
++++ b/__tests__/api/evaluations-missing-demo.test.ts
+@@ -111,21 +111,21 @@ describe('GET /api/evaluations/missing-demo', () => {
+       game({ id: 3, category_group: 'simulation' }),
+     ])
+     const body = await (await GET(req())).json()
+     expect(body.items.map((i: { id: number }) => i.id)).toEqual([1, 2, 3])
+   })
+ 
+   it('returns the fields the panel renders', async () => {
+     db(CFG, [game({ id: 1, title: 'ArcFlush', icon_url: 'https://x/i.png' })])
+     const body = await (await GET(req())).json()
+     expect(body.items[0]).toEqual({
+-      id: 1, game_id: 'g1', title: 'ArcFlush', icon_url: 'https://x/i.png',
++      id: 1, game_id: 'g1', title: 'ArcFlush', icon_url: 'https://x/i.png', demo_code: null,
+       category: 'puzzle', genre: 'Casual', batch: 'W2 Oct, 2026',
+       evaluate_date: '2026-10-07T10:00:00Z',
+       suggested_link: null, suggested_name: null, shared_with: null,
+     })
+   })
+ 
+   describe('suggested links (titles shared by different games)', () => {
+     it('joins the suggestion table on the evaluation id, and still only asks for rows with no link', async () => {
+       db(CFG, [])
+       await GET(req())
+diff --git a/__tests__/api/missing-demo-code.test.ts b/__tests__/api/missing-demo-code.test.ts
+new file mode 100644
+index 0000000..6ee5007
+--- /dev/null
++++ b/__tests__/api/missing-demo-code.test.ts
+@@ -0,0 +1,52 @@
++/**
++ * @jest-environment node
++ */
++import { NextRequest } from 'next/server'
++
++jest.mock('@/lib/db', () => ({ sql: jest.fn() }))
++jest.mock('@/lib/session', () => ({ getSession: jest.fn(async () => ({ user: { name: 'PhuongNT1', role: 'evaluator' } })) }))
++jest.mock('@/lib/current-batch', () => ({ getCurrentBatch: jest.fn(async () => 'W2 Oct, 2026') }))
++
++import { GET as missingDemo } from '@/app/api/evaluations/missing-demo/route'
++import { GET as evalList } from '@/app/api/evaluations/route'
++import { GET as evalOne } from '@/app/api/evaluations/[gameId]/route'
++import { sql } from '@/lib/db'
++
++const sqlMock = sql as unknown as jest.Mock
++const texts = () => sqlMock.mock.calls.filter(c => Array.isArray(c[0])).map(c => (c[0] as string[]).join('?'))
++
++const base = {
++  id: 1, game_id: 'g1', title: 'Game', icon_url: null, genre_1: 'Casual',
++  category_group: 'puzzle', batch: 'W2 Oct, 2026', evaluate_date: null,
++}
++
++describe('file codes on the read endpoints', () => {
++  const realSkip = process.env.SKIP_AUTH
++  beforeAll(() => { process.env.SKIP_AUTH = 'false' })
++  afterAll(() => { process.env.SKIP_AUTH = realSkip })
++  beforeEach(() => { sqlMock.mockReset() })
++
++  it('missing-demo items carry demo_code, null (not undefined) when the game has none', async () => {
++    sqlMock.mockResolvedValue([{ ...base, demo_code: 'AB3K9Z' }, { ...base, id: 2, game_id: 'g2' }])
++    const body = await (await missingDemo(new NextRequest('http://localhost/api/evaluations/missing-demo'))).json()
++    expect(body.items[0].demo_code).toBe('AB3K9Z')
++    expect(body.items[1].demo_code).toBeNull()
++    expect(texts().some(q => q.includes('gi.demo_code'))).toBe(true)
++  })
++
++  it('the evaluations list selects both codes from game_info', async () => {
++    sqlMock.mockImplementation(() => Promise.resolve([]))
++    await evalList(new NextRequest('http://localhost/api/evaluations?category=all&limit=10&meta=0'))
++    const q = texts().find(t => t.includes('gi.title')) ?? ''
++    expect(q).toContain('gi.demo_code')
++    expect(q).toContain('gi.record_code')
++  })
++
++  it('the by-gameId read the panel loads selects both codes from game_info', async () => {
++    sqlMock.mockImplementation(() => Promise.resolve([{ game_id: 'g1', demo_code: null, record_code: null }]))
++    await evalOne(new NextRequest('http://localhost/api/evaluations/g1'), { params: { gameId: 'g1' } })
++    const q = texts().find(t => t.includes('SELECT ge.id')) ?? ''
++    expect(q).toContain('gi.demo_code')
++    expect(q).toContain('gi.record_code')
++  })
++})
+diff --git a/__tests__/api/record-my-queue.test.ts b/__tests__/api/record-my-queue.test.ts
+index 78280da..9014e53 100644
+--- a/__tests__/api/record-my-queue.test.ts
++++ b/__tests__/api/record-my-queue.test.ts
+@@ -18,21 +18,21 @@ const sqlMock = sql as unknown as jest.Mock
+ const sessionMock = getSession as unknown as jest.Mock
+ const sheetMock = getYtbUploaded as unknown as jest.Mock
+ const currentMock = getCurrentBatch as unknown as jest.Mock
+ const spansMock = loadBatchSpans as unknown as jest.Mock
+ const span = (batch: string) => ({ batch, from: '', to: '', fromAt: '', toAt: null })
+ 
+ const game = (over: Record<string, unknown>) => ({
+   id: 1, game_id: 'g1', batch: 'W2 Oct, 2026', category_group: 'puzzle', title: 'Alpha',
+   record_bucket: '5min', final_conclusion: 'Insight',
+   record_5min_assignee: 'KietCD', record_20min_assignee: null,
+-  youtube_link: null, uploaded_local: null, since: '2026-10-01', confirmed: true, ...over,
++  youtube_link: null, uploaded_local: null, since: '2026-10-01', confirmed: true, record_code: null, ...over,
+ })
+ const upload = (title: string) => ({ gameTitle: title, youtubeId: 'yt_' + title, duration: '5mins', time: '2026-10-05 10:00:00', pic: 'KietCD' })
+ 
+ describe('GET /api/record/my-queue', () => {
+   const realSkip = process.env.SKIP_AUTH
+   beforeAll(() => { process.env.SKIP_AUTH = 'false' })
+   afterAll(() => { process.env.SKIP_AUTH = realSkip })
+   beforeEach(() => {
+     sessionMock.mockResolvedValue({ user: { name: 'kietcd', role: 'evaluator' } })
+     sheetMock.mockResolvedValue([])
+@@ -43,20 +43,30 @@ describe('GET /api/record/my-queue', () => {
+   it('counts my confirmed games that have no upload, in the current and the previous batch', async () => {
+     sqlMock.mockResolvedValue([
+       game({ id: 1, title: 'Alpha' }),
+       game({ id: 2, title: 'Beta', batch: 'W1 Oct, 2026' }),
+     ])
+     const body = await (await GET()).json()
+     expect(body.count).toBe(2)
+     expect(body.games.map((g: { title: string }) => g.title)).toEqual(['Alpha', 'Beta'])
+   })
+ 
++  it('carries record_code on each game, null when the game has none', async () => {
++    sqlMock.mockResolvedValue([
++      game({ id: 1, title: 'Alpha', record_code: 'QW7R2T' }),
++      game({ id: 2, title: 'Beta', record_code: undefined }),
++    ])
++    const body = await (await GET()).json()
++    expect(body.games[0].record_code).toBe('QW7R2T')
++    expect(body.games[1].record_code).toBeNull()
++  })
++
+   it('skips older batches and games with no batch', async () => {
+     sqlMock.mockResolvedValue([
+       game({ id: 1, title: 'Old', batch: 'W4 Sep, 2026' }),
+       game({ id: 2, title: 'Unlabelled', batch: null }),
+       game({ id: 3, title: 'Now' }),
+     ])
+     expect((await (await GET()).json()).count).toBe(1)
+   })
+ 
+   it('has no previous batch when the current one is not in the batches table', async () => {
+diff --git a/app/api/evaluations/[gameId]/route.ts b/app/api/evaluations/[gameId]/route.ts
+index 4993a24..b6e295d 100644
+--- a/app/api/evaluations/[gameId]/route.ts
++++ b/app/api/evaluations/[gameId]/route.ts
+@@ -50,20 +50,21 @@ export async function GET(
+         ge.record_20min_assignee, ge.record_20min_date,
+         ge.record_20min_drive, ge.record_20min_drive_date,
+         ge.record_confirmed_at,
+         ge.drive_link, ge.drive_date, ge.youtube_link, ge.record_bucket,
+         ge.record_5min_confirmed_at, ge.record_20min_confirmed_at,
+         ge.youtube_5min_link, ge.youtube_20min_link,
+         to_char(ge.youtube_5min_uploaded_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD HH24:MI:SS') AS youtube_5min_uploaded_local,
+         to_char(ge.youtube_20min_uploaded_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD HH24:MI:SS') AS youtube_20min_uploaded_local,
+         ge.imported_at, ge.updated_at, ge.updated_by,
+         gi.title, gi.os, gi.app_link, gi.icon_url,
++        gi.demo_code, gi.record_code,
+         COALESCE(gi.initial_release, gi.temp_release)::text AS release_date,
+         gi.metadata->'screenshot_urls' AS screenshot_urls,
+         gi.metadata->'manual_screenshot_urls' AS manual_screenshot_urls,
+         gi.metadata->'categories' AS categories,
+         gi.metadata->'description' AS description,
+         gi.metadata->'subtitle' AS subtitle,
+         gi.metadata->'content_rating' AS content_rating,
+         COALESCE(dev.developer_name, dev.dev_company) AS publisher_name,
+         dev.developer_link AS publisher_link
+       FROM game_evaluations ge
+diff --git a/app/api/evaluations/missing-demo/route.ts b/app/api/evaluations/missing-demo/route.ts
+index 48d961b..380f8d7 100644
+--- a/app/api/evaluations/missing-demo/route.ts
++++ b/app/api/evaluations/missing-demo/route.ts
+@@ -10,20 +10,21 @@ export const dynamic = 'force-dynamic'
+ // current batch. Feeds the "missing demo link" prompt.
+ //
+ // Scope is the caller's own name for EVERYONE, managers included -- the prompt nags a
+ // person about games they evaluated. There is deliberately no ?evaluator= override.
+ 
+ interface Row {
+   id: number
+   game_id: string
+   title: string
+   icon_url: string | null
++  demo_code?: string | null
+   genre_1: string | null
+   category_group: string
+   batch: string | null
+   evaluate_date: string | null
+   // From drive_link_suggestions (migration 048); all null when the auto-sync left nothing
+   suggested_link?: string | null
+   suggested_name?: string | null
+   shared_with?: number | null
+ }
+ 
+@@ -45,53 +46,54 @@ export async function GET(_req: NextRequest) {
+ 
+     const current = await getCurrentBatch()
+     if (!current) return NextResponse.json({ items: [] })
+ 
+     // Same scope either way; the first query also carries the auto-sync suggestion for titles
+     // shared by different games. Without migration 048 the suggestion table does not exist, and
+     // losing the whole prompt over that would be worse than losing the suggestions.
+     let rows: Row[]
+     try {
+       rows = await sql`
+-        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, ge.genre_1, ge.category_group,
++        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, gi.demo_code, ge.genre_1, ge.category_group,
+           ge.batch, ge.evaluate_date,
+           s.link AS suggested_link, s.file_name AS suggested_name, s.shared_with
+         FROM game_evaluations ge
+         JOIN game_info gi ON gi.game_id = ge.game_id
+         LEFT JOIN drive_link_suggestions s ON s.game_evaluation_id = ge.id
+         WHERE ge.initial_conclusion = 'List_Idea'
+           AND COALESCE(ge.drive_link, '') = ''
+           AND lower(ge.initial_evaluator) = lower(${me})
+           AND ge.batch = ${current}
+         ORDER BY ge.evaluate_date DESC NULLS LAST, ge.id
+       ` as unknown as Row[]
+     } catch (err) {
+       if (!isMissingSuggestionTable(err)) throw err
+       console.error('GET /api/evaluations/missing-demo: drive_link_suggestions missing, apply migration 048')
+       rows = await sql`
+-        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, ge.genre_1, ge.category_group,
++        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, gi.demo_code, ge.genre_1, ge.category_group,
+           ge.batch, ge.evaluate_date
+         FROM game_evaluations ge
+         JOIN game_info gi ON gi.game_id = ge.game_id
+         WHERE ge.initial_conclusion = 'List_Idea'
+           AND COALESCE(ge.drive_link, '') = ''
+           AND lower(ge.initial_evaluator) = lower(${me})
+           AND ge.batch = ${current}
+         ORDER BY ge.evaluate_date DESC NULLS LAST, ge.id
+       ` as unknown as Row[]
+     }
+ 
+     const items = rows.map(r => ({
+       id: r.id,
+       game_id: r.game_id,
+       title: r.title,
+       icon_url: r.icon_url,
++      demo_code: r.demo_code ?? null,
+       category: r.category_group,
+       genre: r.genre_1,
+       batch: r.batch,
+       evaluate_date: r.evaluate_date,
+       suggested_link: r.suggested_link ?? null,
+       suggested_name: r.suggested_name ?? null,
+       shared_with: r.shared_with ?? null,
+     }))
+ 
+     return NextResponse.json({ items })
+diff --git a/app/api/evaluations/route.ts b/app/api/evaluations/route.ts
+index 810bb2d..6d95519 100644
+Binary files a/app/api/evaluations/route.ts and b/app/api/evaluations/route.ts differ
+diff --git a/lib/record-queue.ts b/lib/record-queue.ts
+index d6b4071..e1a2c6d 100644
+--- a/lib/record-queue.ts
++++ b/lib/record-queue.ts
+@@ -2,20 +2,21 @@ import { recordViewRows, recordBucketOf, toYtGame } from '@/lib/record-view-game
+ import { getCurrentBatch } from '@/lib/current-batch'
+ import { loadBatchSpans } from '@/lib/report-batches'
+ import { resolveYtMatches, normalizeName, type Bucket, type YtbMatchRow } from '@/lib/ytb-match'
+ 
+ export interface RecordQueueGame {
+   id: number
+   title: string
+   bucket: Bucket
+   batch: string
+   category_group: string | null
++  record_code: string | null
+ }
+ 
+ /** The batch the team is in and the one before it: the only two a recorder is chased about.
+  *  Older games that never got a video stay on the Record tab but out of the badge. The
+  *  previous batch is the one that started just before the current one in `batches`; a
+  *  current batch that has no row there (or no table yet) has no previous one. */
+ export async function recordQueueBatches(): Promise<string[]> {
+   const [current, spans] = await Promise.all([getCurrentBatch(), loadBatchSpans()])
+   if (!current) return []
+   const at = spans.findIndex(s => s.batch === current)
+@@ -33,14 +34,14 @@ export async function recordingQueue(recorder: string, ytRows: YtbMatchRow[]): P
+   if (!who) return []
+   const [rows, batches] = await Promise.all([recordViewRows(), recordQueueBatches()])
+   if (batches.length === 0) return []
+   const resolved = resolveYtMatches(rows.map(toYtGame), ytRows)
+   const out: RecordQueueGame[] = []
+   for (const r of rows) {
+     if (!r.confirmed || !r.batch || !batches.includes(r.batch) || resolved.has(r.id)) continue
+     const bucket = recordBucketOf(r)
+     const assignee = bucket === '5min' ? r.record_5min_assignee : r.record_20min_assignee
+     if (!assignee || normalizeName(assignee) !== who) continue
+-    out.push({ id: r.id, title: r.title, bucket, batch: r.batch, category_group: r.category_group })
++    out.push({ id: r.id, title: r.title, bucket, batch: r.batch, category_group: r.category_group, record_code: r.record_code ?? null })
+   }
+   return out
+ }
+diff --git a/lib/record-view-games.ts b/lib/record-view-games.ts
+index 79d5270..71ae304 100644
+--- a/lib/record-view-games.ts
++++ b/lib/record-view-games.ts
+@@ -6,37 +6,38 @@ export { recordBucketOf }
+ // Every game in the Record view, unscoped. resolveYtMatches decides which
+ // uploads are still unclaimed from the games it is given, so it must always get
+ // all of them; a caller showing one batch or one recorder filters afterwards.
+ 
+ export interface RecordViewRow {
+   id: number
+   game_id: string
+   batch: string | null
+   category_group: string | null
+   title: string
++  record_code: string | null
+   record_bucket: string | null
+   final_conclusion: string | null
+   record_5min_assignee: string | null
+   record_20min_assignee: string | null
+   youtube_link: string | null     // the demo link (20min preferred), read by Signal Sense
+   youtube_5min_link: string | null
+   youtube_20min_link: string | null
+   uploaded_local: string | null   // youtube_uploaded_at (= the own bucket's), VN local 'YYYY-MM-DD HH:MM:SS'
+   since: string | null            // first assignment day, 'YYYY-MM-DD'
+   confirmed: boolean              // a manager confirmed the assignment (Recording, not Draft)
+ }
+ 
+ const VN = 'Asia/Ho_Chi_Minh'
+ 
+ export async function recordViewRows(): Promise<RecordViewRow[]> {
+   return sql<RecordViewRow[]>`
+-    SELECT ge.id, ge.game_id, ge.batch, ge.category_group, gi.title, ge.record_bucket, ge.final_conclusion,
++    SELECT ge.id, ge.game_id, ge.batch, ge.category_group, gi.title, gi.record_code, ge.record_bucket, ge.final_conclusion,
+       ge.record_5min_assignee, ge.record_20min_assignee, ge.youtube_link, ge.youtube_5min_link, ge.youtube_20min_link,
+       to_char(ge.youtube_uploaded_at AT TIME ZONE ${VN}, 'YYYY-MM-DD HH24:MI:SS') AS uploaded_local,
+       to_char(COALESCE(ge.first_assigned_date, ge.assigned_date), 'YYYY-MM-DD') AS since,
+       ge.record_confirmed_at IS NOT NULL AS confirmed
+     FROM game_evaluations ge
+     JOIN game_info gi ON ge.game_id = gi.game_id
+     WHERE ge.record_bucket IN ('5min','20min')
+        OR (ge.record_bucket IS NULL AND ge.final_conclusion IN ('Insight','Priority IV'))
+   `
+ }

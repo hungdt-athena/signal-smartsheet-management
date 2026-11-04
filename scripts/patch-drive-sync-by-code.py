@@ -62,6 +62,8 @@ if (codeFiles.length === 0) {
   return [{ json: { sql: 'SELECT 1 AS no_codes', codeFiles, files } }];
 }
 
+// to_jsonb(row)->>'col' reads the code columns without naming them, so the query still runs (and finds
+// nothing) when migration 052 has not been applied yet, instead of failing on a missing column.
 // One query for every code: which game owns it as a demo code, is it a record code instead, and
 // can the link be written (some evaluation row of that game still has an empty drive_link).
 // link_is_this_file: the game's link already points at this very file, so only the rename is missing.
@@ -74,8 +76,8 @@ const sql =
   `  EXISTS (SELECT 1 FROM game_evaluations e WHERE e.game_id = d.game_id AND e.drive_link LIKE '%' || c.file_id || '%') AS link_is_this_file\n` +
   `FROM json_to_recordset($jf$${lit}$jf$::json)\n` +
   `  AS c(code text, file_id text, drive_link text)\n` +
-  `LEFT JOIN game_info d ON d.demo_code = c.code\n` +
-  `LEFT JOIN game_info r ON r.record_code = c.code`;
+  `LEFT JOIN game_info d ON to_jsonb(d)->>'demo_code' = c.code\n` +
+  `LEFT JOIN game_info r ON to_jsonb(r)->>'record_code' = c.code`;
 
 return [{ json: { sql, codeFiles, files } }];
 '''
@@ -88,7 +90,9 @@ CLASSIFY_JS = r'''// Decide, per code file, what happens. Order of preference:
 //   code in neither table                   -> NOT an error: the file stays on the title path
 //                                              (a real title like "Racket" is 6 letters long)
 const split = $('Split Code Files').first().json;
-const rows = $input.all().map(i => i.json).filter(r => r && r.code);
+// An errored lookup (Lookup Codes continues on error and passes an item with `error`) or an empty
+// result means no code is known: every file then stays on the title path and nothing is written.
+const rows = $input.all().map(i => i.json).filter(r => r && !r.error && r.code);
 const byCode = new Map(rows.map(r => [String(r.code), r]));
 const q = s => `'${String(s == null ? '' : s).replace(/'/g, "''")}'`;
 
@@ -224,8 +228,11 @@ def code_node(name, js, pos):
             'type': 'n8n-nodes-base.code', 'typeVersion': 2, 'position': pos}
 
 
-def pg_node(name, query, pos, template):
+def pg_node(name, query, pos, template, on_error=False):
     n = copy.deepcopy(template)
+    if on_error:
+        # A failing query emits an item with `error` instead of stopping the execution.
+        n['onError'] = 'continueRegularOutput'
     n['id'] = nid(name)
     n['name'] = name
     n['position'] = pos
@@ -243,10 +250,10 @@ def main():
     x0, y0 = 3344, 1136
     nodes = [
         code_node('Split Code Files', SPLIT_JS, [x0 - 0, y0 - 480]),
-        pg_node('Lookup Codes', '{{ $json.sql }}', [x0 + 224, y0 - 480], pg_tpl),
+        pg_node('Lookup Codes', '{{ $json.sql }}', [x0 + 224, y0 - 480], pg_tpl, on_error=True),
         code_node('Classify Codes', CLASSIFY_JS, [x0 + 448, y0 - 480]),
         code_node('Title Files', TITLE_FILES_JS, [x0 + 672, y0 - 704]),
-        pg_node('Write Code Links', '{{ $json.writeSql }}', [x0 + 672, y0 - 480], pg_tpl),
+        pg_node('Write Code Links', '{{ $json.writeSql }}', [x0 + 672, y0 - 480], pg_tpl, on_error=True),
         code_node('Plan Renames', PLAN_JS, [x0 + 896, y0 - 480]),
     ]
     taken = copy.deepcopy(drive_tpl)
@@ -297,8 +304,10 @@ def main():
     c['List Drive Files2'] = link('Split Code Files')
     c['Split Code Files'] = link('Lookup Codes')
     c['Lookup Codes'] = link('Classify Codes')
-    # Title path first, so a failure in the code path can never stop it.
-    c['Classify Codes'] = link('Title Files', 'Write Code Links', 'Code Notices')
+    # Title path first, then the notices, then the writes: a failure in a later branch cannot stop an
+    # earlier one. Lookup Codes (before the fan-out) and Write Code Links continue on error, so a
+    # broken code query degrades to "no code known" and everything stays on the title path.
+    c['Classify Codes'] = link('Title Files', 'Code Notices', 'Write Code Links')
     c['Title Files'] = link('Parse File Names2')
     c['Write Code Links'] = link('Plan Renames')
     c['Plan Renames'] = link('Names Taken')

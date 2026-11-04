@@ -58,7 +58,7 @@ describe('drive-video-link-sync [by-code] workflow', () => {
     expect(next('List Drive Files2')).toEqual(['Split Code Files'])
     expect(next('Split Code Files')).toEqual(['Lookup Codes'])
     expect(next('Lookup Codes')).toEqual(['Classify Codes'])
-    expect(next('Classify Codes')).toEqual(['Title Files', 'Write Code Links', 'Code Notices'])
+    expect(next('Classify Codes')).toEqual(['Title Files', 'Code Notices', 'Write Code Links'])
     expect(next('Title Files')).toEqual(['Parse File Names2'])
     expect(next('Parse File Names2')).toEqual(['Match Titles in DB2'])
     expect(next('Write Code Links')).toEqual(['Plan Renames'])
@@ -88,8 +88,10 @@ describe('drive-video-link-sync [by-code] workflow', () => {
     })
     it('asks the database for both columns, in one query', () => {
       const sql = run('Split Code Files', FILES)[0].sql as string
-      expect(sql).toMatch(/LEFT JOIN game_info d ON d\.demo_code = c\.code/)
-      expect(sql).toMatch(/LEFT JOIN game_info r ON r\.record_code = c\.code/)
+      expect(sql).toMatch(/LEFT JOIN game_info d ON to_jsonb\(d\)->>'demo_code' = c\.code/)
+      expect(sql).toMatch(/LEFT JOIN game_info r ON to_jsonb\(r\)->>'record_code' = c\.code/)
+      // never names the new columns directly: a missing migration 052 must not make the query fail
+      expect(sql).not.toMatch(/\b[dr]\.(demo|record)_code\b/)
       expect(sql).toContain('"code":"K7M2QX"')
       expect(sql).toContain('"code":"RACKET"')
     })
@@ -169,6 +171,46 @@ describe('drive-video-link-sync [by-code] workflow', () => {
       const out = classify([{ no_codes: 1 }], [drive('Some Game.mp4')])
       expect(out.titleFiles).toHaveLength(1)
       expect(out.writeSql).toBe('SELECT 1 AS none')
+    })
+  })
+
+  describe('a failing code lookup falls back to title matching', () => {
+    it('Lookup Codes and Write Code Links continue on error instead of stopping the run', () => {
+      expect(node('Lookup Codes').onError).toBe('continueRegularOutput')
+      expect(node('Write Code Links').onError).toBe('continueRegularOutput')
+    })
+
+    it.each([
+      ['an error item', [{ error: 'column "demo_code" does not exist' }]],
+      ['an empty result', []],
+      ['an empty item', [{}]],
+    ])('Classify Codes given %s sends ALL files to the title path, writes nothing, emits no status', (_l, rows) => {
+      const out = classify(rows as Row[])
+      expect((out.titleFiles as Row[]).map(f => f.name)).toEqual(['K7M2QX.mp4', 'Racket.mp4', 'Some Game.mp4', 'K7M2QX_20mins.mp4'])
+      expect(out.writes).toEqual([])
+      expect(out.renames).toEqual([])
+      expect(out.notices).toEqual([])
+      expect(out.writeSql).toBe('SELECT 1 AS none')
+    })
+
+    it('end to end after a failed lookup, the title path still gets K7M2QX.mp4', () => {
+      const out = classify([{ error: 'boom' }])
+      const parsed = run('Parse File Names2', run('Title Files', [out]))[0]
+      expect(parsed.sql as string).toContain('"title":"K7M2QX"')
+    })
+
+    it('a failed write passes no rename (Plan Renames ends the branch)', () => {
+      const w = { code: 'K7M2QX', game_id: 'g-1', title: 'T', file_id: 'F', file_name: 'K7M2QX.mp4', drive_link: 'l' }
+      expect(run('Plan Renames', [{ error: 'boom' }], { 'Classify Codes': { renames: [], writes: [w] }, ...FOLDER })).toEqual([])
+    })
+
+    it('K7M2Q0.mp4 (code-shaped but 0 is outside the alphabet) is a title file from the start', () => {
+      const files = [drive('K7M2Q0.mp4')]
+      const split = run('Split Code Files', files)[0]
+      expect(split.codeFiles).toEqual([])
+      const out = classify([{ no_codes: 1 }], files)
+      const parsed = run('Parse File Names2', run('Title Files', [out]))[0]
+      expect(parsed.sql as string).toContain('"title":"K7M2Q0"')
     })
   })
 
