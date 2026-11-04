@@ -43,7 +43,7 @@ SRC = ROOT / 'workflows' / 'append-sheet.json'
 PG_SRC = ROOT / 'workflows' / 'drive-video-link-sync.json'
 DST = ROOT / 'workflows' / 'record-upload-by-code.json'
 NAME = 'Append Sheet [by-code]'
-CHAT_SPACE = 'spaces/AAQAYTKWM1I'
+CHAT_SPACE = 'spaces/AAQAHvco23k'
 CHAT_CREDENTIAL = {'googleApi': {'id': '5MOpxh9U04GXBIJp', 'name': 'HungDT-Minisoos'}}
 SHEETS_CREDENTIAL = {'googleSheetsOAuth2Api': {'id': 'UMl5XCc7aOcf9yi3', 'name': 'HandoverRequest-HungDT'}}
 

@@ -5,9 +5,9 @@ Branch `feat/file-codes`. Spec: `2026-11-05-file-codes-design.md`. Plan: `../pla
 ## Done (2026-11-05)
 
 - **Migration 052 applied on prod** (693,844 `game_info` rows, 0 duplicate `game_id`; two nullable columns + two partial unique indexes).
-- **Both n8n copies live in project Production, inactive**, credentials re-selected in the UI after the transfer, node-level `onError` set on the code lookups:
+- **Switched over on 2026-11-05:** old `drive-video-link-sync` (`M7zaWUQxsjqAJxfG`) and old `Append Sheet` (`Hz0noofKB64VPRyq`) turned OFF; the two `[by-code]` copies turned ON (project Production, credentials re-selected in the UI after the transfer, node-level `onError` set on the code lookups). Their notices (`code_not_found`, holds, `rename_failed`, `link_exists`, `ambiguous_code`) go to `spaces/AAQAHvco23k`, the space that already gets the "Video Uploaded" cards:
   - demo `drive-video-link-sync [by-code]` (`oA27SA3ikkJ7Wxya`)
-  - record `Append Sheet [by-code]` (`7XuNrY3m8QjZ4DJH`), calling the production `Upload Youtube` (`gFnZgEix9Phn3m37`), notices to `spaces/AAQAYTKWM1I`
+  - record `Append Sheet [by-code]` (`7XuNrY3m8QjZ4DJH`), calling the production `Upload Youtube` (`gFnZgEix9Phn3m37`, unchanged)
 - **Sheet header** `game_id` added in tab `ytb_uploaded` of `[Signal] Logging`, after column H.
 - **End-to-end tests on real data, both passed** (manual Execute of the inactive copies):
   - demo: Ocean Crown, file renamed to code `QD6SF3.mp4`, link cleared → n8n wrote the link and renamed the file to `Ocean Crown.mp4`; no other game touched.
@@ -16,11 +16,12 @@ Branch `feat/file-codes`. Spec: `2026-11-05-file-codes-design.md`. Plan: `../pla
 
 ## Still to do, in order
 
-1. **Build check in a real checkout.** `NEXT_DIST_DIR=.next-check npx next build` (the worktree lacks `exceljs`, so the build never ran there). Then `git checkout tsconfig.json`.
-2. **Merge/push, Republish Replit.** Existing "Recording" games get a record code the first time the Record tab shows them (lazy `POST /api/evaluations/record-code`, writes to prod). Existing List_Idea games without a link get a demo code when the panel or the missing-demo popup shows them.
-3. **Record workflow, before switching on.** Open node `[NEW] Append PENDING` and refresh its column list. The first test run failed there with "Column names were updated after the node's setup" right after the `game_id` header was added; a retry from that node succeeded. Then turn OFF `Append Sheet` (`Hz0noofKB64VPRyq`, same webhook path) and ON `Append Sheet [by-code]`. It polls every 10 minutes from the Scanner Trigger (Drive trigger disabled in the copy so two pollers cannot double-append): about 144 executions a day, check the n8n Cloud quota.
-4. **Demo workflow.** Turn OFF `drive-video-link-sync` (`M7zaWUQxsjqAJxfG`, 4 chains, 2 hourly with older title logic), turn ON `drive-video-link-sync [by-code]`. It only fires on a new file (Drive trigger `fileCreated`); a renamed old file needs a manual Execute.
-5. Tell evaluators and recorders: copy the chip, name the file with it.
+1. **Secret `GOOGLE_SA_KEY_JSON` on Replit** (value from `export-main/.env.local`; service account `pj202-weekly-report@agentic-signal-510121.iam.gserviceaccount.com`). The demo-link name check falls back to the public Drive page without it; the Short List export needs it anyway.
+2. **Republish Replit.** Existing "Recording" games get a record code the first time the Record tab shows them (lazy `POST /api/evaluations/record-code`, writes to prod). Existing List_Idea games without a link get a demo code when the panel or the missing-demo popup shows them.
+3. **Delete the test row** `ArrowIt_TienNH_5mins.mp4` in tab `ytb_uploaded` (its YouTube video was deleted), otherwise the Record tab sync links ArrowIt to a dead video.
+4. **Watch the first runs.** If `[NEW] Append PENDING` fails with "Column names were updated after the node's setup", open the node, refresh its column list and retry the execution from that node. Record polls every 10 minutes (about 144 executions a day: check the n8n Cloud quota). Demo fires on a new file only; a renamed old file needs a manual Execute.
+5. Tell evaluators and recorders: copy the chip, name the file with it. A demo link pasted by hand is checked against the Drive file name and warns (never blocks) when the name is neither the code nor the title.
+6. Optional: add the service account above as Viewer on the `[Signal] Video` shared drive, so the name check does not depend on "anyone with the link" sharing.
 
 ## Behaviour to know
 

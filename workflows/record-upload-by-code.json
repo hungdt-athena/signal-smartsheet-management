@@ -745,7 +745,7 @@
     },
     {
       "parameters": {
-        "spaceId": "spaces/AAQAYTKWM1I",
+        "spaceId": "spaces/AAQAHvco23k",
         "jsonParameters": true,
         "messageJson": "={{ JSON.stringify({ text: $json.text }) }}",
         "additionalFields": {}

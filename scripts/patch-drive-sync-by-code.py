@@ -31,7 +31,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / 'workflows' / 'drive-video-link-sync.json'
 DST = ROOT / 'workflows' / 'drive-video-link-sync-by-code.json'
 NAME = 'drive-video-link-sync [by-code]'
-CHAT_SPACE = 'spaces/AAQAYTKWM1I'
+CHAT_SPACE = 'spaces/AAQAHvco23k'
 CHAT_CREDENTIAL = {'googleApi': {'id': '5MOpxh9U04GXBIJp', 'name': 'HungDT-Minisoos'}}
 
 SPLIT_JS = r'''// Files whose whole name (minus one extension and one " (n)" suffix) is a 6-char code go to the code branch.

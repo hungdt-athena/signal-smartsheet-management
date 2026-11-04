@@ -471,7 +471,7 @@ describe('Append Sheet [by-code] workflow', () => {
     })
 
     it('posts to the agreed Chat space and logs to the existing flow_log sheet', () => {
-      expect(node('Chat Record Notice').parameters.spaceId).toBe('spaces/AAQAYTKWM1I')
+      expect(node('Chat Record Notice').parameters.spaceId).toBe('spaces/AAQAHvco23k')
       const log = node('Log Record Notices')
       const b = baseNode('Log flow_log (append-sheet)')
       expect(log.parameters.documentId).toEqual(b.parameters.documentId)

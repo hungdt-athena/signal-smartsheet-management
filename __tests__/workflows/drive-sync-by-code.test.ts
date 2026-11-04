@@ -370,7 +370,7 @@ describe('drive-video-link-sync [by-code] workflow', () => {
       expect(out[0].text).toMatch(/left as it is/)
     })
     it('posts to the agreed Chat space and logs to the same sheet as the existing flow_log node', () => {
-      expect(node('Chat Code Notice').parameters.spaceId).toBe('spaces/AAQAYTKWM1I')
+      expect(node('Chat Code Notice').parameters.spaceId).toBe('spaces/AAQAHvco23k')
       expect(node('Chat Code Notice').credentials).toEqual({ googleApi: { id: '5MOpxh9U04GXBIJp', name: 'HungDT-Minisoos' } })
       for (const n of ['Log Code Notices', 'Log Code Result']) {
         expect(node(n).parameters.documentId).toEqual(node('Log flow_log2').parameters.documentId)
