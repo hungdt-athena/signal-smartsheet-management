@@ -219,6 +219,42 @@ describe('Append Sheet [by-code] workflow', () => {
       expect(collected.map(c => c.name)).toEqual(['Nail Box_VinhTD_5mins.mp4', 'random clip.mp4'])
     })
 
+    it('a failed Drive rename is reported as rename_failed, once across two passes, and never reaches Parse Filenames', () => {
+      const st: Row = {}
+      const pass = () => {
+        const cls = classify([hit()])
+        const plan = run('Plan Record Renames', [{}], { 'Classify Record Codes': cls })
+        const driveOut = plan.map(() => ({ error: 'The user does not have sufficient permissions for this file.' }))
+        const collected = run('Collect Record Files', driveOut, { 'Classify Record Codes': cls, 'Plan Record Renames': plan })
+        const parsed = run('[NEW] Parse Filenames', collected)
+        // n8n runs the rename branch before the notices branch (execution order v1, top to bottom).
+        const notices = run('Record Code Notices', [{}],
+          { 'Classify Record Codes': cls, 'Plan Record Renames': plan, 'Rename Record File': driveOut }, st)
+        return { collected, parsed, notices }
+      }
+      const first = pass()
+      expect(first.collected.map(c => c.id)).not.toContain('F1')
+      expect(first.parsed.map(p => p.fileId)).not.toContain('F1')
+      expect(first.notices).toHaveLength(1)
+      expect(first.notices[0]).toMatchObject({ name: 'append-sheet', status: 'rename_failed' })
+      expect(JSON.parse(first.notices[0].note)).toMatchObject({ file: 'K7M2QX.mp4', code: 'K7M2QX', game_id: 'com.nail.box' })
+      expect(first.notices[0].text).toContain('K7M2QX.mp4')
+      expect(first.notices[0].text).toMatch(/could not rename/i)
+      expect(first.notices[0].text).toMatch(/left as it is/)
+      const second = pass()
+      expect(second.notices).toEqual([])
+      expect(second.parsed.map(p => p.fileId)).not.toContain('F1')
+    })
+
+    it('a rename that went through is not reported; a run without renames reports nothing extra', () => {
+      const cls = classify([hit()])
+      const plan = run('Plan Record Renames', [{}], { 'Classify Record Codes': cls })
+      const driveOut = plan.map(p => ({ id: p.fileId, name: p.newName }))
+      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': cls, 'Plan Record Renames': plan, 'Rename Record File': driveOut })).toEqual([])
+      const skip = run('Plan Record Renames', [{}], { 'Classify Record Codes': { renames: [] } })
+      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices: [] }, 'Plan Record Renames': skip })).toEqual([])
+    })
+
     it('renames with the same Drive OAuth credential the trigger uses', () => {
       const n = node('Rename Record File')
       expect(n.type).toBe('n8n-nodes-base.googleDrive')

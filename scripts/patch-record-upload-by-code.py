@@ -216,7 +216,8 @@ return renames.length ? renames.map(json => ({ json })) : [{ json: { skip: true 
 
 COLLECT_JS = r'''// Back to one stream for "[NEW] Parse Filenames": the non-code files as Search Drive gave them, plus every
 // code file whose rename went through, under its new name. A failed rename (the Drive node continues on
-// error) keeps its code name in Drive and is simply retried on the next run.
+// error) keeps its code name in Drive, is retried on the next run, and is reported once by Record Code
+// Notices (rename_failed).
 const cls = $('Classify Record Codes').first().json;
 const planned = $('Plan Record Renames').all().map(i => i.json);
 const outs = $input.all().map(i => i.json);
@@ -238,7 +239,24 @@ return $input.all().map(i => ({ json: { ...i.json, game_id: ids.get(String(i.jso
 NOTICES_JS = r'''// One flow_log row + one Chat message per code file left as it is. A file is reported once per status:
 // the workflow lists the last days of the folder on every run, and a held file would otherwise be
 // reported again each time. (Workflow static data is kept for production runs only.)
-const notices = $('Classify Record Codes').first().json.notices || [];
+const notices = [...($('Classify Record Codes').first().json.notices || [])];
+
+// A rename the Drive node could not do (it continues on error) is reported here too. n8n runs the rename
+// branch before this one (execution order v1, top to bottom); when no rename ran, those nodes are absent.
+// Same pairing and failure rule as Collect Record Files. The file keeps its code name and is retried.
+let planned = [];
+let outs = [];
+try { planned = $('Plan Record Renames').all().map(i => i.json); } catch (e) { planned = []; }
+try { outs = $('Rename Record File').all().map(i => i.json); } catch (e) { outs = []; }
+planned.forEach((p, i) => {
+  if (!p || p.skip) return;
+  const o = outs[i];
+  if (o && !o.error && !(o.id && o.id !== p.fileId)) return;
+  const err = o && o.error ? (typeof o.error === 'string' ? o.error : (o.error.message || 'error')) : 'no result from Drive';
+  notices.push({ status: 'rename_failed', code: p.code, file: p.oldName, file_id: p.fileId, game_id: p.game_id,
+    bucket: p.bucket, reason: String(err).slice(0, 300) });
+});
+
 let store = null;
 try { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }
 const sent = new Set(store && Array.isArray(store.recordNoticeKeys) ? store.recordNoticeKeys : []);
@@ -255,6 +273,8 @@ for (const n of notices) {
     text = `append-sheet: ${n.file} is named by code ${n.code}, which no game has as a record code. File left as it is; check the code in the Record tab and rename the file.`;
   } else if (n.status === 'wrong_folder') {
     text = `append-sheet: ${n.file} carries the DEMO code ${n.code}, not a record code. File left as it is; a record video needs the record code shown in the Record tab.`;
+  } else if (n.status === 'rename_failed') {
+    text = `append-sheet: could not rename ${n.file} (code ${n.code}) for ${label}. File left as it is and not uploaded; it is retried on the next runs. Check that the n8n Drive account can edit this file.`;
   } else if (n.status === 'ambiguous_code') {
     text = `append-sheet: ${n.file} carries code ${n.code}, which is both a record code and a demo code (record code of ${label}). File left as it is; the code must be fixed in the database before this file is processed.`;
   } else if (n.status === 'held_not_confirmed') {
