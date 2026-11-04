@@ -42,8 +42,8 @@ Hôm nay n8n khớp video với game bằng **tên file = tên game** (demo) ho�
 
 - **Lưu ở `game_info`**, 2 cột `demo_code`, `record_code`, mỗi cột unique index riêng (partial, `WHERE ... IS NOT NULL`). Lý do: 495 game đang có 2 dòng `game_evaluations` (cross-genre duplicate); gắn mã vào `game_id` thì không nhân đôi. iOS và Android là 2 `game_id` nên có 2 mã.
 - Mã **không bao giờ đổi** sau khi sinh: reset về draft, đổi recorder, đổi bucket 5↔20, bỏ khỏi Record rồi add lại đều giữ mã cũ. Lý do: người quay có thể đã copy mã.
-- Định dạng: 6 ký tự, bảng chữ `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (bỏ `0 O 1 I L`), sinh bằng CSPRNG, retry khi đụng unique. Khớp không phân biệt hoa thường.
-- Regex nhận file ở n8n: tên file (bỏ đuôi, bỏ ` (1)` kiểu trình duyệt) khớp `^[A-Za-z2-9]{6}$` sau chuẩn hoá. Chỉ khớp **đúng 6 ký tự cả tên** để file tên game thật (vd "Puzzle") không bị tưởng là mã.
+- Định dạng: 6 ký tự, bảng chữ `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (bỏ `0 O 1 I L`), gồm ít nhất 2 chữ số (2-9) và ít nhất 2 chữ cái (để tên game thật chỉ toàn chữ như "Racket" không bao giờ giống mã), sinh bằng CSPRNG, retry khi đụng unique. Khớp không phân biệt hoa thường.
+- Regex nhận file ở n8n: tên file (bỏ đuôi, bỏ ` (1)` kiểu trình duyệt) khớp `^[A-Za-z2-9]{6}$` sau chuẩn hoá và có ít nhất 2 chữ số, 2 chữ cái. Chỉ khớp **đúng 6 ký tự cả tên** để file tên game thật (vd "Puzzle") không bị tưởng là mã.
 - Mã demo cũng sinh cho game List_Idea **đã có sẵn** khi chạy lần đầu? Không backfill hàng loạt; chỉ sinh lười (lần đầu game List_Idea hiện ở nơi cần mã, hoặc khi lưu List_Idea). Game List_Idea đã có `drive_link` thì không cần mã.
 
 ## Hành vi
@@ -93,3 +93,10 @@ Hôm nay n8n khớp video với game bằng **tên file = tên game** (demo) ho�
 - Worktree không có `.env.local`; 16 test fail sẵn trên origin/main, không liên quan. Verify build bằng `NEXT_DIST_DIR=.next-check`.
 - `route.ts` có byte NUL (sentinel `__no_evaluator__`): dùng `git diff --text`.
 - Mã record phụ thuộc Confirm; dòng draft không có mã nên recorder chưa quay được. Đây là chủ ý (khớp luồng log "gán recorder log một dòng lúc confirm").
+
+## Change 2026-11-05 (user)
+
+- Giả định hai folder Drive riêng được thay bằng **một folder chung** `[Signal] Video`. Mã phân biệt demo và record; mỗi workflow bỏ qua im lặng mã của loại kia (không notice, không ghi, không đổi tên). `wrong_folder` không còn.
+- Mã mới: 6 ký tự, ít nhất 2 chữ số và 2 chữ cái, nên tên game thật không bao giờ giống mã.
+- Mã không có trong bảng nào: chỉ workflow record báo `code_not_found` (flow_log + Chat, text trung tính), workflow demo cho rơi xuống nhánh khớp tên và im lặng, nên đúng một workflow báo lỗi gõ sai. Mã có ở cả hai cột: workflow demo báo `ambiguous_code`, workflow record im lặng.
+- Các mục "folder riêng" và `wrong_folder` ở trên không còn đúng.
