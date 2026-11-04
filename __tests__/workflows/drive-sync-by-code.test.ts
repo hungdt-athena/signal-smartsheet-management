@@ -18,16 +18,19 @@ const node = (name: string): N => wf.nodes.find((n: N) => n.name === name)
 const src = (name: string): string => node(name).parameters.jsCode
 
 type Row = Record<string, any>
-// ctx: node name -> one item (json) or an array of items
-const run = (name: string, input: Row[], ctx: Record<string, Row | Row[]> = {}): Row[] => {
+// ctx: node name -> one item (json) or an array of items. staticData: what $getWorkflowStaticData returns.
+const run = (name: string, input: Row[], ctx: Record<string, Row | Row[]> = {}, staticData: Row = {}): Row[] => {
   const asItems = (v: Row | Row[]) => (Array.isArray(v) ? v : [v]).map(json => ({ json }))
   const $ = (n: string) => {
     if (!(n in ctx)) throw new Error(`no node ${n}`)
     const items = asItems(ctx[n])
     return { first: () => items[0], all: () => items }
   }
+  const $getWorkflowStaticData = () => staticData
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const out = new Function('$input', '$', src(name))({ all: () => input.map(json => ({ json })), first: () => ({ json: input[0] }) }, $) as { json: Row }[]
+  const out = new Function('$input', '$', '$getWorkflowStaticData', src(name))(
+    { all: () => input.map(json => ({ json })), first: () => ({ json: input[0] }) }, $, $getWorkflowStaticData,
+  ) as { json: Row }[]
   return out.map(o => o.json)
 }
 
@@ -315,6 +318,27 @@ describe('drive-video-link-sync [by-code] workflow', () => {
     })
     it('emits nothing when there is nothing to report', () => {
       expect(run('Code Notices', [{}], { 'Classify Codes': { notices: [] } })).toEqual([])
+    })
+    it('a held file is reported once per status across runs (List Drive Files2 relists 7 days); a new status notifies again', () => {
+      const st: Row = {}
+      const held = [
+        { status: 'link_exists', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1', game_id: 'g-1', title: 'Nail Box Sort' },
+        { status: 'wrong_folder', code: 'ZZZZZZ', file: 'ZZZZZZ.mp4', file_id: 'F2' },
+      ]
+      // two passes over the same held files, sharing the workflow static data
+      const first = (() => {
+        const cls = classify([demoRow({ file_id: 'F1', can_write: false })], [drive('K7M2QX.mp4', 'F1')])
+        return run('Code Notices', [{}], { 'Classify Codes': cls }, st)
+      })()
+      expect(first.map(o => o.status)).toEqual(['link_exists'])
+      const second = run('Code Notices', [{}],
+        { 'Classify Codes': classify([demoRow({ file_id: 'F1', can_write: false })], [drive('K7M2QX.mp4', 'F1')]) }, st)
+      expect(second).toEqual([])
+      // another file, and the same file under a new status, are new notices
+      expect(run('Code Notices', [{}], { 'Classify Codes': { notices: held } }, st).map(o => o.status)).toEqual(['wrong_folder'])
+      const changed = [{ ...held[0], status: 'ambiguous_code' }]
+      expect(run('Code Notices', [{}], { 'Classify Codes': { notices: changed } }, st).map(o => o.status)).toEqual(['ambiguous_code'])
+      expect(run('Code Notices', [{}], { 'Classify Codes': { notices: changed } }, st)).toEqual([])
     })
     it('an ambiguous_code notice is logged and posted with its own status and a plain text', () => {
       const amb = [{ status: 'ambiguous_code', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1', game_id: 'g-1', title: 'Nail Box Sort' }]

@@ -197,9 +197,19 @@ for (const r of plan) {
 return out;
 '''
 
-NOTICES_JS = r'''// One flow_log row + one Chat message per code file that was left as it is.
+NOTICES_JS = r'''// One flow_log row + one Chat message per code file that was left as it is. A file is reported once per
+// status: List Drive Files2 lists the last 7 days of the folder on every run, and a held file would otherwise
+// be reported again each time. (Workflow static data is kept for production runs only.)
 const notices = $('Classify Codes').first().json.notices || [];
-return notices.map(n => {
+let store = null;
+try { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }
+const sent = new Set(store && Array.isArray(store.demoNoticeKeys) ? store.demoNoticeKeys : []);
+
+const out = [];
+for (const n of notices) {
+  const key = `${n.status}|${n.file_id}`;
+  if (sent.has(key)) continue;
+  sent.add(key);
   const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';
   let text;
   if (n.status === 'wrong_folder') {
@@ -209,13 +219,15 @@ return notices.map(n => {
   } else {
     text = `drive-video-link-sync: ${n.file} carries code ${n.code} for ${label}, which already has a demo link. File left as it is; clear the old link to process it again.`;
   }
-  return { json: {
+  out.push({ json: {
     name: 'drive-video-link-sync',
     status: n.status,
     note: JSON.stringify({ file: n.file, code: n.code, game_id: n.game_id || null, reason: n.reason || null }),
     text,
-  } };
-});
+  } });
+}
+if (store) store.demoNoticeKeys = [...sent].slice(-1000);
+return out;
 '''
 
 RESULT_JS = r'''// The Drive node runs with "continue on error", so a failed rename arrives as an item with `error`.
