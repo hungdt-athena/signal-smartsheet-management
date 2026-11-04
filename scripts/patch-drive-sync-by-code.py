@@ -14,8 +14,10 @@ Flow added between "List Drive Files2" and the existing title path:
                         -> Rename Drive File -> Code Result -> Log Code Result
                      -> Code Notices -> Log Code Notices (flow_log) + Chat Code Notice
 
-A code that exists in neither game_info.demo_code nor record_code is NOT an error: a real title such
-as "Racket" is six letters, so that file simply goes on to the title path.
+Demo and record videos share one Drive folder ([Signal] Video); the code tells them apart. A code that is
+only a record_code belongs to the record workflow and is skipped here without a word. A code that exists in
+neither game_info.demo_code nor record_code is NOT an error: a real title such as "Racket" is six letters,
+so that file simply goes on to the title path.
 
 The 6-char rule is re-implemented in the Code node (n8n cannot import lib/short-code.ts);
 __tests__/workflows/drive-sync-by-code.test.ts asserts the alphabet equals CODE_ALPHABET.
@@ -33,16 +35,24 @@ CHAT_SPACE = 'spaces/AAQAYTKWM1I'
 CHAT_CREDENTIAL = {'googleApi': {'id': '5MOpxh9U04GXBIJp', 'name': 'HungDT-Minisoos'}}
 
 SPLIT_JS = r'''// Files whose whole name (minus one extension and one " (n)" suffix) is a 6-char code go to the code branch.
-// Same rule as codeFromFileName in lib/short-code.ts. Keep the alphabet identical (a test checks it).
+// Same rule as codeFromFileName in lib/short-code.ts (alphabet, 6 chars, >= 2 digits, >= 2 letters). Keep the alphabet identical (a test checks it).
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_RE = new RegExp('^[' + CODE_ALPHABET + ']{6}$');
+// A code mixes letters and digits (at least 2 of each), so a real title like "Racket" is never a code.
+const MIN_DIGITS = 2;
+const MIN_LETTERS = 2;
+const isCode = s => {
+  if (!CODE_RE.test(s)) return false;
+  const digits = (s.match(/[2-9]/g) || []).length;
+  return digits >= MIN_DIGITS && 6 - digits >= MIN_LETTERS;
+};
 const codeFromFileName = name => {
   const base = String(name)
     .replace(/\.[^.]*$/, '')
     .replace(/\s*\(\d+\)$/, '')
     .trim()
     .toUpperCase();
-  return CODE_RE.test(base) ? base : null;
+  return isCode(base) ? base : null;
 };
 
 const files = $input.all().map(i => i.json);
@@ -86,7 +96,8 @@ CLASSIFY_JS = r'''// Decide, per code file, what happens. Order of preference:
 //   known demo code + a link can be written -> write the link, then rename the file to the game title
 //   known demo code, link already this file -> only the rename is retried
 //   known demo code, game already has a link -> link_exists (file untouched, flow_log + Chat)
-//   code only in record_code                -> wrong_folder (file untouched, flow_log + Chat)
+//   code only in record_code                -> silent skip: the record workflow owns that file (shared
+//                                              folder); nothing written, no notice, not on the title path
 //   code in demo_code AND in record_code    -> ambiguous_code (file untouched, flow_log + Chat): the file
 //                                              could be either video, so nothing is written
 //   code in neither table                   -> NOT an error: the file stays on the title path
@@ -111,10 +122,7 @@ for (const c of split.codeFiles) {
   if (gameId == null && !inRecord) continue; // unknown code: title path
   claimed.add(c.id);
   const base = { code: c.code, file: c.name, file_id: c.id, drive_link: c.drive_link };
-  if (gameId == null) {
-    notices.push({ ...base, status: 'wrong_folder' });
-    continue;
-  }
+  if (gameId == null) continue; // record code only: claimed above, left untouched for the record workflow
   const entry = { ...base, game_id: gameId, title: r.demo_title, file_name: c.name };
   if (inRecord) {
     notices.push({ ...entry, status: 'ambiguous_code', reason: 'the code is both a demo code and a record code' });
@@ -212,9 +220,7 @@ for (const n of notices) {
   sent.add(key);
   const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';
   let text;
-  if (n.status === 'wrong_folder') {
-    text = `drive-video-link-sync: ${n.file} is a RECORD code (${n.code}) but was dropped in the demo folder. File left as it is; move it to the record folder.`;
-  } else if (n.status === 'ambiguous_code') {
+  if (n.status === 'ambiguous_code') {
     text = `drive-video-link-sync: ${n.file} carries code ${n.code}, which is both a demo code and a record code (demo code of ${label}). File left as it is; the code must be fixed in the database before this file is processed.`;
   } else {
     text = `drive-video-link-sync: ${n.file} carries code ${n.code} for ${label}, which already has a demo link. File left as it is; clear the old link to process it again.`;

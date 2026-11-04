@@ -24,8 +24,11 @@ Recorder and bucket come from the DB when the file is processed (the Confirmed b
 is renamed to the old format, so the legacy path, the sheet formulas and Upload Youtube see what they always
 saw. "[NEW] Append PENDING" gets one more column, game_id (empty for hand-named files).
 
-Unlike the demo workflow, a code in neither column is an error (code_not_found): record names contain
-underscores and never look like a code.
+Demo and record videos share the [Signal] Video folder; the code tells them apart, and each workflow acts
+only on its own kind. This one silently skips a code that is a demo code (alone or also a record code: the
+demo workflow reports that ambiguity). A code mixes letters and digits, so a title never looks like one: a code
+known to neither table is a typo and only this workflow reports it (code_not_found); the demo workflow lets it
+fall through to title matching, silently. Claimed codes stay untouched and out of the legacy stream.
 
 The 6-char rule is re-implemented in the Code node (n8n cannot import lib/short-code.ts);
 __tests__/workflows/record-upload-by-code.test.ts asserts the alphabet equals CODE_ALPHABET.
@@ -45,16 +48,24 @@ CHAT_CREDENTIAL = {'googleApi': {'id': '5MOpxh9U04GXBIJp', 'name': 'HungDT-Minis
 SHEETS_CREDENTIAL = {'googleSheetsOAuth2Api': {'id': 'UMl5XCc7aOcf9yi3', 'name': 'HandoverRequest-HungDT'}}
 
 SPLIT_JS = r'''// Files whose whole name (minus one extension and one " (n)" suffix) is a 6-char code go to the code branch.
-// Same rule as codeFromFileName in lib/short-code.ts. Keep the alphabet identical (a test checks it).
+// Same rule as codeFromFileName in lib/short-code.ts (alphabet, 6 chars, >= 2 digits, >= 2 letters). Keep the alphabet identical (a test checks it).
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_RE = new RegExp('^[' + CODE_ALPHABET + ']{6}$');
+// A code mixes letters and digits (at least 2 of each), so a real title like "Racket" is never a code.
+const MIN_DIGITS = 2;
+const MIN_LETTERS = 2;
+const isCode = s => {
+  if (!CODE_RE.test(s)) return false;
+  const digits = (s.match(/[2-9]/g) || []).length;
+  return digits >= MIN_DIGITS && 6 - digits >= MIN_LETTERS;
+};
 const codeFromFileName = name => {
   const base = String(name)
     .replace(/\.[^.]*$/, '')
     .replace(/\s*\(\d+\)$/, '')
     .trim()
     .toUpperCase();
-  return CODE_RE.test(base) ? base : null;
+  return isCode(base) ? base : null;
 };
 
 const files = $input.all().map(i => i.json);
@@ -116,9 +127,10 @@ CLASSIFY_JS = r'''// Decide, per code file, what happens. Input: the ytb_uploade
 //   record code, not in Record / not Confirmed / no recorder     -> held_not_confirmed (file untouched)
 //   record code, the bucket already has a YouTube link, or the
 //     sheet already has an upload of this game + bucket          -> held_youtube_live (file untouched)
-//   code only in demo_code                                       -> wrong_folder
-//   code in record_code AND in demo_code                         -> ambiguous_code (file untouched)
-//   code in neither column                                       -> code_not_found
+//   code in demo_code (alone or also record_code)                -> silent skip: claimed, file untouched, no
+//                                                                   notice, not on the legacy stream (the demo
+//                                                                   workflow reports an ambiguous code)
+//   code in neither column                                       -> code_not_found (file untouched, not legacy)
 //   lookup failed (error item / no rows)                         -> code_lookup_failed, nothing renamed
 // Files that are not codes go on to the legacy path exactly as Search Drive gave them.
 const split = $('Split Record Codes').first().json;
@@ -155,15 +167,12 @@ for (const c of codeFiles) {
   if (!r) { missing.push(c); continue; }
   const base = { code: c.code, file: c.name, file_id: c.id };
   if (r.game_id == null) {
-    notices.push({ ...base, status: r.in_demo ? 'wrong_folder' : 'code_not_found' });
+    if (!r.in_demo) notices.push({ ...base, status: 'code_not_found' }); // demo code: not ours, silent
     continue;
   }
   const gameId = String(r.game_id);
   const entry = { ...base, game_id: gameId, title: r.title || null };
-  if (r.in_demo) {
-    notices.push({ ...entry, status: 'ambiguous_code', reason: 'the code is both a record code and a demo code' });
-    continue;
-  }
+  if (r.in_demo) continue; // also a demo code: the demo workflow reports it, nothing happens here
   if (r.eval_id == null) {
     notices.push({ ...entry, status: 'held_not_confirmed', reason: 'the game is not in the Record tab (removed, or not Insight / Priority IV)' });
     continue;
@@ -270,13 +279,9 @@ for (const n of notices) {
   const mins = n.bucket === '20min' ? '20' : '5';
   let text;
   if (n.status === 'code_not_found') {
-    text = `append-sheet: ${n.file} is named by code ${n.code}, which no game has as a record code. File left as it is; check the code in the Record tab and rename the file.`;
-  } else if (n.status === 'wrong_folder') {
-    text = `append-sheet: ${n.file} carries the DEMO code ${n.code}, not a record code. File left as it is; a record video needs the record code shown in the Record tab.`;
+    text = `append-sheet: No game has the code ${n.code} (file ${n.file}). Check the code in the app. File left as it is.`;
   } else if (n.status === 'rename_failed') {
     text = `append-sheet: could not rename ${n.file} (code ${n.code}) for ${label}. File left as it is and not uploaded; it is retried on the next runs. Check that the n8n Drive account can edit this file.`;
-  } else if (n.status === 'ambiguous_code') {
-    text = `append-sheet: ${n.file} carries code ${n.code}, which is both a record code and a demo code (record code of ${label}). File left as it is; the code must be fixed in the database before this file is processed.`;
   } else if (n.status === 'held_not_confirmed') {
     text = `append-sheet: ${n.file} (code ${n.code}) is for ${label}, but ${n.reason}. File left as it is; it is processed on a later run once the record bucket is Confirmed with a recorder.`;
   } else if (n.status === 'held_youtube_live') {

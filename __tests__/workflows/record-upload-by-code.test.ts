@@ -104,6 +104,7 @@ describe('Append Sheet [by-code] workflow', () => {
     const m = src('Split Record Codes').match(/const CODE_ALPHABET = '([^']+)'/)
     expect(m && m[1]).toBe(CODE_ALPHABET)
     const names = ['K7M2QX.mp4', 'k7m2qx.MOV', 'K7M2QX (1).mp4', ' K7M2QX .mp4', 'Racket.mp4', 'K7M2QX_20mins.mp4',
+      'ABCDEF.mp4', '234567.mp4', 'K7MQXA.mp4', 'AB2345.mp4', 'A2B3CD.mp4',
       'K7M2Q.mp4', 'K7M2QXA.mp4', 'K7M2Q0.mp4', 'K7M2QI.mp4', 'Nail Box_VinhTD_5mins.mp4', 'K7M2QX']
     const out = run('Split Record Codes', names.map(n => drive(n)))[0]
     const codeOf = (n: string) => (out.codeFiles as Row[]).find(c => c.name === n)?.code ?? null
@@ -141,8 +142,8 @@ describe('Append Sheet [by-code] workflow', () => {
       // A code can never contain a quote; the helper is still applied, so check the helper on the literal it builds.
       const js = src('Split Record Codes')
       expect(js).toMatch(/replace\(\/'\/g, "''"\)/)
-      const sql = run('Split Record Codes', [drive('K7M2QX.mp4'), drive('ABCDEF.mp4')])[0].sql as string
-      expect(sql).toContain("('K7M2QX'), ('ABCDEF')")
+      const sql = run('Split Record Codes', [drive('K7M2QX.mp4'), drive('AB23CD.mp4')])[0].sql as string
+      expect(sql).toContain("('K7M2QX'), ('AB23CD')")
     })
 
     it('still returns a runnable statement when there is no code file', () => {
@@ -318,25 +319,55 @@ describe('Append Sheet [by-code] workflow', () => {
       expect(out.notices).toEqual([expect.objectContaining({ status: 'held_youtube_live', file: 'K7M2QX (1).mp4' })])
     })
 
-    it('a demo code in the record folder -> wrong_folder', () => {
-      const n = only(classify([hit({ game_id: null, title: null, in_demo: true, eval_id: null, bucket: null, recorder: null, confirmed: null })]))
-      expect(n).toEqual([expect.objectContaining({ status: 'wrong_folder', code: 'K7M2QX', file: 'K7M2QX.mp4' })])
-    })
-
-    it('a record code that is also a demo code -> ambiguous_code, no rename, never reaches the legacy path', () => {
-      const out = classify([hit({ in_demo: true })])
-      const n = only(out)
-      expect(n).toEqual([expect.objectContaining({ status: 'ambiguous_code', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1', game_id: 'com.nail.box' })])
+    it('a demo code seen by the record workflow (shared folder): silent, no rename, no upload, not on the legacy stream', () => {
+      const out = classify([hit({ game_id: null, title: null, in_demo: true, eval_id: null, bucket: null, recorder: null, confirmed: null })])
+      expect(out.renames).toEqual([])
+      expect(out.notices).toEqual([])
       expect((out.legacyFiles as Row[]).map(f => f.name)).not.toContain('K7M2QX.mp4')
-      const { collected } = legacyAfter(out)
+      const { collected, attached } = legacyAfter(out)
       expect(collected.map(c => c.name)).not.toContain('K7M2QX.mp4')
-      // even when nothing else would hold it
-      expect(only(classify([hit({ in_demo: true, confirmed: false })]))[0].status).toBe('ambiguous_code')
+      expect(attached.map(a => a.fileId)).toEqual(['F2'])
+      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': out })).toEqual([])
     })
 
-    it('a code in neither column -> code_not_found (an ERROR here, record names never look like a code)', () => {
-      const n = only(classify([hit({ game_id: null, title: null, in_demo: false, eval_id: null, bucket: null, recorder: null, confirmed: null })]))
-      expect(n).toEqual([expect.objectContaining({ status: 'code_not_found', code: 'K7M2QX', file: 'K7M2QX.mp4' })])
+    it('a code that is both a record and a demo code: silent here (the demo workflow reports ambiguity), nothing renamed or uploaded', () => {
+      const out = classify([hit({ in_demo: true })])
+      expect(out.renames).toEqual([])
+      expect(out.notices).toEqual([])
+      expect((out.legacyFiles as Row[]).map(f => f.name)).not.toContain('K7M2QX.mp4')
+      expect(legacyAfter(out).collected.map(c => c.name)).not.toContain('K7M2QX.mp4')
+      // even when nothing else would hold it
+      expect(classify([hit({ in_demo: true, confirmed: false })]).notices).toEqual([])
+    })
+
+    it('a code known to neither table is a typo: ONE code_not_found notice, file untouched, not on the legacy stream', () => {
+      const files = [drive('AB23CD.mp4', 'R1'), drive('Nail Box_VinhTD_5mins.mp4', 'F2')]
+      const unknown = { code: 'AB23CD', game_id: null, title: null, in_demo: false, eval_id: null, bucket: null, recorder: null, confirmed: null }
+      const out = classify([unknown], files)
+      expect(out.notices).toEqual([expect.objectContaining({ status: 'code_not_found', code: 'AB23CD', file: 'AB23CD.mp4', file_id: 'R1' })])
+      expect(out.renames).toEqual([])
+      expect((out.legacyFiles as Row[]).map(f => f.name)).toEqual(['Nail Box_VinhTD_5mins.mp4'])
+      expect(legacyAfter(out).collected.map(c => c.name)).toEqual(['Nail Box_VinhTD_5mins.mp4'])
+      const st: Row = {}
+      const n = run('Record Code Notices', [{}], { 'Classify Record Codes': out }, st)
+      expect(n).toHaveLength(1)
+      expect(n[0]).toMatchObject({ name: 'append-sheet', status: 'code_not_found' })
+      expect(n[0].text).toContain('No game has the code AB23CD')
+      expect(n[0].text).toMatch(/Check the code in the app/)
+      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': out }, st)).toEqual([]) // deduped
+    })
+
+    it('a letters-only name like RACKET.mp4 is not a code: the code branch ignores it, the legacy path gets it as before', () => {
+      const files = [drive('RACKET.mp4', 'R1'), drive('Nail Box_VinhTD_5mins.mp4', 'F2')]
+      expect(run('Split Record Codes', files)[0].codeFiles).toEqual([])
+      const out = classify({ no_codes: 1 }, files)
+      expect(out.notices).toEqual([])
+      expect((out.legacyFiles as Row[]).map(f => f.name)).toEqual(['RACKET.mp4', 'Nail Box_VinhTD_5mins.mp4'])
+    })
+
+    it('wrong_folder can no longer be emitted', () => {
+      expect(src('Classify Record Codes')).not.toMatch(/wrong_folder/)
+      expect(src('Record Code Notices')).not.toMatch(/wrong_folder/)
     })
 
     it('held and errored code files never reach the legacy path', () => {
@@ -383,7 +414,7 @@ describe('Append Sheet [by-code] workflow', () => {
       ['an error item', [{ error: 'column "record_5min_assignee" does not exist' }]],
       ['an empty result', []],
       ['an empty item', [{}]],
-    ])('Classify given %s: legacy files go on, code files are not renamed and NOT reported as code_not_found', (_l, rows) => {
+    ])('Classify given %s: legacy files go on, code files are not renamed and NOT claimed as a notice other than code_lookup_failed', (_l, rows) => {
       const out = classify(rows as Row[])
       expect((out.legacyFiles as Row[]).map(f => f.name)).toEqual(['Nail Box_VinhTD_5mins.mp4', 'random clip.mp4'])
       expect(out.renames).toEqual([])
@@ -403,42 +434,36 @@ describe('Append Sheet [by-code] workflow', () => {
 
   describe('notices', () => {
     const notices = [
-      { status: 'code_not_found', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1' },
-      { status: 'wrong_folder', code: 'ABCDEF', file: 'ABCDEF.mp4', file_id: 'F2' },
-      { status: 'held_not_confirmed', code: 'GHJKMN', file: 'GHJKMN.mp4', file_id: 'F3', game_id: 'g-3', title: 'T3', reason: 'not Confirmed' },
-      { status: 'held_youtube_live', code: 'PQRSTU', file: 'PQRSTU.mp4', file_id: 'F4', game_id: 'g-4', title: 'T4', bucket: '20min' },
+      { status: 'code_not_found', code: 'AB23CD', file: 'AB23CD.mp4', file_id: 'F0' },
+      { status: 'rename_failed', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1', game_id: 'g-1', bucket: '5min', reason: 'forbidden' },
+      { status: 'code_lookup_failed', code: 'ABCDEF', file: 'ABCDEF.mp4', file_id: 'F2' },
+      { status: 'held_not_confirmed', code: 'GH2KM3', file: 'GH2KM3.mp4', file_id: 'F3', game_id: 'g-3', title: 'T3', reason: 'not Confirmed' },
+      { status: 'held_youtube_live', code: 'PQ4ST5', file: 'PQ4ST5.mp4', file_id: 'F4', game_id: 'g-4', title: 'T4', bucket: '20min' },
     ]
 
     it('one flow_log row + Chat text per notice, under the append-sheet flow name', () => {
       const out = run('Record Code Notices', [{}], { 'Classify Record Codes': { notices } })
-      expect(out.map(o => o.status)).toEqual(['code_not_found', 'wrong_folder', 'held_not_confirmed', 'held_youtube_live'])
+      expect(out.map(o => o.status)).toEqual(['code_not_found', 'rename_failed', 'code_lookup_failed', 'held_not_confirmed', 'held_youtube_live'])
       expect(out.every(o => o.name === 'append-sheet')).toBe(true)
-      expect(JSON.parse(out[0].note)).toMatchObject({ file: 'K7M2QX.mp4', code: 'K7M2QX' })
-      expect(out[1].text).toMatch(/demo/i)
-      expect(out[2].text).toMatch(/Confirm/)
-      expect(out[3].text).toMatch(/clear the old/i)
-      expect(out[3].text).toContain('20')
+      expect(JSON.parse(out[1].note)).toMatchObject({ file: 'K7M2QX.mp4', code: 'K7M2QX' })
+      expect(out[0].text).toMatch(/No game has the code AB23CD/)
+      expect(out[1].text).toMatch(/could not rename/i)
+      expect(out[2].text).toMatch(/could not look up/i)
+      expect(out[3].text).toMatch(/Confirm/)
+      expect(out[4].text).toMatch(/clear the old/i)
+      expect(out[4].text).toContain('20')
     })
 
     it('a file is reported once per status, not again on every later run', () => {
       const st: Row = {}
-      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices } }, st)).toHaveLength(4)
+      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices } }, st)).toHaveLength(5)
       expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices } }, st)).toHaveLength(0)
-      const changed = [{ ...notices[2], status: 'held_youtube_live' }]
+      const changed = [{ ...notices[3], status: 'held_youtube_live' }]
       expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices: changed } }, st)).toHaveLength(1)
     })
 
     it('emits nothing when there is nothing to report', () => {
       expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices: [] } })).toEqual([])
-    })
-
-    it('an ambiguous_code notice gets its own plain text', () => {
-      const amb = [{ status: 'ambiguous_code', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1', game_id: 'g-1', title: 'T1' }]
-      const out = run('Record Code Notices', [{}], { 'Classify Record Codes': { notices: amb } })
-      expect(out.map(o => o.status)).toEqual(['ambiguous_code'])
-      expect(out[0].text).toContain('K7M2QX.mp4')
-      expect(out[0].text).toMatch(/both a record code and a demo code/)
-      expect(out[0].text).toMatch(/left as it is/)
     })
 
     it('posts to the agreed Chat space and logs to the existing flow_log sheet', () => {
@@ -497,8 +522,8 @@ describe('Append Sheet [by-code] workflow', () => {
     it.each(['PENDING', 'IN_BATCH', 'PROCESSING', 'DONE', 'FAILED'])(
       'second pass over the same files with the first pass\'s rows at %s appends nothing, renames nothing, reports nothing',
       status => {
-        const drive0 = [drive('K7M2QX.mp4', 'F1'), drive('Nail Box_VinhTD_5mins.mp4', 'F2'), drive('GHJKMN.mp4', 'F5'), drive('random clip.mp4', 'F3')]
-        const lookup = [hit(), hit({ code: 'GHJKMN', game_id: 'g-5', title: 'Held', confirmed: false })]
+        const drive0 = [drive('K7M2QX.mp4', 'F1'), drive('Nail Box_VinhTD_5mins.mp4', 'F2'), drive('GH2KM3.mp4', 'F5'), drive('random clip.mp4', 'F3')]
+        const lookup = [hit(), hit({ code: 'GH2KM3', game_id: 'g-5', title: 'Held', confirmed: false })]
         const st: Row = {}
         const first = fullRun(drive0, [], lookup, st)
         expect(first.appended.map(a => [a.fileId, a.fileName, a.game_id])).toEqual([
@@ -517,11 +542,11 @@ describe('Append Sheet [by-code] workflow', () => {
     )
 
     it('a held file is picked up by a later scheduled run once it is Confirmed, with nothing new in the folder', () => {
-      const drive0 = [drive('GHJKMN.mp4', 'F5')]
+      const drive0 = [drive('GH2KM3.mp4', 'F5')]
       const st: Row = {}
-      const held = fullRun(drive0, [], [hit({ code: 'GHJKMN', game_id: 'g-5', title: 'Held', confirmed: false })], st)
+      const held = fullRun(drive0, [], [hit({ code: 'GH2KM3', game_id: 'g-5', title: 'Held', confirmed: false })], st)
       expect(held.appended).toEqual([])
-      const later = fullRun(drive0, [], [hit({ code: 'GHJKMN', game_id: 'g-5', title: 'Held', confirmed: true })], st)
+      const later = fullRun(drive0, [], [hit({ code: 'GH2KM3', game_id: 'g-5', title: 'Held', confirmed: true })], st)
       expect(later.appended.map(a => [a.fileId, a.fileName, a.game_id])).toEqual([['F5', 'Held_VinhTD_5mins.mp4', 'g-5']])
     })
 
