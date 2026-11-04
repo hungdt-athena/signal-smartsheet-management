@@ -57,6 +57,7 @@ export async function GET(
         to_char(ge.youtube_20min_uploaded_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD HH24:MI:SS') AS youtube_20min_uploaded_local,
         ge.imported_at, ge.updated_at, ge.updated_by,
         gi.title, gi.os, gi.app_link, gi.icon_url,
+        gi.demo_code, gi.record_code,
         COALESCE(gi.initial_release, gi.temp_release)::text AS release_date,
         gi.metadata->'screenshot_urls' AS screenshot_urls,
         gi.metadata->'manual_screenshot_urls' AS manual_screenshot_urls,

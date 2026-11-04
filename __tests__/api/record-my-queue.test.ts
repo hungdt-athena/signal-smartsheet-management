@@ -25,7 +25,7 @@ const game = (over: Record<string, unknown>) => ({
   id: 1, game_id: 'g1', batch: 'W2 Oct, 2026', category_group: 'puzzle', title: 'Alpha',
   record_bucket: '5min', final_conclusion: 'Insight',
   record_5min_assignee: 'KietCD', record_20min_assignee: null,
-  youtube_link: null, uploaded_local: null, since: '2026-10-01', confirmed: true, ...over,
+  youtube_link: null, uploaded_local: null, since: '2026-10-01', confirmed: true, record_code: null, ...over,
 })
 const upload = (title: string) => ({ gameTitle: title, youtubeId: 'yt_' + title, duration: '5mins', time: '2026-10-05 10:00:00', pic: 'KietCD' })
 
@@ -48,6 +48,16 @@ describe('GET /api/record/my-queue', () => {
     const body = await (await GET()).json()
     expect(body.count).toBe(2)
     expect(body.games.map((g: { title: string }) => g.title)).toEqual(['Alpha', 'Beta'])
+  })
+
+  it('carries record_code on each game, null when the game has none', async () => {
+    sqlMock.mockResolvedValue([
+      game({ id: 1, title: 'Alpha', record_code: 'QW7R2T' }),
+      game({ id: 2, title: 'Beta', record_code: undefined }),
+    ])
+    const body = await (await GET()).json()
+    expect(body.games[0].record_code).toBe('QW7R2T')
+    expect(body.games[1].record_code).toBeNull()
   })
 
   it('skips older batches and games with no batch', async () => {

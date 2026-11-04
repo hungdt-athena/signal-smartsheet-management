@@ -17,6 +17,7 @@ interface Row {
   game_id: string
   title: string
   icon_url: string | null
+  demo_code?: string | null
   genre_1: string | null
   category_group: string
   batch: string | null
@@ -52,7 +53,7 @@ export async function GET(_req: NextRequest) {
     let rows: Row[]
     try {
       rows = await sql`
-        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, ge.genre_1, ge.category_group,
+        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, gi.demo_code, ge.genre_1, ge.category_group,
           ge.batch, ge.evaluate_date,
           s.link AS suggested_link, s.file_name AS suggested_name, s.shared_with
         FROM game_evaluations ge
@@ -68,7 +69,7 @@ export async function GET(_req: NextRequest) {
       if (!isMissingSuggestionTable(err)) throw err
       console.error('GET /api/evaluations/missing-demo: drive_link_suggestions missing, apply migration 048')
       rows = await sql`
-        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, ge.genre_1, ge.category_group,
+        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, gi.demo_code, ge.genre_1, ge.category_group,
           ge.batch, ge.evaluate_date
         FROM game_evaluations ge
         JOIN game_info gi ON gi.game_id = ge.game_id
@@ -85,6 +86,7 @@ export async function GET(_req: NextRequest) {
       game_id: r.game_id,
       title: r.title,
       icon_url: r.icon_url,
+      demo_code: r.demo_code ?? null,
       category: r.category_group,
       genre: r.genre_1,
       batch: r.batch,

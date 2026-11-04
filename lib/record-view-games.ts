@@ -13,6 +13,7 @@ export interface RecordViewRow {
   batch: string | null
   category_group: string | null
   title: string
+  record_code: string | null
   record_bucket: string | null
   final_conclusion: string | null
   record_5min_assignee: string | null
@@ -29,7 +30,7 @@ const VN = 'Asia/Ho_Chi_Minh'
 
 export async function recordViewRows(): Promise<RecordViewRow[]> {
   return sql<RecordViewRow[]>`
-    SELECT ge.id, ge.game_id, ge.batch, ge.category_group, gi.title, ge.record_bucket, ge.final_conclusion,
+    SELECT ge.id, ge.game_id, ge.batch, ge.category_group, gi.title, gi.record_code, ge.record_bucket, ge.final_conclusion,
       ge.record_5min_assignee, ge.record_20min_assignee, ge.youtube_link, ge.youtube_5min_link, ge.youtube_20min_link,
       to_char(ge.youtube_uploaded_at AT TIME ZONE ${VN}, 'YYYY-MM-DD HH24:MI:SS') AS uploaded_local,
       to_char(COALESCE(ge.first_assigned_date, ge.assigned_date), 'YYYY-MM-DD') AS since,

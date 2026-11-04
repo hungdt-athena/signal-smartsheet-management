@@ -118,7 +118,7 @@ describe('GET /api/evaluations/missing-demo', () => {
     db(CFG, [game({ id: 1, title: 'ArcFlush', icon_url: 'https://x/i.png' })])
     const body = await (await GET(req())).json()
     expect(body.items[0]).toEqual({
-      id: 1, game_id: 'g1', title: 'ArcFlush', icon_url: 'https://x/i.png',
+      id: 1, game_id: 'g1', title: 'ArcFlush', icon_url: 'https://x/i.png', demo_code: null,
       category: 'puzzle', genre: 'Casual', batch: 'W2 Oct, 2026',
       evaluate_date: '2026-10-07T10:00:00Z',
       suggested_link: null, suggested_name: null, shared_with: null,
