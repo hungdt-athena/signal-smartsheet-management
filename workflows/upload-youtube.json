@@ -1,0 +1,1558 @@
+{
+  "id": "gFnZgEix9Phn3m37",
+  "name": "Upload Youtube",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1936,
+        80
+      ],
+      "id": "756f16fb-f2cf-42e7-b795-4c1ce8147670",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "PENDING"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1072,
+        80
+      ],
+      "id": "d9751c99-43d4-4250-bb00-66e3f0cc23cf",
+      "name": "[NEW] Get PENDING Rows",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9G9ZGmNzh2rJQLAS",
+          "name": "MinhLQ Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Re-parse fileName để lấy lại part1/part2/mins cho YouTube node\nconst re = /^([^_]+)_([^_]+)_(\\d+)mins(?:\\..*)?$/i;\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  if (!j.fileId || !j.fileName) continue;\n  const m = String(j.fileName).match(re);\n  if (!m) continue;\n  const [, part1Raw, part2Raw, minsRaw] = m;\n  const mins = Number(minsRaw);\n  if (!Number.isInteger(mins) || mins <= 0) continue;\n  out.push({\n    json: {\n      ...j,\n      part1: String(part1Raw).trim(),\n      part2: String(part2Raw).trim(),\n      mins\n    }\n  });\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -848,
+        64
+      ],
+      "id": "c8ba5f4c-3064-459c-a18a-4cbed7f18897",
+      "name": "[NEW] Parse for Upload"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -400,
+        80
+      ],
+      "id": "14e7de26-5269-41be-b0f9-b61d7378071c",
+      "name": "[NEW] Loop Over PENDING"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileId": "={{ $('[NEW] Loop Over PENDING').item.json.fileId }}",
+            "status": "PROCESSING",
+            "time": "={{$now.toLocal().format('yyyy-MM-dd HH:mm:ss')}}"
+          },
+          "matchingColumns": [
+            "fileId"
+          ],
+          "schema": [
+            {
+              "id": "fileId",
+              "displayName": "fileId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -176,
+        -16
+      ],
+      "id": "838c52e2-4e9a-451e-817a-c72240fcf864",
+      "name": "[NEW] Mark PROCESSING",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9G9ZGmNzh2rJQLAS",
+          "name": "MinhLQ Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('[NEW] Loop Over PENDING').item.json.fileId }}?alt=media",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        48,
+        -16
+      ],
+      "id": "17dab31a-05d8-4694-afdf-d813d5e73aac",
+      "name": "[NEW] GET media",
+      "retryOnFail": false,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "cDVYIUZSdWptiVnr",
+          "name": "Upload Youtube"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('[NEW] Loop Over PENDING').item.json.fileName }}",
+        "regionCode": "VN",
+        "categoryId": "=20",
+        "options": {
+          "description": "=Game Title: {{ $('[NEW] Loop Over PENDING').item.json.part1 }}\nRecoreded by: {{ $('[NEW] Loop Over PENDING').item.json.part2 }}\nDuration: {{ $('[NEW] Loop Over PENDING').item.json.mins }} mins",
+          "privacyStatus": "unlisted",
+          "selfDeclaredMadeForKids": false
+        }
+      },
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        272,
+        -16
+      ],
+      "id": "d621f598-88d1-4c16-90a7-2534b0038aff",
+      "name": "[NEW] Upload YouTube",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "maxTries": 3,
+      "alwaysOutputData": false,
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "XTwKKqfUXCEXNtYY",
+          "name": "YouTube account - Vinhtrn"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.error === undefined }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        496,
+        -16
+      ],
+      "id": "215e29bd-7991-4b4d-b9fa-90ecdd86e155",
+      "name": "[NEW] Check Success"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileId": "={{ $('[NEW] Loop Over PENDING').item.json.fileId }}",
+            "status": "DONE",
+            "time": "={{$now.toLocal().format('yyyy-MM-dd HH:mm:ss')}}",
+            "youtubeId": "={{ $json.uploadId }}"
+          },
+          "matchingColumns": [
+            "fileId"
+          ],
+          "schema": [
+            {
+              "id": "fileId",
+              "displayName": "fileId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "youtubeId",
+              "displayName": "youtubeId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        -112
+      ],
+      "id": "deabf145-c62e-4f27-95f2-1cd38d6e1094",
+      "name": "[NEW] Log DONE",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9G9ZGmNzh2rJQLAS",
+          "name": "MinhLQ Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileId": "={{ $('[NEW] Loop Over PENDING').item.json.fileId }}",
+            "status": "PENDING"
+          },
+          "matchingColumns": [
+            "fileId"
+          ],
+          "schema": [
+            {
+              "id": "fileId",
+              "displayName": "fileId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        80
+      ],
+      "id": "454309b6-4d41-41ca-9472-8c779a838bac",
+      "name": "[NEW] Log FAILED",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9G9ZGmNzh2rJQLAS",
+          "name": "MinhLQ Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "spaceId": "spaces/AAQAHvco23k",
+        "jsonParameters": true,
+        "messageJson": "={\n  \"cardsV2\": [{\n    \"cardId\": \"yt-upload-v2\",\n    \"card\": {\n      \"header\": {\n        \"title\": \"✅ Video Uploaded\",\n        \"subtitle\": \"{{ $now.format('dd/MM/yyyy - HH:mm') }}\"\n      },\n      \"sections\": [{\n        \"widgets\": [\n          {\n            \"decoratedText\": {\n              \"text\": \"<b>{{ $('[NEW] Loop Over PENDING').item.json.fileName }}</b>\",\n              \"wrapText\": true,\n              \"startIcon\": { \"knownIcon\": \"VIDEO_CAMERA\" }\n            }\n          },\n          {\n            \"decoratedText\": {\n              \"text\": \"https://www.youtube.com/watch?v={{ $('[NEW] Check Success').item.json.uploadId }}\",\n              \"wrapText\": true,\n              \"onClick\": {\n                \"openLink\": {\n                  \"url\": \"https://www.youtube.com/watch?v={{ $('[NEW] Check Success').item.json.uploadId }}\"\n                }\n              }\n            }\n          }\n        ]\n      }]\n    }\n  }]\n}\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.googleChat",
+      "typeVersion": 1,
+      "position": [
+        944,
+        -16
+      ],
+      "id": "a9c1930d-5589-4286-92e1-c976aac57725",
+      "name": "[NEW] Notify DONE",
+      "webhookId": "da207355-2554-4032-9500-3ebb7c175f7b",
+      "credentials": {
+        "googleApi": {
+          "id": "5MOpxh9U04GXBIJp",
+          "name": "HungDT-Minisoos"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "spaceId": "spaces/AAQAfbThMHc",
+        "messageUi": {
+          "text": "Update youtube credential"
+        },
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.googleChat",
+      "typeVersion": 1,
+      "position": [
+        1152,
+        176
+      ],
+      "id": "569e0cb9-d8a3-4741-924d-9d6470100fa1",
+      "name": "[NEW] Notify FAILED",
+      "webhookId": "95c5bad4-3ae5-436b-9119-1e28b22722cb",
+      "credentials": {
+        "googleApi": {
+          "id": "5MOpxh9U04GXBIJp",
+          "name": "HungDT-Minisoos"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 500347841,
+          "mode": "list",
+          "cachedResultName": "realtime",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=500347841"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "workflow",
+              "lookupValue": "upload-youtube"
+            },
+            {
+              "lookupColumn": "status",
+              "lookupValue": "idle"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1520,
+        80
+      ],
+      "id": "682c9a38-7d73-4fea-9294-584bd3c628d4",
+      "name": "Get row(s) in sheet2",
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch"
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -624,
+        80
+      ],
+      "id": "7abd9787-4392-4d37-88a8-637489d466ab",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=621980228"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileId": "={{ $json.fileId }}",
+            "status": "IN_BATCH"
+          },
+          "matchingColumns": [
+            "fileId"
+          ],
+          "schema": [
+            {
+              "id": "fileId",
+              "displayName": "fileId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fileName",
+              "displayName": "fileName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "youtubeId",
+              "displayName": "youtubeId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -848,
+        256
+      ],
+      "id": "e2338dbe-1ca5-43ed-9546-9a27334c9a40",
+      "name": "Update row in sheet6",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=621980228"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "IN_BATCH"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1376,
+        176
+      ],
+      "id": "36a5b693-0703-4906-9faa-1d89b7cf39aa",
+      "name": "Get row(s) in sheet3",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=621980228"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileId": "={{ $json.fileId }}",
+            "status": "FAILED"
+          },
+          "matchingColumns": [
+            "fileId"
+          ],
+          "schema": [
+            {
+              "id": "fileId",
+              "displayName": "fileId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fileName",
+              "displayName": "fileName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "youtubeId",
+              "displayName": "youtubeId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1600,
+        176
+      ],
+      "id": "bb6456e3-6ad3-4ffa-b14f-53cb0e942e6c",
+      "name": "Update row in sheet7",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 500347841,
+          "mode": "list",
+          "cachedResultName": "realtime",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=500347841"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "upload-youtube",
+            "status": "idle"
+          },
+          "matchingColumns": [
+            "workflow"
+          ],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1824,
+        176
+      ],
+      "id": "5344727b-f2fe-4c80-9127-e9830f51b9cd",
+      "name": "Update row in sheet4",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 500347841,
+          "mode": "list",
+          "cachedResultName": "realtime",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=500347841"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "upload-youtube",
+            "status": "running"
+          },
+          "matchingColumns": [
+            "workflow"
+          ],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1296,
+        80
+      ],
+      "id": "88a9370c-e356-4b86-b416-78fa053b2a8b",
+      "name": "Set Running (upload-youtube)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const count = $('[NEW] Parse for Upload').all().length;\nconst date = $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss');\nreturn [{ json: { date, name: 'upload-youtube', status: 'Success', note: count } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        176
+      ],
+      "id": "d7911f5e-6911-4072-b63a-f0bd696ed6f4",
+      "name": "Code Log Upload Success"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "flow_log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "name": "={{ $json.name }}",
+            "status": "={{ $json.status }}",
+            "note": "={{ $json.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        48,
+        176
+      ],
+      "id": "3c3aa4f6-cd6a-466b-9a1a-8520fc6e1961",
+      "name": "Log flow_log (upload success)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 500347841,
+          "mode": "list",
+          "cachedResultName": "realtime",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=500347841"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "upload-youtube",
+            "status": "idle"
+          },
+          "matchingColumns": [
+            "workflow"
+          ],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        272,
+        176
+      ],
+      "id": "218b54f3-fd10-4de0-a6b9-bd23e444f30c",
+      "name": "Set Idle (upload-youtube success)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const count = $('[NEW] Parse for Upload').all().length;\nconst date = $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss');\nreturn [{ json: { date, name: 'upload-youtube', status: 'Fail', note: count } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        176
+      ],
+      "id": "ef1ccad2-c3c2-42d5-9898-2f78eb2adaf4",
+      "name": "Code Log Upload Fail"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "flow_log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "name": "={{ $json.name }}",
+            "status": "={{ $json.status }}",
+            "note": "={{ $json.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2272,
+        176
+      ],
+      "id": "494857dc-029e-4b86-98c9-e71b6ed88e04",
+      "name": "Log flow_log (upload fail)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "upload-youtube",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1744,
+        336
+      ],
+      "id": "3bbe68c4-2679-4eb4-af46-6c5a3a9f44b5",
+      "name": "Webhook",
+      "webhookId": "6a5fba83-93c3-483d-b718-383f5ea9a503"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2496,
+        176
+      ],
+      "id": "1dcfadde-9ea6-4b6a-81e0-7ea3ee3b7dc2",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        496,
+        176
+      ],
+      "id": "60998d89-f199-4f4f-a0dc-788b3182c592",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1152,
+        -16
+      ],
+      "id": "9bbed637-033a-4038-b37e-860284a15eb0",
+      "name": "Wait",
+      "webhookId": "7bb687b3-f00c-4ccf-9eae-caacfb0431bc"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Get PENDING Rows": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Parse for Upload",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update row in sheet6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Parse for Upload": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Loop Over PENDING": {
+      "main": [
+        [
+          {
+            "node": "Code Log Upload Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[NEW] Mark PROCESSING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Mark PROCESSING": {
+      "main": [
+        [
+          {
+            "node": "[NEW] GET media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] GET media": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Upload YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Upload YouTube": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Check Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Check Success": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Log DONE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[NEW] Log FAILED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Log DONE": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Notify DONE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Log FAILED": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Notify FAILED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Notify DONE": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Notify FAILED": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet2": {
+      "main": [
+        [
+          {
+            "node": "Set Running (upload-youtube)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Loop Over PENDING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row in sheet6": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet3": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row in sheet7": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Running (upload-youtube)": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Get PENDING Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Log Upload Success": {
+      "main": [
+        [
+          {
+            "node": "Log flow_log (upload success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log flow_log (upload success)": {
+      "main": [
+        [
+          {
+            "node": "Set Idle (upload-youtube success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update row in sheet4": {
+      "main": [
+        [
+          {
+            "node": "Code Log Upload Fail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Log Upload Fail": {
+      "main": [
+        [
+          {
+            "node": "Log flow_log (upload fail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log flow_log (upload fail)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Idle (upload-youtube success)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Loop Over PENDING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": null
+}

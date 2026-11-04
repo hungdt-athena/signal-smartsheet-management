@@ -1,0 +1,616 @@
+{
+  "id": "Hz0noofKB64VPRyq",
+  "name": "Append Sheet",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -32,
+        -32
+      ],
+      "id": "a714465b-f9a4-4c37-904b-d2e3d6a49dc8",
+      "name": "[NEW] Scanner Trigger"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "='1tf_Kf_wi6wu6mD6vI8CWlIHUhZXsg1TU' in parents and trashed = false\nand mimeType contains 'video/'\nand createdTime >= '{{$now.startOf(\"day\").minus(2, 'days').toISO()}}'\nand createdTime <= '{{$now.startOf(\"day\").plus(1, 'days').toISO()}}'",
+        "limit": 200,
+        "filter": {},
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "dfb70bb8-9b41-4cee-b554-832074812a85",
+      "name": "[NEW] Search Drive",
+      "executeOnce": true,
+      "credentials": {
+        "googleApi": {
+          "id": "5MOpxh9U04GXBIJp",
+          "name": "HungDT-Minisoos"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse filename pattern và extract fields\nconst re = /^([^_]+)_([^_]+)_(\\d+)mins(?:\\..*)?$/i;\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  const id = j.id || j.fileId;\n  let name = j.name || j.fileName;\n  if (!id || !name) continue;\n  name = String(name).trim();\n  const mimeType = j.mimeType || j.mime_type;\n  if (mimeType === 'application/vnd.google-apps.folder') continue;\n  const m = name.match(re);\n  if (!m) continue;\n  const [, part1Raw, part2Raw, minsRaw] = m;\n  const mins = Number(minsRaw);\n  if (!Number.isInteger(mins) || mins <= 0) continue;\n  const part1 = String(part1Raw).trim();\n  const part2 = String(part2Raw).trim();\n  out.push({\n    json: {\n      fileId: id,\n      fileName: name,\n      title: `${part1} ${part2} (${mins} mins)`,\n      part1,\n      part2,\n      mins\n    }\n  });\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "4cab5d47-800c-42dd-97ae-90fa6db43d2d",
+      "name": "[NEW] Parse Filenames"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        672,
+        192
+      ],
+      "id": "16e56e14-a542-40d7-9c58-a36c88987e24",
+      "name": "[NEW] Get Existing Rows",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9G9ZGmNzh2rJQLAS",
+          "name": "MinhLQ Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "fileId",
+              "field2": "fileId"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.compareDatasets",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        64
+      ],
+      "id": "eb573cfb-134d-4d66-8255-227eb469d77d",
+      "name": "[NEW] Compare - Find New"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileId": "={{ $json.fileId }}",
+            "fileName": "={{ $json.fileName }}",
+            "time": "={{$now.toLocal().format('yyyy-MM-dd HH:mm:ss')}}",
+            "status": "PENDING"
+          },
+          "matchingColumns": [
+            "fileId"
+          ],
+          "schema": [
+            {
+              "id": "fileId",
+              "displayName": "fileId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fileName",
+              "displayName": "fileName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1424,
+        48
+      ],
+      "id": "269c5ff7-7f40-43f0-a5af-202c8d785dde",
+      "name": "[NEW] Append PENDING",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9G9ZGmNzh2rJQLAS",
+          "name": "MinhLQ Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "gFnZgEix9Phn3m37",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/gFnZgEix9Phn3m37",
+          "cachedResultName": "Production — Upload Youtube"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1648,
+        48
+      ],
+      "id": "cf99da61-c791-4b63-9203-78134cc4e2dc",
+      "name": "Call 'Upload Youtube'"
+    },
+    {
+      "parameters": {
+        "jsCode": "const count = $('[NEW] Compare - Find New').all().length;\nconst date = $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss');\nreturn [{ json: { date, name: 'append-sheet', status: 'Success', note: count } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        48
+      ],
+      "id": "495e8377-475d-4cde-a6b9-ba052c63ab6c",
+      "name": "Code Log Append"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "flow_log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "name": "={{ $json.name }}",
+            "status": "={{ $json.status }}",
+            "note": "={{ $json.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2096,
+        48
+      ],
+      "id": "21487c94-ebfe-4930-b07f-887e04368cc8",
+      "name": "Log flow_log (append-sheet)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 500347841,
+          "mode": "list",
+          "cachedResultName": "realtime",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=500347841"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "append-sheet",
+            "status": "idle"
+          },
+          "matchingColumns": [
+            "workflow"
+          ],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2320,
+        48
+      ],
+      "id": "9e0f7791-f0c8-4d96-994d-c0128482ec9c",
+      "name": "Set Idle (append-sheet)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "append-sheet",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -48,
+        192
+      ],
+      "id": "010c3b99-1060-42f3-8f03-cdb7787c3052",
+      "name": "Webhook",
+      "webhookId": "aff56009-50fa-41f7-80ee-153cf52c594b"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2528,
+        48
+      ],
+      "id": "533cd8b0-0514-4627-b594-4a78ba45640e",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 5,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "1tf_Kf_wi6wu6mD6vI8CWlIHUhZXsg1TU",
+          "mode": "list",
+          "cachedResultName": "[Signal] Video",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1tf_Kf_wi6wu6mD6vI8CWlIHUhZXsg1TU"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        -240
+      ],
+      "id": "ac36c14c-5beb-40c8-be2f-a8374ca938c8",
+      "name": "Google Drive Trigger",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "ZMDZzSCOielVihYl",
+          "name": "HungDT"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "[NEW] Scanner Trigger": {
+      "main": [
+        []
+      ]
+    },
+    "[NEW] Search Drive": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Parse Filenames",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Parse Filenames": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Compare - Find New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Get Existing Rows": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Compare - Find New",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "[NEW] Compare - Find New": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Append PENDING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Append PENDING": {
+      "main": [
+        [
+          {
+            "node": "Call 'Upload Youtube'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'Upload Youtube'": {
+      "main": [
+        [
+          {
+            "node": "Code Log Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Log Append": {
+      "main": [
+        [
+          {
+            "node": "Log flow_log (append-sheet)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log flow_log (append-sheet)": {
+      "main": [
+        [
+          {
+            "node": "Set Idle (append-sheet)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Search Drive",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "[NEW] Get Existing Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Idle (append-sheet)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Search Drive",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "[NEW] Get Existing Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
