@@ -48,6 +48,13 @@ describe('YouTube / Record page', () => {
     for (const key of ['year', 'month', 'ev', 'dur']) expect(src).toContain(`useUrlState('${key}'`)
   })
 
+  it('fills a missing record code lazily for recording/recorded rows only', () => {
+    // Eligibility is the same lock the Code column uses; the hook skips rows with a code.
+    expect(src).toMatch(/useLazyRecordCodes\(/)
+    expect(src).toMatch(/locked: s === 'recording' \|\| s === 'recorded'/)
+    expect(src).toMatch(/<CodeChip code=\{item\.record_code \?\? lazyCodes\[item\.id\] \?\? null\} \/>/)
+  })
+
   it('reports the YouTube recorder sync with a toast, not a page-local banner', () => {
     expect(src).not.toMatch(/syncToast/)
     expect(src).toMatch(/toast\.success\(`Updated \$\{parts\.join/)

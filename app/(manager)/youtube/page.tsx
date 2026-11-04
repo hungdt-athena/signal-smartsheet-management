@@ -24,7 +24,7 @@ import { SearchInput, IconX } from '@/components/ui/SearchInput'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader, RefreshButton } from '@/components/ui/PageHeader'
 import { Switch } from '@/components/ui/Switch'
-import { CodeChip } from '@/components/CodeChip'
+import { CodeChip, useLazyRecordCodes } from '@/components/CodeChip'
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/ui/States'
 
 interface YtbRow {
@@ -788,6 +788,12 @@ function RecordTable({
 }) {
   const recOpts = [{ value: '', label: '—' }, ...recorders.map(r => ({ value: r, label: r }))]
   const cols = isManager ? 6 : 5
+  // Rows Confirmed before codes existed (or whose code write failed) get one from the server.
+  const lazyRows = useMemo(() => items.map(item => {
+    const s = recordStatus(item, ytMap).status
+    return { id: item.id, game_id: item.game_id, record_code: item.record_code, locked: s === 'recording' || s === 'recorded' }
+  }), [items, ytMap])
+  const lazyCodes = useLazyRecordCodes(lazyRows)
   return (
     <div className={`card rec-table${dragOver ? ' is-drop' : ''}`}>
       <div className="rec-table-head">
@@ -884,7 +890,7 @@ function RecordTable({
                         )}
                       </td>
                       <td>
-                        {assignLocked && <CodeChip code={item.record_code ?? null} />}
+                        {assignLocked && <CodeChip code={item.record_code ?? lazyCodes[item.id] ?? null} />}
                       </td>
                       <td>
                         <RecordStatusBadge status={status} youtubeId={youtubeId} approx={approx} />

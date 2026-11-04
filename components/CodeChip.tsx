@@ -17,6 +17,45 @@ export async function fetchDemoCode(gameId: string): Promise<string | null> {
   } catch { return null }
 }
 
+/** Asks the server for a game's record code. The server makes one only for a game with a
+ *  Confirmed bucket. Never throws: null on any failure. */
+export async function fetchRecordCode(gameId: string): Promise<string | null> {
+  try {
+    const r = await fetch('/api/evaluations/record-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gameId }),
+    })
+    if (!r.ok) return null
+    const j = await r.json()
+    return typeof j?.code === 'string' && j.code ? j.code : null
+  } catch { return null }
+}
+
+export interface LazyCodeRow { id: number; game_id: string; record_code?: string | null; locked: boolean }
+
+/** Record codes for locked (recording/recorded) rows that arrived without one, keyed by row id.
+ *  One request at a time, one try per row: a failure leaves the row without a chip. */
+export function useLazyRecordCodes(rows: LazyCodeRow[]): Record<number, string> {
+  const [codes, setCodes] = useState<Record<number, string>>({})
+  const [tick, setTick] = useState(0)
+  const tried = useRef<Set<number>>(new Set())
+  const busy = useRef(false)
+  useEffect(() => {
+    if (busy.current) return
+    const next = rows.find(r => r.locked && !r.record_code && r.game_id && !tried.current.has(r.id))
+    if (!next) return
+    busy.current = true
+    tried.current.add(next.id)
+    fetchRecordCode(next.game_id).then(code => {
+      busy.current = false
+      if (code) setCodes(c => ({ ...c, [next.id]: code }))
+      setTick(t => t + 1)  // re-run this effect for the next row
+    })
+  }, [rows, tick])
+  return codes
+}
+
 /** A 6-character file code. Click copies it. Without clipboard access the code stays as
  *  selectable text, so it can still be copied by hand. */
 export function CodeChip({ code, label }: { code: string | null; label?: string }) {
