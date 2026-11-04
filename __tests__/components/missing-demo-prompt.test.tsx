@@ -370,4 +370,32 @@ describe('MissingDemoPrompt', () => {
       expect(row).not.toHaveTextContent('Same title')
     })
   })
+
+  describe('file codes', () => {
+    it('shows the code that came with the row and does not ask the server', async () => {
+      await open([{ ...A, demo_code: 'K7M2QX' } as Item])
+      expect(screen.getByText('K7M2QX')).toBeTruthy()
+      const urls = (global.fetch as jest.Mock).mock.calls.map(c => String(c[0]))
+      expect(urls.some(u => u.includes('demo-code'))).toBe(false)
+    })
+
+    it('asks once per row without a code, one at a time, and does not retry a failure', async () => {
+      const calls: string[] = []
+      global.fetch = jest.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        const u = String(url)
+        if (u.startsWith('/api/evaluations/missing-demo')) return { ok: true, json: async () => ({ items: [A, { ...B, game_id: 'g2' }] }) } as Response
+        if (u === '/api/evaluations/demo-code') {
+          const id = JSON.parse(String(init?.body)).gameId
+          calls.push(id)
+          return id === 'g1' ? { ok: true, json: async () => ({ code: 'AAAAAA' }) } as Response : { ok: false, json: async () => ({}) } as Response
+        }
+        throw new Error(`unexpected fetch ${u}`)
+      }) as jest.Mock
+      render(<MissingDemoPrompt />)
+      await screen.findByText('AAAAAA')
+      await waitFor(() => expect(calls).toHaveLength(2))
+      await act(async () => { await new Promise(r => setTimeout(r, 50)) })
+      expect(calls).toHaveLength(2)
+    })
+  })
 })

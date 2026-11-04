@@ -3,8 +3,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import { CodeChip } from '@/components/CodeChip'
 
-interface QueueGame { id: number; title: string; bucket: '5min' | '20min'; batch: string; category_group: string | null }
+interface QueueGame { id: number; title: string; bucket: '5min' | '20min'; batch: string; category_group: string | null; record_code?: string | null }
 
 const storeKey = (name: string) => `record-badge-hidden:${name.trim().toLowerCase()}`
 
@@ -120,6 +121,7 @@ export function RecordQueueBadge() {
               {shown.map(g => (
                 <li key={g.id}>
                   <span className="t" title={g.title}>{g.title}</span>
+                  <CodeChip code={g.record_code ?? null} />
                   <span className="m">{g.bucket === '20min' ? "20'" : "5'"}{g.category_group ? ` · ${g.category_group}` : ''}</span>
                 </li>
               ))}

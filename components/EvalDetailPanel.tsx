@@ -30,6 +30,7 @@ import { isManagerRole } from '@/lib/roles'
 import { startView, onVisibility, onInput, snapshot, restartAfterSave, type ViewTimer } from '@/lib/view-timer'
 import type { LogContext } from '@/lib/evaluation-log'
 import { GameIcon } from '@/components/ui/GameIcon'
+import { CodeChip, fetchDemoCode } from '@/components/CodeChip'
 import {
   EMPTY_NOTE_PARTS, NOTE_MIN_LEN, isLegacyNote, missingNoteParts, notePartsFromRow, notePartsRequirementError,
   type NoteParts,
@@ -54,6 +55,7 @@ export interface EvalDetail {
   game_alike: GameAlikeGame[] | null
   initial_conclusion: string | null
   final_conclusion: string | null
+  demo_code?: string | null
   batch: string | null
   current_batch?: string | null
   record_assignee: string | null
@@ -637,6 +639,21 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
 
   const currentIdx = useMemo(() => gameList.findIndex(g => g.game_id === currentGameId), [gameList, currentGameId])
   const hasNav = gameList.length > 1 && currentIdx !== -1
+
+  // Demo file code: shown for a List_Idea game that has no demo link yet. If the row came
+  // without one, ask the server once per game (a failure is not retried).
+  const [demoCodes, setDemoCodes] = useState<Record<string, string>>({})
+  const demoCodeTried = useRef<Set<string>>(new Set())
+  const needsDemoCode = !!ev && conclusion === 'List_Idea' && !driveLink.trim()
+  const demoGameId = ev?.game_id
+  const demoCodeInRow = ev?.demo_code
+  useEffect(() => {
+    if (!needsDemoCode || !demoGameId || demoCodeInRow || demoCodeTried.current.has(demoGameId)) return
+    demoCodeTried.current.add(demoGameId)
+    fetchDemoCode(demoGameId).then(code => {
+      if (code) setDemoCodes(c => ({ ...c, [demoGameId]: code }))
+    })
+  }, [needsDemoCode, demoGameId, demoCodeInRow])
 
   const qrGenRef = useRef(0)
   const generateQR = useCallback((appLink: string | null) => {
@@ -1579,6 +1596,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   <span className="label">Demo Video (Drive)</span>
                   {canEditEval && driveLink && <ClearBtn onClick={() => clearField('drive')} />}
                 </div>
+                {needsDemoCode && <CodeChip code={ev.demo_code ?? demoCodes[ev.game_id] ?? null} label="Code" />}
                 <input
                   className="input"
                   type="url"

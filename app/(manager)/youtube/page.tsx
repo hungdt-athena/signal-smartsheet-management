@@ -24,6 +24,7 @@ import { SearchInput, IconX } from '@/components/ui/SearchInput'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader, RefreshButton } from '@/components/ui/PageHeader'
 import { Switch } from '@/components/ui/Switch'
+import { CodeChip } from '@/components/CodeChip'
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/ui/States'
 
 interface YtbRow {
@@ -575,6 +576,7 @@ interface ShortListItem {
   initial_conclusion: string | null
   final_conclusion: string | null
   drive_link: string | null
+  record_code?: string | null
   record_confirmed_at: string | null
   record_5min_assignee: string | null
   record_5min_drive: string | null
@@ -785,7 +787,7 @@ function RecordTable({
   onCancelRemove?: () => void
 }) {
   const recOpts = [{ value: '', label: '—' }, ...recorders.map(r => ({ value: r, label: r }))]
-  const cols = isManager ? 5 : 4
+  const cols = isManager ? 6 : 5
   return (
     <div className={`card rec-table${dragOver ? ' is-drop' : ''}`}>
       <div className="rec-table-head">
@@ -805,6 +807,7 @@ function RecordTable({
               <th style={{ width: 36 }}>#</th>
               <th>Game</th>
               <th style={{ width: 160 }}>Recorder</th>
+              <th style={{ width: 110 }}>Code</th>
               <th style={{ width: 130 }}>Status</th>
               {isManager && <th style={{ width: 36 }} aria-label="Remove" />}
             </tr>
@@ -814,7 +817,7 @@ function RecordTable({
               <tr><td colSpan={cols}><EmptyState>No games.</EmptyState></td></tr>
             )}
             {loading && items.length === 0 && (
-              <SkeletonRows widths={isManager ? [16, 200, 120, 80, 16] : [16, 200, 120, 80]} />
+              <SkeletonRows widths={isManager ? [16, 200, 120, 80, 80, 16] : [16, 200, 120, 80, 80]} />
             )}
             {items.map((item, idx) => {
               const eb = effectiveBucket(item)
@@ -848,7 +851,7 @@ function RecordTable({
                     </div>
                   </td>
                   {confirming ? (
-                    <td colSpan={isManager ? 3 : 2} onClick={e => e.stopPropagation()}>
+                    <td colSpan={isManager ? 4 : 3} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Remove from list? The recorder is cleared.</span>
                         <button type="button" className="btn btn-sm" onClick={() => onCancelRemove && onCancelRemove()}>Cancel</button>
@@ -879,6 +882,9 @@ function RecordTable({
                             )}
                           </div>
                         )}
+                      </td>
+                      <td>
+                        {assignLocked && <CodeChip code={item.record_code ?? null} />}
                       </td>
                       <td>
                         <RecordStatusBadge status={status} youtubeId={youtubeId} approx={approx} />

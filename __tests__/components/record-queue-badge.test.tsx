@@ -6,8 +6,8 @@ jest.mock('next/navigation', () => ({ usePathname: () => '/youtube' }))
 import { RecordQueueBadge } from '@/components/RecordQueueBadge'
 
 const games = [
-  { id: 1, title: 'Alpha', bucket: '5min', batch: 'W2 Oct, 2026', category_group: 'puzzle' },
-  { id: 2, title: 'Beta', bucket: '20min', batch: 'W1 Oct, 2026', category_group: 'arcade' },
+  { id: 1, title: 'Alpha', bucket: '5min', batch: 'W2 Oct, 2026', category_group: 'puzzle', record_code: 'K7M2QX' },
+  { id: 2, title: 'Beta', bucket: '20min', batch: 'W1 Oct, 2026', category_group: 'arcade', record_code: null },
 ]
 
 beforeEach(() => {
@@ -49,5 +49,12 @@ describe('RecordQueueBadge', () => {
     const { container } = render(<RecordQueueBadge />)
     await waitFor(() => expect(global.fetch).toHaveBeenCalled())
     expect(container.textContent).toBe('')
+  })
+
+  it('shows each game\'s record code, and no chip when it has none', async () => {
+    render(<RecordQueueBadge />)
+    fireEvent.click(await screen.findByRole('button', { name: '2 to record' }))
+    expect(screen.getByText('K7M2QX')).toBeTruthy()
+    expect(screen.getAllByTitle('Name the file with this code')).toHaveLength(1)
   })
 })

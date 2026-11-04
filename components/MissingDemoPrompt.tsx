@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { saveDriveLink } from '@/lib/drive-link-client'
+import { CodeChip, fetchDemoCode } from '@/components/CodeChip'
 
 interface Item {
   id: number
@@ -16,6 +17,7 @@ interface Item {
   suggested_link: string | null
   suggested_name: string | null
   shared_with: number | null
+  demo_code: string | null
 }
 
 const SAVED_FLASH_MS = 500
@@ -49,6 +51,7 @@ function toItem(raw: unknown): Item | null {
     id: r.id, game_id: str(r.game_id) ?? '', title: str(r.title)?.trim() ? (r.title as string) : 'Untitled game', icon_url: str(r.icon_url),
     category: r.category, genre: str(r.genre), batch: r.batch, evaluate_date: str(r.evaluate_date),
     suggested_link: str(r.suggested_link)?.trim() || null, suggested_name: str(r.suggested_name),
+    demo_code: str(r.demo_code)?.trim() || null,
     shared_with: typeof r.shared_with === 'number' && Number.isFinite(r.shared_with) && r.shared_with > 0 ? r.shared_with : null,
   }
 }
@@ -102,6 +105,24 @@ export function MissingDemoPrompt() {
       .catch(() => { /* a broken list is not worth nagging about */ })
     return () => { cancelled = true }
   }, [])
+
+  // A row that arrives without a code gets one from the server. One request at a time, one
+  // try per row: a failure leaves the row without a chip rather than retrying.
+  const [codes, setCodes] = useState<Record<number, string>>({})
+  const codeTried = useRef<Set<number>>(new Set())
+  const codeBusy = useRef(false)
+  useEffect(() => {
+    if (codeBusy.current) return
+    const next = items.find(i => !i.demo_code && i.game_id && !codeTried.current.has(i.id))
+    if (!next) return
+    codeBusy.current = true
+    codeTried.current.add(next.id)
+    fetchDemoCode(next.game_id).then(code => {
+      codeBusy.current = false
+      if (code) setCodes(c => ({ ...c, [next.id]: code }))
+      else setCodes(c => ({ ...c }))  // re-run this effect for the next row
+    })
+  }, [items, codes])
 
   const remaining = items.filter(i => !saved.has(i.id))
   const finished = loaded && total > 0 && remaining.length === 0
@@ -207,6 +228,7 @@ export function MissingDemoPrompt() {
                           ) : (
                             <div className="mdp-edit">
                               <div className="mdp-in">
+                                <CodeChip code={r.demo_code ?? codes[r.id] ?? null} />
                                 <input
                                   className="input"
                                   placeholder="Paste demo video link…"
