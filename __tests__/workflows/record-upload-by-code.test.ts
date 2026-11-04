@@ -112,12 +112,16 @@ describe('Append Sheet [by-code] workflow', () => {
   })
 
   describe('Split Record Codes', () => {
-    it('asks the database about each code once, by code only, through to_jsonb so a missing column cannot fail it', () => {
+    it('asks the database about each code once, by code only, on the plain indexed columns', () => {
       const files = [drive('K7M2QX.mp4', 'A'), drive('k7m2qx (1).mp4', 'B'), drive("O'Neil_VinhTD_5mins.mp4", 'C')]
       const sql = run('Split Record Codes', files)[0].sql as string
-      expect(sql).toMatch(/to_jsonb\(r\)->>'record_code'/)
-      expect(sql).toMatch(/to_jsonb\(d\)->>'demo_code'/)
-      expect(sql).not.toMatch(/\b[rd]\.(record|demo)_code\b/)
+      expect(sql).toMatch(/LEFT JOIN game_info r ON r\.record_code = c\.code/)
+      expect(sql).toMatch(/LEFT JOIN game_info d ON d\.demo_code = c\.code/)
+      // to_jsonb(row) detoasts every row of the 5.7 GB table: never in the lookup
+      expect(sql).not.toContain('to_jsonb(')
+      // named ordering, not positional
+      expect(sql).not.toMatch(/ORDER BY \d/)
+      expect(sql).toMatch(/ORDER BY confirmed DESC, confirmed_at DESC NULLS LAST, ge\.id/)
       expect(sql.match(/'K7M2QX'/g)).toHaveLength(1)
       // file names (and their quotes) never reach the SQL
       expect(sql).not.toContain('Neil')

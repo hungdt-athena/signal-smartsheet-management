@@ -85,8 +85,10 @@ const q = s => `'${String(s == null ? '' : s).replace(/'/g, "''")}'`;
 const codes = [...new Set(codeFiles.map(c => c.code))];
 const values = codes.map(c => `(${q(c)})`).join(', ');
 
-// One row per code. to_jsonb(row)->>'col' reads the code columns without naming them, so the query still
-// runs (and finds nothing) when migration 052 has not been applied yet.
+// One row per code. The joins compare the plain columns record_code / demo_code with the code, so the
+// partial unique indexes of migration 052 are used (game_info is 5.7 GB: never wrap the row in to_jsonb()).
+// Migration 052 MUST be applied before this workflow is activated: without it the column does not exist,
+// this query fails and code files are not renamed (legacy name matching only).
 // pick: the game's row in the Record tab (record_bucket 5min/20min, or unset with final Insight / Priority IV;
 // 'none' = removed), Confirmed rows first. Its own bucket is the Record tab's rule; recorder and Confirm are
 // that bucket's. youtube_live: any row of the game already has a YouTube link for that bucket.
@@ -101,8 +103,8 @@ const sql =
   `      AND COALESCE(btrim(CASE pick.bucket WHEN '5min' THEN g2.youtube_5min_link ELSE g2.youtube_20min_link END), '') <> ''\n` +
   `  ) END AS youtube_live\n` +
   `FROM c\n` +
-  `LEFT JOIN game_info r ON to_jsonb(r)->>'record_code' = c.code\n` +
-  `LEFT JOIN game_info d ON to_jsonb(d)->>'demo_code' = c.code\n` +
+  `LEFT JOIN game_info r ON r.record_code = c.code\n` +
+  `LEFT JOIN game_info d ON d.demo_code = c.code\n` +
   `LEFT JOIN LATERAL (\n` +
   `  SELECT ge.id, s.bucket,\n` +
   `    CASE s.bucket WHEN '5min' THEN ge.record_5min_assignee ELSE ge.record_20min_assignee END AS recorder,\n` +
@@ -115,7 +117,7 @@ const sql =
   `  WHERE ge.game_id::text = r.game_id::text\n` +
   `    AND (ge.record_bucket IN ('5min','20min')\n` +
   `         OR (ge.record_bucket IS NULL AND ge.final_conclusion IN ('Insight','Priority IV')))\n` +
-  `  ORDER BY 5 DESC, 4 DESC NULLS LAST, ge.id\n` +
+  `  ORDER BY confirmed DESC, confirmed_at DESC NULLS LAST, ge.id\n` +
   `  LIMIT 1\n` +
   `) pick ON true`;
 

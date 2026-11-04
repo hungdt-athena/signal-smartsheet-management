@@ -72,8 +72,10 @@ if (codeFiles.length === 0) {
   return [{ json: { sql: 'SELECT 1 AS no_codes', codeFiles, files } }];
 }
 
-// to_jsonb(row)->>'col' reads the code columns without naming them, so the query still runs (and finds
-// nothing) when migration 052 has not been applied yet, instead of failing on a missing column.
+// The joins compare the plain columns game_info.demo_code / record_code with the code, so the partial
+// unique indexes of migration 052 are used (game_info is 5.7 GB: never wrap the row in to_jsonb()).
+// Migration 052 MUST be applied before this workflow is activated: without it the column does not exist,
+// this query fails and every file falls back to title matching.
 // One query for every code: which game owns it as a demo code, is it a record code instead, and
 // can the link be written (some evaluation row of that game still has an empty drive_link).
 // link_is_this_file: the game's link already points at this very file, so only the rename is missing.
@@ -86,8 +88,8 @@ const sql =
   `  EXISTS (SELECT 1 FROM game_evaluations e WHERE e.game_id = d.game_id AND e.drive_link LIKE '%' || c.file_id || '%') AS link_is_this_file\n` +
   `FROM json_to_recordset($jf$${lit}$jf$::json)\n` +
   `  AS c(code text, file_id text, drive_link text)\n` +
-  `LEFT JOIN game_info d ON to_jsonb(d)->>'demo_code' = c.code\n` +
-  `LEFT JOIN game_info r ON to_jsonb(r)->>'record_code' = c.code`;
+  `LEFT JOIN game_info d ON d.demo_code = c.code\n` +
+  `LEFT JOIN game_info r ON r.record_code = c.code`;
 
 return [{ json: { sql, codeFiles, files } }];
 '''

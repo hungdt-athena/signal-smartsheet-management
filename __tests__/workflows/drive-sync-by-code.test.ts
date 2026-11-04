@@ -93,10 +93,11 @@ describe('drive-video-link-sync [by-code] workflow', () => {
     })
     it('asks the database for both columns, in one query', () => {
       const sql = run('Split Code Files', FILES)[0].sql as string
-      expect(sql).toMatch(/LEFT JOIN game_info d ON to_jsonb\(d\)->>'demo_code' = c\.code/)
-      expect(sql).toMatch(/LEFT JOIN game_info r ON to_jsonb\(r\)->>'record_code' = c\.code/)
-      // never names the new columns directly: a missing migration 052 must not make the query fail
-      expect(sql).not.toMatch(/\b[dr]\.(demo|record)_code\b/)
+      // plain columns, nothing wrapped around them, so the partial unique indexes (migration 052) are usable
+      expect(sql).toMatch(/LEFT JOIN game_info d ON d\.demo_code = c\.code/)
+      expect(sql).toMatch(/LEFT JOIN game_info r ON r\.record_code = c\.code/)
+      // to_jsonb(row) detoasts every row of the 5.7 GB table: never in the lookup
+      expect(sql).not.toContain('to_jsonb(')
       expect(sql).toContain('"code":"K7M2QX"')
       expect(sql).not.toContain('RACKET')
     })
