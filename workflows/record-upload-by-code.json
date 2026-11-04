@@ -1,0 +1,1041 @@
+{
+  "name": "Append Sheet [by-code]",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -32,
+        -32
+      ],
+      "id": "a714465b-f9a4-4c37-904b-d2e3d6a49dc8",
+      "name": "[NEW] Scanner Trigger"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "='1tf_Kf_wi6wu6mD6vI8CWlIHUhZXsg1TU' in parents and trashed = false\nand mimeType contains 'video/'\nand createdTime >= '{{$now.startOf(\"day\").minus(2, 'days').toISO()}}'\nand createdTime <= '{{$now.startOf(\"day\").plus(1, 'days').toISO()}}'",
+        "limit": 200,
+        "filter": {},
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "dfb70bb8-9b41-4cee-b554-832074812a85",
+      "name": "[NEW] Search Drive",
+      "executeOnce": true,
+      "credentials": {
+        "googleApi": {
+          "id": "5MOpxh9U04GXBIJp",
+          "name": "HungDT-Minisoos"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse filename pattern và extract fields\nconst re = /^([^_]+)_([^_]+)_(\\d+)mins(?:\\..*)?$/i;\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  const id = j.id || j.fileId;\n  let name = j.name || j.fileName;\n  if (!id || !name) continue;\n  name = String(name).trim();\n  const mimeType = j.mimeType || j.mime_type;\n  if (mimeType === 'application/vnd.google-apps.folder') continue;\n  const m = name.match(re);\n  if (!m) continue;\n  const [, part1Raw, part2Raw, minsRaw] = m;\n  const mins = Number(minsRaw);\n  if (!Number.isInteger(mins) || mins <= 0) continue;\n  const part1 = String(part1Raw).trim();\n  const part2 = String(part2Raw).trim();\n  out.push({\n    json: {\n      fileId: id,\n      fileName: name,\n      title: `${part1} ${part2} (${mins} mins)`,\n      part1,\n      part2,\n      mins\n    }\n  });\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "4cab5d47-800c-42dd-97ae-90fa6db43d2d",
+      "name": "[NEW] Parse Filenames"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        672,
+        192
+      ],
+      "id": "16e56e14-a542-40d7-9c58-a36c88987e24",
+      "name": "[NEW] Get Existing Rows",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9G9ZGmNzh2rJQLAS",
+          "name": "MinhLQ Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "fileId",
+              "field2": "fileId"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.compareDatasets",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        64
+      ],
+      "id": "eb573cfb-134d-4d66-8255-227eb469d77d",
+      "name": "[NEW] Compare - Find New"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fileId": "={{ $json.fileId }}",
+            "fileName": "={{ $json.fileName }}",
+            "time": "={{$now.toLocal().format('yyyy-MM-dd HH:mm:ss')}}",
+            "status": "PENDING",
+            "game_id": "={{ $json.game_id }}"
+          },
+          "matchingColumns": [
+            "fileId"
+          ],
+          "schema": [
+            {
+              "id": "fileId",
+              "displayName": "fileId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fileName",
+              "displayName": "fileName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "game_id",
+              "displayName": "game_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1424,
+        48
+      ],
+      "id": "269c5ff7-7f40-43f0-a5af-202c8d785dde",
+      "name": "[NEW] Append PENDING",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9G9ZGmNzh2rJQLAS",
+          "name": "MinhLQ Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "gFnZgEix9Phn3m37",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/gFnZgEix9Phn3m37",
+          "cachedResultName": "Production — Upload Youtube"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1648,
+        48
+      ],
+      "id": "cf99da61-c791-4b63-9203-78134cc4e2dc",
+      "name": "Call 'Upload Youtube'"
+    },
+    {
+      "parameters": {
+        "jsCode": "const count = $('[NEW] Compare - Find New').all().length;\nconst date = $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss');\nreturn [{ json: { date, name: 'append-sheet', status: 'Success', note: count } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        48
+      ],
+      "id": "495e8377-475d-4cde-a6b9-ba052c63ab6c",
+      "name": "Code Log Append"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "flow_log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "name": "={{ $json.name }}",
+            "status": "={{ $json.status }}",
+            "note": "={{ $json.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2096,
+        48
+      ],
+      "id": "21487c94-ebfe-4930-b07f-887e04368cc8",
+      "name": "Log flow_log (append-sheet)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 500347841,
+          "mode": "list",
+          "cachedResultName": "realtime",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=500347841"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "append-sheet",
+            "status": "idle"
+          },
+          "matchingColumns": [
+            "workflow"
+          ],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2320,
+        48
+      ],
+      "id": "9e0f7791-f0c8-4d96-994d-c0128482ec9c",
+      "name": "Set Idle (append-sheet)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "append-sheet",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -48,
+        192
+      ],
+      "id": "010c3b99-1060-42f3-8f03-cdb7787c3052",
+      "name": "Webhook",
+      "webhookId": "aff56009-50fa-41f7-80ee-153cf52c594b"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2528,
+        48
+      ],
+      "id": "533cd8b0-0514-4627-b594-4a78ba45640e",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 5,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "1tf_Kf_wi6wu6mD6vI8CWlIHUhZXsg1TU",
+          "mode": "list",
+          "cachedResultName": "[Signal] Video",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1tf_Kf_wi6wu6mD6vI8CWlIHUhZXsg1TU"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        -240
+      ],
+      "id": "ac36c14c-5beb-40c8-be2f-a8374ca938c8",
+      "name": "Google Drive Trigger",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "ZMDZzSCOielVihYl",
+          "name": "HungDT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Files whose whole name (minus one extension and one \" (n)\" suffix) is a 6-char code go to the code branch.\n// Same rule as codeFromFileName in lib/short-code.ts. Keep the alphabet identical (a test checks it).\nconst CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';\nconst CODE_RE = new RegExp('^[' + CODE_ALPHABET + ']{6}$');\nconst codeFromFileName = name => {\n  const base = String(name)\n    .replace(/\\.[^.]*$/, '')\n    .replace(/\\s*\\(\\d+\\)$/, '')\n    .trim()\n    .toUpperCase();\n  return CODE_RE.test(base) ? base : null;\n};\n\nconst files = $input.all().map(i => i.json);\nconst codeFiles = [];\nfor (const f of files) {\n  const code = f && f.id && f.name ? codeFromFileName(f.name) : null;\n  if (!code) continue;\n  codeFiles.push({ code, id: f.id, name: f.name, mimeType: f.mimeType });\n}\n\nif (codeFiles.length === 0) {\n  return [{ json: { sql: 'SELECT 1 AS no_codes', codeFiles, files } }];\n}\n\n// Only codes go into the SQL (never a file name); quotes are doubled anyway.\nconst q = s => `'${String(s == null ? '' : s).replace(/'/g, \"''\")}'`;\nconst codes = [...new Set(codeFiles.map(c => c.code))];\nconst values = codes.map(c => `(${q(c)})`).join(', ');\n\n// One row per code. to_jsonb(row)->>'col' reads the code columns without naming them, so the query still\n// runs (and finds nothing) when migration 052 has not been applied yet.\n// pick: the game's row in the Record tab (record_bucket 5min/20min, or unset with final Insight / Priority IV;\n// 'none' = removed), Confirmed rows first. Its own bucket is the Record tab's rule; recorder and Confirm are\n// that bucket's. youtube_live: any row of the game already has a YouTube link for that bucket.\nconst sql =\n  `WITH c(code) AS (VALUES ${values})\\n` +\n  `SELECT c.code, r.game_id::text AS game_id, r.title,\\n` +\n  `  (d.game_id IS NOT NULL) AS in_demo,\\n` +\n  `  pick.id AS eval_id, pick.bucket, pick.recorder, pick.confirmed,\\n` +\n  `  CASE WHEN pick.id IS NULL THEN false ELSE EXISTS (\\n` +\n  `    SELECT 1 FROM game_evaluations g2\\n` +\n  `    WHERE g2.game_id::text = r.game_id::text\\n` +\n  `      AND COALESCE(btrim(CASE pick.bucket WHEN '5min' THEN g2.youtube_5min_link ELSE g2.youtube_20min_link END), '') <> ''\\n` +\n  `  ) END AS youtube_live\\n` +\n  `FROM c\\n` +\n  `LEFT JOIN game_info r ON to_jsonb(r)->>'record_code' = c.code\\n` +\n  `LEFT JOIN game_info d ON to_jsonb(d)->>'demo_code' = c.code\\n` +\n  `LEFT JOIN LATERAL (\\n` +\n  `  SELECT ge.id, s.bucket,\\n` +\n  `    CASE s.bucket WHEN '5min' THEN ge.record_5min_assignee ELSE ge.record_20min_assignee END AS recorder,\\n` +\n  `    CASE s.bucket WHEN '5min' THEN ge.record_5min_confirmed_at ELSE ge.record_20min_confirmed_at END AS confirmed_at,\\n` +\n  `    (CASE s.bucket WHEN '5min' THEN ge.record_5min_confirmed_at ELSE ge.record_20min_confirmed_at END) IS NOT NULL AS confirmed\\n` +\n  `  FROM game_evaluations ge\\n` +\n  `  CROSS JOIN LATERAL (SELECT CASE\\n` +\n  `    WHEN ge.record_bucket IN ('5min','20min') THEN ge.record_bucket\\n` +\n  `    WHEN ge.final_conclusion = 'Priority IV' THEN '20min' ELSE '5min' END AS bucket) s\\n` +\n  `  WHERE ge.game_id::text = r.game_id::text\\n` +\n  `    AND (ge.record_bucket IN ('5min','20min')\\n` +\n  `         OR (ge.record_bucket IS NULL AND ge.final_conclusion IN ('Insight','Priority IV')))\\n` +\n  `  ORDER BY 5 DESC, 4 DESC NULLS LAST, ge.id\\n` +\n  `  LIMIT 1\\n` +\n  `) pick ON true`;\n\nreturn [{ json: { sql, codeFiles, files } }];\n"
+      },
+      "id": "e4c5e144-65a0-5454-8cc5-f96bdab34b6d",
+      "name": "Split Record Codes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "f7c061ff-9b74-5856-9bca-6152e1a265d3",
+      "name": "Lookup Record Codes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        896,
+        -560
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "KBZC0RGIJsc8d7GK",
+          "name": "Production - Signal Sense"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 621980228,
+          "mode": "list",
+          "cachedResultName": "ytb_uploaded"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1120,
+        -560
+      ],
+      "id": "6a84ea55-53f4-583f-a0ac-457b41683ade",
+      "name": "Read Upload Rows",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9G9ZGmNzh2rJQLAS",
+          "name": "MinhLQ Google Sheets account"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decide, per code file, what happens. Input: the ytb_uploaded sheet rows (Read Upload Rows).\n//   record code, bucket Confirmed with a recorder, no upload yet -> rename to Title_Recorder_Nmins, legacy path\n//   record code, not in Record / not Confirmed / no recorder     -> held_not_confirmed (file untouched)\n//   record code, the bucket already has a YouTube link, or the\n//     sheet already has an upload of this game + bucket          -> held_youtube_live (file untouched)\n//   code only in demo_code                                       -> wrong_folder\n//   code in neither column                                       -> code_not_found\n//   lookup failed (error item / no rows)                         -> code_lookup_failed, nothing renamed\n// Files that are not codes go on to the legacy path exactly as Search Drive gave them.\nconst split = $('Split Record Codes').first().json;\nconst files = split.files || [];\nconst codeFiles = split.codeFiles || [];\n\nlet lookup = [];\ntry { lookup = $('Lookup Record Codes').all().map(i => i.json); } catch (e) { lookup = []; }\nconst byCode = new Map(lookup.filter(r => r && !r.error && r.code).map(r => [String(r.code), r]));\n\n// Same regex as \"[NEW] Parse Filenames\" and Upload Youtube's \"Parse for Upload\".\nconst re = /^([^_]+)_([^_]+)_(\\d+)mins(?:\\..*)?$/i;\nconst inFlight = new Set();\nfor (const row of $input.all().map(i => i.json)) {\n  if (!row || row.error || !row.game_id) continue;\n  if (String(row.status || '').trim().toUpperCase() === 'FAILED') continue;\n  const m = String(row.fileName || '').trim().match(re);\n  if (m) inFlight.add(`${String(row.game_id).trim()}|${Number(m[3])}`);\n}\n\n// Underscores split the legacy name into title / recorder / minutes, so neither part may contain one.\n// Characters Drive and most tools dislike become a space too; runs of spaces collapse.\nconst clean = s => String(s == null ? '' : s).replace(/[\\/\\\\:*?\"<>|_]/g, ' ').replace(/\\s+/g, ' ').trim();\n\nconst claimed = new Set();\nconst seen = new Set();\nconst renames = [];\nconst notices = [];\nconst missing = [];\n\nfor (const c of codeFiles) {\n  claimed.add(c.id);\n  const r = byCode.get(c.code);\n  if (!r) { missing.push(c); continue; }\n  const base = { code: c.code, file: c.name, file_id: c.id };\n  if (r.game_id == null) {\n    notices.push({ ...base, status: r.in_demo ? 'wrong_folder' : 'code_not_found' });\n    continue;\n  }\n  const gameId = String(r.game_id);\n  const entry = { ...base, game_id: gameId, title: r.title || null };\n  if (r.eval_id == null) {\n    notices.push({ ...entry, status: 'held_not_confirmed', reason: 'the game is not in the Record tab (removed, or not Insight / Priority IV)' });\n    continue;\n  }\n  const bucket = r.bucket === '20min' ? '20min' : '5min';\n  if (!r.confirmed) {\n    notices.push({ ...entry, bucket, status: 'held_not_confirmed', reason: `the ${bucket} record bucket is not Confirmed yet` });\n    continue;\n  }\n  const recorder = clean(r.recorder);\n  if (!recorder) {\n    notices.push({ ...entry, bucket, status: 'held_not_confirmed', reason: `the ${bucket} record bucket has no recorder` });\n    continue;\n  }\n  const mins = bucket === '20min' ? 20 : 5;\n  const key = `${gameId}|${mins}`;\n  let held = null;\n  if (seen.has(key)) held = 'another file for this game and bucket is handled in this run';\n  else if (r.youtube_live) held = `the game already has a ${bucket} YouTube link`;\n  else if (inFlight.has(key)) held = `ytb_uploaded already has a ${bucket} upload of this game`;\n  if (held) {\n    notices.push({ ...entry, bucket, status: 'held_youtube_live', reason: held });\n    continue;\n  }\n  seen.add(key);\n  const title = clean(r.title) || clean(gameId);\n  const m = String(c.name).match(/\\.[^./]*$/);\n  const ext = m ? m[0] : '';\n  renames.push({\n    fileId: c.id, oldName: c.name, newName: `${title}_${recorder}_${mins}mins${ext}`,\n    game_id: gameId, code: c.code, bucket, recorder, mimeType: c.mimeType,\n  });\n}\n\nif (missing.length) {\n  notices.push({\n    status: 'code_lookup_failed', code: missing.map(c => c.code).join(','),\n    file: missing.map(c => c.name).join(', '), file_id: missing.map(c => c.id).join(','),\n  });\n}\n\nconst legacyFiles = files.filter(f => !(f && claimed.has(f.id)));\nreturn [{ json: { renames, notices, legacyFiles } }];\n"
+      },
+      "id": "d50e1c74-82b2-54c1-bf60-9c6aec9865fa",
+      "name": "Classify Record Codes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per file to rename, or a single skip item so the legacy path always continues.\nconst renames = $('Classify Record Codes').first().json.renames || [];\nreturn renames.length ? renames.map(json => ({ json })) : [{ json: { skip: true } }];\n"
+      },
+      "id": "52ee49ee-cc53-5545-977e-437bbdf7c0b1",
+      "name": "Plan Record Renames",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skip !== true }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "4ee03b1b-98db-5b54-9dae-10cf4525fd6c",
+      "name": "Any Record Rename",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1792,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "update",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.fileId }}",
+          "mode": "id"
+        },
+        "newUpdatedFileName": "={{ $json.newName }}",
+        "options": {}
+      },
+      "id": "0b7ad58f-e5c7-5d97-8cf5-878b3225cdd8",
+      "name": "Rename Record File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2016,
+        -672
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "ZMDZzSCOielVihYl",
+          "name": "HungDT"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Back to one stream for \"[NEW] Parse Filenames\": the non-code files as Search Drive gave them, plus every\n// code file whose rename went through, under its new name. A failed rename (the Drive node continues on\n// error) keeps its code name in Drive and is simply retried on the next run.\nconst cls = $('Classify Record Codes').first().json;\nconst planned = $('Plan Record Renames').all().map(i => i.json);\nconst outs = $input.all().map(i => i.json);\nconst files = (cls.legacyFiles || []).map(f => ({ ...f, game_id: '' }));\nplanned.forEach((p, i) => {\n  if (!p || p.skip) return;\n  const o = outs[i];\n  if (!o || o.error || (o.id && o.id !== p.fileId)) return;\n  files.push({ id: p.fileId, name: p.newName, mimeType: p.mimeType, game_id: p.game_id });\n});\nreturn files.map(json => ({ json }));\n"
+      },
+      "id": "d60702a5-d407-5296-8f8f-cd5157d65ec9",
+      "name": "Collect Record Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// \"[NEW] Parse Filenames\" keeps only its own fields; put game_id back for \"[NEW] Append PENDING\".\nconst ids = new Map($('Collect Record Files').all().map(i => [String(i.json.id), i.json.game_id || '']));\nreturn $input.all().map(i => ({ json: { ...i.json, game_id: ids.get(String(i.json.fileId)) || '' } }));\n"
+      },
+      "id": "58cd2740-c135-50ca-bd41-c85ba3bee2d5",
+      "name": "Attach game_id",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One flow_log row + one Chat message per code file left as it is. A file is reported once per status:\n// the workflow lists the last days of the folder on every run, and a held file would otherwise be\n// reported again each time. (Workflow static data is kept for production runs only.)\nconst notices = $('Classify Record Codes').first().json.notices || [];\nlet store = null;\ntry { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }\nconst sent = new Set(store && Array.isArray(store.recordNoticeKeys) ? store.recordNoticeKeys : []);\n\nconst out = [];\nfor (const n of notices) {\n  const key = `${n.status}|${n.file_id}`;\n  if (sent.has(key)) continue;\n  sent.add(key);\n  const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';\n  const mins = n.bucket === '20min' ? '20' : '5';\n  let text;\n  if (n.status === 'code_not_found') {\n    text = `append-sheet: ${n.file} is named by code ${n.code}, which no game has as a record code. File left as it is; check the code in the Record tab and rename the file.`;\n  } else if (n.status === 'wrong_folder') {\n    text = `append-sheet: ${n.file} carries the DEMO code ${n.code}, not a record code. File left as it is; a record video needs the record code shown in the Record tab.`;\n  } else if (n.status === 'held_not_confirmed') {\n    text = `append-sheet: ${n.file} (code ${n.code}) is for ${label}, but ${n.reason}. File left as it is; it is processed on a later run once the record bucket is Confirmed with a recorder.`;\n  } else if (n.status === 'held_youtube_live') {\n    text = `append-sheet: ${n.file} (code ${n.code}) is for ${label}: ${n.reason}. Not uploaded twice. To upload this file, clear the old ${mins} min YouTube link in the Record tab and remove its row from ytb_uploaded; the file is processed on a later run.`;\n  } else {\n    text = `append-sheet: could not look up record codes for ${n.file}. Files left as they are; they are retried on the next run.`;\n  }\n  out.push({ json: {\n    name: 'append-sheet',\n    status: n.status,\n    note: JSON.stringify({ file: n.file, code: n.code, game_id: n.game_id || null, bucket: n.bucket || null, reason: n.reason || null }),\n    text,\n  } });\n}\nif (store) store.recordNoticeKeys = [...sent].slice(-1000);\nreturn out;\n"
+      },
+      "id": "6edd51d0-0e26-536c-8a7d-f1b56682b4a1",
+      "name": "Record Code Notices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg",
+          "mode": "list",
+          "cachedResultName": "[Signal] Logging",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "flow_log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1yb558PpmunJcdDYCyVzdDpBfKDiIArMBG4IBI-eR0dg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "name": "={{ $json.name }}",
+            "status": "={{ $json.status }}",
+            "note": "={{ $json.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1792,
+        -336
+      ],
+      "id": "73d3cb6c-bc41-5956-8a0c-7dfbbfd6dcec",
+      "name": "Log Record Notices",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UMl5XCc7aOcf9yi3",
+          "name": "HandoverRequest-HungDT"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "spaceId": "spaces/AAQAYTKWM1I",
+        "jsonParameters": true,
+        "messageJson": "={{ JSON.stringify({ text: $json.text }) }}",
+        "additionalFields": {}
+      },
+      "id": "34617fd4-e03a-52e8-90bb-dd3e5ca65707",
+      "name": "Chat Record Notice",
+      "type": "n8n-nodes-base.googleChat",
+      "typeVersion": 1,
+      "position": [
+        1792,
+        -176
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "5MOpxh9U04GXBIJp",
+          "name": "HungDT-Minisoos"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "[NEW] Scanner Trigger": {
+      "main": [
+        []
+      ]
+    },
+    "[NEW] Search Drive": {
+      "main": [
+        [
+          {
+            "node": "Split Record Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Parse Filenames": {
+      "main": [
+        [
+          {
+            "node": "Attach game_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Get Existing Rows": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Compare - Find New",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "[NEW] Compare - Find New": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Append PENDING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[NEW] Append PENDING": {
+      "main": [
+        [
+          {
+            "node": "Call 'Upload Youtube'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'Upload Youtube'": {
+      "main": [
+        [
+          {
+            "node": "Code Log Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Log Append": {
+      "main": [
+        [
+          {
+            "node": "Log flow_log (append-sheet)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log flow_log (append-sheet)": {
+      "main": [
+        [
+          {
+            "node": "Set Idle (append-sheet)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Search Drive",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "[NEW] Get Existing Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Idle (append-sheet)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Search Drive",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "[NEW] Get Existing Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Record Codes": {
+      "main": [
+        [
+          {
+            "node": "Lookup Record Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Record Codes": {
+      "main": [
+        [
+          {
+            "node": "Read Upload Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Upload Rows": {
+      "main": [
+        [
+          {
+            "node": "Classify Record Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Record Codes": {
+      "main": [
+        [
+          {
+            "node": "Plan Record Renames",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Record Code Notices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Record Renames": {
+      "main": [
+        [
+          {
+            "node": "Any Record Rename",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Record Rename": {
+      "main": [
+        [
+          {
+            "node": "Rename Record File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Collect Record Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rename Record File": {
+      "main": [
+        [
+          {
+            "node": "Collect Record Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Record Files": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Parse Filenames",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach game_id": {
+      "main": [
+        [
+          {
+            "node": "[NEW] Compare - Find New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Code Notices": {
+      "main": [
+        [
+          {
+            "node": "Log Record Notices",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Chat Record Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
