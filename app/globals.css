@@ -666,6 +666,7 @@ body {
 .badge.neutral { background: var(--surface-3); color: var(--muted); }
 .badge.neutral-strong { background: #e2e5ea; color: #3a4150; }
 .badge.info    { background: var(--accent-weak); color: var(--accent-strong); }
+.badge.queued  { background: var(--fc-p5-bg); color: var(--fc-p5); }
 
 /* Clickable YouTube link/badge affordance (Record tab). */
 .yt-link { cursor: pointer; }

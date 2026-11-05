@@ -1,4 +1,4 @@
-import { normalizeTitle, durationBucket, ytKey, buildYtMap, ytLookup, resolveYtMatches } from '@/lib/ytb-match'
+import { normalizeTitle, durationBucket, ytKey, buildYtMap, ytLookup, resolveYtMatches, resolveVideoMatches } from '@/lib/ytb-match'
 
 describe('lib/ytb-match', () => {
   it('normalizeTitle strips accents/case/extra spaces', () => {
@@ -204,5 +204,70 @@ describe('resolveYtMatches', () => {
       [up('Car Loop', '20', 'KietCD', 'a', '2026-10-07 09:02:02')],
     )
     expect(out.get(1)?.id).toBe('a')
+  })
+})
+
+describe('resolveVideoMatches (Recorded vs Uploaded)', () => {
+  const row = (over: Partial<{ gameTitle: string; youtubeId: string; duration: string; time: string; pic: string; gameId: string; fileId: string }>) =>
+    ({ gameTitle: '', youtubeId: '', duration: '5', time: '2026-11-05 10:00:00', pic: 'QuangVN', fileId: 'f', ...over })
+
+  it('a file with a youtubeId is Uploaded', () => {
+    const out = resolveVideoMatches([{ key: 1, title: 'Block Merge 2048', bucket: '5min' }],
+      [row({ gameTitle: 'Block Merge 2048', youtubeId: 'yt1' })])
+    expect(out.get(1)).toMatchObject({ uploaded: true, id: 'yt1' })
+  })
+
+  it('a queued file (no youtubeId) named after the game is Recorded', () => {
+    const out = resolveVideoMatches([{ key: 1, title: 'Block Merge 2048', bucket: '5min' }],
+      [row({ gameTitle: 'Block Merge 2048', fileId: 'a' })])
+    expect(out.get(1)).toMatchObject({ uploaded: false, id: '' })
+  })
+
+  it('a queued file prefers the game\'s own bucket over the other one', () => {
+    const out = resolveVideoMatches([{ key: 1, title: 'Piggy Out!', bucket: '5min' }], [
+      row({ gameTitle: 'Piggy Out!', duration: '20', pic: 'Wrong', fileId: 'long' }),
+      row({ gameTitle: 'Piggy Out!', duration: '5', pic: 'Right', fileId: 'short' }),
+    ])
+    expect(out.get(1)).toMatchObject({ uploaded: false, pic: 'Right' })
+  })
+
+  it('a file named by record code matches by game_id even when the title differs', () => {
+    const out = resolveVideoMatches([{ key: 1, gameId: 'com.x.arrow', title: 'ArrowIt: Puzzle', bucket: '5min' }],
+      [row({ gameTitle: 'Totally Different', gameId: 'com.x.arrow', fileId: 'a' })])
+    expect(out.get(1)).toMatchObject({ uploaded: false })
+  })
+
+  it('game_id picks the right store build when two games share a title', () => {
+    const out = resolveVideoMatches([
+      { key: 1, gameId: 'ios.1', title: 'Twin', bucket: '5min' },
+      { key: 2, gameId: 'and.2', title: 'Twin', bucket: '5min' },
+    ], [row({ gameTitle: 'Twin', gameId: 'and.2', youtubeId: 'yt-and' })])
+    expect(out.get(2)).toMatchObject({ uploaded: true, id: 'yt-and' })
+  })
+
+  it('Uploaded wins over a queued file for the same game', () => {
+    const out = resolveVideoMatches([{ key: 1, title: 'Rail Rangers', bucket: '20min' }], [
+      row({ gameTitle: 'Rail Rangers', duration: '20', fileId: 'q' }),
+      row({ gameTitle: 'Rail Rangers', duration: '20', youtubeId: 'yt9', fileId: 'u' }),
+    ])
+    expect(out.get(1)).toMatchObject({ uploaded: true, id: 'yt9' })
+  })
+
+  it('a queued file whose title an uploaded game owns is not guessed onto another game', () => {
+    const out = resolveVideoMatches([
+      { key: 1, title: 'Bus Jam', bucket: '5min' },
+      { key: 2, title: 'Bus Jam Deluxe Edition', bucket: '5min', recorder: 'QuangVN' },
+    ], [
+      row({ gameTitle: 'Bus Jam', youtubeId: 'yt1', fileId: 'u' }),
+      row({ gameTitle: 'Bus Jam', fileId: 'q' }),
+    ])
+    expect(out.get(1)).toMatchObject({ uploaded: true })
+    expect(out.get(2)).toBeUndefined()
+  })
+
+  it('a failed upload still counts as Recorded: the file exists', () => {
+    const out = resolveVideoMatches([{ key: 1, title: 'Pop Busters', bucket: '20min' }],
+      [row({ gameTitle: 'Pop Busters', duration: '20', fileId: 'x' })])
+    expect(out.get(1)?.uploaded).toBe(false)
   })
 })

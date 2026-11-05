@@ -1,7 +1,7 @@
 import { recordViewRows, recordBucketOf, toYtGame } from '@/lib/record-view-games'
 import { getCurrentBatch } from '@/lib/current-batch'
 import { loadBatchSpans } from '@/lib/report-batches'
-import { resolveYtMatches, normalizeName, type Bucket, type YtbMatchRow } from '@/lib/ytb-match'
+import { resolveVideoMatches, normalizeName, type Bucket, type YtbMatchRow } from '@/lib/ytb-match'
 
 export interface RecordQueueGame {
   id: number
@@ -34,7 +34,7 @@ export async function recordingQueue(recorder: string, ytRows: YtbMatchRow[]): P
   if (!who) return []
   const [rows, batches] = await Promise.all([recordViewRows(), recordQueueBatches()])
   if (batches.length === 0) return []
-  const resolved = resolveYtMatches(rows.map(toYtGame), ytRows)
+  const resolved = resolveVideoMatches(rows.map(toYtGame), ytRows)
   const out: RecordQueueGame[] = []
   for (const r of rows) {
     if (!r.confirmed || !r.batch || !batches.includes(r.batch) || resolved.has(r.id)) continue

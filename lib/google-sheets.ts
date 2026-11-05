@@ -17,6 +17,8 @@ export interface YtbRow {
   gameTitle: string
   pic: string
   duration: string
+  // Col I: set only for a file named by record code (see the by-code Drive flow).
+  gameId?: string
 }
 
 function getAuthClient() {
@@ -33,7 +35,7 @@ export async function readYtbUploaded(): Promise<YtbRow[]> {
   const sheets = google.sheets({ version: 'v4', auth })
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${YTB_SHEET}!A:H`,
+    range: `${YTB_SHEET}!A:I`,
   })
   const rows = res.data.values ?? []
   // Skip header row (index 0), data starts at index 1 → sheet row 2
@@ -47,6 +49,7 @@ export async function readYtbUploaded(): Promise<YtbRow[]> {
     gameTitle: row[5] ?? '',
     pic:       row[6] ?? '',
     duration:  row[7] ?? '',
+    gameId:    row[8] ?? '',
   })).filter(r => r.fileId || r.fileName)  // skip fully empty rows
 }
 

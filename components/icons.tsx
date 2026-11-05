@@ -24,3 +24,16 @@ export function UserIcon({ size = 11 }: { size?: number }) {
     </svg>
   )
 }
+
+// A drawn play triangle for "open on YouTube". The ▶ character it replaces is a
+// font glyph: macOS draws it small and rounded, Windows falls back to a heavy,
+// emoji-style arrow. An SVG looks the same everywhere and takes the text colour.
+export function PlayIcon({ size = 9 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"
+      stroke="currentColor" strokeWidth="3" strokeLinejoin="round"
+      style={{ flexShrink: 0 }} aria-hidden="true">
+      <path d="M6 4l14 8-14 8z" />
+    </svg>
+  )
+}

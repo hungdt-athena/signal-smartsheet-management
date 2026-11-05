@@ -55,10 +55,12 @@ export const FINAL_CHART_COLORS: Record<string, string> = {
 }
 
 /** Record status: same badge on the Record tab and in the eval panel. */
-export type RecordStatus = 'pending' | 'draft' | 'recording' | 'recorded'
+export type RecordStatus = 'pending' | 'draft' | 'recording' | 'recorded' | 'uploaded'
 export const RECORD_STATUS_BADGE: Record<RecordStatus, { cls: string; label: string }> = {
   pending:   { cls: 'idle', label: 'Pending' },
   draft:     { cls: 'running', label: 'Draft' },
   recording: { cls: 'info', label: 'Recording' },
-  recorded:  { cls: 'success', label: 'Recorded' },
+  // Recorded = the file is in the YouTube tab; Uploaded = it has a youtubeId.
+  recorded:  { cls: 'queued', label: 'Recorded' },
+  uploaded:  { cls: 'success', label: 'Uploaded' },
 }

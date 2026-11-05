@@ -12,6 +12,11 @@ export interface YtbMatchRow {
   duration: string
   time: string
   pic?: string
+  // The game this file was named for, when it was named by record code (the
+  // by-code Drive flow writes it to the sheet's `game_id` column). Blank for a
+  // file the evaluator named by hand.
+  gameId?: string
+  fileId?: string
 }
 
 // A resolved match: the YouTube id, when the file was uploaded (sheet `time`),
@@ -162,6 +167,9 @@ export function ytLookup(map: Map<string, YtMatch>, title: string, bucket: Bucke
 
 export interface YtGame {
   key: number | string
+  // game_evaluations.game_id: lets a code-named file find its game without
+  // guessing from the title.
+  gameId?: string
   title: string
   bucket: Bucket
   recorder?: string | null   // assignee of the game's own bucket
@@ -302,5 +310,85 @@ export function resolveYtMatches(games: YtGame[], rows: YtbMatchRow[]): Map<numb
       out.set(p.game.key, { id: row.youtubeId, time: row.time || '', pic: row.pic || '', approx: row.gameTitle })
     }
   }
+  return out
+}
+
+// ── Recorded vs uploaded ─────────────────────────────────────────────────────
+//
+// Two stages, both read off the same sheet:
+//   uploaded  a row with a youtubeId: the video is on YouTube.
+//   recorded  a row WITHOUT one: the file reached the YouTube tab (queued,
+//             processing, or failed) but is not on YouTube yet.
+// A file is matched to its game by game_id when it was named by record code, and
+// by title (exact, then the approximate rules above) when an evaluator named it
+// after the game. Uploaded always wins over recorded for the same game.
+
+export interface VideoMatch extends YtMatch {
+  /** true = on YouTube (id is set); false = only in the YouTube tab (id is ''). */
+  uploaded: boolean
+}
+
+function earliestRow(rows: YtbMatchRow[]): YtbMatchRow {
+  return rows.reduce((a, b) => (timeRank(b.time) < timeRank(a.time) ? b : a))
+}
+
+// One stage: game_id first (exact, no guessing), then the title rules for the
+// games left. Queued rows carry a throwaway id so the title resolver, which only
+// looks at rows that have one, can still pair them.
+function matchStage(games: YtGame[], rows: YtbMatchRow[], uploaded: boolean): Map<number | string, VideoMatch> {
+  const out = new Map<number | string, VideoMatch>()
+  const used = new Set<YtbMatchRow>()
+  const toMatch = (r: YtbMatchRow, approx?: string): VideoMatch =>
+    ({ id: uploaded ? r.youtubeId : '', time: r.time || '', pic: r.pic || '', uploaded, ...(approx ? { approx } : {}) })
+
+  for (const g of games) {
+    if (!g.gameId) continue
+    const hits = rows.filter(r => r.gameId === g.gameId && durationBucket(r.duration) === g.bucket)
+    if (hits.length === 0) continue
+    const row = earliestRow(hits)
+    used.add(row)
+    out.set(g.key, toMatch(row))
+  }
+
+  const rest = games.filter(g => !out.has(g.key))
+  if (rest.length === 0) return out
+  const pool = rows
+    .filter(r => !used.has(r) && r.gameTitle)
+    .map((r, i) => ({ ...r, youtubeId: uploaded ? r.youtubeId : `~queued:${r.fileId || i}` }))
+  for (const [key, m] of Array.from(resolveYtMatches(rest, pool))) {
+    out.set(key, { id: uploaded ? m.id : '', time: m.time, pic: m.pic, uploaded, ...(m.approx ? { approx: m.approx } : {}) })
+  }
+  return out
+}
+
+export function resolveVideoMatches(games: YtGame[], rows: YtbMatchRow[]): Map<number | string, VideoMatch> {
+  const up = matchStage(games, rows.filter(r => r.youtubeId), true)
+
+  const left = games.filter(g => !up.has(g.key))
+  if (left.length === 0) return up
+  // A queued file whose title is already an uploaded game's is that game's next
+  // upload, not a stranger for the leftover games to guess at. A file named by
+  // record code for a leftover game is never dropped.
+  const owned = new Set<string>()
+  for (const g of games) {
+    if (!up.has(g.key)) continue
+    owned.add(ytKey(g.title, g.bucket))
+    const lk = looseKey(g.title, g.bucket)
+    if (lk) owned.add(lk)
+  }
+  const leftIds = new Set(left.map(g => g.gameId).filter((v): v is string => !!v))
+  const queued = rows.filter(r => {
+    if (r.youtubeId) return false
+    if (!r.gameId && !r.gameTitle) return false
+    if (r.gameId && leftIds.has(r.gameId)) return true
+    if (!r.gameTitle) return false
+    const bucket = durationBucket(r.duration)
+    const lk = looseKey(r.gameTitle, bucket)
+    return !owned.has(ytKey(r.gameTitle, bucket)) && !(lk && owned.has(lk))
+  })
+  const rec = matchStage(left, queued, false)
+
+  const out = new Map(up)
+  for (const [k, v] of Array.from(rec)) out.set(k, v)
   return out
 }

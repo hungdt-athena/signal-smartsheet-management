@@ -19,7 +19,7 @@ import { toast } from '@/lib/toast'
 import { CloseButton } from '@/components/ui/CloseButton'
 import { Switch } from '@/components/ui/Switch'
 import { IconX } from '@/components/ui/SearchInput'
-import { LockIcon, UserIcon } from '@/components/icons'
+import { LockIcon, UserIcon, PlayIcon } from '@/components/icons'
 import { GameAlikeField } from '@/components/GameAlikeField'
 import { DemoLinkWarning } from '@/components/DemoLinkWarning'
 import { type ReviewChange, type ReviewTag } from './TrendTagReview'
@@ -403,7 +403,7 @@ function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: 
                   <a href={step.href} target="_blank" rel="noopener noreferrer" title="Open on YouTube"
                     className="yt-link"
                     style={{ fontSize: 12, fontWeight: 600, color: 'var(--good)', textDecoration: 'none' }}>
-                    ▶ {step.label}
+                    <PlayIcon /> {step.label}
                   </a>
                 ) : (
                   <span style={{ fontSize: 12, fontWeight: isCurrent || isCompleted ? 600 : 500, color: isCurrent ? 'var(--text)' : isCompleted ? 'var(--muted)' : 'var(--faint)' }}>
@@ -450,21 +450,23 @@ function ProgressTracker({ ev, yt5, yt20, uploadedAt }: { ev: EvalDetail; yt5?: 
   )
 }
 
-// Same four states and badges as the Record tab (lib/conclusion-badge.ts):
-// uploaded → Recorded, no recorder → Pending, recorder confirmed → Recording,
-// recorder picked but not confirmed → Draft.
-function recordStatusOf(youtubeId: string | undefined, assignee: string | null, confirmed: boolean): RecordStatus {
-  if (youtubeId) return 'recorded'
+// Same states and badges as the Record tab (lib/conclusion-badge.ts):
+// on YouTube → Uploaded, file in the YouTube tab but not uploaded → Recorded,
+// no recorder → Pending, recorder confirmed → Recording, recorder picked but
+// not confirmed → Draft.
+function recordStatusOf(youtubeId: string | undefined, queued: boolean, assignee: string | null, confirmed: boolean): RecordStatus {
+  if (youtubeId) return 'uploaded'
+  if (queued && assignee) return 'recorded'
   if (!assignee) return 'pending'
   return confirmed ? 'recording' : 'draft'
 }
 
 function RecordBadge({ status, youtubeId }: { status: RecordStatus; youtubeId?: string }) {
   const b = RECORD_STATUS_BADGE[status]
-  if (status === 'recorded' && youtubeId) {
+  if (status === 'uploaded' && youtubeId) {
     return (
       <a className={`badge ${b.cls} yt-link`} href={`https://www.youtube.com/watch?v=${youtubeId}`} target="_blank" rel="noopener noreferrer"
-        title="Open on YouTube" style={{ textDecoration: 'none' }}>▶ {b.label}</a>
+        title="Open on YouTube" style={{ textDecoration: 'none' }}><PlayIcon /> {b.label}</a>
     )
   }
   return <span className={`badge ${b.cls}`}>{b.label}</span>
@@ -502,19 +504,25 @@ interface Props {
 // long after this screen matters — recording happens after final conclusion, so
 // a mirror minutes behind is indistinguishable from live here. The Record tab,
 // which actually edits these rows, still talks to the sheet directly.
-function useYtbUploads(): Map<string, YtMatch> {
-  const [map, setMap] = useState<Map<string, YtMatch>>(new Map())
+function useYtbUploads(): { ytMap: Map<string, YtMatch>; queuedMap: Map<string, YtMatch> } {
+  const [maps, setMaps] = useState<{ ytMap: Map<string, YtMatch>; queuedMap: Map<string, YtMatch> }>(
+    { ytMap: new Map(), queuedMap: new Map() })
   useEffect(() => {
     fetch('/api/ytb-uploads', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : [])
-      .then((rows: Array<{ gameTitle: string; youtubeId: string; duration: string; time: string }>) => setMap(buildYtMap(rows)))
+      .then((rows: Array<{ gameTitle: string; youtubeId: string; duration: string; time: string }>) => setMaps({
+        ytMap: buildYtMap(rows),
+        // Rows without a youtubeId are files that reached the YouTube tab but are not
+        // uploaded yet; the placeholder id only makes buildYtMap keep them.
+        queuedMap: buildYtMap(rows.filter(r => !r.youtubeId).map(r => ({ ...r, youtubeId: '~queued' }))),
+      }))
       .catch(() => {})
   }, [])
-  return map
+  return maps
 }
 
 export default function EvalDetailPanel({ initialGameId, gameList, category, role, userName, readOnly, canAssignRecords, hideRecordSections, showFinalConclusion, logContext, onNavigate, onSaved, onClose }: Props) {
-  const ytMap = useYtbUploads()
+  const { ytMap, queuedMap } = useYtbUploads()
   const [currentGameId, setCurrentGameId] = useState(initialGameId)
   // How long the current game has been on screen (evaluation_log.view_s). A ref, not
   // state: it changes on every input and must never re-render the panel.
@@ -942,6 +950,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // 5/20-min recordings are always YouTube uploads, matched live (title + duration).
   const m5 = ev ? ytLookup(ytMap, ev.title, '5min') : undefined
   const m20 = ev ? ytLookup(ytMap, ev.title, '20min') : undefined
+  const queued5 = !!ev && !!ytLookup(queuedMap, ev.title, '5min')
+  const queued20 = !!ev && !!ytLookup(queuedMap, ev.title, '20min')
   // Each bucket shows its own round's video. The live lookup only matches by
   // title; near matches (typo, dropped subtitle) need every Record game at once,
   // so they come from the link the reconcile stored for that bucket, which also
@@ -1675,7 +1685,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 5 min</span>
-                <RecordBadge status={recordStatusOf(yt5, ev.record_5min_assignee, confirmed5)} youtubeId={yt5} />
+                <RecordBadge status={recordStatusOf(yt5, queued5, ev.record_5min_assignee, confirmed5)} youtubeId={yt5} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1701,7 +1711,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 <div className="field" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
                   <span className="label">YouTube Link</span>
                   {yt5
-                    ? <a className="yt-link" href={`https://www.youtube.com/watch?v=${yt5}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--accent)' }}>▶ youtu.be/{yt5}</a>
+                    ? <a className="yt-link" href={`https://www.youtube.com/watch?v=${yt5}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--accent)' }}><PlayIcon /> youtu.be/{yt5}</a>
                     : <span style={{ fontSize: 13, color: 'var(--faint)' }}>Not uploaded yet</span>}
                 </div>
               </div>
@@ -1713,7 +1723,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
                 <span className="card-label">Record 20 min</span>
-                <RecordBadge status={recordStatusOf(yt20, ev.record_20min_assignee, confirmed20)} youtubeId={yt20} />
+                <RecordBadge status={recordStatusOf(yt20, queued20, ev.record_20min_assignee, confirmed20)} youtubeId={yt20} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1739,7 +1749,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 <div className="field" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
                   <span className="label">YouTube Link</span>
                   {yt20
-                    ? <a className="yt-link" href={`https://www.youtube.com/watch?v=${yt20}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--accent)' }}>▶ youtu.be/{yt20}</a>
+                    ? <a className="yt-link" href={`https://www.youtube.com/watch?v=${yt20}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--accent)' }}><PlayIcon /> youtu.be/{yt20}</a>
                     : <span style={{ fontSize: 13, color: 'var(--faint)' }}>Not uploaded yet</span>}
                 </div>
               </div>

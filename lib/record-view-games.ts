@@ -46,6 +46,7 @@ export function toYtGame(row: RecordViewRow): YtGame {
   const bucket = recordBucketOf(row)
   return {
     key: row.id,
+    gameId: row.game_id,
     title: row.title,
     bucket,
     recorder: bucket === '5min' ? row.record_5min_assignee : row.record_20min_assignee,

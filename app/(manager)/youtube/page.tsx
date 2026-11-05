@@ -5,10 +5,10 @@ import { useSession } from 'next-auth/react'
 import { StyledSelect } from '@/components/StyledSelect'
 import { BatchPicker, batchPickLabel, parseBatchPick } from '@/components/ui/BatchPicker'
 import { batchLabelsOfMonth } from '@/lib/batch-month'
-import { resolveYtMatches, type YtGame, type YtMatch } from '@/lib/ytb-match'
+import { resolveVideoMatches, type YtGame, type VideoMatch } from '@/lib/ytb-match'
 import { prettyConclusion, BUCKETS } from '@/lib/buckets'
 import { useConfig } from '@/hooks/useConfig'
-import { LockIcon, UserIcon } from '@/components/icons'
+import { LockIcon, UserIcon, PlayIcon } from '@/components/icons'
 import EvalDetailPanel from '@/components/EvalDetailPanel'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
 import { SHORTCUT_EVALUATOR } from '@/lib/system-accounts'
@@ -37,6 +37,7 @@ interface YtbRow {
   gameTitle: string
   pic: string
   duration: string
+  gameId?: string
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -730,11 +731,12 @@ function recorderOf(item: ShortListItem): string {
   return (effectiveBucket(item) === '20min' ? item.record_20min_assignee : item.record_5min_assignee) || ''
 }
 
-function recordStatus(item: ShortListItem, ytMap: Map<number | string, YtMatch>): { status: RecordStatus; youtubeId?: string; approx?: string } {
+function recordStatus(item: ShortListItem, ytMap: Map<number | string, VideoMatch>): { status: RecordStatus; youtubeId?: string; approx?: string } {
   const bucket = effectiveBucket(item)
   const assignee = bucket === '20min' ? item.record_20min_assignee : item.record_5min_assignee
   const yt = ytMap.get(item.id)
-  if (yt) return { status: 'recorded', youtubeId: yt.id, approx: yt.approx }
+  // A file in the YouTube tab = Recorded; once it has a youtubeId = Uploaded.
+  if (yt) return yt.uploaded ? { status: 'uploaded', youtubeId: yt.id, approx: yt.approx } : { status: 'recorded', approx: yt.approx }
   if (!assignee) return { status: 'pending' }
   if (item.record_confirmed_at) return { status: 'recording' }
   return { status: 'draft' }
@@ -742,7 +744,7 @@ function recordStatus(item: ShortListItem, ytMap: Map<number | string, YtMatch>)
 
 function RecordStatusBadge({ status, youtubeId, approx }: { status: RecordStatus; youtubeId?: string; approx?: string }) {
   const s = RECORD_STATUS_BADGE[status]
-  if (status === 'recorded' && youtubeId) {
+  if (status === 'uploaded' && youtubeId) {
     return (
       <a
         href={`https://www.youtube.com/watch?v=${youtubeId}`}
@@ -753,11 +755,14 @@ function RecordStatusBadge({ status, youtubeId, approx }: { status: RecordStatus
         className={`badge ${s.cls} yt-link`}
         style={{ textDecoration: 'none', cursor: 'pointer' }}
       >
-        ▶ {s.label}
+        <PlayIcon /> {s.label}
       </a>
     )
   }
-  return <span className={`badge ${s.cls}`}>{s.label}</span>
+  const title = status === 'recorded'
+    ? (approx ? `Matched to file "${approx}" in the YouTube tab, not uploaded yet` : 'File is in the YouTube tab, not uploaded yet')
+    : undefined
+  return <span className={`badge ${s.cls}`} title={title}>{s.label}</span>
 }
 
 // ── Record Table ─────────────────────────────────────────────────────────────
@@ -774,7 +779,7 @@ function RecordTable({
   recorders: string[]
   onAssign: (item: ShortListItem, name: string) => void
   onReset: (id: number) => void
-  ytMap: Map<number | string, YtMatch>
+  ytMap: Map<number | string, VideoMatch>
   onClickGame: (gameId: string) => void
   /** The game open in the panel; its row is highlighted. */
   activeGameId: string | null
@@ -791,11 +796,11 @@ function RecordTable({
   // Rows Confirmed before codes existed (or whose code write failed) get one from the server.
   const lazyRows = useMemo(() => items.map(item => {
     const s = recordStatus(item, ytMap).status
-    return { id: item.id, game_id: item.game_id, record_code: item.record_code, locked: s === 'recording' || s === 'recorded' }
+    return { id: item.id, game_id: item.game_id, record_code: item.record_code, locked: s === 'recording' || s === 'recorded' || s === 'uploaded' }
   }), [items, ytMap])
   const lazyCodes = useLazyRecordCodes(lazyRows)
   return (
-    <div className={`card rec-table${dragOver ? ' is-drop' : ''}`}>
+    <div className={`card rec-table${dragOver ? ' is-drop' : ''}`} style={{ flex: 1, minWidth: 0 }}>
       <div className="rec-table-head">
         <span className="card-label">{label}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -831,7 +836,7 @@ function RecordTable({
               const { status, youtubeId, approx } = recordStatus(item, ytMap)
               // Once confirmed (recording) — or already recorded — the recorder
               // is locked; no reassigning.
-              const assignLocked = status === 'recording' || status === 'recorded'
+              const assignLocked = status === 'recording' || status === 'recorded' || status === 'uploaded'
               const confirming = confirmRemoveId === item.id
               return (
                 <tr key={item.id} className={`tbl-row-premium${item.game_id === activeGameId ? ' tbl-row-active' : ''}`}
@@ -897,8 +902,8 @@ function RecordTable({
                       </td>
                       {isManager && (
                         <td onClick={e => e.stopPropagation()} style={{ textAlign: 'center' }}>
-                          {status === 'recorded' ? (
-                            <span title="Recorded, cannot remove" style={{ color: 'var(--faint)', display: 'inline-flex' }}><LockIcon /></span>
+                          {status === 'recorded' || status === 'uploaded' ? (
+                            <span title={status === 'uploaded' ? 'Uploaded, cannot remove' : 'Recorded, cannot remove'} style={{ color: 'var(--faint)', display: 'inline-flex' }}><LockIcon /></span>
                           ) : (
                             <button type="button" className="btn btn-sm btn-ghost" title="Remove from list" aria-label="Remove from list"
                               onClick={() => onRemoveRequest && onRemoveRequest(item.id)}><IconX size={14} /></button>
@@ -1437,7 +1442,7 @@ function RecordTab() {
 
   // Reset a confirmed (recording) game back to draft so it can be reassigned.
   // Optimistic: clear record_confirmed_at → status becomes draft → dropdown
-  // unlocks. Only offered for 'recording' (never 'recorded').
+  // unlocks. Only offered for 'recording' (never 'recorded' or 'uploaded').
   const resetRecording = useCallback(async (id: number) => {
     setData(prev => prev.map(d => d.id === id ? { ...d, record_confirmed_at: null } : d))
     try {
@@ -1468,8 +1473,10 @@ function RecordTab() {
     moveBucket(dragged.id, target)
   }, [moveBucket])
 
-  // Each game's YouTube upload: exact title+bucket first, then the closest
-  // unclaimed upload (typo, dropped subtitle, wrong duration) — see lib/ytb-match.
+  // Each game's video in the YouTube tab: by game_id when the file was named by
+  // record code, else exact title+bucket, then the closest unclaimed file (typo,
+  // dropped subtitle, wrong duration) — see lib/ytb-match. Uploaded when it has a
+  // youtubeId, Recorded when it is still queued.
   // Resolved over every Record-view game, not just this batch or recorder: an
   // upload is "unclaimed" only if no game anywhere in Record owns it. The rows on
   // screen override their entry so a drag to the other bucket re-matches at once.
@@ -1477,9 +1484,9 @@ function RecordTab() {
     const games = new Map<number | string, YtGame>(recordGames.map(g => [g.key, g]))
     for (const d of data) {
       const known = games.get(d.id)
-      games.set(d.id, { key: d.id, title: d.title, bucket: effectiveBucket(d), recorder: recorderOf(d), since: known?.since, heldVideo: known?.heldVideo })
+      games.set(d.id, { key: d.id, gameId: d.game_id, title: d.title, bucket: effectiveBucket(d), recorder: recorderOf(d), since: known?.since, heldVideo: known?.heldVideo })
     }
-    return resolveYtMatches(Array.from(games.values()), ytRows)
+    return resolveVideoMatches(Array.from(games.values()), ytRows)
   }, [recordGames, data, ytRows])
 
   // Split into the two buckets by effective bucket, then apply the status filter.
@@ -1554,7 +1561,7 @@ function RecordTab() {
 
   // Status counts for the Seg: across both buckets, before the status filter.
   const statusCounts = useMemo(() => {
-    const c: Record<RecordStatus, number> = { pending: 0, draft: 0, recording: 0, recorded: 0 }
+    const c: Record<RecordStatus, number> = { pending: 0, draft: 0, recording: 0, recorded: 0, uploaded: 0 }
     for (const d of data) c[recordStatus(d, ytMap).status]++
     return c
   }, [data, ytMap])
@@ -1605,7 +1612,7 @@ function RecordTab() {
 
       {/* Split tables: 5 MIN and 20 MIN (effective bucket) */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16, overflow: 'hidden' }}>
-        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}
           onDragOver={isManager ? (e => { e.preventDefault(); if (dragOverBucket !== '5min') setDragOverBucket('5min') }) : undefined}
           onDragLeave={isManager ? (e => { if (e.currentTarget === e.target) setDragOverBucket(null) }) : undefined}
           onDrop={isManager ? (e => { e.preventDefault(); handleDrop('5min') }) : undefined}>
@@ -1613,7 +1620,7 @@ function RecordTab() {
             dragOver={dragOverBucket === '5min'}
             onHeaderAdd={() => setAddBucket('5min')} />
         </div>
-        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}
           onDragOver={isManager ? (e => { e.preventDefault(); if (dragOverBucket !== '20min') setDragOverBucket('20min') }) : undefined}
           onDragLeave={isManager ? (e => { if (e.currentTarget === e.target) setDragOverBucket(null) }) : undefined}
           onDrop={isManager ? (e => { e.preventDefault(); handleDrop('20min') }) : undefined}>
