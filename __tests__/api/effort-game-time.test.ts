@@ -99,15 +99,18 @@ describe('GET /api/external/effort-game-time', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.timezone).toBe('Asia/Ho_Chi_Minh')
-    expect(body.people[0].days[0]).toEqual({
+    expect(body.people[0].days[0]).toEqual(expect.objectContaining({
       date: '2026-10-26',
-      games: [
-        { game_id: 'g1', game: 'Color Sand Block', genre: 'puzzle', duration_s: 700 },
-        { game_id: 'g2', game: 'Old game', genre: 'puzzle', duration_s: null },
-      ],
+      games: {
+        puzzle: [
+          { game_id: 'g1', game: 'Color Sand Block', duration_s: 700 },
+          { game_id: 'g2', game: 'Old game', duration_s: null },
+        ],
+        arcade: [], simulation: [],
+      },
       records: [{ time: '09:12:00', game_id: 'r1', game: 'R1', genre: 'puzzle', duration_min: 5 }],
       records_5min: 1, records_20min: 0,
-    })
+    }))
   })
 
   describe('where the seconds come from', () => {

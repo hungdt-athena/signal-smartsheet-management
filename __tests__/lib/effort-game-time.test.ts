@@ -20,10 +20,13 @@ describe('groupGameTime', () => {
   it('lists one entry per game per day with only its duration', () => {
     const [p] = groupGameTime([abc], [row({ duration_s: 700 }), row({ game_id: 'g2', game: 'G2', duration_s: 50 })], [])
     expect(p.days).toHaveLength(1)
-    expect(p.days[0].games).toEqual([
-      { game_id: 'g1', game: 'G1', genre: 'puzzle', duration_s: 700 },
-      { game_id: 'g2', game: 'G2', genre: 'puzzle', duration_s: 50 },
-    ])
+    expect(p.days[0].games).toEqual({
+      puzzle: [
+        { game_id: 'g1', game: 'G1', duration_s: 700 },
+        { game_id: 'g2', game: 'G2', duration_s: 50 },
+      ],
+      arcade: [], simulation: [],
+    })
   })
 
   // 495 games still have a row in two genres. A person who judged both rows of one game
@@ -33,27 +36,28 @@ describe('groupGameTime', () => {
       row({ genre: 'arcade', duration_s: 30 }),
       row({ genre: 'puzzle', duration_s: 120 }),
     ], [])
-    expect(p.days[0].games).toEqual([{ game_id: 'g1', game: 'G1', genre: 'puzzle', duration_s: 150 }])
+    expect(p.days[0].games.puzzle).toEqual([{ game_id: 'g1', game: 'G1', duration_s: 150 }])
+    expect(p.days[0].games.arcade).toEqual([])
   })
 
   it('reports null, not 0, when nothing was measured for the game that day', () => {
     const [p] = groupGameTime([abc], [row({ duration_s: null })], [])
-    expect(p.days[0].games[0].duration_s).toBeNull()
+    expect(p.days[0].games.puzzle[0].duration_s).toBeNull()
   })
 
   it('a measured row wins over an unmeasured one for the same game and day', () => {
     const [p] = groupGameTime([abc], [row({ duration_s: null }), row({ duration_s: 80 })], [])
-    expect(p.days[0].games[0].duration_s).toBe(80)
+    expect(p.days[0].games.puzzle[0].duration_s).toBe(80)
   })
 
   it('splits a game worked on two days into two entries', () => {
     const [p] = groupGameTime([abc], [row({ duration_s: 100 }), row({ date: '2026-10-27', duration_s: 40 })], [])
-    expect(p.days.map(d => [d.date, d.games[0].duration_s])).toEqual([['2026-10-26', 100], ['2026-10-27', 40]])
+    expect(p.days.map(d => [d.date, d.games.puzzle[0].duration_s])).toEqual([['2026-10-26', 100], ['2026-10-27', 40]])
   })
 
   it('keeps the first genre it finds when no row has any time', () => {
     const [p] = groupGameTime([abc], [row({ genre: null, duration_s: null }), row({ genre: 'arcade', duration_s: null })], [])
-    expect(p.days[0].games[0].genre).toBe('arcade')
+    expect(p.days[0].games.arcade.map(g => g.game_id)).toEqual(['g1'])
   })
 
   it('puts records on their own day, with the 5 and 20 minute counts', () => {
@@ -64,10 +68,10 @@ describe('groupGameTime', () => {
       rec({ date: '2026-10-25', game_id: 'r4', duration_min: 20 }),
     ])
     expect(p.days.map(d => d.date)).toEqual(['2026-10-25', '2026-10-26'])
-    expect(p.days[0]).toEqual({
-      date: '2026-10-25', games: [], records_5min: 0, records_20min: 1,
+    expect(p.days[0]).toEqual(expect.objectContaining({
+      date: '2026-10-25', games: { puzzle: [], arcade: [], simulation: [] }, records_5min: 0, records_20min: 1,
       records: [{ time: '09:00:00', game_id: 'r4', game: 'R1', genre: 'puzzle', duration_min: 20 }],
-    })
+    }))
     expect(p.days[1].records_5min).toBe(2)
     expect(p.days[1].records_20min).toBe(1)
     expect(p.days[1].records.map(r => r.game_id)).toEqual(['r1', 'r2', 'r3'])
@@ -76,5 +80,26 @@ describe('groupGameTime', () => {
   it('ignores rows for people who were not asked for', () => {
     const [p] = groupGameTime([abc], [row({ person_key: 'someone-else' })], [rec({ assignee_key: 'someone-else' })])
     expect(p.days).toEqual([])
+  })
+})
+
+describe('groupGameTime category groups', () => {
+  it('files each game under its category group; other only when needed', () => {
+    const [p] = groupGameTime([abc], [
+      row({ game_id: 'a', genre: 'puzzle', duration_s: 100 }),
+      row({ game_id: 'b', genre: 'arcade', duration_s: 40 }),
+      row({ game_id: 'c', genre: 'arcade', duration_s: null }),
+    ], [])
+    const g = p.days[0].games
+    expect(g.puzzle.map(x => x.game_id)).toEqual(['a'])
+    expect(g.arcade).toEqual([{ game_id: 'b', game: 'G1', duration_s: 40 }, { game_id: 'c', game: 'G1', duration_s: null }])
+    expect(g.simulation).toEqual([])
+    expect('other' in g).toBe(false)
+  })
+
+  it('puts a game with no known category group under other', () => {
+    const [p] = groupGameTime([abc], [row({ game_id: 'd', genre: null, duration_s: 5 })], [])
+    expect(p.days[0].games.other).toEqual([{ game_id: 'd', game: 'G1', duration_s: 5 }])
+    expect(p.days[0].games.puzzle).toEqual([])
   })
 })

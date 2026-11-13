@@ -16,11 +16,24 @@ export type GameTimeRow = {
   duration_s: number | null
 }
 
-export type GameTime = { game_id: string; game: string | null; genre: string | null; duration_s: number | null }
+
+/** What a game looks like in the output: its category group is the key it sits under. */
+export type GameOut = { game_id: string; game: string | null; duration_s: number | null }
+
+/** The three category groups (puzzle | arcade | simulation). Always present, [] when empty. */
+export const CATEGORY_KEYS = ['puzzle', 'arcade', 'simulation'] as const
+export type CategoryKey = typeof CATEGORY_KEYS[number]
+/** `other` only shows up when a game has no category group, or one we do not know. */
+export type GamesByCategory = Record<CategoryKey, GameOut[]> & { other?: GameOut[] }
+
+const keyOf = (g: string | null): CategoryKey | 'other' => {
+  const k = (g ?? '').toLowerCase()
+  return k === 'puzzle' || k === 'arcade' || k === 'simulation' ? k : 'other'
+}
 
 export type Day = {
   date: string
-  games: GameTime[]
+  games: GamesByCategory
   records: RecordOut[]
   records_5min: number
   records_20min: number
@@ -76,12 +89,21 @@ export function groupGameTime(people: Person[], rows: GameTimeRow[], records: Re
     ...p,
     days: Array.from(byPerson.get(p.name.toLowerCase())!.values())
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-      .map(d => ({
-        date: d.date,
-        games: Array.from(d.games.values()).map(({ game_id, game, genre, duration_s }) => ({ game_id, game, genre, duration_s })),
-        records: d.records,
-        records_5min: d.records.filter(x => x.duration_min === 5).length,
-        records_20min: d.records.filter(x => x.duration_min === 20).length,
-      })),
+      .map(d => {
+        const games = Object.fromEntries(CATEGORY_KEYS.map(k => [k, [] as GameOut[]])) as GamesByCategory
+        for (const g of Array.from(d.games.values())) {
+          const k = keyOf(g.genre)
+          const out: GameOut = { game_id: g.game_id, game: g.game, duration_s: g.duration_s }
+          if (k === 'other') (games.other ??= []).push(out)
+          else games[k].push(out)
+        }
+        return {
+          date: d.date,
+          games,
+          records: d.records,
+          records_5min: d.records.filter(x => x.duration_min === 5).length,
+          records_20min: d.records.filter(x => x.duration_min === 20).length,
+        }
+      }),
   }))
 }
