@@ -15,6 +15,14 @@ describe('YouTube / Record page', () => {
     expect(src).toMatch(/<GameIcon src=\{item\.icon_url\} os=\{item\.os\}/)
   })
 
+  it('lets only managers rename or delete a live video, through /api/youtube/videos', () => {
+    // Actions sit in the right-hand panel, only for a live video and a manager.
+    expect(src).toMatch(/const live = !!row\.youtubeId && !dead/)
+    expect(src).toMatch(/\{live && isManager \? \(/)
+    expect((src.match(/fetch\('\/api\/youtube\/videos'/g) || []).length).toBe(2)
+    expect(src).toMatch(/DELETED:\s*\{ cls: 'neutral', label: 'Deleted' \}/)
+  })
+
   it('opens every page modal through <Modal>, with no letter "x" close buttons', () => {
     expect(src).not.toMatch(/>x<\/button>/)
     expect(src).not.toMatch(/useEscapeToClose/)

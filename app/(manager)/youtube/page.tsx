@@ -48,6 +48,8 @@ const STATUS_STYLES: Record<string, { cls: string; label: string }> = {
   PROCESSING: { cls: 'running', label: 'Processing' },
   IN_BATCH:   { cls: 'running', label: 'Waiting for processing' },
   PENDING:    { cls: 'idle',    label: 'Pending' },
+  // Deleted from YouTube in this tab. The row stays so n8n does not upload the file again.
+  DELETED:    { cls: 'neutral', label: 'Deleted' },
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -286,20 +288,265 @@ function BlockingToggle() {
   )
 }
 
-// ── Colgroup ─────────────────────────────────────────────────────────────────
+// ── Table pieces ─────────────────────────────────────────────────────────────
 
 function ColGroup() {
   return (
     <colgroup>
-      <col style={{ width: '10%' }} />
-      <col style={{ width: '17%' }} />
-      <col style={{ width: '10%' }} />
-      <col style={{ width: '7%' }} />
-      <col style={{ width: '14%' }} />
-      <col style={{ width: '19%' }} />
-      <col style={{ width: '15%' }} />
-      <col style={{ width: '8%' }} />
+      <col style={{ width: 76 }} />
+      <col />
+      <col style={{ width: 120 }} />
+      <col style={{ width: 72 }} />
+      <col style={{ width: 150 }} />
     </colgroup>
+  )
+}
+
+/** 5′ / 20′ chip. The sheet stores the minutes as a bare number. */
+function LengthChip({ minutes }: { minutes: string }) {
+  if (!minutes) return <span style={{ color: 'var(--muted)' }}>—</span>
+  const isNum = /^\d+$/.test(minutes)
+  return <span className={`yt-len${minutes === '20' ? ' is-20' : ''}`}>{isNum ? `${minutes}′` : minutes}</span>
+}
+
+function isDeleted(row: YtbRow) { return row.status?.toUpperCase() === 'DELETED' }
+
+/** 1281 -> "21:21", 3725 -> "1:02:05" (YouTube's own format). */
+function clockTime(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
+}
+
+function vnTime(raw: string, withDate = false): string {
+  if (!raw) return '—'
+  const d = new Date(raw)
+  if (isNaN(d.getTime())) return raw
+  return d.toLocaleString('en-GB', {
+    timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit',
+    ...(withDate ? { day: 'numeric', month: 'short', year: 'numeric' } : {}),
+  })
+}
+
+// ── Video panel (right side) ─────────────────────────────────────────────────
+
+// Everything about one video, and the actions on it. The table on the left only
+// reads; Rename / Delete / Edit YouTube ID live here.
+function VideoPanel({ row, isManager, onSaveId, onRename, onDelete }: {
+  row: YtbRow | null
+  isManager: boolean
+  onSaveId: (rowIndex: number, youtubeId: string) => Promise<boolean>
+  onRename: (row: YtbRow) => void
+  onDelete: (row: YtbRow) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [idDraft, setIdDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { setEditing(false) }, [row?.row_index])
+
+  // Real title + length from YouTube (the sheet only has the minutes from the
+  // file name). Nothing is shown until it arrives, never a guessed length.
+  const liveId = row && row.youtubeId && !isDeleted(row) ? row.youtubeId : ''
+  const [info, setInfo] = useState<{ id: string; title: string; duration_s: number | null } | null>(null)
+  useEffect(() => {
+    setInfo(null)
+    if (!liveId) return
+    let stale = false
+    fetch(`/api/youtube/videos?ids=${encodeURIComponent(liveId)}`, { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { const v = d?.items?.[liveId]; if (!stale && v) setInfo({ id: liveId, title: v.title, duration_s: v.duration_s }) })
+      .catch(() => {})
+    return () => { stale = true }
+  }, [liveId])
+  const realInfo = info && info.id === liveId ? info : null
+
+  if (!row) {
+    return (
+      <aside className="yt-panel" aria-label="Video details">
+        <p className="yt-panel-empty">Pick a video to see it here.</p>
+      </aside>
+    )
+  }
+
+  const dead = isDeleted(row)
+  const live = !!row.youtubeId && !dead
+  const ytUrl = row.youtubeId ? `https://www.youtube.com/watch?v=${row.youtubeId}` : null
+
+  async function save() {
+    setSaving(true)
+    const ok = await onSaveId(row!.row_index, idDraft.trim())
+    setSaving(false)
+    if (ok) setEditing(false)
+  }
+
+  return (
+    <aside className="yt-panel" aria-label="Video details">
+      {ytUrl ? (
+        <a className="yt-thumb" href={ytUrl} target="_blank" rel="noreferrer" aria-label="Open on YouTube">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={`https://i.ytimg.com/vi/${row.youtubeId}/hqdefault.jpg`} alt="" loading="lazy" />
+          {realInfo?.duration_s != null && <span className="yt-thumb-len">{clockTime(realInfo.duration_s)}</span>}
+        </a>
+      ) : (
+        <div className="yt-thumb is-empty">{dead ? 'Deleted from YouTube' : 'No video on YouTube yet'}</div>
+      )}
+
+      <div>
+        <h2 className="yt-panel-title">{row.gameTitle || row.fileName || '—'}</h2>
+        <div className="yt-panel-meta">
+          <StatusBadge status={row.status} />
+          <LengthChip minutes={row.duration} />
+          <span>{row.pic || '—'}</span>
+        </div>
+      </div>
+
+      <dl className="yt-dl">
+        <dt>YouTube</dt>
+        <dd>{ytUrl
+          ? <a className="yt-url" href={ytUrl} target="_blank" rel="noreferrer">youtu.be/{row.youtubeId}</a>
+          : <span style={{ color: 'var(--muted)' }}>{dead ? 'Removed' : 'Not synced yet'}</span>}</dd>
+        <dt>Title</dt>
+        <dd title={realInfo?.title || row.fileName}>{realInfo?.title || row.fileName || '—'}</dd>
+        <dt>Uploaded</dt>
+        <dd className="num">{vnTime(row.time, true)}</dd>
+        <dt>YouTube ID</dt>
+        <dd>
+          {editing ? (
+            <span style={{ display: 'flex', gap: 4 }}>
+              <input className="input num" value={idDraft} onChange={e => setIdDraft(e.target.value)}
+                aria-label="YouTube ID" placeholder="YouTube ID" autoFocus disabled={saving}
+                onKeyDown={e => { if (e.key === 'Enter') void save(); if (e.key === 'Escape') setEditing(false) }}
+                style={{ padding: '3px 7px', fontSize: 12 }} />
+              <button type="button" className="btn btn-sm btn-ghost" aria-label="Cancel" onClick={() => setEditing(false)} disabled={saving}><IconX size={12} /></button>
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+            </span>
+          ) : (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span className="num">{row.youtubeId || '—'}</span>
+              <button type="button" className="btn btn-sm btn-ghost" style={{ padding: '2px 6px' }}
+                title="Fix the YouTube ID in the sheet (does not touch YouTube)"
+                onClick={() => { setIdDraft(row.youtubeId); setEditing(true) }}>Edit</button>
+            </span>
+          )}
+        </dd>
+      </dl>
+
+      <div className="yt-panel-acts">
+        {live && isManager ? (
+          <>
+            <button type="button" className="btn" onClick={() => onRename(row)}>Rename</button>
+            <span style={{ flex: 1 }} />
+            <button type="button" className="btn btn-danger" onClick={() => onDelete(row)}>Delete from YouTube</button>
+          </>
+        ) : (
+          <span className="yt-panel-note">
+            {dead ? 'Deleted from YouTube. The game is back to Recording.'
+              : !row.youtubeId ? 'No video on YouTube yet.'
+              : 'Only admins and moderators can rename or delete videos.'}
+          </span>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+// ── Rename / delete on YouTube ───────────────────────────────────────────────
+
+// Both go through /api/youtube/videos (n8n does the YouTube call). A title in
+// the upload format "Game title_Recorder_5mins" also updates the game title,
+// recorder and duration the Record tab matches on.
+function RenameVideoModal({ row, onClose, onDone }: {
+  row: YtbRow
+  onClose: () => void
+  onDone: (updates: Partial<YtbRow>) => void
+}) {
+  const [title, setTitle] = useState(row.fileName)
+  const [busy, setBusy] = useState(false)
+  const clean = title.replace(/\s+/g, ' ').trim()
+  const invalid = !clean || clean.length > 100 || /[<>]/.test(clean)
+
+  async function save() {
+    if (invalid || busy) return
+    setBusy(true)
+    try {
+      const res = await fetch('/api/youtube/videos', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ row_index: row.row_index, youtubeId: row.youtubeId, title: clean }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Rename failed')
+      toast.success('Renamed on YouTube')
+      onDone(data.updates ?? { fileName: clean })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Rename failed')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Rename on YouTube" sub={`youtu.be/${row.youtubeId}`} onClose={onClose} busy={busy} width={480}
+      footer={<>
+        <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={save} disabled={busy || invalid || clean === row.fileName}>
+          {busy ? 'Renaming…' : 'Rename'}
+        </button>
+      </>}>
+      <label style={{ display: 'grid', gap: 6, fontSize: 13 }}>
+        New title
+        <input className="input" value={title} maxLength={100} aria-label="New title"
+          onChange={e => setTitle(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') void save() }} />
+      </label>
+      <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>
+        Keep the format <b>Game title_Recorder_5mins</b> so the Record tab still matches this video. {clean.length}/100
+      </p>
+    </Modal>
+  )
+}
+
+function DeleteVideoModal({ row, onClose, onDone }: {
+  row: YtbRow
+  onClose: () => void
+  onDone: (updates: Partial<YtbRow>) => void
+}) {
+  const [busy, setBusy] = useState(false)
+
+  async function remove() {
+    setBusy(true)
+    try {
+      const res = await fetch('/api/youtube/videos', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ row_index: row.row_index, youtubeId: row.youtubeId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Delete failed')
+      toast.success(data.gone ? 'Video was already gone from YouTube. Row marked Deleted.' : 'Deleted from YouTube')
+      onDone(data.updates ?? { status: 'DELETED', youtubeId: '' })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Delete from YouTube?" onClose={onClose} busy={busy} width={460} role="alertdialog"
+      footer={<>
+        <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+        <button type="button" className="btn btn-danger" onClick={remove} disabled={busy}>
+          {busy ? 'Deleting…' : 'Delete video'}
+        </button>
+      </>}>
+      <p style={{ margin: 0, fontSize: 13 }}><b>{row.fileName || row.gameTitle}</b></p>
+      <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, color: 'var(--muted)', display: 'grid', gap: 4 }}>
+        <li>The video is deleted from YouTube. This cannot be undone.</li>
+        <li>The game goes back to Recording in the Record tab.</li>
+        <li>This row stays here as Deleted. The Drive file is not uploaded again.</li>
+      </ul>
+    </Modal>
   )
 }
 
@@ -309,10 +556,15 @@ function YouTubeTab() {
   const [rows, setRows]       = useState<YtbRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
-  const [edits, setEdits]     = useState<Record<number, Partial<YtbRow>>>({})
-  const [saving, setSaving]   = useState<Set<number>>(new Set())
+  const [selected, setSelected] = useState<number | null>(null)
   const [openDays, setOpenDays] = useState<Set<string>>(new Set())
   const initialOpenDone = useRef(false)
+  const [renaming, setRenaming] = useState<YtbRow | null>(null)
+  const [deleting, setDeleting] = useState<YtbRow | null>(null)
+  const { data: session } = useSession()
+  const isManager = isManagerRole(session?.user?.role)
+  const applyRow = (rowIndex: number, updates: Partial<YtbRow>) =>
+    setRows(prev => prev.map(r => r.row_index === rowIndex ? { ...r, ...updates } : r))
 
   // Filters live in the URL (reload and shared links keep them).
   const cur = useMemo(currentYearMonth, [])
@@ -376,37 +628,37 @@ function YouTubeTab() {
     })
   }
 
-  function setEdit(rowIndex: number, field: keyof YtbRow, value: string) {
-    setEdits(prev => ({ ...prev, [rowIndex]: { ...prev[rowIndex], [field]: value } }))
-  }
+  // The panel follows the selected row. Until someone picks one, it shows the
+  // first video of the first open day, so the panel is never blank on load.
+  const selectedRow = useMemo(() => {
+    if (selected != null) {
+      const r = filteredRows.find(x => x.row_index === selected)
+      if (r) return r
+    }
+    const first = dayGroups.find(g => openDays.has(g.day)) ?? dayGroups[0]
+    return first?.rows[0] ?? null
+  }, [selected, filteredRows, dayGroups, openDays])
 
-  async function saveEdits(rowIndex: number) {
-    const updates = edits[rowIndex]
-    if (!updates || Object.keys(updates).length === 0) return
-    setSaving(s => new Set(Array.from(s).concat([rowIndex])))
+  // The YouTube ID column is a plain sheet edit (fixing a wrong link); it does not touch YouTube.
+  async function saveYoutubeId(rowIndex: number, youtubeId: string): Promise<boolean> {
     try {
       const res = await fetch('/api/sheets/ytb-uploaded', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ row_index: rowIndex, updates }),
+        body: JSON.stringify({ row_index: rowIndex, updates: { youtubeId } }),
       })
       if (!res.ok) throw new Error()
-      setRows(prev => prev.map(r => r.row_index === rowIndex ? { ...r, ...updates } : r))
-      setEdits(prev => { const n = { ...prev }; delete n[rowIndex]; return n })
+      applyRow(rowIndex, { youtubeId })
       toast.success('YouTube ID saved')
+      return true
     } catch {
-      toast.error('Could not save the YouTube ID.', { label: 'Try again', run: () => { void saveEdits(rowIndex) } })
-    } finally {
-      setSaving(s => { const n = new Set(s); n.delete(rowIndex); return n })
+      toast.error('Could not save the YouTube ID.')
+      return false
     }
   }
 
-  function cancelEdits(rowIndex: number) {
-    setEdits(prev => { const n = { ...prev }; delete n[rowIndex]; return n })
-  }
-
-  const evaluatorOpts = [{ value: '', label: 'All evaluators' }, ...filterOptions.evaluators.map(e => ({ value: e, label: e }))]
-  const durationOpts  = [{ value: '', label: 'All durations' }, ...filterOptions.durations.map(d => ({ value: d, label: d }))]
+  const evaluatorOpts = [{ value: '', label: 'All recorders' }, ...filterOptions.evaluators.map(e => ({ value: e, label: e }))]
+  const durationOpts  = [{ value: '', label: 'All lengths' }, ...filterOptions.durations.map(d => ({ value: d, label: /^\d+$/.test(d) ? `${d}′` : d }))]
 
   return (
     <div className="page yt-page">
@@ -419,10 +671,10 @@ function YouTubeTab() {
             <TimeFilter year={filters.year} month={filters.month} options={filterOptions}
               onSelect={pickYearMonth} />
           )}
-          <StyledSelect filter ariaLabel="Evaluator" value={evaluator} onChange={setEvaluator}
-            options={evaluatorOpts} placeholder="All evaluators" style={{ width: 170 }} />
-          <StyledSelect filter ariaLabel="Duration" value={duration} onChange={setDuration}
-            options={durationOpts} placeholder="All durations" style={{ width: 150 }} />
+          <StyledSelect filter ariaLabel="Recorder" value={evaluator} onChange={setEvaluator}
+            options={evaluatorOpts} placeholder="All recorders" style={{ width: 170 }} />
+          <StyledSelect filter ariaLabel="Length" value={duration} onChange={setDuration}
+            options={durationOpts} placeholder="All lengths" style={{ width: 150 }} />
           <FilterSpacer />
           <ClearFilters visible={filtersOn} onClear={clearFilters} />
           <FilterCount shown={filteredRows.length} total={rows.length} noun="videos" />
@@ -430,135 +682,102 @@ function YouTubeTab() {
       )}
 
       <div className="card yt-card">
-        {/* Table header */}
-        <div style={{ flexShrink: 0 }}>
-          <table className="tbl" style={{ tableLayout: 'fixed' }}>
-            <ColGroup />
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Game title</th>
-                <th>Evaluator</th>
-                <th>Duration</th>
-                <th>Status</th>
-                <th>File name</th>
-                <th>YouTube link</th>
-                <th></th>
-              </tr>
-            </thead>
-          </table>
-        </div>
+        <div className="yt-split">
+          <div className="yt-list">
+            <div style={{ flexShrink: 0 }}>
+              <table className="tbl" style={{ tableLayout: 'fixed' }}>
+                <ColGroup />
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Game</th>
+                    <th>Recorder</th>
+                    <th>Length</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+              </table>
+            </div>
 
-        {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-          {error && (
-            <ErrorState onRetry={refresh}>Could not load the videos. {error}</ErrorState>
-          )}
-          {!error && filteredRows.length === 0 && !loading && (
-            rows.length === 0
-              ? <EmptyState>No videos yet.</EmptyState>
-              : <EmptyState action={filtersOn ? { label: 'Clear filters', onClick: clearFilters } : undefined}>
-                  No videos match these filters.
-                </EmptyState>
-          )}
-          {loading && rows.length === 0 && (
-            <table className="tbl" style={{ tableLayout: 'fixed' }}>
-              <ColGroup />
-              <tbody><SkeletonRows widths={[40, 160, 80, 50, 90, 140, 110, 40]} rows={4} /></tbody>
-            </table>
-          )}
-          {dayGroups.map((group, gi) => {
-            const isOpen  = openDays.has(group.day)
-            const isToday = group.label === 'Today'
-            return (
-              <div key={group.day}>
-                {gi > 0 && <div style={{ height: 4, background: 'var(--border)' }} />}
+            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+              {error && (
+                <ErrorState onRetry={refresh}>Could not load the videos. {error}</ErrorState>
+              )}
+              {!error && filteredRows.length === 0 && !loading && (
+                rows.length === 0
+                  ? <EmptyState>No videos yet.</EmptyState>
+                  : <EmptyState action={filtersOn ? { label: 'Clear filters', onClick: clearFilters } : undefined}>
+                      No videos match these filters.
+                    </EmptyState>
+              )}
+              {loading && rows.length === 0 && (
+                <table className="tbl" style={{ tableLayout: 'fixed' }}>
+                  <ColGroup />
+                  <tbody><SkeletonRows widths={[40, 180, 70, 30, 80]} rows={6} /></tbody>
+                </table>
+              )}
+              {dayGroups.map(group => {
+                const isOpen  = openDays.has(group.day)
+                const isToday = group.label === 'Today'
+                const count = (s: string) => group.rows.filter(r => r.status?.toUpperCase() === s).length
+                const nFailed = count('FAILED')
+                const nWaiting = count('PENDING') + count('PROCESSING') + count('IN_BATCH')
+                return (
+                  <div key={group.day}>
+                    <button type="button" className={`yt-day${isToday ? ' is-today' : ''}`}
+                      aria-expanded={isOpen} onClick={() => toggleDay(group.day)}>
+                      <span className="yt-day-caret" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+                      <span className="yt-day-label">{group.label}</span>
+                      <span className="badge success">{count('DONE')} uploaded</span>
+                      {nFailed > 0 && <span className="badge error">{nFailed} failed</span>}
+                      {nWaiting > 0 && <span className="badge idle">{nWaiting} waiting</span>}
+                      <span className="yt-day-count">
+                        {group.rows.length} video{group.rows.length !== 1 ? 's' : ''}
+                      </span>
+                    </button>
 
-                {/* Day header */}
-                <button type="button" className={`yt-day${isToday ? ' is-today' : ''}`}
-                  aria-expanded={isOpen} onClick={() => toggleDay(group.day)}>
-                  <span className="yt-day-caret" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
-                  <span className="yt-day-label">{group.label}</span>
-                  {isToday && <span className="badge running">live</span>}
-                  <span className="yt-day-count">
-                    {group.rows.length} video{group.rows.length !== 1 ? 's' : ''}
-                  </span>
-                </button>
+                    {isOpen && (
+                      <table className="tbl" style={{ tableLayout: 'fixed' }}>
+                        <ColGroup />
+                        <tbody>
+                          {group.rows.map(row => {
+                            const isSel = selectedRow?.row_index === row.row_index
+                            return (
+                              <tr key={row.row_index}
+                                className={`yt-row${isSel ? ' is-selected' : ''}${isDeleted(row) ? ' is-deleted' : ''}`}
+                                aria-selected={isSel} tabIndex={0}
+                                onClick={() => setSelected(row.row_index)}
+                                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(row.row_index) } }}>
+                                <td className="num" style={{ color: 'var(--muted)' }}>{vnTime(row.time)}</td>
+                                <td className="yt-game" title={row.fileName}>{row.gameTitle || row.fileName || '—'}</td>
+                                <td style={{ color: 'var(--muted)' }}>{row.pic || '—'}</td>
+                                <td><LengthChip minutes={row.duration} /></td>
+                                <td><StatusBadge status={row.status} /></td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
 
-                {/* Day rows */}
-                {isOpen && (
-                  <table className="tbl" style={{ tableLayout: 'fixed' }}>
-                    <ColGroup />
-                    <tbody>
-                      {group.rows.map(row => {
-                        const pending   = edits[row.row_index] ?? {}
-                        const isDirty   = Object.keys(pending).length > 0
-                        const isSaving  = saving.has(row.row_index)
-                        const youtubeId = pending.youtubeId ?? row.youtubeId
-                        const ytUrl     = youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : null
-
-                        return (
-                          <tr key={row.row_index} style={{ background: isDirty ? 'var(--accent-weak)' : 'transparent' }}>
-                            <td style={{ color: 'var(--faint)' }}>
-                              {row.time ? new Date(row.time).toLocaleTimeString('en-US', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' }) : '—'}
-                            </td>
-                            <td>{row.gameTitle || '—'}</td>
-                            <td>{row.pic || '—'}</td>
-                            <td style={{ color: 'var(--muted)' }}>{row.duration || '—'}</td>
-                            <td><StatusBadge status={row.status} /></td>
-                            <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.fileName || '—'}</td>
-                            <td>
-                              {isDirty ? (
-                                <input
-                                  value={youtubeId}
-                                  onChange={e => setEdit(row.row_index, 'youtubeId', e.target.value)}
-                                  placeholder="YouTube ID"
-                                  aria-label="YouTube ID"
-                                  autoFocus
-                                  className="input"
-                                  style={{ padding: '3px 7px', fontSize: 12, fontFamily: 'var(--num)', width: '100%', maxWidth: 160 }}
-                                />
-                              ) : (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  {ytUrl ? (
-                                    <a href={ytUrl} target="_blank" rel="noreferrer"
-                                      style={{ color: 'var(--accent)', fontWeight: 600, fontSize: 12, textDecoration: 'underline', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                      youtu.be/{youtubeId}
-                                    </a>
-                                  ) : (
-                                    <span style={{ color: 'var(--faint)', fontStyle: 'italic', fontSize: 12 }}>
-                                      not synced yet
-                                    </span>
-                                  )}
-                                  <button type="button" className="btn btn-sm btn-ghost"
-                                    onClick={() => setEdit(row.row_index, 'youtubeId', youtubeId)}
-                                    title="Edit YouTube ID" aria-label="Edit YouTube ID">✎</button>
-                                </div>
-                              )}
-                            </td>
-                            <td>
-                              {isDirty && (
-                                <div style={{ display: 'flex', gap: 4 }}>
-                                  <button type="button" className="btn btn-sm btn-ghost" aria-label="Cancel edit" title="Cancel"
-                                    onClick={() => cancelEdits(row.row_index)} disabled={isSaving}><IconX size={12} /></button>
-                                  <button type="button" className="btn btn-sm btn-primary"
-                                    onClick={() => saveEdits(row.row_index)} disabled={isSaving}>
-                                    {isSaving ? 'Saving…' : 'Save'}
-                                  </button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )
-          })}
+          <VideoPanel row={selectedRow} isManager={isManager}
+            onSaveId={saveYoutubeId} onRename={setRenaming} onDelete={setDeleting} />
         </div>
       </div>
+
+      {renaming && (
+        <RenameVideoModal row={renaming} onClose={() => setRenaming(null)}
+          onDone={u => { applyRow(renaming.row_index, u); setRenaming(null) }} />
+      )}
+      {deleting && (
+        <DeleteVideoModal row={deleting} onClose={() => setDeleting(null)}
+          onDone={u => { applyRow(deleting.row_index, u); setDeleting(null) }} />
+      )}
     </div>
   )
 }
