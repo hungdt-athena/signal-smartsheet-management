@@ -647,7 +647,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// One flow_log row + one Chat message per code file left as it is. A file is reported once per status:\n// the workflow lists the last days of the folder on every run, and a held file would otherwise be\n// reported again each time. (Workflow static data is kept for production runs only.)\nconst notices = [...($('Classify Record Codes').first().json.notices || [])];\n\n// A rename the Drive node could not do (it continues on error) is reported here too. n8n runs the rename\n// branch before this one (execution order v1, top to bottom); when no rename ran, those nodes are absent.\n// Same pairing and failure rule as Collect Record Files. The file keeps its code name and is retried.\nlet planned = [];\nlet outs = [];\ntry { planned = $('Plan Record Renames').all().map(i => i.json); } catch (e) { planned = []; }\ntry { outs = $('Rename Record File').all().map(i => i.json); } catch (e) { outs = []; }\nplanned.forEach((p, i) => {\n  if (!p || p.skip) return;\n  const o = outs[i];\n  if (o && !o.error && !(o.id && o.id !== p.fileId)) return;\n  const err = o && o.error ? (typeof o.error === 'string' ? o.error : (o.error.message || 'error')) : 'no result from Drive';\n  notices.push({ status: 'rename_failed', code: p.code, file: p.oldName, file_id: p.fileId, game_id: p.game_id,\n    bucket: p.bucket, reason: String(err).slice(0, 300) });\n});\n\nlet store = null;\ntry { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }\nconst sent = new Set(store && Array.isArray(store.recordNoticeKeys) ? store.recordNoticeKeys : []);\n\nconst out = [];\nfor (const n of notices) {\n  const key = `${n.status}|${n.file_id}`;\n  if (sent.has(key)) continue;\n  sent.add(key);\n  const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';\n  const mins = n.bucket === '20min' ? '20' : '5';\n  let text;\n  if (n.status === 'code_not_found') {\n    text = `append-sheet: No game has the code ${n.code} (file ${n.file}). Check the code in the app. File left as it is.`;\n  } else if (n.status === 'rename_failed') {\n    text = `append-sheet: could not rename ${n.file} (code ${n.code}) for ${label}. File left as it is and not uploaded; it is retried on the next runs. Check that the n8n Drive account can edit this file.`;\n  } else if (n.status === 'held_not_confirmed') {\n    text = `append-sheet: ${n.file} (code ${n.code}) is for ${label}, but ${n.reason}. File left as it is; it is processed on a later run once the record bucket is Confirmed with a recorder.`;\n  } else if (n.status === 'held_youtube_live') {\n    text = `append-sheet: ${n.file} (code ${n.code}) is for ${label}: ${n.reason}. Not uploaded twice. To upload this file, clear the old ${mins} min YouTube link in the Record tab and remove its row from ytb_uploaded; the file is processed on a later run.`;\n  } else {\n    text = `append-sheet: could not look up record codes for ${n.file}. Files left as they are; they are retried on the next run.`;\n  }\n  out.push({ json: {\n    name: 'append-sheet',\n    status: n.status,\n    note: JSON.stringify({ file: n.file, code: n.code, game_id: n.game_id || null, bucket: n.bucket || null, reason: n.reason || null }),\n    text,\n  } });\n}\nif (store) store.recordNoticeKeys = [...sent].slice(-1000);\nreturn out;\n"
+        "jsCode": "// One flow_log row + one Chat message per code file left as it is. A file is reported once per status:\n// the workflow lists the last days of the folder on every run, and a held file would otherwise be\n// reported again each time. What was sent is kept in the table workflow_notices (migration 053), not in\n// workflow static data: on n8n cloud the Code node reads static data back empty and every run re-posted.\n// This node only builds the messages and one INSERT; Claim Record Notices runs it and Send Record Notices\n// keeps the messages whose key was new.\nconst WORKFLOW = 'append-sheet';\nconst q = s => `'${String(s == null ? '' : s).replace(/'/g, \"''\")}'`;\nconst notices = [...($('Classify Record Codes').first().json.notices || [])];\n\n// A rename the Drive node could not do (it continues on error) is reported here too. n8n runs the rename\n// branch before this one (execution order v1, top to bottom); when no rename ran, those nodes are absent.\n// Same pairing and failure rule as Collect Record Files. The file keeps its code name and is retried.\nlet planned = [];\nlet outs = [];\ntry { planned = $('Plan Record Renames').all().map(i => i.json); } catch (e) { planned = []; }\ntry { outs = $('Rename Record File').all().map(i => i.json); } catch (e) { outs = []; }\nplanned.forEach((p, i) => {\n  if (!p || p.skip) return;\n  const o = outs[i];\n  if (o && !o.error && !(o.id && o.id !== p.fileId)) return;\n  const err = o && o.error ? (typeof o.error === 'string' ? o.error : (o.error.message || 'error')) : 'no result from Drive';\n  notices.push({ status: 'rename_failed', code: p.code, file: p.oldName, file_id: p.fileId, game_id: p.game_id,\n    bucket: p.bucket, reason: String(err).slice(0, 300) });\n});\n\nconst out = [];\nconst seen = new Set();\nfor (const n of notices) {\n  const key = `${WORKFLOW}|${n.status}|${n.file_id}`;\n  if (seen.has(key)) continue;\n  seen.add(key);\n  const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';\n  const mins = n.bucket === '20min' ? '20' : '5';\n  let text;\n  if (n.status === 'code_not_found') {\n    text = `append-sheet: No game has the code ${n.code} (file ${n.file}). Check the code in the app. File left as it is.`;\n  } else if (n.status === 'rename_failed') {\n    text = `append-sheet: could not rename ${n.file} (code ${n.code}) for ${label}. File left as it is and not uploaded; it is retried on the next runs. Check that the n8n Drive account can edit this file.`;\n  } else if (n.status === 'held_not_confirmed') {\n    text = `append-sheet: ${n.file} (code ${n.code}) is for ${label}, but ${n.reason}. File left as it is; it is processed on a later run once the record bucket is Confirmed with a recorder.`;\n  } else if (n.status === 'held_youtube_live') {\n    text = `append-sheet: ${n.file} (code ${n.code}) is for ${label}: ${n.reason}. Not uploaded twice. To upload this file, clear the old ${mins} min YouTube link in the Record tab and remove its row from ytb_uploaded; the file is processed on a later run.`;\n  } else {\n    text = `append-sheet: could not look up record codes for ${n.file}. Files left as they are; they are retried on the next run.`;\n  }\n  out.push({\n    key,\n    name: WORKFLOW,\n    status: n.status,\n    note: JSON.stringify({ file: n.file, code: n.code, game_id: n.game_id || null, bucket: n.bucket || null, reason: n.reason || null }),\n    text,\n  });\n}\nif (out.length === 0) return [];\nconst sql =\n  `INSERT INTO workflow_notices (key, workflow) VALUES\\n  ` +\n  out.map(o => `(${q(o.key)}, ${q(WORKFLOW)})`).join(',\\n  ') +\n  `\\nON CONFLICT (key) DO NOTHING\\nRETURNING key`;\nreturn [{ json: { sql, notices: out } }];\n"
       },
       "id": "6edd51d0-0e26-536c-8a7d-f1b56682b4a1",
       "name": "Record Code Notices",
@@ -655,6 +655,42 @@
       "typeVersion": 2,
       "position": [
         1568,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "0da53889-f4fc-5cb1-a20f-ff4a1421eb18",
+      "name": "Claim Record Notices",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1792,
+        -336
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "KBZC0RGIJsc8d7GK",
+          "name": "Production - Signal Sense"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json || {});\nconst notices = $('Record Code Notices').first().json.notices || [];\nconst failed = rows.some(r => r.error);\nconst claimed = new Set(rows.map(r => r.key).filter(Boolean));\nreturn notices.filter(n => failed || claimed.has(n.key)).map(json => ({ json }));\n"
+      },
+      "id": "498126ca-f0a1-588c-8cfb-8cb85bfa8208",
+      "name": "Send Record Notices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
         -336
       ]
     },
@@ -730,7 +766,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1792,
+        2240,
         -336
       ],
       "id": "73d3cb6c-bc41-5956-8a0c-7dfbbfd6dcec",
@@ -755,7 +791,7 @@
       "type": "n8n-nodes-base.googleChat",
       "typeVersion": 1,
       "position": [
-        1792,
+        2240,
         -176
       ],
       "credentials": {
@@ -1027,6 +1063,28 @@
       ]
     },
     "Record Code Notices": {
+      "main": [
+        [
+          {
+            "node": "Claim Record Notices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Record Notices": {
+      "main": [
+        [
+          {
+            "node": "Send Record Notices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Record Notices": {
       "main": [
         [
           {

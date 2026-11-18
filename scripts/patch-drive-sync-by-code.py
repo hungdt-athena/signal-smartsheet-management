@@ -12,7 +12,8 @@ Flow added between "List Drive Files2" and the existing title path:
       Classify Codes -> Title Files -> Parse File Names2 -> ... (existing title path, untouched)
                      -> Write Code Links -> Plan Renames -> Names Taken -> Resolve Names
                         -> Rename Drive File -> Code Result -> Log Code Result
-                     -> Code Notices -> Log Code Notices (flow_log) + Chat Code Notice
+                     -> Code Notices -> Claim Code Notices (workflow_notices) -> Send Code Notices
+                        -> Log Code Notices (flow_log) + Chat Code Notice
 
 Demo and record videos share one Drive folder ([Signal] Video); the code tells them apart. A code that is
 only a record_code belongs to the record workflow and is skipped here without a word. A code that exists in
@@ -209,17 +210,20 @@ return out;
 
 NOTICES_JS = r'''// One flow_log row + one Chat message per code file that was left as it is. A file is reported once per
 // status: List Drive Files2 lists the last 7 days of the folder on every run, and a held file would otherwise
-// be reported again each time. (Workflow static data is kept for production runs only.)
+// be reported again each time. What was sent is kept in the table workflow_notices (migration 053), not in
+// workflow static data: on n8n cloud the Code node reads static data back empty and every run re-posted.
+// This node only builds the messages and one INSERT; Claim Code Notices runs it and Send Code Notices keeps
+// the messages whose key was new.
+const WORKFLOW = 'drive-video-link-sync';
 const notices = $('Classify Codes').first().json.notices || [];
-let store = null;
-try { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }
-const sent = new Set(store && Array.isArray(store.demoNoticeKeys) ? store.demoNoticeKeys : []);
+const q = s => `'${String(s == null ? '' : s).replace(/'/g, "''")}'`;
 
 const out = [];
+const seen = new Set();
 for (const n of notices) {
-  const key = `${n.status}|${n.file_id}`;
-  if (sent.has(key)) continue;
-  sent.add(key);
+  const key = `${WORKFLOW}|${n.status}|${n.file_id}`;
+  if (seen.has(key)) continue;
+  seen.add(key);
   const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';
   let text;
   if (n.status === 'ambiguous_code') {
@@ -227,15 +231,30 @@ for (const n of notices) {
   } else {
     text = `drive-video-link-sync: ${n.file} carries code ${n.code} for ${label}, which already has a demo link. File left as it is; clear the old link to process it again.`;
   }
-  out.push({ json: {
-    name: 'drive-video-link-sync',
+  out.push({
+    key,
+    name: WORKFLOW,
     status: n.status,
     note: JSON.stringify({ file: n.file, code: n.code, game_id: n.game_id || null, reason: n.reason || null }),
     text,
-  } });
+  });
 }
-if (store) store.demoNoticeKeys = [...sent].slice(-1000);
-return out;
+if (out.length === 0) return [];
+const sql =
+  `INSERT INTO workflow_notices (key, workflow) VALUES\n  ` +
+  out.map(o => `(${q(o.key)}, ${q(WORKFLOW)})`).join(',\n  ') +
+  `\nON CONFLICT (key) DO NOTHING\nRETURNING key`;
+return [{ json: { sql, notices: out } }];
+'''
+
+# Keeps the messages whose key Claim Code Notices inserted (a key already in workflow_notices returns no
+# row). Claim continues on error: a failed claim posts everything, as before the table existed, rather than
+# hiding a notice.
+SEND_JS = r'''const rows = $input.all().map(i => i.json || {});
+const notices = $('Code Notices').first().json.notices || [];
+const failed = rows.some(r => r.error);
+const claimed = new Set(rows.map(r => r.key).filter(Boolean));
+return notices.filter(n => failed || claimed.has(n.key)).map(json => ({ json }));
 '''
 
 RESULT_JS = r'''// The Drive node runs with "continue on error", so a failed rename arrives as an item with `error`.
@@ -316,12 +335,17 @@ def main():
 
     nodes.append(log_node('Log Code Result', [x0 + 2016, y0 - 480]))
     nodes.append(code_node('Code Notices', NOTICES_JS, [x0 + 672, y0 - 256]))
-    nodes.append(log_node('Log Code Notices', [x0 + 896, y0 - 256]))
+    claim = pg_node('Claim Code Notices', '{{ $json.sql }}', [x0 + 896, y0 - 256], pg_tpl, on_error=True)
+    # INSERT ... RETURNING gives no row when every key was already sent; Send Code Notices must still run.
+    claim['alwaysOutputData'] = True
+    nodes.append(claim)
+    nodes.append(code_node('Send Code Notices', SEND_JS, [x0 + 1120, y0 - 256]))
+    nodes.append(log_node('Log Code Notices', [x0 + 1344, y0 - 256]))
     chat = {
         'parameters': {'spaceId': CHAT_SPACE, 'jsonParameters': True,
                        'messageJson': '={{ JSON.stringify({ text: $json.text }) }}', 'additionalFields': {}},
         'id': nid('Chat Code Notice'), 'name': 'Chat Code Notice',
-        'type': 'n8n-nodes-base.googleChat', 'typeVersion': 1, 'position': [x0 + 896, y0 - 96],
+        'type': 'n8n-nodes-base.googleChat', 'typeVersion': 1, 'position': [x0 + 1344, y0 - 96],
         'credentials': copy.deepcopy(CHAT_CREDENTIAL),
     }
     nodes.append(chat)
@@ -346,7 +370,9 @@ def main():
     c['Resolve Names'] = link('Rename Drive File')
     c['Rename Drive File'] = link('Code Result')
     c['Code Result'] = link('Log Code Result')
-    c['Code Notices'] = link('Log Code Notices', 'Chat Code Notice')
+    c['Code Notices'] = link('Claim Code Notices')
+    c['Claim Code Notices'] = link('Send Code Notices')
+    c['Send Code Notices'] = link('Log Code Notices', 'Chat Code Notice')
 
     wf['name'] = NAME
     wf['pinData'] = {}

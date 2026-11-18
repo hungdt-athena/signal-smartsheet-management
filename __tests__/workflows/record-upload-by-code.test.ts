@@ -42,6 +42,17 @@ const run = (name: string, input: Row[], ctx: Record<string, Row | Row[]> = {}, 
   return out.map(o => o.json)
 }
 
+// Record Code Notices builds the messages and one INSERT; Claim Record Notices (Postgres) returns the keys it inserted into
+// workflow_notices; Send Record Notices keeps those messages. `st.sent` plays the table across runs.
+const notify = (input: Row[], ctx: Record<string, Row | Row[]>, st: Row = {}): Row[] => {
+  const built = run('Record Code Notices', input, ctx)
+  if (built.length === 0) return []
+  const sent: Set<string> = st.sent ?? (st.sent = new Set<string>())
+  const claimed = (built[0].notices as Row[]).map(n => n.key as string).filter(k => !sent.has(k))
+  claimed.forEach(k => sent.add(k))
+  return run('Send Record Notices', claimed.length ? claimed.map(key => ({ key })) : [{}], { 'Record Code Notices': built[0] })
+}
+
 const drive = (name: string, id = 'id-' + name) => ({ id, name, mimeType: 'video/mp4' })
 const FILES = [drive('K7M2QX.mp4', 'F1'), drive('Nail Box_VinhTD_5mins.mp4', 'F2'), drive('random clip.mp4', 'F3')]
 
@@ -92,7 +103,9 @@ describe('Append Sheet [by-code] workflow', () => {
     expect(next('[NEW] Parse Filenames')).toEqual(['Attach game_id'])
     expect(next('Attach game_id')).toEqual(['[NEW] Compare - Find New'])
     expect(wf.connections['Attach game_id'].main[0][0].index).toBe(0)
-    expect(next('Record Code Notices')).toEqual(['Log Record Notices', 'Chat Record Notice'])
+    expect(next('Record Code Notices')).toEqual(['Claim Record Notices'])
+    expect(next('Claim Record Notices')).toEqual(['Send Record Notices'])
+    expect(next('Send Record Notices')).toEqual(['Log Record Notices', 'Chat Record Notice'])
     // the rest of the legacy chain is untouched
     for (const n of ['[NEW] Get Existing Rows', '[NEW] Compare - Find New', '[NEW] Append PENDING', "Call 'Upload Youtube'",
       'Code Log Append', 'Log flow_log (append-sheet)', 'Set Idle (append-sheet)', 'Webhook', 'Google Drive Trigger']) {
@@ -233,7 +246,7 @@ describe('Append Sheet [by-code] workflow', () => {
         const collected = run('Collect Record Files', driveOut, { 'Classify Record Codes': cls, 'Plan Record Renames': plan })
         const parsed = run('[NEW] Parse Filenames', collected)
         // n8n runs the rename branch before the notices branch (execution order v1, top to bottom).
-        const notices = run('Record Code Notices', [{}],
+        const notices = notify([{}],
           { 'Classify Record Codes': cls, 'Plan Record Renames': plan, 'Rename Record File': driveOut }, st)
         return { collected, parsed, notices }
       }
@@ -255,9 +268,9 @@ describe('Append Sheet [by-code] workflow', () => {
       const cls = classify([hit()])
       const plan = run('Plan Record Renames', [{}], { 'Classify Record Codes': cls })
       const driveOut = plan.map(p => ({ id: p.fileId, name: p.newName }))
-      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': cls, 'Plan Record Renames': plan, 'Rename Record File': driveOut })).toEqual([])
+      expect(notify([{}], { 'Classify Record Codes': cls, 'Plan Record Renames': plan, 'Rename Record File': driveOut })).toEqual([])
       const skip = run('Plan Record Renames', [{}], { 'Classify Record Codes': { renames: [] } })
-      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices: [] }, 'Plan Record Renames': skip })).toEqual([])
+      expect(notify([{}], { 'Classify Record Codes': { notices: [] }, 'Plan Record Renames': skip })).toEqual([])
     })
 
     it('renames with the same Drive OAuth credential the trigger uses', () => {
@@ -331,7 +344,7 @@ describe('Append Sheet [by-code] workflow', () => {
       const { collected, attached } = legacyAfter(out)
       expect(collected.map(c => c.name)).not.toContain('K7M2QX.mp4')
       expect(attached.map(a => a.fileId)).toEqual(['F2'])
-      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': out })).toEqual([])
+      expect(notify([{}], { 'Classify Record Codes': out })).toEqual([])
     })
 
     it('a code that is both a record and a demo code: silent here (the demo workflow reports ambiguity), nothing renamed or uploaded', () => {
@@ -353,12 +366,12 @@ describe('Append Sheet [by-code] workflow', () => {
       expect((out.legacyFiles as Row[]).map(f => f.name)).toEqual(['Nail Box_VinhTD_5mins.mp4'])
       expect(legacyAfter(out).collected.map(c => c.name)).toEqual(['Nail Box_VinhTD_5mins.mp4'])
       const st: Row = {}
-      const n = run('Record Code Notices', [{}], { 'Classify Record Codes': out }, st)
+      const n = notify([{}], { 'Classify Record Codes': out }, st)
       expect(n).toHaveLength(1)
       expect(n[0]).toMatchObject({ name: 'append-sheet', status: 'code_not_found' })
       expect(n[0].text).toContain('No game has the code AB23CD')
       expect(n[0].text).toMatch(/Check the code in the app/)
-      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': out }, st)).toEqual([]) // deduped
+      expect(notify([{}], { 'Classify Record Codes': out }, st)).toEqual([]) // deduped
     })
 
     it('a letters-only name like RACKET.mp4 is not a code: the code branch ignores it, the legacy path gets it as before', () => {
@@ -446,7 +459,7 @@ describe('Append Sheet [by-code] workflow', () => {
     ]
 
     it('one flow_log row + Chat text per notice, under the append-sheet flow name', () => {
-      const out = run('Record Code Notices', [{}], { 'Classify Record Codes': { notices } })
+      const out = notify([{}], { 'Classify Record Codes': { notices } })
       expect(out.map(o => o.status)).toEqual(['code_not_found', 'rename_failed', 'code_lookup_failed', 'held_not_confirmed', 'held_youtube_live'])
       expect(out.every(o => o.name === 'append-sheet')).toBe(true)
       expect(JSON.parse(out[1].note)).toMatchObject({ file: 'K7M2QX.mp4', code: 'K7M2QX' })
@@ -460,14 +473,28 @@ describe('Append Sheet [by-code] workflow', () => {
 
     it('a file is reported once per status, not again on every later run', () => {
       const st: Row = {}
-      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices } }, st)).toHaveLength(5)
-      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices } }, st)).toHaveLength(0)
+      expect(notify([{}], { 'Classify Record Codes': { notices } }, st)).toHaveLength(5)
+      expect(notify([{}], { 'Classify Record Codes': { notices } }, st)).toHaveLength(0)
       const changed = [{ ...notices[3], status: 'held_youtube_live' }]
-      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices: changed } }, st)).toHaveLength(1)
+      expect(notify([{}], { 'Classify Record Codes': { notices: changed } }, st)).toHaveLength(1)
+    })
+
+    it('remembers what was sent in workflow_notices, not in static data; a failed claim posts everything', () => {
+      expect(src('Record Code Notices')).not.toMatch(/getWorkflowStaticData/)
+      const built = run('Record Code Notices', [{}], { 'Classify Record Codes': { notices } })[0]
+      expect(built.notices.map((n: Row) => n.key)[0]).toBe('append-sheet|code_not_found|F0')
+      expect(built.sql).toMatch(/^INSERT INTO workflow_notices \(key, workflow\) VALUES\n {2}\('append-sheet\|code_not_found\|F0', 'append-sheet'\),/)
+      expect(built.sql).toMatch(/ON CONFLICT \(key\) DO NOTHING\nRETURNING key$/)
+      const claim = node('Claim Record Notices')
+      expect(claim.type).toBe('n8n-nodes-base.postgres')
+      expect(claim.credentials).toEqual(node('Lookup Record Codes').credentials)
+      expect((claim as Row).alwaysOutputData).toBe(true)
+      expect(run('Send Record Notices', [{ error: 'boom' }], { 'Record Code Notices': built })).toHaveLength(5)
+      expect(run('Send Record Notices', [{}], { 'Record Code Notices': built })).toEqual([])
     })
 
     it('emits nothing when there is nothing to report', () => {
-      expect(run('Record Code Notices', [{}], { 'Classify Record Codes': { notices: [] } })).toEqual([])
+      expect(notify([{}], { 'Classify Record Codes': { notices: [] } })).toEqual([])
     })
 
     it('posts to the agreed Chat space and logs to the existing flow_log sheet', () => {
@@ -508,7 +535,7 @@ describe('Append Sheet [by-code] workflow', () => {
     const fullRun = (driveFiles: Row[], sheet: Row[], lookup: Row[], st: Row) => {
       const split = run('Split Record Codes', driveFiles)[0]
       const cls = run('Classify Record Codes', sheet, { 'Split Record Codes': split, 'Lookup Record Codes': split.codeFiles.length ? lookup : { no_codes: 1 } })[0]
-      const notices = run('Record Code Notices', [{}], { 'Classify Record Codes': cls }, st)
+      const notices = notify([{}], { 'Classify Record Codes': cls }, st)
       const { attached } = legacyAfter(cls)
       const known = new Set(sheet.map(r => String(r.fileId)))
       const appended = attached.filter(a => !known.has(String(a.fileId)))

@@ -18,7 +18,8 @@ Flow added between "[NEW] Search Drive" and the existing "[NEW] Parse Filenames"
           true  -> Rename Record File (Drive) -> Collect Record Files
           false ------------------------------> Collect Record Files
        Collect Record Files -> [NEW] Parse Filenames (unchanged) -> Attach game_id -> [NEW] Compare - Find New
-    -> Record Code Notices -> Log Record Notices (flow_log) + Chat Record Notice
+    -> Record Code Notices -> Claim Record Notices (workflow_notices) -> Send Record Notices
+   -> Log Record Notices (flow_log) + Chat Record Notice
 
 Recorder and bucket come from the DB when the file is processed (the Confirmed bucket's assignee). The file
 is renamed to the old format, so the legacy path, the sheet formulas and Upload Youtube see what they always
@@ -249,7 +250,12 @@ return $input.all().map(i => ({ json: { ...i.json, game_id: ids.get(String(i.jso
 
 NOTICES_JS = r'''// One flow_log row + one Chat message per code file left as it is. A file is reported once per status:
 // the workflow lists the last days of the folder on every run, and a held file would otherwise be
-// reported again each time. (Workflow static data is kept for production runs only.)
+// reported again each time. What was sent is kept in the table workflow_notices (migration 053), not in
+// workflow static data: on n8n cloud the Code node reads static data back empty and every run re-posted.
+// This node only builds the messages and one INSERT; Claim Record Notices runs it and Send Record Notices
+// keeps the messages whose key was new.
+const WORKFLOW = 'append-sheet';
+const q = s => `'${String(s == null ? '' : s).replace(/'/g, "''")}'`;
 const notices = [...($('Classify Record Codes').first().json.notices || [])];
 
 // A rename the Drive node could not do (it continues on error) is reported here too. n8n runs the rename
@@ -268,15 +274,12 @@ planned.forEach((p, i) => {
     bucket: p.bucket, reason: String(err).slice(0, 300) });
 });
 
-let store = null;
-try { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }
-const sent = new Set(store && Array.isArray(store.recordNoticeKeys) ? store.recordNoticeKeys : []);
-
 const out = [];
+const seen = new Set();
 for (const n of notices) {
-  const key = `${n.status}|${n.file_id}`;
-  if (sent.has(key)) continue;
-  sent.add(key);
+  const key = `${WORKFLOW}|${n.status}|${n.file_id}`;
+  if (seen.has(key)) continue;
+  seen.add(key);
   const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';
   const mins = n.bucket === '20min' ? '20' : '5';
   let text;
@@ -291,15 +294,30 @@ for (const n of notices) {
   } else {
     text = `append-sheet: could not look up record codes for ${n.file}. Files left as they are; they are retried on the next run.`;
   }
-  out.push({ json: {
-    name: 'append-sheet',
+  out.push({
+    key,
+    name: WORKFLOW,
     status: n.status,
     note: JSON.stringify({ file: n.file, code: n.code, game_id: n.game_id || null, bucket: n.bucket || null, reason: n.reason || null }),
     text,
-  } });
+  });
 }
-if (store) store.recordNoticeKeys = [...sent].slice(-1000);
-return out;
+if (out.length === 0) return [];
+const sql =
+  `INSERT INTO workflow_notices (key, workflow) VALUES\n  ` +
+  out.map(o => `(${q(o.key)}, ${q(WORKFLOW)})`).join(',\n  ') +
+  `\nON CONFLICT (key) DO NOTHING\nRETURNING key`;
+return [{ json: { sql, notices: out } }];
+'''
+
+# Keeps the messages whose key Claim Record Notices inserted (a key already in workflow_notices returns no
+# row). Claim continues on error: a failed claim posts everything, as before the table existed, rather than
+# hiding a notice.
+SEND_JS = r'''const rows = $input.all().map(i => i.json || {});
+const notices = $('Record Code Notices').first().json.notices || [];
+const failed = rows.some(r => r.error);
+const claimed = new Set(rows.map(r => r.key).filter(Boolean));
+return notices.filter(n => failed || claimed.has(n.key)).map(json => ({ json }));
 '''
 
 
@@ -359,15 +377,22 @@ def main():
     nodes.append(code_node('Attach game_id', ATTACH_JS, [x0 + 2016, y0]))
 
     nodes.append(code_node('Record Code Notices', NOTICES_JS, [x0 + 1120, y0 + 224]))
+    claim = copy.deepcopy(pg_tpl)
+    # INSERT ... RETURNING gives no row when every key was already sent; Send Record Notices must still run.
+    claim.update({'id': nid('Claim Record Notices'), 'name': 'Claim Record Notices', 'position': [x0 + 1344, y0 + 224],
+                  'onError': 'continueRegularOutput', 'alwaysOutputData': True})
+    claim['parameters'] = {'operation': 'executeQuery', 'query': '{{ $json.sql }}', 'options': {}}
+    nodes.append(claim)
+    nodes.append(code_node('Send Record Notices', SEND_JS, [x0 + 1568, y0 + 224]))
     log = copy.deepcopy(log_tpl)
-    log.update({'id': nid('Log Record Notices'), 'name': 'Log Record Notices', 'position': [x0 + 1344, y0 + 224],
+    log.update({'id': nid('Log Record Notices'), 'name': 'Log Record Notices', 'position': [x0 + 1792, y0 + 224],
                 'onError': 'continueRegularOutput'})
     nodes.append(log)
     nodes.append({
         'parameters': {'spaceId': CHAT_SPACE, 'jsonParameters': True,
                        'messageJson': '={{ JSON.stringify({ text: $json.text }) }}', 'additionalFields': {}},
         'id': nid('Chat Record Notice'), 'name': 'Chat Record Notice',
-        'type': 'n8n-nodes-base.googleChat', 'typeVersion': 1, 'position': [x0 + 1344, y0 + 384],
+        'type': 'n8n-nodes-base.googleChat', 'typeVersion': 1, 'position': [x0 + 1792, y0 + 384],
         'credentials': copy.deepcopy(CHAT_CREDENTIAL),
         'onError': 'continueRegularOutput',
     })
@@ -410,7 +435,9 @@ def main():
     c['Collect Record Files'] = link('[NEW] Parse Filenames')
     c['[NEW] Parse Filenames'] = link('Attach game_id')
     c['Attach game_id'] = link('[NEW] Compare - Find New')
-    c['Record Code Notices'] = link('Log Record Notices', 'Chat Record Notice')
+    c['Record Code Notices'] = link('Claim Record Notices')
+    c['Claim Record Notices'] = link('Send Record Notices')
+    c['Send Record Notices'] = link('Log Record Notices', 'Chat Record Notice')
 
     out = {'name': NAME, 'nodes': wf['nodes'], 'connections': c, 'settings': wf.get('settings') or {},
            'pinData': {}, 'meta': wf.get('meta')}

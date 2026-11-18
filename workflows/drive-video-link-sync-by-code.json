@@ -513,7 +513,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// One flow_log row + one Chat message per code file that was left as it is. A file is reported once per\n// status: List Drive Files2 lists the last 7 days of the folder on every run, and a held file would otherwise\n// be reported again each time. (Workflow static data is kept for production runs only.)\nconst notices = $('Classify Codes').first().json.notices || [];\nlet store = null;\ntry { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }\nconst sent = new Set(store && Array.isArray(store.demoNoticeKeys) ? store.demoNoticeKeys : []);\n\nconst out = [];\nfor (const n of notices) {\n  const key = `${n.status}|${n.file_id}`;\n  if (sent.has(key)) continue;\n  sent.add(key);\n  const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';\n  let text;\n  if (n.status === 'ambiguous_code') {\n    text = `drive-video-link-sync: ${n.file} carries code ${n.code}, which is both a demo code and a record code (demo code of ${label}). File left as it is; the code must be fixed in the database before this file is processed.`;\n  } else {\n    text = `drive-video-link-sync: ${n.file} carries code ${n.code} for ${label}, which already has a demo link. File left as it is; clear the old link to process it again.`;\n  }\n  out.push({ json: {\n    name: 'drive-video-link-sync',\n    status: n.status,\n    note: JSON.stringify({ file: n.file, code: n.code, game_id: n.game_id || null, reason: n.reason || null }),\n    text,\n  } });\n}\nif (store) store.demoNoticeKeys = [...sent].slice(-1000);\nreturn out;\n"
+        "jsCode": "// One flow_log row + one Chat message per code file that was left as it is. A file is reported once per\n// status: List Drive Files2 lists the last 7 days of the folder on every run, and a held file would otherwise\n// be reported again each time. What was sent is kept in the table workflow_notices (migration 053), not in\n// workflow static data: on n8n cloud the Code node reads static data back empty and every run re-posted.\n// This node only builds the messages and one INSERT; Claim Code Notices runs it and Send Code Notices keeps\n// the messages whose key was new.\nconst WORKFLOW = 'drive-video-link-sync';\nconst notices = $('Classify Codes').first().json.notices || [];\nconst q = s => `'${String(s == null ? '' : s).replace(/'/g, \"''\")}'`;\n\nconst out = [];\nconst seen = new Set();\nfor (const n of notices) {\n  const key = `${WORKFLOW}|${n.status}|${n.file_id}`;\n  if (seen.has(key)) continue;\n  seen.add(key);\n  const label = n.title ? `${n.title} (${n.game_id})` : n.game_id || '';\n  let text;\n  if (n.status === 'ambiguous_code') {\n    text = `drive-video-link-sync: ${n.file} carries code ${n.code}, which is both a demo code and a record code (demo code of ${label}). File left as it is; the code must be fixed in the database before this file is processed.`;\n  } else {\n    text = `drive-video-link-sync: ${n.file} carries code ${n.code} for ${label}, which already has a demo link. File left as it is; clear the old link to process it again.`;\n  }\n  out.push({\n    key,\n    name: WORKFLOW,\n    status: n.status,\n    note: JSON.stringify({ file: n.file, code: n.code, game_id: n.game_id || null, reason: n.reason || null }),\n    text,\n  });\n}\nif (out.length === 0) return [];\nconst sql =\n  `INSERT INTO workflow_notices (key, workflow) VALUES\\n  ` +\n  out.map(o => `(${q(o.key)}, ${q(WORKFLOW)})`).join(',\\n  ') +\n  `\\nON CONFLICT (key) DO NOTHING\\nRETURNING key`;\nreturn [{ json: { sql, notices: out } }];\n"
       },
       "id": "8bfdc9b9-0d6b-50af-acff-59ecb44c04b6",
       "name": "Code Notices",
@@ -521,6 +521,42 @@
       "typeVersion": 2,
       "position": [
         4016,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "d6a9593c-472e-5488-b583-1e12501f2e7f",
+      "name": "Claim Code Notices",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4240,
+        880
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "KBZC0RGIJsc8d7GK",
+          "name": "Production - Signal Sense"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json || {});\nconst notices = $('Code Notices').first().json.notices || [];\nconst failed = rows.some(r => r.error);\nconst claimed = new Set(rows.map(r => r.key).filter(Boolean));\nreturn notices.filter(n => failed || claimed.has(n.key)).map(json => ({ json }));\n"
+      },
+      "id": "f9956dcf-ed43-51e3-8b4d-61976490b35d",
+      "name": "Send Code Notices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4464,
         880
       ]
     },
@@ -604,7 +640,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        4240,
+        4688,
         880
       ],
       "credentials": {
@@ -626,7 +662,7 @@
       "type": "n8n-nodes-base.googleChat",
       "typeVersion": 1,
       "position": [
-        4240,
+        4688,
         1040
       ],
       "credentials": {
@@ -847,6 +883,28 @@
       ]
     },
     "Code Notices": {
+      "main": [
+        [
+          {
+            "node": "Claim Code Notices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Code Notices": {
+      "main": [
+        [
+          {
+            "node": "Send Code Notices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Code Notices": {
       "main": [
         [
           {

@@ -35,6 +35,17 @@ const run = (name: string, input: Row[], ctx: Record<string, Row | Row[]> = {}, 
   return out.map(o => o.json)
 }
 
+// Code Notices builds the messages and one INSERT; Claim Code Notices (Postgres) returns the keys it inserted into
+// workflow_notices; Send Code Notices keeps those messages. `st.sent` plays the table across runs.
+const notify = (input: Row[], ctx: Record<string, Row | Row[]>, st: Row = {}): Row[] => {
+  const built = run('Code Notices', input, ctx)
+  if (built.length === 0) return []
+  const sent: Set<string> = st.sent ?? (st.sent = new Set<string>())
+  const claimed = (built[0].notices as Row[]).map(n => n.key as string).filter(k => !sent.has(k))
+  claimed.forEach(k => sent.add(k))
+  return run('Send Code Notices', claimed.length ? claimed.map(key => ({ key })) : [{}], { 'Code Notices': built[0] })
+}
+
 const drive = (name: string, id = name) => ({ id, name, webViewLink: `https://drive.google.com/file/d/${id}/view` })
 const FILES = ['K7M2QX.mp4', 'Racket.mp4', 'Some Game.mp4', 'K7M2QX_20mins.mp4'].map(n => drive(n))
 const FOLDER = { 'Config2': { folderId: 'FOLDER1' } }
@@ -69,7 +80,9 @@ describe('drive-video-link-sync [by-code] workflow', () => {
     expect(next('Plan Renames')).toEqual(['Names Taken'])
     expect(next('Names Taken')).toEqual(['Resolve Names'])
     expect(next('Resolve Names')).toEqual(['Rename Drive File'])
-    expect(next('Code Notices')).toEqual(['Log Code Notices', 'Chat Code Notice'])
+    expect(next('Code Notices')).toEqual(['Claim Code Notices'])
+    expect(next('Claim Code Notices')).toEqual(['Send Code Notices'])
+    expect(next('Send Code Notices')).toEqual(['Log Code Notices', 'Chat Code Notice'])
   })
 
   it('the code alphabet in the node source equals CODE_ALPHABET in lib/short-code.ts, and the rule gives the same answers', () => {
@@ -137,7 +150,7 @@ describe('drive-video-link-sync [by-code] workflow', () => {
       const out = classify([demoRow({ code: 'ZZ99ZZ', file_id: 'Z1', demo_game_id: null, can_write: false })], files)
       expect((out.titleFiles as Row[]).map(f => f.name)).toEqual(['ZZ99ZZ.mp4'])
       expect(out.notices).toEqual([])
-      expect(run('Code Notices', [{}], { 'Classify Codes': out })).toEqual([])
+      expect(notify([{}], { 'Classify Codes': out })).toEqual([])
     })
 
     it('a code whose game already has a link: link_exists, nothing written, file left alone', () => {
@@ -157,7 +170,7 @@ describe('drive-video-link-sync [by-code] workflow', () => {
       expect(out.writeSql).toBe('SELECT 1 AS none')
       expect((out.titleFiles as Row[]).map(f => f.name)).not.toContain('K7M2QX.mp4')
       // the notices node has nothing to say either: no flow_log row, no Chat
-      expect(run('Code Notices', [{}], { 'Classify Codes': out })).toEqual([])
+      expect(notify([{}], { 'Classify Codes': out })).toEqual([])
     })
 
     it('neither workflow can emit wrong_folder or code_not_found any more', () => {
@@ -329,15 +342,38 @@ describe('drive-video-link-sync [by-code] workflow', () => {
       { status: 'ambiguous_code', code: 'ZZ99ZZ', file: 'ZZ99ZZ.mp4', game_id: 'g-9', title: 'Rec' },
     ]
     it('makes one flow_log row and one Chat text per notice, with the status as given', () => {
-      const out = run('Code Notices', [{}], { 'Classify Codes': { notices } })
+      const out = notify([{}], { 'Classify Codes': { notices } })
       expect(out.map(o => o.status)).toEqual(['link_exists', 'ambiguous_code'])
       expect(out.every(o => o.name === 'drive-video-link-sync')).toBe(true)
       expect(JSON.parse(out[0].note)).toMatchObject({ file: 'K7M2QX.mp4', code: 'K7M2QX' })
       expect(out[0].text).toContain('K7M2QX.mp4')
       expect(out[1].text).toMatch(/both a demo code and a record code/)
     })
+    it('remembers what was sent in workflow_notices, not in static data (n8n cloud reads static data back empty)', () => {
+      expect(src('Code Notices')).not.toMatch(/getWorkflowStaticData/)
+      const built = run('Code Notices', [{}], { 'Classify Codes': { notices: [
+        { status: 'link_exists', code: 'K7M2QX', file: "it's.mp4", file_id: 'F1', game_id: 'g-1' },
+        { status: 'link_exists', code: 'K7M2QX', file: 'dup.mp4', file_id: 'F1', game_id: 'g-1' },
+      ] } })
+      expect(built).toHaveLength(1)
+      expect(built[0].notices.map((n: Row) => n.key)).toEqual(['drive-video-link-sync|link_exists|F1'])
+      expect(built[0].sql).toBe(
+        "INSERT INTO workflow_notices (key, workflow) VALUES\n  ('drive-video-link-sync|link_exists|F1', 'drive-video-link-sync')\n" +
+        'ON CONFLICT (key) DO NOTHING\nRETURNING key')
+      const claim = node('Claim Code Notices')
+      expect(claim.type).toBe('n8n-nodes-base.postgres')
+      expect(claim.parameters.query).toBe('{{ $json.sql }}')
+      expect(claim.credentials).toEqual(node('Lookup Codes').credentials)
+      expect((claim as Row).alwaysOutputData).toBe(true)
+      expect((claim as Row).onError).toBe('continueRegularOutput')
+    })
+    it('a failed claim posts every notice rather than hiding one', () => {
+      const built = run('Code Notices', [{}], { 'Classify Codes': { notices } })[0]
+      expect(run('Send Code Notices', [{ error: 'relation "workflow_notices" does not exist' }], { 'Code Notices': built })).toHaveLength(2)
+      expect(run('Send Code Notices', [{}], { 'Code Notices': built })).toEqual([])
+    })
     it('emits nothing when there is nothing to report', () => {
-      expect(run('Code Notices', [{}], { 'Classify Codes': { notices: [] } })).toEqual([])
+      expect(notify([{}], { 'Classify Codes': { notices: [] } })).toEqual([])
     })
     it('a held file is reported once per status across runs (List Drive Files2 relists 7 days); a new status notifies again', () => {
       const st: Row = {}
@@ -348,21 +384,21 @@ describe('drive-video-link-sync [by-code] workflow', () => {
       // two passes over the same held files, sharing the workflow static data
       const first = (() => {
         const cls = classify([demoRow({ file_id: 'F1', can_write: false })], [drive('K7M2QX.mp4', 'F1')])
-        return run('Code Notices', [{}], { 'Classify Codes': cls }, st)
+        return notify([{}], { 'Classify Codes': cls }, st)
       })()
       expect(first.map(o => o.status)).toEqual(['link_exists'])
-      const second = run('Code Notices', [{}],
+      const second = notify([{}],
         { 'Classify Codes': classify([demoRow({ file_id: 'F1', can_write: false })], [drive('K7M2QX.mp4', 'F1')]) }, st)
       expect(second).toEqual([])
       // another file, and the same file under a new status, are new notices
-      expect(run('Code Notices', [{}], { 'Classify Codes': { notices: held } }, st).map(o => o.status)).toEqual(['ambiguous_code'])
+      expect(notify([{}], { 'Classify Codes': { notices: held } }, st).map(o => o.status)).toEqual(['ambiguous_code'])
       const changed = [{ ...held[0], status: 'ambiguous_code' }]
-      expect(run('Code Notices', [{}], { 'Classify Codes': { notices: changed } }, st).map(o => o.status)).toEqual(['ambiguous_code'])
-      expect(run('Code Notices', [{}], { 'Classify Codes': { notices: changed } }, st)).toEqual([])
+      expect(notify([{}], { 'Classify Codes': { notices: changed } }, st).map(o => o.status)).toEqual(['ambiguous_code'])
+      expect(notify([{}], { 'Classify Codes': { notices: changed } }, st)).toEqual([])
     })
     it('an ambiguous_code notice is logged and posted with its own status and a plain text', () => {
       const amb = [{ status: 'ambiguous_code', code: 'K7M2QX', file: 'K7M2QX.mp4', file_id: 'F1', game_id: 'g-1', title: 'Nail Box Sort' }]
-      const out = run('Code Notices', [{}], { 'Classify Codes': { notices: amb } })
+      const out = notify([{}], { 'Classify Codes': { notices: amb } })
       expect(out).toHaveLength(1)
       expect(out[0].status).toBe('ambiguous_code')
       expect(out[0].text).toContain('K7M2QX.mp4')
