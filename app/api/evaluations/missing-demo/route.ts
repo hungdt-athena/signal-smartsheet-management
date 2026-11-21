@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { getCurrentBatch } from '@/lib/current-batch'
+import { listRowFilter } from '@/lib/eval-pairs'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,30 +54,36 @@ export async function GET(_req: NextRequest) {
     let rows: Row[]
     try {
       rows = await sql`
-        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, gi.demo_code, ge.genre_1, ge.category_group,
+        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, COALESCE(gi.demo_code, twin_gi.demo_code) AS demo_code, ge.genre_1, ge.category_group,
           ge.batch, ge.evaluate_date,
           s.link AS suggested_link, s.file_name AS suggested_name, s.shared_with
         FROM game_evaluations ge
         JOIN game_info gi ON gi.game_id = ge.game_id
+        LEFT JOIN game_evaluations twin ON twin.id = ge.pair_eval_id
+        LEFT JOIN game_info twin_gi ON twin_gi.game_id = twin.game_id
         LEFT JOIN drive_link_suggestions s ON s.game_evaluation_id = ge.id
         WHERE ge.initial_conclusion = 'List_Idea'
           AND COALESCE(ge.drive_link, '') = ''
           AND lower(ge.initial_evaluator) = lower(${me})
           AND ge.batch = ${current}
+          ${listRowFilter(sql)}
         ORDER BY ge.evaluate_date DESC NULLS LAST, ge.id
       ` as unknown as Row[]
     } catch (err) {
       if (!isMissingSuggestionTable(err)) throw err
       console.error('GET /api/evaluations/missing-demo: drive_link_suggestions missing, apply migration 048')
       rows = await sql`
-        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, gi.demo_code, ge.genre_1, ge.category_group,
+        SELECT ge.id, ge.game_id, gi.title, gi.icon_url, COALESCE(gi.demo_code, twin_gi.demo_code) AS demo_code, ge.genre_1, ge.category_group,
           ge.batch, ge.evaluate_date
         FROM game_evaluations ge
         JOIN game_info gi ON gi.game_id = ge.game_id
+        LEFT JOIN game_evaluations twin ON twin.id = ge.pair_eval_id
+        LEFT JOIN game_info twin_gi ON twin_gi.game_id = twin.game_id
         WHERE ge.initial_conclusion = 'List_Idea'
           AND COALESCE(ge.drive_link, '') = ''
           AND lower(ge.initial_evaluator) = lower(${me})
           AND ge.batch = ${current}
+          ${listRowFilter(sql)}
         ORDER BY ge.evaluate_date DESC NULLS LAST, ge.id
       ` as unknown as Row[]
     }

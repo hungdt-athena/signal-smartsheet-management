@@ -18,13 +18,14 @@ export interface PairStore {
   dead: boolean
 }
 
-/** List queries: drop every "back" row so each linked pair shows once. */
+/** List queries: drop every "back" row so each linked pair shows once.
+ *  Emits a leading `AND`, so it goes after an existing WHERE condition. */
 export function listRowFilter(q: Sql, alias = 'ge') {
   return q`AND NOT ${q(alias)}.pair_back`
 }
 
 /**
- * Work-count queries: drop the back row only when it is a copy. A back row that is
+ * Work-count queries: drop the back row only when it is a copy. Emits a leading `AND`. A back row that is
  * Link_dead / Stale_release is real work of the person who marked it, so it still counts.
  */
 export function notPairCopy(q: Sql, alias = 'ge') {
@@ -40,7 +41,7 @@ export function notPairCopy(q: Sql, alias = 'ge') {
  */
 export function storesSelect(q: Sql, alias = 'ge', giAlias = 'gi') {
   return q`(
-    SELECT COALESCE(json_agg(s.j ORDER BY s.ord), '[]'::json)
+    SELECT COALESCE(json_agg(s.j ORDER BY s.ord, s.src), '[]'::json)
     FROM (
       SELECT 0 AS src,
              CASE WHEN ${q(giAlias)}.os = 'ios' THEN 0 ELSE 1 END AS ord,

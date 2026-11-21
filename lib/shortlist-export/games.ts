@@ -1,6 +1,7 @@
 // The Insight / Priority IV games of an export scope, one per game_id.
 
 import { sql } from '@/lib/db'
+import { listRowFilter, storesSelect, type PairStore } from '@/lib/eval-pairs'
 import { CONCLUSION_OF, type ExportGame, type ExportType } from './types'
 
 /** Labels that can be exported: the ones with a row in `batches`, newest first. */
@@ -23,6 +24,7 @@ type Row = {
   evaluate_date: string | Date | null
   youtube_5min_link: string | null
   youtube_20min_link: string | null
+  stores: PairStore[] | null
 }
 
 function clean(v: string | null | undefined): string | null {
@@ -57,12 +59,14 @@ export async function loadExportGames(labels: string[], types: ExportType[]): Pr
            ge.game_id, gi.title, dev.developer_name, gi.os, gi.app_link, gi.icon_url,
            to_char(gi.initial_release AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD') AS initial_release,
            ge.final_conclusion, ge.batch, ge.evaluate_date,
-           ge.youtube_5min_link, ge.youtube_20min_link
+           ge.youtube_5min_link, ge.youtube_20min_link,
+           ${storesSelect(sql)} AS stores
     FROM game_evaluations ge
     JOIN game_info gi USING (game_id)
     LEFT JOIN developer dev ON gi.publisher_id = dev.id
     WHERE ge.batch = ANY(${labels}::text[])
       AND ge.final_conclusion = ANY(${conclusions}::text[])
+      ${listRowFilter(sql)}
     ORDER BY ge.game_id, ge.evaluate_date DESC NULLS LAST, ge.id DESC`
 
   const rank = new Map(labels.map((l, i) => [l, i]))
@@ -71,6 +75,10 @@ export async function loadExportGames(labels: string[], types: ExportType[]): Pr
 
   return sorted.map(r => {
     const conclusion: ExportGame['conclusion'] = r.final_conclusion === 'Priority IV' ? 'Priority IV' : 'Insight'
+    const stores = (r.stores ?? []).flatMap(s => {
+      const os = platformOf(s.os)
+      return os ? [{ os, link: clean(s.app_link) }] : []
+    })
     return {
       gameId: String(r.game_id),
       title: clean(r.title) ?? String(r.game_id),
@@ -81,6 +89,7 @@ export async function loadExportGames(labels: string[], types: ExportType[]): Pr
       releaseDate: clean(r.initial_release),
       conclusion,
       batch: r.batch,
+      ...(stores.length ? { stores } : {}),
       youtubeUrl: clean(conclusion === 'Insight' ? r.youtube_5min_link : r.youtube_20min_link),
     }
   })

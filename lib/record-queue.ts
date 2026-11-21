@@ -1,6 +1,7 @@
 import { recordViewRows, recordBucketOf, toYtGame } from '@/lib/record-view-games'
 import { getCurrentBatch } from '@/lib/current-batch'
 import { loadBatchSpans } from '@/lib/report-batches'
+import type { PairStore } from '@/lib/eval-pairs'
 import { resolveVideoMatches, normalizeName, type Bucket, type YtbMatchRow } from '@/lib/ytb-match'
 
 export interface RecordQueueGame {
@@ -10,6 +11,7 @@ export interface RecordQueueGame {
   batch: string
   category_group: string | null
   record_code: string | null
+  stores: PairStore[]
 }
 
 /** The batch the team is in and the one before it: the only two a recorder is chased about.
@@ -41,7 +43,7 @@ export async function recordingQueue(recorder: string, ytRows: YtbMatchRow[]): P
     const bucket = recordBucketOf(r)
     const assignee = bucket === '5min' ? r.record_5min_assignee : r.record_20min_assignee
     if (!assignee || normalizeName(assignee) !== who) continue
-    out.push({ id: r.id, title: r.title, bucket, batch: r.batch, category_group: r.category_group, record_code: r.record_code ?? null })
+    out.push({ id: r.id, title: r.title, bucket, batch: r.batch, category_group: r.category_group, record_code: r.record_code ?? null, stores: r.stores ?? [] })
   }
   return out
 }

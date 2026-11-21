@@ -284,11 +284,15 @@ export function readSearch(searchParams: URLSearchParams): string {
   return q.length >= SEARCH_MIN_CHARS ? q : ''
 }
 
-/** Match the term against a game's title or its store id. */
+/** Match the term against a game's title or its store id. The row's twin counts too
+ *  (migration 054): the back row of a linked pair is hidden from lists, so a term that
+ *  is the back store's id must still land on the front row. */
 export function searchFilter(term: string) {
   if (!term) return sql``
   const contains = `%${escapeLike(term)}%`
-  return sql`AND (gi.title ILIKE ${contains} OR gi.game_id ILIKE ${contains})`
+  return sql`AND (gi.title ILIKE ${contains} OR gi.game_id ILIKE ${contains}
+    OR EXISTS (SELECT 1 FROM game_evaluations pe
+               WHERE pe.id = ge.pair_eval_id AND pe.game_id ILIKE ${contains}))`
 }
 
 /** The whole ordering for a search, in three tiers.
@@ -316,7 +320,9 @@ export function searchOrder(term: string) {
     : sql``
 
   return sql`
-    CASE WHEN gi.game_id = ${term} THEN 0
+    CASE WHEN gi.game_id = ${term}
+           OR EXISTS (SELECT 1 FROM game_evaluations pe
+                      WHERE pe.id = ge.pair_eval_id AND pe.game_id = ${term}) THEN 0
          WHEN lower(gi.title) = lower(${term}) THEN 1
          WHEN gi.title ILIKE ${prefix} THEN 2
          ${wordTier}

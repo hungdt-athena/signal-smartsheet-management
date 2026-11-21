@@ -14,13 +14,9 @@ export interface SheetTab {
 
 function rowOf(g: ExportGame): string[] {
   const link = g.storeUrl ?? ''
-  return [
-    g.gameId,
-    g.title,
-    g.publisher ?? '',
-    g.platform === 'android' ? link : '',
-    g.platform === 'ios' ? link : '',
-  ]
+  const of = (os: 'android' | 'ios') =>
+    g.stores?.length ? (g.stores.find(s => s.os === os)?.link ?? '') : g.platform === os ? link : ''
+  return [g.gameId, g.title, g.publisher ?? '', of('android'), of('ios')]
 }
 
 /** Tabs in the order Priority IV, Insight -- only the chosen types. */
