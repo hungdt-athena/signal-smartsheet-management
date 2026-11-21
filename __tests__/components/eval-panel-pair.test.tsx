@@ -108,6 +108,8 @@ describe('EvalDetailPanel, a single-store game', () => {
     expect(screen.queryByRole('switch', { name: /link dead/ })).toBeNull()
     expect(screen.getByText('StoreKit (24)')).toBeTruthy()
     expect(document.querySelector('.shared-hint')).toBeNull()
+    // a single store keeps its platform chip
+    expect(Array.from(document.querySelectorAll('.badge.neutral')).some(b => b.textContent === 'ANDROID')).toBe(true)
   })
 })
 
@@ -127,6 +129,15 @@ describe('EvalDetailPanel, game card', () => {
 })
 
 describe('EvalDetailPanel, a linked pair', () => {
+  it('drops the platform chip: the store tabs already say which store is shown', async () => {
+    mockApi({ stores: [IOS, AND], front: AND })
+    panel(IOS.game_id)
+    await waitFor(() => expect(document.querySelector('.store-tabs')).not.toBeNull())
+    const chips = Array.from(document.querySelectorAll('.badge.neutral')).map(b => b.textContent)
+    expect(chips).not.toContain('IOS')
+    expect(chips).not.toContain('ANDROID')
+  })
+
   it('shows two store tabs, the asked-for store first selected; switching changes Game Info, never the form', async () => {
     mockApi({ stores: [IOS, AND], front: AND })
     panel(AND.game_id)

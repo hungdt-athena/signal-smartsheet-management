@@ -1518,7 +1518,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                 {showSubtitle && <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 5 }}>{gi.subtitle}</div>}
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                   {/* Labels, not chips anyone can click: .badge (see C3). */}
-                  <span className="badge neutral">{gi.os?.toUpperCase()}</span>
+                  {/* A pair names its store on the tabs above; only a single store keeps the chip. */}
+                  {!shown && <span className="badge neutral">{gi.os?.toUpperCase()}</span>}
                   {cats.map((c, i) => (
                     <span key={i} className="badge info">{c}</span>
                   ))}
