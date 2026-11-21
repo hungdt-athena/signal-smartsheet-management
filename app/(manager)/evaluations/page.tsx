@@ -1359,7 +1359,7 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen,
               </span>
             ) : undefined} />
         </td>
-        <td><StoresCell stores={storesOf(ev)} /></td>
+        <td><StoresCell stores={storesOf(ev)} asLinks /></td>
         <td style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', color: ev.initial_evaluator ? 'var(--text)' : 'var(--faint)' }}>
           {ev.initial_evaluator || '—'}
         </td>

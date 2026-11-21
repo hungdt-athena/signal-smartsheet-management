@@ -111,6 +111,21 @@ describe('EvalDetailPanel, a single-store game', () => {
   })
 })
 
+describe('EvalDetailPanel, game card', () => {
+  it('hides a subtitle that only repeats a category chip, keeps one that adds something', async () => {
+    mockApi({ stores: null, front: AND, over: { subtitle: 'puzzle ', categories: ['Puzzle'] } })
+    const { unmount } = panel(AND.game_id)
+    await screen.findByText('Funbit Android Co')
+    // the subtitle line would be a div holding exactly the raw subtitle text
+    expect(Array.from(document.querySelectorAll('div')).filter(d => d.textContent === 'puzzle ').length).toBe(0)
+    expect(document.querySelector('.badge.info')?.textContent).toBe('Puzzle')
+    unmount()
+    mockApi({ stores: null, front: AND, over: { subtitle: 'Sort balls by colour', categories: ['Puzzle'] } })
+    panel(AND.game_id)
+    expect(await screen.findByText('Sort balls by colour')).toBeTruthy()
+  })
+})
+
 describe('EvalDetailPanel, a linked pair', () => {
   it('shows two store tabs, the asked-for store first selected; switching changes Game Info, never the form', async () => {
     mockApi({ stores: [IOS, AND], front: AND })

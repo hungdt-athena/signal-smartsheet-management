@@ -93,6 +93,8 @@ describe('Evaluate tab: pairs', () => {
     // no `stores` on the row: falls back to its own store
     expect(rowOf('Legacy Game').children[idx].querySelectorAll('.store-ico').length).toBe(1)
     expect(document.querySelector('.game-icon-plat')).toBeNull()
+    // each store icon opens that store's page
+    expect(rowOf('Pair Game').children[idx].querySelectorAll('a.store-ico').length).toBe(2)
     // the count is the API total
     expect(screen.getByText(/7 games/)).toBeTruthy()
   })

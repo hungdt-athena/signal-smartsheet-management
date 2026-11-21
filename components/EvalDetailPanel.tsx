@@ -1401,6 +1401,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // Manual uploads: admin or the assigned evaluator (matches the API rule).
   const canEditShots = !readOnly && (isManager || ev.initial_evaluator === userName)
   const cats = ev.categories || []
+  // A subtitle that only repeats a category chip below it (iOS often sets it to the genre) is noise.
+  const showSubtitle = !!gi.subtitle && !cats.some(c => String(c).trim().toLowerCase() === String(gi.subtitle).trim().toLowerCase())
 
   return (
     <>
@@ -1513,7 +1515,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   <span style={{ wordBreak: 'break-all' }}>{gi.game_id}</span>
                   <TitleCopyButton title={gi.game_id} label="game ID" />
                 </div>
-                {gi.subtitle && <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 5 }}>{gi.subtitle}</div>}
+                {showSubtitle && <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 5 }}>{gi.subtitle}</div>}
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                   {/* Labels, not chips anyone can click: .badge (see C3). */}
                   <span className="badge neutral">{gi.os?.toUpperCase()}</span>
