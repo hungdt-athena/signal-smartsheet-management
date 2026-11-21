@@ -12,7 +12,7 @@ describe('YouTube / Record page', () => {
     expect(src).not.toMatch(/FINAL_CONC_STYLES|RECORD_STATUS_STYLES/)
     // Every game in a container is List_Idea + Insight/Priority IV, so the badges said nothing.
     expect(src).not.toMatch(/finalConclusionStyle\(item\.final_conclusion\)/)
-    expect(src).toMatch(/<GameIcon src=\{item\.icon_url\} os=\{item\.os\}/)
+    expect(src).toMatch(/<GameIcon src=\{item\.icon_url\} os=\{item\.os\} oses=/)
   })
 
   it('lets only managers rename or delete a live video, through /api/youtube/videos', () => {

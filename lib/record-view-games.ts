@@ -14,6 +14,7 @@ export interface RecordViewRow {
   batch: string | null
   category_group: string | null
   title: string
+  twin_title: string | null       // the other store's title on a linked pair
   record_code: string | null      // the pair's code: own, else the twin's
   stores: PairStore[]             // the row's store plus its twin's, iOS first
   record_bucket: string | null
@@ -32,7 +33,7 @@ const VN = 'Asia/Ho_Chi_Minh'
 
 export async function recordViewRows(): Promise<RecordViewRow[]> {
   return sql<RecordViewRow[]>`
-    SELECT ge.id, ge.game_id, ge.batch, ge.category_group, gi.title,
+    SELECT ge.id, ge.game_id, ge.batch, ge.category_group, gi.title, twin_gi.title AS twin_title,
       COALESCE(gi.record_code, twin_gi.record_code) AS record_code,
       ${storesSelect(sql)} AS stores,
       ge.record_bucket, ge.final_conclusion,
@@ -60,5 +61,6 @@ export function toYtGame(row: RecordViewRow): YtGame {
     recorder: bucket === '5min' ? row.record_5min_assignee : row.record_20min_assignee,
     since: row.since,
     heldVideo: extractYtId(bucket === '5min' ? row.youtube_20min_link : row.youtube_5min_link),
+    ...(row.twin_title != null ? { alt: { title: row.twin_title, gameId: (row.stores || []).find(s => s.game_id !== row.game_id)?.game_id } } : {}),
   }
 }
