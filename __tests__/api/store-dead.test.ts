@@ -84,6 +84,21 @@ describe('POST /api/evaluations/store-dead', () => {
     expect((await res.json()).data.id).toBe(1)
   })
 
+  // The evaluate_date fragment of the UPDATE (a nested sql`` call, so its own entry in calls).
+  const dateFrag = () => calls.map(c => c.text).find(t => /NOW\(\)/.test(t) && !/UPDATE|INSERT|SELECT/.test(t))
+
+  it('dead=true on a judged store moves evaluate_date to now (same rule as PATCH), not the old date', async () => {
+    locked[0] = { ...locked[0], initial_conclusion: 'Bypass', evaluate_date: '2026-11-01T03:00:00Z' }
+    expect((await post({ id: 1, dead: true })).status).toBe(200)
+    expect(dateFrag()).toBe('NOW()')
+  })
+
+  it('dead=true on a store already Link_dead keeps its date', async () => {
+    locked[0] = { ...locked[0], initial_conclusion: 'Link_dead', evaluate_date: '2026-11-01T03:00:00Z' }
+    expect((await post({ id: 1, dead: true })).status).toBe(200)
+    expect(dateFrag()).toBe('COALESCE(ge.evaluate_date, NOW())')
+  })
+
   it('dead=false on a store that is not Link_dead is a 400', async () => {
     expect((await post({ id: 1, dead: false })).status).toBe(400)
     expect(calls.some((c) => /UPDATE game_evaluations/.test(c.text))).toBe(false)

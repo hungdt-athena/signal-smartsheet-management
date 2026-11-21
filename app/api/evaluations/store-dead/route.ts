@@ -61,11 +61,17 @@ export async function POST(req: NextRequest) {
       }
 
       // 1. The write. The sync trigger runs inside it: on a reopen it copies the pair's
-      //    result onto this row.
+      //    result onto this row. Marking dead is a new result, so the date moves to now
+      //    (same rule as PATCH: evaluate_date follows a change of the conclusion). Keeping the
+      //    old date would backdate a counted row; a row already Link_dead keeps its date.
+      //    The row is locked above, so its conclusion cannot change in between.
+      const newDate = !dead ? sql`NULL`
+        : row.initial_conclusion === 'Link_dead' ? sql`COALESCE(ge.evaluate_date, NOW())`
+        : sql`NOW()`
       await tx`
         UPDATE game_evaluations ge SET
           initial_conclusion = ${dead ? 'Link_dead' : null}::text,
-          evaluate_date = ${dead ? sql`COALESCE(ge.evaluate_date, NOW())` : sql`NULL`},
+          evaluate_date = ${newDate},
           updated_by = ${actor}
         WHERE ge.id = ${id}
       `
