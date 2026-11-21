@@ -159,8 +159,9 @@ describe('GET /api/evaluations?q=', () => {
     setupSql({ months: [{ year: 2026, month: 6 }] })
     await get('category=puzzle&year=2026&month=6&page=1&q=merge')
     const q = allQueries()
-    expect(q).toContain('gi.title ILIKE')
-    expect(q).toContain('gi.game_id ILIKE')
+    // game_info aliased `g` inside searchFilter's id subquery (see lib/evaluations-filters)
+    expect(q).toContain('g.title ILIKE')
+    expect(q).toContain('g.game_id ILIKE')
     // The id half on `ge` is what loses the index.
     expect(q).not.toContain('ge.game_id ILIKE')
   })

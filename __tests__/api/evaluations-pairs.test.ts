@@ -57,11 +57,13 @@ describe('GET /api/evaluations: a linked pair shows once', () => {
 
   it('searching a game id also looks at the twin game id (the back row is hidden)', async () => {
     await get('category=puzzle&q=6822015244&limit=10')
+    // filter: the front row of a twin whose store id matches (searchFilter)
+    const f = withText('SELECT pe.pair_eval_id').join('\n')
+    expect(f).toContain('g.game_id ILIKE')
+    // ranking: the id you pasted ranks first whichever store it names
     const t = withText('pe.id = ')
     expect(t.length).toBeGreaterThanOrEqual(1)
     expect(t.join('\n')).toContain('pair_eval_id')
-    expect(t.join('\n')).toContain('pe.game_id ILIKE')
-    // ranking: the id you pasted ranks first whichever store it names
     expect(t.join('\n')).toContain('pe.game_id = ')
   })
 
