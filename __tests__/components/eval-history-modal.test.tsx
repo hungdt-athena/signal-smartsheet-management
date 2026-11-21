@@ -110,6 +110,24 @@ describe('EvalHistoryModal', () => {
     rerender(<EvalHistoryModal events={null} logReady error onClose={noop} onRetry={noop} />)
     expect(screen.getByText('Could not load the history')).toBeTruthy()
   })
+  it('marks each event with its stores: two for the whole pair, one for a single store', () => {
+    const pairSave: HistoryEvent = { ...EVENTS[0], key: 'log-p', stores: ['android', 'ios'] }
+    const dead: HistoryEvent = { ...EVENTS[0], key: 'log-d', verb: 'marked the link dead', stores: ['ios'] }
+    const assign: HistoryEvent = { ...EVENTS[1], key: 'asg-p', verb: 'assigned the pair to ThuDT', note: 'Counts as 1 game', stores: ['android', 'ios'] }
+    const linked: HistoryEvent = { ...EVENTS[1], key: 'seed-l', type: 'seed', who: 'System', verb: 'linked iOS to the pair', changes: [], stores: ['ios'] }
+    view({ events: [pairSave, dead, assign, linked] })
+    const rows = screen.getAllByTestId('history-row')
+    const marks = (r: HTMLElement) => Array.from(r.querySelectorAll('.hx-line .hx-stores [role="img"]')).map(m => m.getAttribute('aria-label'))
+    expect(marks(rows[0])).toEqual(['Android', 'iOS'])
+    expect(marks(rows[1])).toEqual(['iOS'])
+    expect(marks(rows[2])).toEqual(['Android', 'iOS'])
+    expect(rows[2].querySelector('.hx-note')?.textContent).toBe('Counts as 1 game')
+    expect(rows[3].textContent).toContain('System linked iOS to the pair')
+    expect(marks(rows[3])).toEqual(['iOS'])
+    // no stores, no mark group
+    view({ events: [EVENTS[1]] })
+    expect(screen.getAllByTestId('history-row').at(-1)!.querySelector('.hx-stores')).toBeNull()
+  })
   it('offers Try again on an error', () => {
     const onRetry = jest.fn()
     view({ events: null, error: true, onRetry })

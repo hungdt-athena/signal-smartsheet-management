@@ -2,6 +2,7 @@
 import { Modal } from '@/components/ui/Modal'
 import { prettyConclusion } from '@/lib/buckets'
 import { conclusionBadgeClass } from '@/lib/conclusion-badge'
+import { StoreMark } from '@/components/ui/StoreIcons'
 import { fmtClock, fmtDuration, groupByDay, summarize, type Change, type EventType, type HistoryEvent } from '@/lib/evaluation-history'
 
 export interface EvalHistoryModalProps {
@@ -52,7 +53,19 @@ function Row({ e, last }: { e: HistoryEvent; last: boolean }) {
       <div className={`hx-ico ${e.type}`}>{ICONS[e.type]}</div>
       {!last && <span className="hx-rail" />}
       <div>
-        <div className="hx-line"><span className="who">{e.who}</span> <span className="verb">{e.verb}</span></div>
+        <div className="hx-line">
+          <span className="who">{e.who}</span> <span className="verb">{e.verb}</span>
+          {/* Which store the event touched: both marks for the whole pair, one for a single store. */}
+          {e.stores.length > 0 && (
+            <span className="hx-stores">
+              {e.stores.map(os => (
+                <span key={os} role="img" aria-label={os === 'ios' ? 'iOS' : 'Android'} style={{ display: 'inline-flex' }}>
+                  <StoreMark os={os} size={12} />
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
         {e.changes.map((c, i) => <ChangeLine key={i} c={c} />)}
         {e.note && <div className="hx-note">{e.note}</div>}
       </div>

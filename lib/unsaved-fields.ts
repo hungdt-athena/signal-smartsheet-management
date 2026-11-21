@@ -37,10 +37,17 @@ const s = (v: string | null | undefined) => v ?? ''
 export function unsavedFields(
   form: FormValues,
   row: LoadedRow,
-  extra: { trendsTouched: boolean; stagedShots: number },
+  extra: {
+    trendsTouched: boolean
+    stagedShots: number
+    /** Stores of a linked pair whose link dead switch was flipped and not saved yet. */
+    deadSwitched?: ('ios' | 'android')[]
+  },
 ): string[] {
   const out: string[] = []
   const diff = (label: string, now: string, was: string | null | undefined) => { if (now !== s(was)) out.push(label) }
+
+  for (const os of extra.deadSwitched ?? []) out.push(`${os === 'ios' ? 'iOS' : 'Android'} link dead`)
 
   diff('Initial conclusion', form.conclusion, row.initial_conclusion)
   diff('Self note', form.noteParts.self_note, row.noteParts.self_note)

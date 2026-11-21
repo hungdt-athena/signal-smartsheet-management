@@ -22,10 +22,14 @@ describe('Eval panel timing wiring', () => {
     expect(save.indexOf('restartAfterSave(')).toBeGreaterThan(save.indexOf('if (!res.ok)'))
   })
 
+  // The key is the game_id the panel asked for: a linked pair opened by its back game_id shows
+  // its front row, so data.game_id would never match the game on screen.
   it('does not paint a refetched game the user has left', () => {
-    expect(save).toMatch(/currentGameIdRef\.current === ev\.game_id/)
-    expect(save).toMatch(/shownGameRef\.current === ev\.game_id/)
-    expect(src).toMatch(/shownGameRef\.current = data\.game_id/)
+    expect(save).toMatch(/const key = shownGameRef\.current \?\? ev\.game_id/)
+    expect(save).toMatch(/currentGameIdRef\.current === key\) applyData\(fresh, key\)/)
+    expect(save).toMatch(/shownGameRef\.current === key/)
+    expect(src).toMatch(/shownGameRef\.current = key/)
+    expect(src).toMatch(/applyData\(data, gameId\)/)
   })
 
   it('starts the timer on every game change', () => {
