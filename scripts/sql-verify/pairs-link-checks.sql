@@ -72,6 +72,7 @@ BEGIN
   ASSERT lg.actor = 'System' AND lg.game_id = 'i1' AND lg.game_evaluation_id = n AND lg.pair_scope = 'store',
     format('log row: %s', to_jsonb(lg));
   ASSERT lg.conclusion_before IS NULL AND lg.conclusion_after = 'List_Idea' AND lg.changed, 'log conclusion before/after';
+  ASSERT lg.owner IS NULL AND lg.owner_after = 'ThuDT', format('log owner before/after: %s / %s', lg.owner, lg.owner_after);
 END $$;
 
 -- ===== insert_twin_pending: store 1 held by a tester, not judged yet =====
@@ -91,6 +92,9 @@ BEGIN
   ASSERT nr.category_group = 'simulation', 'N moved to T''s category_group';
   ASSERT nr.initial_conclusion IS NULL, 'nothing judged yet';
   ASSERT nr.pair_back AND NOT tr.pair_back, 'N is the back row';
+  -- History shows the holder change
+  ASSERT (SELECT owner IS NULL AND owner_after = 'QuangVN' FROM evaluation_log
+          WHERE kind = 'pair_link' AND game_evaluation_id = n), 'pair_link log owner_after is the holder N took';
 END $$;
 
 -- ===== insert_twin_dead: store 1 is Link_dead, store 2 is a game to judge =====

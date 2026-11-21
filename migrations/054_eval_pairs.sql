@@ -16,7 +16,7 @@
 -- linked: the video belongs to the pair, and n8n / YouTube reconcile can land on the
 -- dead store's row). Every copy reads those two lists.
 --
--- This file, part 1:
+-- This file:
 --   - link on insert (trg_eval_pair_link_insert): a new row whose game has a twin store
 --     with exactly one row, not linked yet, links to it and fills its EMPTY columns from
 --     it (a value the INSERT wrote itself, e.g. add-to-record's batch, is kept):
@@ -24,21 +24,38 @@
 --       twin judged                            -> every shared column; new row is back
 --       twin not judged                        -> holder, assign dates, batch + media
 --     and the new row moves to the twin's category_group (same genre in the lists).
---     One evaluation_log row: kind 'pair_link', actor 'System', pair_scope 'store'.
+--     One evaluation_log row: kind 'pair_link', actor 'System', pair_scope 'store',
+--     owner / owner_after = the new row's holder before / after. An error while linking
+--     is a WARNING, never a failed INSERT.
+--   - copy on update (trg_eval_pair_sync): every write to a linked row reaches its twin,
+--     column by column (only the columns the write changed), with the Link_dead /
+--     Stale_release exception and the reopen rule; pair_back is recomputed after each
+--     write; a pair that is no longer valid is unlinked instead.
+--   - delete (trg_eval_pair_delete): the twin of a deleted row is a lone game again.
+--   - updated_at: trg_game_evaluations_updated now runs game_evaluations_touch_updated(),
+--     which leaves updated_at alone when only pair_eval_id / pair_back change.
 --   - link the safe pairs already there (link_safe_eval_pairs(), run at the end): both
 --     rows unjudged, same category_group, and every shared column equal or empty on one
 --     side (batch, holder and media included). Everything else waits for phase 2.
--- Part 2 (copy on update, delete) and part 3 (unlink from game_info, ROLLBACK) follow.
+-- Part 3 (unlink from game_info, ROLLBACK) follows.
 --
--- Internal UPDATEs from the insert trigger run at pg_trigger_depth() > 1, so the copy
--- trigger of part 2 (depth 1 only) skips them.
+-- Trigger depth: the triggers' own writes run at pg_trigger_depth() > 1, and the copy
+-- trigger skips those, so a copy never copies back. link_safe_eval_pairs() is called by a
+-- top-level SELECT, so the copy trigger does fire (depth 1) on its writes: its fills run
+-- before the rows are linked (the WHEN clause skips unlinked rows), the link itself changes
+-- pair_eval_id (skipped by the WHEN clause) and pair_back alone (nothing to copy). Re-running
+-- this file is checked to change nothing.
 --
 -- ORDER: additive. Apply BEFORE the build that reads pair_back. The build from before
 -- keeps working: it ignores the new columns, and a back row it lists is a full copy.
 -- Idempotent: columns/indexes IF NOT EXISTS, functions replaced, trigger dropped and
 -- recreated, the FK added only when missing, the safe-pair pass skips linked rows.
 --
--- ROLLBACK: (added with part 3)
+-- ROLLBACK: (added with part 3). It must point trg_game_evaluations_updated back at
+-- update_game_evaluations_timestamp() BEFORE dropping pair_eval_id / pair_back:
+--   DROP TRIGGER IF EXISTS trg_game_evaluations_updated ON game_evaluations;
+--   CREATE TRIGGER trg_game_evaluations_updated BEFORE UPDATE ON game_evaluations
+--     FOR EACH ROW EXECUTE FUNCTION update_game_evaluations_timestamp();
 
 -- Two transactions, as 051: the first only adds columns (metadata only, the lock is
 -- held for milliseconds), the second installs the functions and links.
@@ -212,10 +229,11 @@ BEGIN
   PERFORM eval_pair_refresh_back(a, b);
 
   SELECT * INTO done FROM game_evaluations WHERE id = a;
-  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, source, kind,
+  -- owner_after: the holder a ends up with, so History shows the holder change
+  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, owner_after, source, kind,
     conclusion_before, conclusion_after, final_before, final_after, batch_before, batch_after,
     changed, pair_scope)
-  VALUES (a, ra.game_id, 'System', ra.initial_evaluator, 'other', 'pair_link',
+  VALUES (a, ra.game_id, 'System', ra.initial_evaluator, done.initial_evaluator, 'other', 'pair_link',
     ra.initial_conclusion, done.initial_conclusion, ra.final_conclusion, done.final_conclusion,
     ra.batch, done.batch,
     ra.initial_conclusion IS DISTINCT FROM done.initial_conclusion, 'store');
@@ -223,28 +241,36 @@ BEGIN
 END;
 $$;
 
--- Link on insert (spec 6.2 b).
+-- Link on insert (spec 6.2 b). Linking is a convenience on top of the INSERT (push,
+-- add-to-record, n8n): an error in it must never fail the INSERT. It is caught, logged as
+-- a WARNING, and its half-done work rolls back with the block, so the row stays a lone
+-- game (the safe-pair pass or phase 2 can link it later).
 CREATE OR REPLACE FUNCTION eval_pair_link_on_insert() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE fam text; my_os text; twin integer; n_twin bigint;
 BEGIN
-  SELECT gi.family_id, gi.os INTO fam, my_os
-    FROM game_info gi
-   WHERE gi.game_id = NEW.game_id AND NOT COALESCE(gi.family_unlinked, false);
-  IF fam IS NULL OR my_os IS NULL THEN RETURN NULL; END IF;
-  -- One linker per family until commit: 2 stores pushed in one statement, or by two
-  -- sessions, see each other and link once.
-  PERFORM pg_advisory_xact_lock(hashtext(fam));
-  -- the other row of the same statement may have linked this one already
-  IF EXISTS (SELECT 1 FROM game_evaluations WHERE id = NEW.id AND pair_eval_id IS NOT NULL) THEN
-    RETURN NULL;
-  END IF;
-  SELECT min(t.id), count(*) INTO twin, n_twin
-    FROM game_info g JOIN game_evaluations t ON t.game_id = g.game_id
-   WHERE g.family_id = fam AND g.os <> my_os AND NOT COALESCE(g.family_unlinked, false);
-  IF n_twin = 1 THEN
-    PERFORM link_eval_pair(NEW.id, twin);
-  END IF;
+  BEGIN
+    SELECT gi.family_id, gi.os INTO fam, my_os
+      FROM game_info gi
+     WHERE gi.game_id = NEW.game_id AND NOT COALESCE(gi.family_unlinked, false);
+    IF fam IS NULL OR my_os IS NULL THEN RETURN NULL; END IF;
+    -- One linker per family until commit: 2 stores pushed in one statement, or by two
+    -- sessions, see each other and link once.
+    PERFORM pg_advisory_xact_lock(hashtext(fam));
+    -- the other row of the same statement may have linked this one already
+    IF EXISTS (SELECT 1 FROM game_evaluations WHERE id = NEW.id AND pair_eval_id IS NOT NULL) THEN
+      RETURN NULL;
+    END IF;
+    SELECT min(t.id), count(*) INTO twin, n_twin
+      FROM game_info g JOIN game_evaluations t ON t.game_id = g.game_id
+     WHERE g.family_id = fam AND g.os <> my_os AND NOT COALESCE(g.family_unlinked, false);
+    IF n_twin = 1 THEN
+      PERFORM link_eval_pair(NEW.id, twin);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING '054: evaluation % (game %) was not linked to its store pair: % (%)',
+      NEW.id, NEW.game_id, SQLERRM, SQLSTATE;
+  END;
   RETURN NULL;
 END;
 $$;
@@ -253,6 +279,137 @@ DROP TRIGGER IF EXISTS trg_eval_pair_link_insert ON game_evaluations;
 CREATE TRIGGER trg_eval_pair_link_insert
   AFTER INSERT ON game_evaluations
   FOR EACH ROW EXECUTE FUNCTION eval_pair_link_on_insert();
+
+-- updated_at is "last edited". Linking, unlinking and moving the front row only write
+-- pair_eval_id / pair_back: not an edit, so updated_at stays. Its own function because
+-- update_game_evaluations_timestamp() is shared with weekly_feedback, which has no pair
+-- columns. Same trigger name, so the BEFORE UPDATE order (record_slots, then this) holds.
+CREATE OR REPLACE FUNCTION game_evaluations_touch_updated() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF (NEW.pair_eval_id IS DISTINCT FROM OLD.pair_eval_id OR NEW.pair_back IS DISTINCT FROM OLD.pair_back)
+     AND to_jsonb(NEW) - ARRAY['pair_eval_id', 'pair_back', 'updated_at']
+       = to_jsonb(OLD) - ARRAY['pair_eval_id', 'pair_back', 'updated_at'] THEN
+    RETURN NEW;
+  END IF;
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_game_evaluations_updated ON game_evaluations;
+CREATE TRIGGER trg_game_evaluations_updated
+  BEFORE UPDATE ON game_evaluations
+  FOR EACH ROW EXECUTE FUNCTION game_evaluations_touch_updated();
+
+-- Writes src's value of each column in cols into row target, in one UPDATE, for the
+-- columns where target differs (an equal column is not rewritten). When the copy can
+-- move target's own Record bucket (record_bucket or final_conclusion), 051's
+-- record_slots trigger re-freezes target's record_<b>_batch from target's old batch;
+-- those two are then set to src's, because the media group is the pair's.
+CREATE OR REPLACE FUNCTION eval_pair_copy(target integer, src game_evaluations, cols text[]) RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE js jsonb := to_jsonb(src); jt jsonb; diff text[];
+BEGIN
+  SELECT to_jsonb(g) INTO jt FROM game_evaluations g WHERE id = target;
+  IF jt IS NULL THEN RETURN; END IF;
+  SELECT array_agg(c) INTO diff FROM unnest(cols) c WHERE js -> c IS DISTINCT FROM jt -> c;
+  IF diff IS NULL THEN RETURN; END IF;
+  EXECUTE format('UPDATE game_evaluations SET %s WHERE id = $2',
+                 (SELECT string_agg(format('%1$I = ($1).%1$I', c), ', ') FROM unnest(diff) c))
+    USING src, target;
+  IF diff && ARRAY['record_bucket', 'final_conclusion', 'record_5min_batch', 'record_20min_batch'] THEN
+    UPDATE game_evaluations
+       SET record_5min_batch = src.record_5min_batch, record_20min_batch = src.record_20min_batch
+     WHERE id = target
+       AND (record_5min_batch IS DISTINCT FROM src.record_5min_batch
+            OR record_20min_batch IS DISTINCT FROM src.record_20min_batch);
+  END IF;
+END;
+$$;
+
+-- Copy on update (spec 6.2 a). R is the row just written, T its twin.
+--   pair no longer valid (Unlink, family change, a second row) -> unlink both, copy nothing
+--   media group  -> always: the columns R just changed go to T
+--   evaluation group, by the store-only result (Link_dead / Stale_release):
+--     R just reopened (store-only -> not) -> R takes T's whole group, unless T is
+--                                            store-only too (a pending T gives its holder
+--                                            and assign dates, and clears what the dead
+--                                            store had written)
+--     R and T both without one             -> the columns R just changed go to T
+--     otherwise (R just went dead, R or T store-only) -> nothing
+--   then pair_back is recomputed.
+-- Only the columns R changed (OLD vs NEW) are copied, so two people saving two columns
+-- of one pair do not overwrite each other. Values are read from R as it is now, not from
+-- NEW: one statement that writes both rows of a pair then still ends with them equal.
+-- Root statement only: its own writes run at depth 2 and are skipped, so nothing loops.
+-- The WHEN clause skips unlinked rows and the writes that link or unlink.
+CREATE OR REPLACE FUNCTION eval_pair_sync() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE t integer := NEW.pair_eval_id; rc game_evaluations; tr game_evaluations;
+        jn jsonb := to_jsonb(NEW); jo jsonb := to_jsonb(OLD); media text[]; evals text[];
+BEGIN
+  IF pg_trigger_depth() > 1 THEN RETURN NULL; END IF;
+  SELECT array_agg(c) INTO media FROM unnest(eval_pair_media_cols()) c WHERE jn -> c IS DISTINCT FROM jo -> c;
+  SELECT array_agg(c) INTO evals FROM unnest(eval_pair_eval_cols()) c WHERE jn -> c IS DISTINCT FROM jo -> c;
+  -- a write of pair_back alone (eval_pair_refresh_back at depth 0) has nothing to copy
+  IF media IS NULL AND evals IS NULL AND NEW.pair_back IS DISTINCT FROM OLD.pair_back THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT * INTO rc FROM game_evaluations WHERE id = NEW.id;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  SELECT * INTO tr FROM game_evaluations WHERE id = t;
+  IF NOT FOUND OR tr.pair_eval_id IS DISTINCT FROM NEW.id OR NOT eval_pair_valid(NEW.id, t) THEN
+    UPDATE game_evaluations SET pair_eval_id = NULL, pair_back = false
+     WHERE id = NEW.id OR (id = t AND pair_eval_id = NEW.id);
+    RETURN NULL;
+  END IF;
+
+  IF media IS NOT NULL THEN
+    PERFORM eval_pair_copy(t, rc, media);
+  END IF;
+
+  IF eval_store_specific(OLD.initial_conclusion) AND NOT eval_store_specific(rc.initial_conclusion) THEN
+    IF NOT eval_store_specific(tr.initial_conclusion) THEN
+      SELECT * INTO tr FROM game_evaluations WHERE id = t;
+      PERFORM eval_pair_copy(NEW.id, tr, eval_pair_eval_cols());
+    END IF;
+  ELSIF evals IS NOT NULL AND NOT eval_store_specific(rc.initial_conclusion)
+        AND NOT eval_store_specific(tr.initial_conclusion) THEN
+    PERFORM eval_pair_copy(t, rc, evals);
+  END IF;
+
+  PERFORM eval_pair_refresh_back(NEW.id, t);
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_eval_pair_sync ON game_evaluations;
+CREATE TRIGGER trg_eval_pair_sync
+  AFTER UPDATE ON game_evaluations
+  FOR EACH ROW
+  WHEN (NEW.pair_eval_id IS NOT NULL AND OLD.pair_eval_id IS NOT DISTINCT FROM NEW.pair_eval_id)
+  EXECUTE FUNCTION eval_pair_sync();
+
+-- A deleted row leaves its twin a lone game: the FK (ON DELETE SET NULL) clears the
+-- pointer, this clears pair_back, so the twin shows in the lists again.
+CREATE OR REPLACE FUNCTION eval_pair_on_delete() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE game_evaluations SET pair_eval_id = NULL, pair_back = false
+   WHERE id = OLD.pair_eval_id
+     AND (pair_eval_id IS NULL OR pair_eval_id = OLD.id)
+     AND (pair_eval_id IS NOT NULL OR pair_back);
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_eval_pair_delete ON game_evaluations;
+CREATE TRIGGER trg_eval_pair_delete
+  AFTER DELETE ON game_evaluations
+  FOR EACH ROW WHEN (OLD.pair_eval_id IS NOT NULL)
+  EXECUTE FUNCTION eval_pair_on_delete();
 
 -- Pairs already there that can be linked with no judgment call (spec 6.2 d): f is the
 -- lower id (the front row, as neither is judged). True when the 2 games are the whole
