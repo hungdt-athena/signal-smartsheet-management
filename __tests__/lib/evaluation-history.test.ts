@@ -25,7 +25,7 @@ describe('fromLog', () => {
   it('a first save is "evaluated" with the verdict and the panel time', () => {
     expect(fromLog(log({}))).toEqual({
       key: 'log-1', at: '2026-10-11T07:32:00.000Z', who: 'Alice', type: 'save', verb: 'evaluated',
-      changes: [{ kind: 'initial', from: null, to: 'Bypass' }], time: '8m', seconds: 480, note: null,
+      changes: [{ kind: 'initial', from: null, to: 'Bypass' }], time: '8m', seconds: 480, note: null, stores: [],
     })
   })
   it('a first save on a game that already carried a conclusion shows before → after', () => {
@@ -251,7 +251,7 @@ describe('fromAssign', () => {
   it('a reassign shows from → to and who ran it', () => {
     expect(fromAssign(asg({}))).toEqual({
       key: 'asg-7', at: '2026-10-10T02:00:00.000Z', who: 'Auto-assign', type: 'assign', verb: 'reassigned',
-      changes: [{ kind: 'person', from: 'Bob', to: 'Alice' }], time: null, seconds: null, note: null,
+      changes: [{ kind: 'person', from: 'Bob', to: 'Alice' }], time: null, seconds: null, note: null, stores: [],
     })
   })
   it('an assign has no source person', () => {
@@ -321,5 +321,43 @@ describe('groupByDay', () => {
 describe('fmtClock', () => {
   it('shows HH:mm in Vietnam time', () => {
     expect(fmtClock('2026-10-11T07:32:00.000Z')).toBe('14:32')
+  })
+})
+
+describe('pair history', () => {
+  it('a log row with pair_scope "pair" shows both stores', () => {
+    expect(fromLog(log({ pair_scope: 'pair', os: 'android' })).stores).toEqual(['ios', 'android'])
+  })
+
+  it('a store-scope or NULL-scope log row shows its own store only', () => {
+    expect(fromLog(log({ pair_scope: 'store', os: 'android' })).stores).toEqual(['android'])
+    expect(fromLog(log({ pair_scope: null, os: 'ios' })).stores).toEqual(['ios'])
+    expect(fromLog(log({})).stores).toEqual([])
+  })
+
+  it('pair_link is a seed event: "linked iOS to the pair" with the joined note', () => {
+    const e = fromLog(log({
+      kind: 'pair_link', actor: 'System', source: 'other', game_id: '111', os: 'ios', other_game_id: 'com.x',
+      pair_scope: 'store', owner: null, owner_after: 'Alice', conclusion_before: null, conclusion_after: null, changed: false, view_s: null,
+    }))
+    expect(e).toMatchObject({
+      type: 'seed', who: 'System', verb: 'linked iOS to the pair', note: 'iOS 111 joined com.x', stores: ['ios'],
+      changes: [{ kind: 'person', label: 'Evaluator', from: null, to: 'Alice' }], time: null,
+    })
+  })
+
+  it('pair_unlink is a seed event for the one store that was unlinked', () => {
+    const e = fromLog(log({ kind: 'pair_unlink', actor: 'System', game_id: 'com.x', os: 'android', pair_scope: 'store', changed: false, view_s: null }))
+    expect(e).toMatchObject({ type: 'seed', who: 'System', verb: 'unlinked Android from the pair', changes: [], stores: ['android'] })
+  })
+
+  it('an assign that holds both ids is the pair: two stores, "Counts as 1 game"', () => {
+    expect(fromAssign(asg({ action: 'assign', pair_both: true, os: 'ios', from_evaluator: null }))).toMatchObject({
+      type: 'assign', verb: 'assigned the pair to Alice', note: 'Counts as 1 game', stores: ['ios', 'android'],
+    })
+  })
+
+  it('an assign with one id keeps the old verb and its own store', () => {
+    expect(fromAssign(asg({ os: 'android' }))).toMatchObject({ verb: 'reassigned', note: null, stores: ['android'] })
   })
 })

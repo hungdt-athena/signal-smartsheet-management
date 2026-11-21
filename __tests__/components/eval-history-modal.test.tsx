@@ -8,11 +8,11 @@ const EVENTS: HistoryEvent[] = [
   {
     key: 'log-2', at: '2026-10-11T07:32:00.000Z', who: 'Alice', type: 'save', verb: 'changed the verdict',
     changes: [{ kind: 'initial', from: 'Bypass', to: 'List_Idea' }, { kind: 'final', from: null, to: 'Priority IV' }],
-    time: '12m', seconds: 720, note: 'From Short List',
+    time: '12m', seconds: 720, note: 'From Short List', stores: [],
   },
   {
     key: 'asg-1', at: '2026-10-10T02:00:00.000Z', who: 'Auto-assign', type: 'assign', verb: 'reassigned',
-    changes: [{ kind: 'person', from: 'Bob', to: 'Alice' }], time: null, seconds: null, note: null,
+    changes: [{ kind: 'person', from: 'Bob', to: 'Alice' }], time: null, seconds: null, note: null, stores: [],
   },
 ]
 const noop = () => {}
@@ -69,7 +69,7 @@ describe('EvalHistoryModal', () => {
     const rec: HistoryEvent = {
       key: 'log-9', at: '2026-10-11T07:32:00.000Z', who: 'VinhTD', type: 'record', verb: 'added to Record · 5 min',
       changes: [{ kind: 'person', label: 'Evaluator', from: 'Alice', to: 'Shortcut' }, { kind: 'initial', from: 'Bypass', to: 'List_Idea' }, { kind: 'final', from: null, to: 'Insight' }],
-      time: null, seconds: null, note: 'Batch W2 Oct, 2026',
+      time: null, seconds: null, note: 'Batch W2 Oct, 2026', stores: [],
     }
     view({ events: [rec, EVENTS[1]] })
     const [r0, r1] = screen.getAllByTestId('history-row')
@@ -87,7 +87,7 @@ describe('EvalHistoryModal', () => {
   })
   it('shows a Record event that has no change lines as the sentence and the note only', () => {
     const ev: HistoryEvent = { key: 'log-8', at: '2026-10-11T07:32:00.000Z', who: 'VinhTD', type: 'record',
-      verb: 'reassigned Record · 20 min from MyTL to Bob', changes: [], time: null, seconds: null, note: 'Batch W2 Oct, 2026' }
+      verb: 'reassigned Record · 20 min from MyTL to Bob', changes: [], time: null, seconds: null, note: 'Batch W2 Oct, 2026', stores: [] }
     view({ events: [ev] })
     const row = screen.getByTestId('history-row')
     expect(row.querySelector('.hx-chg')).toBeNull()
