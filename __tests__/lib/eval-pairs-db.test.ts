@@ -37,4 +37,16 @@ describe('twinGameIds', () => {
     // the ids are sent once, deduplicated
     expect(outer[0].slice(1)).toContainEqual(['a1', 'a2', 'solo'])
   })
+
+  it('a failed read never fails the caller: empty map, error logged', async () => {
+    // Every caller runs it AFTER its assignment committed, only to add the twin ids to the
+    // history row. Throwing there turned a done move into a 500 the user would retry.
+    sqlMock.mockImplementation(() => Promise.reject(new Error('connection reset')))
+    const err = jest.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const m = await twinGameIds(['a1'])
+      expect(m.size).toBe(0)
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('twinGameIds'), expect.any(Error))
+    } finally { err.mockRestore() }
+  })
 })

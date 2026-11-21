@@ -49,6 +49,13 @@ const sqlMock = sql as unknown as jest.Mock
 const texts = () => sqlMock.mock.results.map(r => (r.value as { __text: string }).__text)
 const outer = (needle: string) => texts().filter(t => t.includes(needle))
 
+// The routes read WEBHOOK_SECRET from the environment; restore it so no other suite sees ours.
+const realSecret = process.env.WEBHOOK_SECRET
+afterAll(() => {
+  if (realSecret === undefined) delete process.env.WEBHOOK_SECRET
+  else process.env.WEBHOOK_SECRET = realSecret
+})
+
 beforeEach(() => {
   sqlMock.mockClear()
   respond = () => []
@@ -118,5 +125,31 @@ describe('cron assign writes history with both store ids', () => {
     expect(insert.__binds).toContain(2)
     const ids = insert.__binds.find(b => Array.isArray(b)) as string[]
     expect([...ids].sort()).toEqual(['a1', 'i1', 'solo'])
+  })
+
+  it('the twin lookup failing after the commit does not fail the assign: 200, history with the front ids', async () => {
+    respond = (t, binds) => {
+      if (t.includes('FROM evaluator_roster')) return [{ name: 'A', game_platform: 'all', weight: 100 }]
+      if (t.includes('initial_evaluator IS NULL')) return [{ id: 1, game_id: 'a1', os: 'pair' }]
+      if (t.includes('UPDATE game_evaluations')) {
+        const ids = binds.find(b => Array.isArray(b)) as number[]
+        return ids.map(id => ({ id }))
+      }
+      if (t.includes('pair_eval_id') && t.includes('twin_game_id')) throw new Error('connection reset')
+      return []
+    }
+    process.env.WEBHOOK_SECRET = 's'
+    const err = jest.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const res = await assignCron(new NextRequest('http://x/api/cron/assign-evaluators', {
+        method: 'POST', headers: { 'x-webhook-secret': 's' }, body: JSON.stringify({ category: 'puzzle' }),
+      }))
+      expect(res.status).toBe(200)
+      expect((await res.json()).assigned).toBe(1)
+      const insert = sqlMock.mock.results
+        .map(r => r.value as { __text: string; __binds: unknown[] })
+        .find(f => f.__text.includes('INSERT INTO assignment_history'))!
+      expect(insert.__binds.find(b => Array.isArray(b))).toEqual(['a1'])
+    } finally { err.mockRestore() }
   })
 })
