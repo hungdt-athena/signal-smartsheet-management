@@ -199,10 +199,15 @@ function withAlts(games: YtGame[]): YtGame[] {
   }
   return out
 }
-function foldAlts<T>(games: YtGame[], found: Map<number | string, T>): Map<number | string, T> {
+// The front store's answer wins, unless `better(alt, front)` says the other store's is
+// stronger (a video already on YouTube beats a file only queued in the YouTube tab).
+function foldAlts<T>(games: YtGame[], found: Map<number | string, T>,
+  better?: (alt: T, front: T) => boolean): Map<number | string, T> {
   const out = new Map<number | string, T>()
   for (const g of games) {
-    const hit = found.get(g.key) ?? (g.alt ? found.get(`${g.key}${ALT}`) : undefined)
+    const front = found.get(g.key)
+    const alt = g.alt ? found.get(`${g.key}${ALT}`) : undefined
+    const hit = front && alt && better?.(alt, front) ? alt : front ?? alt
     if (hit) out.set(g.key, hit)
   }
   return out
@@ -391,7 +396,7 @@ function matchStage(games: YtGame[], rows: YtbMatchRow[], uploaded: boolean): Ma
 }
 
 export function resolveVideoMatches(games: YtGame[], rows: YtbMatchRow[]): Map<number | string, VideoMatch> {
-  return foldAlts(games, resolveVideoCore(withAlts(games), rows))
+  return foldAlts(games, resolveVideoCore(withAlts(games), rows), (alt, front) => alt.uploaded && !front.uploaded)
 }
 
 function resolveVideoCore(games: YtGame[], rows: YtbMatchRow[]): Map<number | string, VideoMatch> {
