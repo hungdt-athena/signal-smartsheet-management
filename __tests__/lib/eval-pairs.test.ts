@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres'
-import { STORE_SPECIFIC, listRowFilter, notPairCopy, storesSelect, sortStores, assignOs, PairStore } from '@/lib/eval-pairs'
+import { STORE_SPECIFIC, listRowFilter, notPairCopy, mediaRowFilter, storesSelect, sortStores, assignOs, PairStore } from '@/lib/eval-pairs'
 
 // Fake tag: q`...` joins strings, q('alias') acts as the identifier helper.
 const q = ((strings: unknown, ...vals: unknown[]) => {
@@ -25,6 +25,12 @@ describe('eval-pairs', () => {
     expect(s).toContain('x.pair_back')
     expect(s).toContain('Link_dead')
     expect(s).toContain('Stale_release')
+  })
+  it('mediaRowFilter drops every back row: media columns are copied even onto a dead back row', () => {
+    const s = String(mediaRowFilter(q, 'x'))
+    expect(s).toContain('AND NOT x.pair_back')
+    expect(s).not.toContain('Link_dead')
+    expect(String(mediaRowFilter(q))).toContain('NOT ge.pair_back')
   })
   it('storesSelect reads the twin through pair_eval_id', () => {
     const s = String(storesSelect(q, 'a', 'g'))

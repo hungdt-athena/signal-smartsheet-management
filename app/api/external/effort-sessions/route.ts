@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { notPairCopy } from '@/lib/eval-pairs'
+import { mediaRowFilter, notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { SYSTEM_LABEL_KEY_LIST } from '@/lib/system-accounts'
 import {
@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
         WHERE s.confirmed_at IS NOT NULL
           AND s.assignee IS NOT NULL
           AND lower(s.assignee) = ANY(${keys})
-          ${notPairCopy(sql)}
+          ${mediaRowFilter(sql)}
       )
       SELECT lower(slot.assignee) AS assignee_key,
              to_char(slot.assigned_at AT TIME ZONE ${VN}, 'YYYY-MM-DD') AS date,

@@ -76,6 +76,15 @@ const geQueries = () => texts().filter(t => /(FROM|JOIN) game_evaluations (ge|g2
 // every `FROM game_evaluations ge` read, minus the ones that deliberately do not count work
 const mustCarry = (t: string) => !/NOT EXISTS \(\s*SELECT 1 FROM game_evaluations ge/.test(t)
 
+// Recording counts (record slots) drop EVERY back row: media columns are copied onto a dead
+// back row too, so the evaluation rule (notPairCopy) would count one recording twice.
+const MEDIA = 'AND NOT ge.pair_back'
+const EVAL = 'NOT (ge.pair_back'
+function expectMedia(q: string) {
+  expect(q).toContain(MEDIA)
+  expect(q).not.toContain(EVAL)
+}
+
 function expectAllCarry(qs: string[]) {
   expect(qs.length).toBeGreaterThan(0)
   for (const q of qs) expect(q).toContain('pair_back')
@@ -125,6 +134,22 @@ describe('work counts drop the copy row of a linked pair', () => {
     expectAllCarry(qs)
   })
 
+  it('report: recordings per recorder and the recording queue use the media filter', async () => {
+    // another category than the test above: the route caches a response per query string
+    await report(req('/api/report?category=arcade&range=month'))
+    const isRec = (t: string) => /WITH rec AS|AS slot|AS record_confirmed_at/.test(t)
+    const rec = geQueries().filter(t => /WITH rec AS/.test(t))
+    expect(rec).toHaveLength(2)
+    for (const q of rec) {
+      expectMedia(q)
+      expect(q.split(MEDIA).length - 1).toBe(2)
+    }
+    // the evaluation reads still use the evaluation rule
+    const evals = geQueries().filter(mustCarry).filter(t => !isRec(t))
+    expect(evals.length).toBeGreaterThanOrEqual(13)
+    for (const q of evals) expect(q).toContain(EVAL)
+  })
+
   it('report daily', async () => {
     await reportDaily(req('/api/report/daily?from=2026-11-01&to=2026-11-07&category=all'))
     expectAllCarry(geQueries())
@@ -144,6 +169,9 @@ describe('work counts drop the copy row of a linked pair', () => {
     // the recording statement reads two slots, both carry it
     const rec = qs.find(t => t.includes("'recording'"))!
     expect((rec.match(/pair_back/g) || []).length).toBe(2)
+    expectMedia(rec)
+    const ev = qs.find(t => !t.includes("'recording'"))!
+    expect(ev).toContain(EVAL)
   })
 
   it('pending holders', async () => {
@@ -171,6 +199,10 @@ describe('work counts drop the copy row of a linked pair', () => {
     const qs = geQueries()
     expect(qs).toHaveLength(2)
     expectAllCarry(qs)
+    const slots = qs.filter(t => t.includes('record_5min_confirmed_at'))
+    expect(slots).toHaveLength(1)
+    expectMedia(slots[0])
+    expect(qs.find(t => !t.includes('record_5min_confirmed_at'))).toContain(EVAL)
   })
 
   it('effort-game-time: the record slots (panel time reads evaluation_log, written once per pair)', async () => {
@@ -178,6 +210,7 @@ describe('work counts drop the copy row of a linked pair', () => {
     const slots = geQueries().filter(t => t.includes('record_5min_confirmed_at'))
     expect(slots).toHaveLength(1)
     expectAllCarry(slots)
+    expectMedia(slots[0])
   })
 
   it('people config totals and the evaluator-name audit', async () => {

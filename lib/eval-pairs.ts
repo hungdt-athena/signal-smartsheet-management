@@ -35,6 +35,16 @@ export function notPairCopy(q: Sql, alias = 'ge') {
 }
 
 /**
+ * Media queries (Record slots, recordings, uploads): drop EVERY back row. Emits a leading `AND`.
+ * The media columns (recorders, Confirm, videos) are copied onto the back row even when it holds
+ * Link_dead / Stale_release, so notPairCopy would count one recording twice. Use notPairCopy for
+ * evaluation work and this for recording work.
+ */
+export function mediaRowFilter(q: Sql, alias = 'ge') {
+  return q`AND NOT ${q(alias)}.pair_back`
+}
+
+/**
  * SELECT expression for a `stores` column: json array of PairStore, the row's own store
  * plus the twin's (via pair_eval_id), iOS first. Self-contained scalar subquery, so the
  * caller needs no extra JOIN and no extra round-trip.

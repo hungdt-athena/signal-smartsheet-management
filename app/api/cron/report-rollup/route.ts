@@ -1,5 +1,5 @@
 import type postgres from 'postgres'
-import { notPairCopy } from '@/lib/eval-pairs'
+import { mediaRowFilter, notPairCopy } from '@/lib/eval-pairs'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
             lower(${s.assignee}) AS ekey, ${s.assignee} AS ename,
             ge.category_group AS cat, ${slot}::text AS bucket
           FROM game_evaluations ge
-          WHERE ${s.doneAt} IS NOT NULL ${notPairCopy(sql)}
+          WHERE ${s.doneAt} IS NOT NULL ${mediaRowFilter(sql)}
             AND ${s.assignee} IS NOT NULL AND ${s.assignee} <> ''
             AND lower(${s.assignee}) <> ALL(${EXCLUDED}) ${s.credited}
             AND ${sourcePred(s.doneAt)}`

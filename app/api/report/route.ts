@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { notPairCopy } from '@/lib/eval-pairs'
+import { mediaRowFilter, notPairCopy } from '@/lib/eval-pairs'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { loadBatchSpans } from '@/lib/report-batches'
@@ -369,7 +369,7 @@ export async function GET(req: NextRequest) {
     const recDoneRows = (s: ReturnType<typeof recordSlot>, slot: '5min' | '20min') => sql`
           SELECT lower(${s.assignee}) AS k, ${s.assignee} AS name, ${slot}::text AS slot
           FROM game_evaluations ge
-          WHERE ${s.doneAt} IS NOT NULL AND ${s.assignee} IS NOT NULL AND ${s.assignee} <> '' ${notPairCopy(sql)}
+          WHERE ${s.doneAt} IS NOT NULL AND ${s.assignee} IS NOT NULL AND ${s.assignee} <> '' ${mediaRowFilter(sql)}
             ${recOk(s.assigneeCol)} ${s.credited}
             ${catF}
             ${recWinOn(s)}`
@@ -378,7 +378,7 @@ export async function GET(req: NextRequest) {
           SELECT lower(${s.assignee}) AS k, ${slot}::text AS slot, ge.game_id, gi.title, gi.os,
                  ${s.batch} AS batch, ${s.confirmedAt} AS record_confirmed_at, ${s.videoLink} AS youtube_link, ${s.doneAt} AS rec_at
           FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-          WHERE ${s.assignee} IS NOT NULL AND ${s.assignee} <> '' ${recOk(s.assigneeCol)} ${s.credited} ${catF} ${notPairCopy(sql)}`
+          WHERE ${s.assignee} IS NOT NULL AND ${s.assignee} <> '' ${recOk(s.assigneeCol)} ${s.credited} ${catF} ${mediaRowFilter(sql)}`
 
     // "Judged" as every other number on the report counts it. Link_dead and
     // Stale_release are housekeeping, not decisions, and leaving them in made the
