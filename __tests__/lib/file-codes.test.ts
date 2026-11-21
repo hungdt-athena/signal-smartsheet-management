@@ -16,6 +16,7 @@ let table: Map<string, Row>
 let statements: string[]
 let updateHook: ((col: string, code: string) => void) | null
 let uniqueTaken: Set<string>
+let twinOf: Map<string, string> // linked pair: game_id -> twin game_id
 
 const uniqueViolation = () => Object.assign(new Error('dup'), { code: '23505' })
 
@@ -24,6 +25,7 @@ beforeEach(() => {
   statements = []
   updateHook = null
   uniqueTaken = new Set()
+  twinOf = new Map()
   genMock.mockReset()
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
@@ -38,6 +40,12 @@ beforeEach(() => {
       text += parts[i + 1]
     })
     statements.push(text)
+    if (/^\s*SELECT/.test(text) && /pair_eval_id/.test(text)) {
+      const col = text.match(/SELECT\s+(\w+)/)![1] as keyof Row
+      const twin = twinOf.get(vals[0] as string)
+      const row = twin ? table.get(twin) : undefined
+      return Promise.resolve(row ? [{ code: row[col] }] : [])
+    }
     if (/^\s*SELECT/.test(text)) {
       const col = text.match(/SELECT\s+(\w+)/)![1] as keyof Row
       const row = table.get(vals[0] as string)
@@ -99,7 +107,7 @@ describe('ensureDemoCode / ensureRecordCode', () => {
     expect(results).toEqual(['WINNR2', 'WINNR2'])
     // both saw NULL on the first read, both UPDATEd, the second matched 0 rows and re-read
     const updates = statements.filter((s) => /UPDATE/.test(s)).length
-    const selects = statements.filter((s) => /^\s*SELECT/.test(s)).length
+    const selects = statements.filter((s) => /^\s*SELECT/.test(s) && !/pair_eval_id/.test(s)).length
     expect(updates).toBe(2)
     expect(selects).toBe(3)
     expect(table.get('g1')!.demo_code).toBe('WINNR2')
@@ -137,5 +145,24 @@ describe('ensureDemoCode / ensureRecordCode', () => {
     uniqueTaken.add('DUPDUP')
     await expect(ensureDemoCode('g1')).rejects.toMatchObject({ code: '23505' })
     expect(genMock).toHaveBeenCalledTimes(5)
+  })
+
+  it('a linked twin that already has the code: returned as is, no UPDATE, nothing generated', async () => {
+    table.set('g1', { demo_code: null, record_code: null })
+    table.set('g2', { demo_code: 'DEMO22', record_code: 'EGF2W8' })
+    twinOf.set('g1', 'g2')
+    expect(await ensureRecordCode('g1')).toBe('EGF2W8')
+    expect(await ensureDemoCode('g1')).toBe('DEMO22')
+    expect(statements.some((s) => /UPDATE/.test(s))).toBe(false)
+    expect(genMock).not.toHaveBeenCalled()
+  })
+
+  it('a linked twin without the code: a new one is allocated on this game only', async () => {
+    table.set('g1', { demo_code: null, record_code: null })
+    table.set('g2', { demo_code: null, record_code: null })
+    twinOf.set('g1', 'g2')
+    genMock.mockReturnValueOnce('NEWCD2')
+    expect(await ensureRecordCode('g1')).toBe('NEWCD2')
+    expect(table.get('g2')!.record_code).toBeNull()
   })
 })
