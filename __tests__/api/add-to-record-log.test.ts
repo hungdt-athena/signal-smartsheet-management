@@ -64,20 +64,32 @@ describe('add-to-record logs itself', () => {
   })
 })
 
-describe('add-to-record updates the row by the id from INSERT ... RETURNING', () => {
-  it.each([
-    ['override', { initial_evaluator: 'Shortcut', initial_conclusion: 'List_Idea' }],
-    ['legacy', {}],
-  ])('%s branch: old CTE selects WHERE id = the returned id, not (game_id, category_group)', async (_n, extra) => {
+describe('add-to-record updates the row by the id from INSERT ... RETURNING'
+, () => {
+  // No row for the game yet: the lookup finds nothing, the INSERT returns the new id.
+  const fresh = (insertId: number | null, conflictId?: number) => {
+    let lookups = 0
     sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
       if (!Array.isArray(strings)) return Promise.resolve([])
       const text = (strings as string[]).join('$')
       calls.push({ text, binds })
-      if (/INSERT INTO game_evaluations/.test(text)) return Promise.resolve([{ id: 4242 }])
-      return Promise.resolve([{ id: 4242, game_id: 'g' }])
+      if (/INSERT INTO game_evaluations/.test(text)) return Promise.resolve(insertId === null ? [] : [{ id: insertId }])
+      if (/SELECT id FROM game_evaluations WHERE game_id/.test(text)) {
+        lookups++
+        return Promise.resolve(lookups === 1 || conflictId === undefined ? [] : [{ id: conflictId }])
+      }
+      return Promise.resolve([{ id: insertId ?? conflictId, game_id: 'g' }])
     })
+  }
+
+  it.each([
+    ['override', { initial_evaluator: 'Shortcut', initial_conclusion: 'List_Idea' }],
+    ['legacy', {}],
+  ])('%s branch: old CTE selects WHERE id = the returned id, not (game_id, category_group)', async (_n, extra) => {
+    fresh(4242)
     await post({ game_id: 'g', category_group: 'puzzle', bucket: '5min', ...extra })
     const ins = calls.findIndex(c => /INSERT INTO game_evaluations/.test(c.text))
+    expect(ins).toBeGreaterThan(-1)
     expect(calls[ins].text).toMatch(/ON CONFLICT \(game_id, category_group\) DO NOTHING\s+RETURNING id/)
     const upd = calls.find(c => /UPDATE game_evaluations ge/.test(c.text))!
     expect(upd.text).toMatch(/FROM game_evaluations\s+WHERE id = \$\s+FOR NO KEY UPDATE/)
@@ -86,17 +98,45 @@ describe('add-to-record updates the row by the id from INSERT ... RETURNING', ()
     expect(calls.indexOf(upd)).toBeGreaterThan(ins)
   })
 
-  it('on conflict (no RETURNING row) it looks the id up first, preferring the asked group', async () => {
+  it('a new row is inserted WITHOUT the batch; the UPDATE stamps it, so a linked twin takes the week too', async () => {
+    // The link-on-insert trigger fills only the new row's NULL columns from its twin, and the copy
+    // trigger copies only columns an UPDATE changes. Inserting the batch would make the UPDATE a no-op
+    // for it, and the twin (the front row the lists show) would keep its old week.
+    fresh(4242)
+    await post({ game_id: 'g', category_group: 'puzzle', bucket: '5min', batch: 'W3 Nov, 2026' })
+    const ins = calls.find(c => /INSERT INTO game_evaluations/.test(c.text))!
+    expect(ins.text).toMatch(/INSERT INTO game_evaluations \(game_id, category_group\)\s+VALUES/)
+    expect(ins.binds).not.toContain('W3 Nov, 2026')
+    const upd = calls.find(c => /UPDATE game_evaluations ge/.test(c.text))!
+    expect(upd.text).toMatch(/batch = COALESCE\(\$, ge\.batch\)/)
+    expect(upd.binds).toContain('W3 Nov, 2026')
+  })
+
+  it('on conflict (no RETURNING row) it looks the id up again, preferring the asked group', async () => {
+    fresh(null, 99)
+    await post({ game_id: 'g', category_group: 'puzzle', bucket: '5min' })
+    const upd = calls.find(c => /UPDATE game_evaluations ge/.test(c.text))!
+    expect(upd.binds).toContain(99)
+  })
+
+  it('a game that already has a row in ANOTHER group (a link moved it) reuses that row, no second INSERT', async () => {
+    // Linking moves a new store's row to its twin's category_group. Re-adding the game with the
+    // genre it was first pulled in with must not insert a second row for the same game_id.
     sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
       if (!Array.isArray(strings)) return Promise.resolve([])
       const text = (strings as string[]).join('$')
       calls.push({ text, binds })
-      if (/INSERT INTO game_evaluations/.test(text)) return Promise.resolve([])
-      if (/SELECT id FROM game_evaluations WHERE game_id/.test(text)) return Promise.resolve([{ id: 99 }])
-      return Promise.resolve([{ id: 99, game_id: 'g' }])
+      if (/INSERT INTO game_evaluations/.test(text)) return Promise.resolve([{ id: 5000 }])
+      if (/SELECT id FROM game_evaluations WHERE game_id/.test(text)) return Promise.resolve([{ id: 31 }])
+      return Promise.resolve([{ id: 31, game_id: 'g' }])
     })
-    await post({ game_id: 'g', category_group: 'puzzle', bucket: '5min' })
+    const res = await post({ game_id: 'g', category_group: 'arcade', bucket: '5min' })
+    expect(res.status).toBe(200)
+    expect(calls.some(c => /INSERT INTO game_evaluations/.test(c.text))).toBe(false)
+    const look = calls.find(c => /SELECT id FROM game_evaluations WHERE game_id/.test(c.text))!
+    expect(look.text).not.toMatch(/AND category_group = \$/)
+    expect(look.text).toMatch(/ORDER BY \(category_group = \$\) DESC/)
     const upd = calls.find(c => /UPDATE game_evaluations ge/.test(c.text))!
-    expect(upd.binds).toContain(99)
+    expect(upd.binds).toContain(31)
   })
 })

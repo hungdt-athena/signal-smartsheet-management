@@ -141,6 +141,33 @@ BEGIN
   ASSERT nr.final_conclusion = 'Insight', 'N still takes the NULL columns';
 END $$;
 
+-- ===== add_to_record_batch_reaches_twin: insert without batch, then UPDATE it =====
+-- add-to-record pulls a new store of a pair into a Record week. Its INSERT leaves batch NULL
+-- (the link fills it from the twin), then its UPDATE stamps the week; the copy trigger takes
+-- that change to the twin, so the front row the lists show is in the week too.
+DO $$
+DECLARE t int; n int; nr game_evaluations; tr game_evaluations;
+BEGIN
+  INSERT INTO game_info (game_id, os, family_id) VALUES ('aar1', 'android', 'fam.ar1'), ('iar1', 'ios', 'fam.ar1');
+  INSERT INTO game_evaluations (game_id, category_group, initial_conclusion, initial_evaluator, final_conclusion,
+      batch, record_bucket)
+    VALUES ('aar1', 'arcade', 'List_Idea', 'ThuDT', 'Insight', 'W1 Nov', '5min') RETURNING id INTO t;
+  -- the route's INSERT: no batch; asked for puzzle, the link moves it to the twin's group
+  INSERT INTO game_evaluations (game_id, category_group) VALUES ('iar1', 'puzzle') RETURNING id INTO n;
+  SELECT * INTO nr FROM game_evaluations WHERE id = n;
+  ASSERT nr.pair_eval_id = t, 'linked at insert';
+  ASSERT nr.category_group = 'arcade', 'moved to the twin''s group';
+  ASSERT nr.batch = 'W1 Nov', 'took the twin''s batch';
+  -- the route's UPDATE (by id)
+  UPDATE game_evaluations ge SET record_bucket = '20min', batch = COALESCE('W3 Nov', ge.batch) WHERE ge.id = n;
+  SELECT * INTO nr FROM game_evaluations WHERE id = n;
+  SELECT * INTO tr FROM game_evaluations WHERE id = t;
+  ASSERT nr.batch = 'W3 Nov' AND tr.batch = 'W3 Nov', format('both rows in the new week: %s / %s', nr.batch, tr.batch);
+  ASSERT nr.record_bucket = '20min' AND tr.record_bucket = '20min', 'bucket on both rows';
+  -- a second add with the first-asked group finds the one row of the game (no second row)
+  ASSERT (SELECT count(*) FROM game_evaluations WHERE game_id = 'iar1') = 1, 'one row for the game';
+END $$;
+
 -- ===== insert_copy_keeps_record_batches: the record_slots trigger does not rewrite the copy =====
 -- N's own bucket flips 5min -> 20min when it takes 'Priority IV'; 051 would then freeze
 -- record_5min_batch from N's old batch (NULL). The copy must end equal to T's.
