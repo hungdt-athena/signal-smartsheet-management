@@ -15,11 +15,19 @@
 -- Link_dead / Stale_release exception) and eval_pair_media_cols() (always shared while
 -- linked: the video belongs to the pair, and n8n / YouTube reconcile can land on the
 -- dead store's row). Every copy reads those two lists.
+-- KEEP THEM IN STEP WITH THE TABLE: a later migration that adds, renames or drops a shared
+-- column of game_evaluations must update eval_pair_eval_cols() / eval_pair_media_cols() in
+-- the same migration. A renamed or dropped column still listed makes every link fail
+-- (eval_pair_fill names it: a WARNING, the new row stays a lone game, the safe-pair pass
+-- links nothing); a new shared column not listed is never copied, so the two rows of a pair
+-- drift apart without any error.
 --
 -- This file:
 --   - link on insert (trg_eval_pair_link_insert): a new row whose game has a twin store
 --     with exactly one row, not linked yet, links to it and fills its EMPTY columns from
---     it (a value the INSERT wrote itself, e.g. add-to-record's batch, is kept):
+--     it (a value the INSERT wrote itself is kept, and an UPDATE that later writes the same
+--     value changes nothing, so it is not copied to the twin: add-to-record therefore
+--     inserts without the batch and sets it in its UPDATE):
 --       twin carries Link_dead / Stale_release -> media only; the new row is the front row
 --       twin judged                            -> every shared column; new row is back
 --       twin not judged                        -> holder, assign dates, batch + media
@@ -306,8 +314,9 @@ BEGIN
      WHERE gi.game_id = NEW.game_id AND NOT COALESCE(gi.family_unlinked, false);
     IF fam IS NULL OR my_os IS NULL THEN RETURN NULL; END IF;
     -- One linker per family until commit: 2 stores pushed in one statement, or by two
-    -- sessions, see each other and link once.
-    PERFORM pg_advisory_xact_lock(hashtext(fam));
+    -- sessions, see each other and link once. Two-key form, first key 54 (this migration):
+    -- the single-key space is left to other code on this database (Signal Sense).
+    PERFORM pg_advisory_xact_lock(54, hashtext(fam));
     -- the other row of the same statement may have linked this one already
     IF EXISTS (SELECT 1 FROM game_evaluations WHERE id = NEW.id AND pair_eval_id IS NOT NULL) THEN
       RETURN NULL;

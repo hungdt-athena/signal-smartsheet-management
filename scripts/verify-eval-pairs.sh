@@ -78,8 +78,10 @@ two_sessions() {
 
 # Two sessions push the 2 stores of a new family: B's trigger waits on A's family lock,
 # then sees A's committed row and links. Without the lock B would miss A's row.
+# The family lock is the two-key form (54, hashtext(family)): classid 54, objsubid 2, so it
+# never shares the single-key space other code (Signal Sense) may use.
 "${P[@]}" -d verify -c "INSERT INTO game_info (game_id, os, family_id) VALUES ('ca', 'android', 'fam.cc'), ('ci', 'ios', 'fam.cc')"
-two_sessions "l.locktype = 'advisory'" \
+two_sessions "l.locktype = 'advisory' AND l.classid = 54 AND l.objid = hashtext('fam.cc')::oid AND l.objsubid = 2" \
   "INSERT INTO game_evaluations (game_id, category_group, initial_evaluator) VALUES ('ca', 'puzzle', 'ThuDT')" \
   "INSERT INTO game_evaluations (game_id, category_group) VALUES ('ci', 'puzzle')"
 "${P[@]}" -d verify -c "DO \$\$ BEGIN

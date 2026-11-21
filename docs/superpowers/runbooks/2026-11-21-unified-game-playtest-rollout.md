@@ -386,8 +386,12 @@ Gửi trước bước 2, nguyên văn:
 >   `family_id`, `family_unlinked` hoặc index đó thì báo Playtest trước.
 > - Không xoá trigger này khi dọn trigger. Nếu cần tắt khẩn cấp: `DROP TRIGGER trg_game_info_eval_pair_unlink ON game_info;`
 >   (Playtest chỉ mất việc tự tách cặp; cặp sai sẽ được tách ở lần ghi kế tiếp vào nó).
-> - Số tag Trends trong Report của Playtest chỉ đếm dòng trước của cặp, nên cần `trg_mirror_custom_field_value`
->   (042) tiếp tục chép tag sang game cùng family.
+> - Playtest lưu tag Trends của 1 cặp dưới `game_id` của dòng trước, nên cần `trg_mirror_custom_field_value`
+>   (042) tiếp tục chép tag đã duyệt sang game cùng family (store kia).
+> - Xoá 1 dòng `game_info` thì `game_evaluations` bị xoá theo (FK `ON DELETE CASCADE`), và trigger
+>   `trg_eval_pair_delete` (hàm `eval_pair_on_delete()`) chạy NGAY TRONG transaction DELETE đó của Signal Sense:
+>   nó chỉ UPDATE dòng còn lại của cặp thành game 1 store (`pair_eval_id = NULL`, `pair_back = false`).
+>   Hàm này không bắt lỗi, nên nếu nó lỗi thì lệnh DELETE của Signal Sense cũng lỗi theo.
 > - Đã kiểm trên DB mẫu (041-044): không hàm/trigger nào của Signal Sense ghi vào `game_evaluations`.
 
 ## 9. Giới hạn đã biết (theo dõi sau rollout)
@@ -400,6 +404,17 @@ Gửi trước bước 2, nguyên văn:
 - **Tách cặp bằng tay:** chỉ dùng `SELECT unlink_eval_pair(<id>);`. `UPDATE ... SET pair_eval_id = NULL` trên
   1 dòng để lại dòng kia nửa nối (có thể vẫn là dòng sau và bị ẩn khỏi list).
 - **Unlink (Signal Sense):** dòng sau trước đó là bản chép, sau khi tách được đếm lại như 1 game đã chấm.
+- **n8n ghi vào `game_evaluations`** (drive link, YouTube, record) không khoá trước 2 dòng của cặp như app làm.
+  Nếu n8n và 1 người cùng ghi vào 2 store của 1 cặp đúng lúc đó, Postgres có thể báo lỗi `deadlock detected`
+  cho 1 bên: lệnh đó lỗi rõ ràng (n8n ghi lỗi vào `flow_log`), không mất dữ liệu âm thầm. Chạy lại là xong.
+- **Flow n8n ngoài repo** (thẻ Chat daily eval, log trạng thái evaluator sang Sheet) đếm thẳng trên
+  `game_evaluations`, không có `pair_back`: chúng thấy cả 2 dòng của 1 cặp, nên 1 game có 2 store bị đếm 2.
+  Sửa từng flow sau rollout (bỏ dòng `pair_back`, giữ dòng sau có `Link_dead` / `Stale_release` nếu cần đếm việc).
+- **Đợt 2 (importer):** `link_eval_pair` chỉ so kết quả (`initial_conclusion`). Dòng nối vào có cùng kết quả
+  nhưng ghi chú riêng vẫn được nối; ghi chú của nó giữ trong dòng nhưng bị che nếu nó thành dòng sau. Push và
+  add-to-record tạo dòng trống, `link_safe_eval_pairs()` bỏ qua cặp có cột khác nhau; đường duy nhất INSERT kèm
+  kết quả là `/api/admin/import-evaluations` (nhập từ Smartsheet, đã ngưng dùng). Importer đợt 2 phải tự kiểm
+  ghi chú trước khi gọi `link_eval_pair`.
 - `final_evaluator` / `actor` trống trên các bản ghi tạo khi chạy local `SKIP_AUTH` (chỉ local, không áp dụng prod).
 
 ## 10. Đã chạy ở local ngày 21/11 (Task 14)
