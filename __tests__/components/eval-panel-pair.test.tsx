@@ -249,6 +249,32 @@ describe('EvalDetailPanel, a linked pair', () => {
     expect(patch.body).not.toHaveProperty('initial_conclusion')
   })
 
+  it('a Stale_release store keeps its own result too: the form PATCH goes to the iOS row, and Android is not drawn dead', async () => {
+    const stale = { ...AND, conclusion: 'Stale_release' }
+    const calls = mockApi({ stores: [IOS, stale], front: AND })
+    panel(AND.game_id)
+    await screen.findByText('Funbit Android Co')
+    expect(screen.getByRole('switch', { name: 'Android link dead' }).getAttribute('aria-checked')).toBe('false')
+    expect(document.querySelector('.store-tab.dead')).toBeNull()
+    await editSelfNote()
+    await clickSave()
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    expect(writes(calls)[0]).toMatchObject({ url: '/api/evaluations', method: 'PATCH', body: { id: IOS.eval_id } })
+  })
+
+  it('hands the host the pair\'s stores after a save, so its list can show the new state', async () => {
+    mockApi({ stores: [IOS, AND], front: AND })
+    const onSaved = jest.fn()
+    render(<EvalDetailPanel initialGameId={AND.game_id} gameList={[]} role="admin" userName="HungDT" logContext="evaluate" onSaved={onSaved} />)
+    await screen.findByText('Funbit Android Co')
+    fireEvent.click(screen.getByRole('switch', { name: 'Android link dead' }))
+    await clickSave()
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+    const [fresh, stores] = onSaved.mock.calls[0]
+    expect(fresh.id).toBe(AND.eval_id)
+    expect(stores).toEqual([IOS, AND].map(({ os, game_id, eval_id, app_link, is_active, dead }) => ({ os, game_id, eval_id, app_link, is_active, dead })))
+  })
+
   it('reopening a dead store goes through store-dead with dead: false', async () => {
     const dIos = { ...IOS, dead: true, conclusion: 'Link_dead' }
     const calls = mockApi({ stores: [dIos, AND], front: AND })

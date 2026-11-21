@@ -37,16 +37,18 @@ jest.mock('@/hooks/useConfig', () => ({
 }))
 
 // Children that do their own fetching or need a DOM the table does not give them.
+// The stand-in keeps the props it was last given, so a test can play the panel's onSaved.
+const mockPanelProps: { current: Record<string, unknown> | null } = { current: null }
 jest.mock('@/components/EvalDetailPanel', () => ({
   __esModule: true,
-  default: () => <div data-testid="eval-panel" />,
+  default: (p: Record<string, unknown>) => { mockPanelProps.current = p; return <div data-testid="eval-panel" /> },
   weekBatches: () => [],
 }))
 jest.mock('@/components/QuickStatsModal', () => ({ QuickStatsModal: () => null }))
 jest.mock('@/components/weekly-feedback/WeeklyFeedbackTab', () => ({ WeeklyFeedbackTab: () => null }))
 jest.mock('@/components/TaggingTab', () => ({ TaggingTab: () => null }))
 
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import EvaluationsPage from '@/app/(manager)/evaluations/page'
 
 const IOS = { os: 'ios', game_id: '111', eval_id: 1, app_link: 'https://apps.apple.com/app/id111', is_active: true, dead: false }
@@ -93,6 +95,26 @@ describe('Evaluate tab: pairs', () => {
     expect(document.querySelector('.game-icon-plat')).toBeNull()
     // the count is the API total
     expect(screen.getByText(/7 games/)).toBeTruthy()
+  })
+
+  it('a save in the panel that marks iOS link dead shows on the row at once, without refetching the list', async () => {
+    stubFetch([PAIR, SOLO])
+    render(<EvaluationsPage />)
+    await waitFor(() => expect(screen.getByText('Pair Game')).toBeTruthy())
+    fireEvent.click(screen.getByText('Pair Game'))
+    await waitFor(() => expect(screen.getByTestId('eval-panel')).toBeTruthy())
+    const listCalls = () => (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).startsWith('/api/evaluations?')).length
+    const before = listCalls()
+    const idx = colIndex('Stores')
+    expect(rowOf('Pair Game').children[idx].querySelector('.store-ico.dead')).toBeNull()
+    const onSaved = mockPanelProps.current!.onSaved as (fresh: unknown, stores: unknown) => void
+    // the front row may have changed after the switch: the row still matches by the pair's ids
+    act(() => { onSaved({ ...PAIR, id: 2, game_id: 'com.x.y' }, [{ ...IOS, dead: true }, AND]) })
+    const dead = rowOf('Pair Game').children[idx].querySelectorAll('.store-ico.dead')
+    expect(dead).toHaveLength(1)
+    expect(dead[0].getAttribute('title')).toContain('iOS')
+    expect(rowOf('Solo Game').children[idx].querySelector('.store-ico.dead')).toBeNull()
+    expect(listCalls()).toBe(before)
   })
 })
 

@@ -1876,9 +1876,16 @@ function EvaluationsPageInner() {
               hideRecordSections={false}
               onClose={handleClose}
               onNavigate={handleNavigate}
-              onSaved={(fresh: EvalDetail) => {
-                setData(prev => prev.map(d => d.game_id === fresh.game_id
-                  ? { ...d, initial_conclusion: fresh.initial_conclusion, initial_note: fresh.initial_note, evaluate_date: fresh.evaluate_date, drive_link: fresh.drive_link }
+              onSaved={(fresh: EvalDetail, stores: PairStore[] | null) => {
+                // A pair: the list row is the pair's front row as it was loaded, which a link dead
+                // switch can turn into the back row, so match it by either store's id too. Its
+                // `stores` take the saved state, so a store marked dead shows without a reload.
+                const pairIds = new Set((stores ?? []).map(st => st.eval_id))
+                setData(prev => prev.map(d => d.game_id === fresh.game_id || pairIds.has(d.id)
+                  ? {
+                      ...d, initial_conclusion: fresh.initial_conclusion, initial_note: fresh.initial_note, evaluate_date: fresh.evaluate_date, drive_link: fresh.drive_link,
+                      ...(stores ? { stores } : {}),
+                    }
                   : d
                 ))
               }}

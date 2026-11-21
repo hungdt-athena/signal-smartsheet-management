@@ -35,6 +35,7 @@ import { CodeChip, fetchDemoCode } from '@/components/CodeChip'
 import { StoreTabs } from '@/components/StoreTabs'
 import { StoreMark } from '@/components/ui/StoreIcons'
 import type { PanelStore } from '@/app/api/evaluations/[gameId]/route'
+import { STORE_SPECIFIC, type PairStore } from '@/lib/eval-pairs'
 import {
   EMPTY_NOTE_PARTS, NOTE_MIN_LEN, isLegacyNote, missingNoteParts, notePartsFromRow, notePartsRequirementError,
   type NoteParts,
@@ -113,6 +114,13 @@ export interface EvalPair {
 }
 
 export interface EvalListItem { game_id: string; title: string }
+
+/** A pair's stores as the lists carry them (PairStore), from the panel's richer PanelStore. */
+export function pairStoresOf(ev: EvalDetail): PairStore[] | null {
+  return ev.pair
+    ? ev.pair.stores.map(({ os, game_id, eval_id, app_link, is_active, dead }) => ({ os, game_id, eval_id, app_link, is_active, dead }))
+    : null
+}
 
 // The Initial Conclusion an evaluator picks: Bypass (drop), List_Idea (keep →
 // buckets into a weekly batch), or Playtest & Bypass (playtest first, then drop).
@@ -502,7 +510,9 @@ interface Props {
    *  be split by screen. Required so a new mount cannot forget it. */
   logContext: LogContext
   onNavigate?: (gameId: string) => void
-  onSaved?: (ev: EvalDetail) => void
+  /** `stores`: a pair's stores after the save (PairStore, iOS first), so a host list can show the
+   *  new link dead state without reloading; null for a single-store game. */
+  onSaved?: (ev: EvalDetail, stores: PairStore[] | null) => void
   onClose?: () => void
 }
 
@@ -1010,12 +1020,18 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   const shown = pairStores.find(st => st.game_id === shownStore) ?? pairStores.find(st => st.game_id === ev?.game_id) ?? null
   const liveStores = pairStores.filter(st => !st.dead)
   const deadStores = pairStores.filter(st => st.dead)
+  // The form's row has to take the pair's result: a store whose own row holds a store-only
+  // result (Link_dead, or Stale_release, which has no switch) cannot. Only Link_dead is drawn red.
+  // `dead` is the switch (pending flips applied), so a Link_dead row being reopened counts as live.
+  const storeOnly = (st: PanelStore) => st.dead
+    || (st.conclusion !== 'Link_dead' && (STORE_SPECIFIC as readonly string[]).includes(st.conclusion ?? ''))
+  const formStores = pairStores.filter(st => !storeOnly(st))
   const storeName = (os: string) => (os === 'ios' ? 'iOS' : 'Android')
   // Flipped switches, in store order (iOS first): what Save sends to store-dead before the form.
   const deadSwitched = pair ? pair.stores.filter(st => st.eval_id in deadEdits) : []
   // The row the form PATCH goes to: the one live store when only one is, else the front row
   // (both live: the DB copies to the twin; both dead: both rows keep their own result).
-  const formRowId = pair && liveStores.length === 1 ? liveStores[0].eval_id : ev?.id
+  const formRowId = pair && formStores.length === 1 ? formStores[0].eval_id : ev?.id
   // The eval editor's Save button also flushes staged screenshots, so staged
   // shots count as unsaved work for it (the card hides its own button then).
   const formPending = dirty || (canEditEval && stagedShots > 0)
@@ -1172,7 +1188,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           // Initial Conclusion (+ batch) freezes once a final conclusion exists. On a pair a
           // Link_dead store opens and closes only by its switch: the form never sends Link_dead,
           // and never writes a conclusion into a row that stays dead.
-          const formRowLive = !pair || liveStores.some(st => st.eval_id === formId)
+          const formRowLive = !pair || formStores.some(st => st.eval_id === formId)
           if (canEditInitialConc && formRowLive && !(pair && conclusion === 'Link_dead')) {
             body.initial_conclusion = conclusion
             // Batch only applies to List_Idea games. Managers pick freely; evaluators
@@ -1225,7 +1241,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           if (currentGameIdRef.current === key) applyData(fresh, key)
           // Old game still on screen and already saved: clear dirty so auto-save does not fire again.
           else if (shownGameRef.current === key) setDirty(false)
-          onSaved?.(fresh)
+          onSaved?.(fresh, pairStoresOf(fresh))
         }
       }
     } catch { showToast('Network error', true) }
@@ -1250,7 +1266,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       if (fresh) {
         cacheRef.current.set(key, fresh)
         if (currentGameIdRef.current === key) applyData(fresh, key)
-        onSaved?.(fresh)
+        onSaved?.(fresh, pairStoresOf(fresh))
       }
     } catch { showToast('Network error', true) }
   }
