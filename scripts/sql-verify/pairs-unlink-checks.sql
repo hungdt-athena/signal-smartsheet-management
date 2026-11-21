@@ -176,6 +176,30 @@ BEGIN
                  WHERE table_name = 'game_evaluations' AND column_name = 'pair_back'), 'rename rolled back';
 END $$;
 
+-- ===== runs_as_owner: Signal Sense's role has no grant on game_evaluations or
+-- evaluation_log and no public on its search_path; the split still happens =====
+BEGIN;
+CREATE ROLE verify_signal_sense NOLOGIN;
+GRANT SELECT, UPDATE ON game_info TO verify_signal_sense;
+DO $$
+DECLARE p int[];
+BEGIN
+  p := pg_temp.mkpair('10', '{"initial_conclusion": "List_Idea", "initial_evaluator": "ThuDT"}', '{}');
+END $$;
+SET LOCAL ROLE verify_signal_sense;
+SET LOCAL search_path = pg_catalog;
+UPDATE public.game_info SET family_unlinked = true WHERE game_id = 'ui10';
+RESET ROLE;
+RESET search_path;
+DO $$
+BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM game_evaluations WHERE game_id IN ('ua10', 'ui10')
+                     AND (pair_eval_id IS NOT NULL OR pair_back)), 'split under Signal Sense''s role';
+  ASSERT (SELECT count(*) FROM evaluation_log WHERE game_id IN ('ua10', 'ui10') AND kind = 'pair_unlink') = 2,
+    'logged under Signal Sense''s role';
+END $$;
+ROLLBACK;
+
 -- ===== schema: one game_info trigger, AFTER UPDATE OF family_id, family_unlinked =====
 DO $$
 BEGIN
@@ -184,4 +208,6 @@ BEGIN
   ASSERT (SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE tgname = 'trg_game_info_eval_pair_unlink')
          LIKE 'CREATE TRIGGER trg_game_info_eval_pair_unlink AFTER UPDATE OF family_id, family_unlinked ON public.game_info FOR EACH ROW WHEN (%',
     'trigger shape';
+  ASSERT (SELECT prosecdef AND proconfig = ARRAY['search_path=public, pg_temp'] FROM pg_proc
+          WHERE proname = 'game_info_eval_pair_unlink'), 'runs as its owner with a fixed search_path';
 END $$;

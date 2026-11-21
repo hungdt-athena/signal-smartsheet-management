@@ -36,6 +36,8 @@
 --   - delete (trg_eval_pair_delete): the twin of a deleted row is a lone game again.
 --   - unlink from game_info (trg_game_info_eval_pair_unlink): Signal Sense sets
 --     family_unlinked or changes family_id -> a pair no longer valid splits, data kept.
+--     Its function is SECURITY DEFINER (search_path public, pg_temp), so it works under
+--     Signal Sense's role and search_path.
 --   - unlink_eval_pair(id): THE unlink, used by the copy trigger and the game_info
 --     trigger. Both rows go back to lone games and each gets one evaluation_log row
 --     (kind 'pair_unlink', actor 'System', pair_scope 'store'). To split a pair by hand,
@@ -58,6 +60,11 @@
 -- before the rows are linked (the WHEN clause skips unlinked rows), the link itself changes
 -- pair_eval_id (skipped by the WHEN clause) and pair_back alone (nothing to copy). Re-running
 -- this file is checked to change nothing.
+--
+-- TIMING (runbook): on the local sample DB (18099 evaluation rows, 2026-11-21) the
+-- safe-pair pass took 100-220 ms to link 3 pairs and ~55 ms to find nothing (re-run).
+-- game_evaluations is locked (DISABLE TRIGGER) for that long; game_info is not locked
+-- by it: its trigger is created in a third, short transaction with lock_timeout 5 s.
 --
 -- ORDER: additive. Apply BEFORE the build that reads pair_back. The build from before
 -- keeps working: it ignores the new columns, and a back row it lists is a full copy.
@@ -100,8 +107,9 @@
 -- COMMIT;
 -- END ROLLBACK
 
--- Two transactions, as 051: the first only adds columns (metadata only, the lock is
--- held for milliseconds), the second installs the functions and links.
+-- Three transactions: the first only adds columns (metadata only, the lock is held for
+-- milliseconds), the second installs the functions and links, the third adds the trigger
+-- on Signal Sense's game_info (see there).
 BEGIN;
 
 ALTER TABLE game_evaluations
@@ -501,8 +509,12 @@ CREATE TRIGGER trg_eval_pair_delete
 -- must never fail Signal Sense's UPDATE: any error is a WARNING and its half-done work
 -- rolls back with the block. AFTER ROW triggers fire once the statement is done, so a
 -- statement that moves both stores to a new family together sees a valid pair and keeps it.
+-- SECURITY DEFINER with a fixed search_path: it runs as Signal Sense's role, which may have
+-- no grant on game_evaluations / evaluation_log and another search_path; either would turn
+-- every split into a WARNING. As the owner (Playtest's role), everything it calls runs with
+-- the owner's rights and this search_path (pg_temp last, so no temp object can shadow ours).
 CREATE OR REPLACE FUNCTION game_info_eval_pair_unlink() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE r record;
 BEGIN
   BEGIN
@@ -519,13 +531,6 @@ BEGIN
   RETURN NULL;
 END;
 $$;
-
-DROP TRIGGER IF EXISTS trg_game_info_eval_pair_unlink ON game_info;
-CREATE TRIGGER trg_game_info_eval_pair_unlink
-  AFTER UPDATE OF family_id, family_unlinked ON game_info
-  FOR EACH ROW
-  WHEN (OLD.family_id IS DISTINCT FROM NEW.family_id OR OLD.family_unlinked IS DISTINCT FROM NEW.family_unlinked)
-  EXECUTE FUNCTION game_info_eval_pair_unlink();
 
 -- Pairs already there that can be linked with no judgment call (spec 6.2 d): f is the
 -- lower id (the front row, as neither is judged). True when the 2 games are the whole
@@ -606,5 +611,25 @@ $$;
 ALTER TABLE game_evaluations DISABLE TRIGGER trg_game_evaluations_updated;
 SELECT link_safe_eval_pairs() AS safe_pairs_linked;
 ALTER TABLE game_evaluations ENABLE TRIGGER trg_game_evaluations_updated;
+
+COMMIT;
+
+-- The trigger on Signal Sense's game_info, in its own short transaction AFTER the links
+-- are committed: CREATE TRIGGER holds ShareRowExclusiveLock (DROP TRIGGER on a re-run:
+-- AccessExclusiveLock) on game_info until COMMIT, so inside the transaction above it would
+-- stall every Signal Sense write (on a re-run, every read) for the whole safe-pair pass.
+-- lock_timeout: if an open Signal Sense transaction holds game_info, give up after 5 s
+-- (psql stops with "lock timeout"; the links above are already committed, just re-run the
+-- file) instead of queueing an AccessExclusive request that every later game_info query
+-- would queue behind. A family change between the two transactions is not lost: the copy
+-- trigger finds the pair invalid on its next write and splits it.
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+DROP TRIGGER IF EXISTS trg_game_info_eval_pair_unlink ON game_info;
+CREATE TRIGGER trg_game_info_eval_pair_unlink
+  AFTER UPDATE OF family_id, family_unlinked ON game_info
+  FOR EACH ROW
+  WHEN (OLD.family_id IS DISTINCT FROM NEW.family_id OR OLD.family_unlinked IS DISTINCT FROM NEW.family_unlinked)
+  EXECUTE FUNCTION game_info_eval_pair_unlink();
 
 COMMIT;

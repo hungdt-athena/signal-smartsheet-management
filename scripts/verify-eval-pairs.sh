@@ -48,14 +48,14 @@ catalog_with_054=$(catalog)
 # Two-session checks. Session A writes, then holds its transaction open until it sees
 # session B waiting on a lock (or 10 s pass) and prints whether it saw B wait. The shell
 # starts B only once A holds its lock AND A's write has finished (A runs its wait loop,
-# the DO statement), so A's triggers, e.g. the copy to the twin, are done before B starts.
+# the DO statement marked verify_wait), so A's triggers, e.g. the copy to the twin, are done before B starts.
 # The order never depends on a sleep.
 #   $1 the lock A must hold before B starts (SQL condition on pg_locks l, A's pid is a.pid)
 #   $2 A's write   $3 B's write
 two_sessions() {
   local out="$TMP/sessA.out"
   PGAPPNAME=verify_sess_a "${P[@]}" -d verify -At -c "BEGIN" -c "$2" \
-    -c "DO \$\$ BEGIN FOR i IN 1..400 LOOP
+    -c "DO \$\$ /* verify_wait */ BEGIN FOR i IN 1..400 LOOP
           EXIT WHEN EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted);
           PERFORM pg_sleep(0.025);
         END LOOP; END \$\$" \
@@ -65,7 +65,7 @@ two_sessions() {
   local held=0
   for _ in $(seq 1 400); do
     held=$("${P[@]}" -d verify -At -c "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-                                         WHERE a.application_name = 'verify_sess_a' AND a.query LIKE 'DO %'
+                                         WHERE a.application_name = 'verify_sess_a' AND a.query LIKE '%verify_wait%'
                                            AND l.granted AND ($1)")
     [ "$held" -gt 0 ] && break
     sleep 0.025
@@ -108,6 +108,81 @@ snap() { "${P[@]}" -d verify -At -c "SELECT md5(string_agg(to_jsonb(g)::text, ',
 before=$(snap)
 "${P[@]}" -d verify -f migrations/054_eval_pairs.sql >/dev/null
 [ "$(snap)" = "$before" ] || { echo "re-running 054 changed game_evaluations or evaluation_log"; exit 1; }
+
+# Waits (up to 10 s) until the SQL count $1 is above 0.
+wait_for() {
+  local n=0
+  for _ in $(seq 1 400); do
+    n=$("${P[@]}" -d verify -At -c "$1")
+    [ "$n" -gt 0 ] && return 0
+    sleep 0.025
+  done
+  echo "timed out waiting for: $1"; exit 1
+}
+# A background session that holds $1 (SQL run inside its transaction) until the shell
+# inserts a row into verify_go (or 30 s pass).
+hold() {
+  PGAPPNAME=verify_holder "${P[@]}" -d verify -At -c "BEGIN" -c "$1" \
+    -c "DO \$\$ BEGIN FOR i IN 1..1200 LOOP EXIT WHEN EXISTS (SELECT 1 FROM verify_go);
+          PERFORM pg_sleep(0.025); END LOOP; END \$\$" -c "COMMIT" >/dev/null &
+}
+"${P[@]}" -d verify -c "CREATE TABLE verify_go (x int)"
+
+# pass_leaves_game_info_alone: the safe-pair pass holds no lock on Signal Sense's game_info.
+# (Reading game_info takes AccessShare / RowShare, which block no Signal Sense INSERT,
+# UPDATE or SELECT; the check looks for the modes that would.)
+# A test trigger parks the pass on its first pair_link log (advisory lock 4242, held by a
+# background session) while a Signal Sense UPDATE of game_info runs with a 2 s lock_timeout.
+"${P[@]}" -d verify -c "INSERT INTO game_info (game_id, os) VALUES ('lka', 'android'), ('lki', 'ios')" \
+  -c "INSERT INTO game_evaluations (game_id, category_group) VALUES ('lka', 'puzzle'), ('lki', 'puzzle')" \
+  -c "UPDATE game_info SET family_id = 'fam.lk' WHERE game_id IN ('lka', 'lki')" \
+  -c "CREATE FUNCTION verify_park_link() RETURNS trigger LANGUAGE plpgsql AS
+        \$\$ BEGIN PERFORM pg_advisory_xact_lock(4242); RETURN NEW; END \$\$" \
+  -c "CREATE TRIGGER verify_park BEFORE INSERT ON evaluation_log FOR EACH ROW
+        WHEN (NEW.kind = 'pair_link') EXECUTE FUNCTION verify_park_link()"
+hold "SELECT pg_advisory_xact_lock(4242)"
+holder=$!
+wait_for "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+          WHERE a.application_name = 'verify_holder' AND l.locktype = 'advisory' AND l.granted"
+PGAPPNAME=verify_mig "${P[@]}" -d verify -f migrations/054_eval_pairs.sql >"$TMP/mig.out" 2>&1 &
+mig=$!
+wait_for "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+          WHERE a.application_name = 'verify_mig' AND l.locktype = 'advisory' AND NOT l.granted"
+gi_locks=$("${P[@]}" -d verify -At -c "SELECT string_agg(l.mode, ',') FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+          WHERE a.application_name = 'verify_mig' AND l.relation = 'game_info'::regclass AND l.granted
+            AND l.mode IN ('ShareLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')")
+ss_update=ok
+PGOPTIONS="$PGOPTIONS -c lock_timeout=2s" "${P[@]}" -d verify \
+  -c "UPDATE game_info SET title = 'Signal Sense edit' WHERE game_id = 'lka'" >/dev/null 2>&1 || ss_update=failed
+"${P[@]}" -d verify -c "INSERT INTO verify_go VALUES (1)"
+wait "$holder"
+mig_status=0; wait "$mig" || mig_status=$?
+"${P[@]}" -d verify -c "DELETE FROM verify_go" -c "DROP TRIGGER verify_park ON evaluation_log" -c "DROP FUNCTION verify_park_link()"
+[ "$mig_status" = 0 ] || { echo "054 failed while parked: $(cat "$TMP/mig.out")"; exit 1; }
+[ -z "$gi_locks" ] || { echo "the safe-pair pass holds locks on game_info: $gi_locks"; exit 1; }
+[ "$ss_update" = ok ] || { echo "a Signal Sense UPDATE of game_info waited on the safe-pair pass"; exit 1; }
+"${P[@]}" -d verify -c "DO \$\$ BEGIN
+  ASSERT (SELECT count(*) FROM game_evaluations WHERE game_id IN ('lka', 'lki') AND pair_eval_id IS NOT NULL) = 2,
+    'the parked pass linked its pair';
+END \$\$;"
+
+# trigger_lock_timeout: the game_info trigger is (re)created under a lock_timeout, so 054
+# gives up instead of queueing behind an open Signal Sense transaction (which would stall
+# every later game_info query behind its AccessExclusive request).
+hold "LOCK TABLE game_info IN ACCESS SHARE MODE"
+holder=$!
+wait_for "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+          WHERE a.application_name = 'verify_holder' AND l.relation = 'game_info'::regclass AND l.granted"
+mig_status=0
+"${P[@]}" -d verify -f migrations/054_eval_pairs.sql >"$TMP/mig.out" 2>&1 || mig_status=$?
+"${P[@]}" -d verify -c "INSERT INTO verify_go VALUES (1)"
+wait "$holder"
+"${P[@]}" -d verify -c "DROP TABLE verify_go"
+[ "$mig_status" != 0 ] && grep -q 'lock timeout' "$TMP/mig.out" || {
+  echo "054 did not give up on a locked game_info: status $mig_status, $(tail -3 "$TMP/mig.out")"; exit 1; }
+"${P[@]}" -d verify -c "DO \$\$ BEGIN
+  ASSERT (SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_game_info_eval_pair_unlink') = 1, 'trigger kept';
+END \$\$;"
 
 # rollback_block: the SQL in the "-- ROLLBACK:" block of 054 (each line behind "-- ", up to
 # "-- END ROLLBACK") removes everything 054 added, and game_evaluations still takes an
