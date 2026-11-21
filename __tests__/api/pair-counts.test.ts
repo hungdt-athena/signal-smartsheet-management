@@ -150,14 +150,29 @@ describe('work counts drop the copy row of a linked pair', () => {
     for (const q of evals) expect(q).toContain(EVAL)
   })
 
+  // Trends tags (playtest_tags) are one row per tag, never a copy, so their join to the
+  // evaluation row (for its category) carries no pair condition.
+  const tagParts = (qs: string[]) => qs.filter(t => t.includes('FROM playtest_tags pt')).map(t => {
+    const i = t.indexOf('FROM playtest_tags pt')
+    return t.slice(i, t.indexOf('GROUP BY', i))
+  })
+
   it('report daily', async () => {
     await reportDaily(req('/api/report/daily?from=2026-11-01&to=2026-11-07&category=all'))
     expectAllCarry(geQueries())
+    const tags = tagParts(geQueries())
+    expect(tags).toHaveLength(1)
+    // (the day pick subquery on g2 inside it keeps its own evaluation rule)
+    expect(tags[0]).not.toContain('ge.pair_back')
   })
 
   it('report daily, one evaluator (self scope)', async () => {
     await reportDaily(req('/api/report/daily?from=2026-11-01&to=2026-11-07&evaluator=ThuDT'))
     expectAllCarry(geQueries())
+    const tags = tagParts(geQueries())
+    expect(tags).toHaveLength(1)
+    // (the day pick subquery on g2 inside it keeps its own evaluation rule)
+    expect(tags[0]).not.toContain('ge.pair_back')
   })
 
   it('report rollup', async () => {

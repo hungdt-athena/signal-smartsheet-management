@@ -165,7 +165,7 @@ export async function GET(req: NextRequest) {
           FROM playtest_tags pt
           JOIN dashboard_users du ON lower(du.email) = lower(pt.tagged_by)
           JOIN game_evaluations ge ON ge.game_id = pt.game_id
-          WHERE pt.tagged_at >= (${from}::timestamp AT TIME ZONE ${VN}) ${notPairCopy(sql)}
+          WHERE pt.tagged_at >= (${from}::timestamp AT TIME ZONE ${VN})
             AND pt.tagged_at < ((${to}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')
             AND pt.status <> 'removed'
             AND lower(du.name) = lower(${evaluator})
@@ -276,8 +276,9 @@ export async function GET(req: NextRequest) {
                count(DISTINCT pt.game_id)::int AS tagged
         FROM playtest_tags pt
         JOIN dashboard_users du ON lower(du.email) = lower(pt.tagged_by)
+        -- No pair condition: a tag row is never a copy (playtest_tags has no twin mirror).
         JOIN game_evaluations ge ON ge.game_id = pt.game_id
-        WHERE pt.tagged_at >= ${lo} AND pt.tagged_at < ${hi} ${notPairCopy(sql)}
+        WHERE pt.tagged_at >= ${lo} AND pt.tagged_at < ${hi}
           AND pt.status <> 'removed'
           AND lower(du.name) <> ALL(${excluded})
           ${catFilter}

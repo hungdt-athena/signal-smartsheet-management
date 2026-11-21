@@ -809,6 +809,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     trendTagsLoadedFor.current = gameId
   }, [])
 
+  // Trends tags live in playtest_tags per game_id, with no copy on the twin store. A pair keeps
+  // them under its front row's game_id (ev.game_id) whichever store the panel was opened with,
+  // so both stores show and save the same set. Until the asked-for game is on screen this is
+  // the asked-for id (a single-store game, the common case, loads without waiting).
+  const tagGameId = ev?.pair && shownGameRef.current === currentGameId ? ev.game_id : currentGameId
+
   const loadTrendTags = useCallback((gameId: string, force = false) => {
     const gen = ++trendTagsGen.current
     // Cache hit: the neighbour prefetch below already has this game's tags, so the
@@ -873,16 +879,16 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // the form depends on that list, so the section is all that moves -- and it
   // moves from the response, not from a re-read.
   const onExistingChanged = useCallback((change: ExistingTagChange) => {
-    trendTagsCacheRef.current.delete(currentGameId)
+    trendTagsCacheRef.current.delete(tagGameId)
     setExistingTrends(prev => applyExistingChange(prev, change))
-  }, [currentGameId])
+  }, [tagGameId])
 
   useEffect(() => {
-    loadTrendTags(currentGameId)
+    loadTrendTags(tagGameId)
     // Bump the generation on unmount / game change so an in-flight response is
     // dropped instead of landing on the next game.
     return () => { trendTagsGen.current++ }
-  }, [currentGameId, loadTrendTags])
+  }, [tagGameId, loadTrendTags])
 
   useEffect(() => {
     if (!hasNav) return
@@ -1165,11 +1171,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
         // Only PUT what we actually loaded: the endpoint replaces the game's whole
         // pending set, so sending the empty state of a failed or still-in-flight
         // load would silently delete the evaluator's proposals.
-        if (canEditGameAlike && trendTagsLoadedFor.current === key) {
+        // A pair's tags sit under its front row's game_id (see tagGameId).
+        const tagKey = ev.pair ? ev.game_id : key
+        if (canEditGameAlike && trendTagsLoadedFor.current === tagKey) {
           const tagRes = await fetch('/api/playtest-tags', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ game_id: key, tags: trendTags }),
+            body: JSON.stringify({ game_id: tagKey, tags: trendTags }),
           })
           if (!tagRes.ok) {
             const err = await tagRes.json().catch(() => ({}))
@@ -1178,7 +1186,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             return false
           }
           // The pending set just changed; the cached copy is the pre-save one.
-          trendTagsCacheRef.current.delete(key)
+          trendTagsCacheRef.current.delete(tagKey)
         }
         const body: Record<string, unknown> = { id: formId }
         if (canEditEval) {
@@ -1754,7 +1762,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
               <div className="field">
                 <span className="label">Trends Tags</span>
                 <TrendTagsField
-                  gameId={currentGameId}
+                  gameId={tagGameId}
                   value={trendTags}
                   existing={existingTrends}
                   options={trendOptions}
@@ -1766,7 +1774,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   optionsError={trendOptionsError}
                   onRetryOptions={loadTrendOptions}
                   loadError={trendTagsError}
-                  onRetryLoad={() => loadTrendTags(currentGameId, true)}
+                  onRetryLoad={() => loadTrendTags(tagGameId, true)}
                   review={pendingReview}
                   canReview={isManager}
                   onReviewed={onTagReviewed}

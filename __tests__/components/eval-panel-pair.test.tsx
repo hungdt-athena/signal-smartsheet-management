@@ -217,6 +217,19 @@ describe('EvalDetailPanel, a linked pair', () => {
     await waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.url === `/api/evaluations/${IOS.game_id}`).length).toBe(2))
   })
 
+  it('opened by the back game_id: Trends tags load and save under the front row\'s game_id', async () => {
+    const calls = mockApi({ stores: [IOS, AND], front: AND })
+    panel(IOS.game_id)
+    await screen.findByText('Funbit iOS Ltd')
+    const tagGets = () => calls.filter(c => c.method === 'GET' && c.url.startsWith('/api/playtest-tags'))
+    await waitFor(() => expect(tagGets().at(-1)?.url).toBe(`/api/playtest-tags?gameId=${encodeURIComponent(AND.game_id)}`))
+    await editSelfNote()
+    await clickSave()
+    await waitFor(() => expect(calls.some(c => c.url === '/api/playtest-tags' && c.method === 'PUT')).toBe(true))
+    const put = calls.find(c => c.url === '/api/playtest-tags' && c.method === 'PUT')!
+    expect(put.body).toMatchObject({ game_id: AND.game_id })
+  })
+
   it('turning Android dead while iOS lives: store-dead for Android, then the form PATCH to the iOS row', async () => {
     const calls = mockApi({ stores: [IOS, AND], front: AND })
     panel(AND.game_id)
