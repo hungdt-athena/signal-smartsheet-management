@@ -46,7 +46,8 @@ export async function POST(req: NextRequest) {
       // Both rows of the pair, in id order, before anything is written: two people saving
       // the two stores at once would otherwise deadlock on the sync triggers.
       const locked = await tx`
-        SELECT id, initial_evaluator, initial_conclusion, pair_eval_id FROM game_evaluations
+        SELECT id, game_id, initial_evaluator, initial_conclusion, final_conclusion, evaluate_date, batch, pair_eval_id
+        FROM game_evaluations
         WHERE id IN (${id}, (SELECT pair_eval_id FROM game_evaluations WHERE id = ${id}))
         ORDER BY id FOR UPDATE
       `
@@ -59,18 +60,27 @@ export async function POST(req: NextRequest) {
         return { status: 400, error: 'This store is not marked Link_dead' }
       }
 
+      // 1. The write. The sync trigger runs inside it: on a reopen it copies the pair's
+      //    result onto this row.
+      await tx`
+        UPDATE game_evaluations ge SET
+          initial_conclusion = ${dead ? 'Link_dead' : null}::text,
+          evaluate_date = ${dead ? sql`COALESCE(ge.evaluate_date, NOW())` : sql`NULL`},
+          updated_by = ${actor}
+        WHERE ge.id = ${id}
+      `
+      // 2. Re-read the row after the triggers, and 3. log from that state, so
+      //    conclusion_after is what the row really holds (the pair's result after a reopen).
       const rows = await tx`
         WITH old AS (
-          SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date, batch
-          FROM game_evaluations WHERE id = ${id}
-          FOR NO KEY UPDATE
+          SELECT ${id}::int AS id, ${(row.game_id as string) ?? null}::text AS game_id,
+            ${(row.initial_conclusion as string | null) ?? null}::text AS initial_conclusion,
+            ${(row.initial_evaluator as string | null) ?? null}::text AS initial_evaluator,
+            ${(row.final_conclusion as string | null) ?? null}::text AS final_conclusion,
+            ${row.evaluate_date ? new Date(row.evaluate_date as string).toISOString() : null}::timestamptz AS evaluate_date,
+            ${(row.batch as string | null) ?? null}::text AS batch
         ), upd AS (
-          UPDATE game_evaluations ge SET
-            initial_conclusion = ${dead ? 'Link_dead' : null}::text,
-            evaluate_date = ${dead ? sql`COALESCE(ge.evaluate_date, NOW())` : sql`NULL`},
-            updated_by = ${actor}
-          FROM old WHERE ge.id = old.id
-          RETURNING ge.*
+          SELECT * FROM game_evaluations WHERE id = ${id}
         ), logged AS (
           INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, actor_role, owner, source,
             context, kind, conclusion_before, conclusion_after, final_before, final_after, changed,

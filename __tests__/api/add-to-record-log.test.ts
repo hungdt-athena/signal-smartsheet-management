@@ -63,3 +63,40 @@ describe('add-to-record logs itself', () => {
     expect(c.text).toMatch(/evaluate_date, batch\s+FROM game_evaluations/)
   })
 })
+
+describe('add-to-record updates the row by the id from INSERT ... RETURNING', () => {
+  it.each([
+    ['override', { initial_evaluator: 'Shortcut', initial_conclusion: 'List_Idea' }],
+    ['legacy', {}],
+  ])('%s branch: old CTE selects WHERE id = the returned id, not (game_id, category_group)', async (_n, extra) => {
+    sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
+      if (!Array.isArray(strings)) return Promise.resolve([])
+      const text = (strings as string[]).join('$')
+      calls.push({ text, binds })
+      if (/INSERT INTO game_evaluations/.test(text)) return Promise.resolve([{ id: 4242 }])
+      return Promise.resolve([{ id: 4242, game_id: 'g' }])
+    })
+    await post({ game_id: 'g', category_group: 'puzzle', bucket: '5min', ...extra })
+    const ins = calls.findIndex(c => /INSERT INTO game_evaluations/.test(c.text))
+    expect(calls[ins].text).toMatch(/ON CONFLICT \(game_id, category_group\) DO NOTHING\s+RETURNING id/)
+    const upd = calls.find(c => /UPDATE game_evaluations ge/.test(c.text))!
+    expect(upd.text).toMatch(/FROM game_evaluations\s+WHERE id = \$\s+FOR NO KEY UPDATE/)
+    expect(upd.text).not.toMatch(/category_group = \$\s+FOR NO KEY UPDATE/)
+    expect(upd.binds).toContain(4242)
+    expect(calls.indexOf(upd)).toBeGreaterThan(ins)
+  })
+
+  it('on conflict (no RETURNING row) it looks the id up first, preferring the asked group', async () => {
+    sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
+      if (!Array.isArray(strings)) return Promise.resolve([])
+      const text = (strings as string[]).join('$')
+      calls.push({ text, binds })
+      if (/INSERT INTO game_evaluations/.test(text)) return Promise.resolve([])
+      if (/SELECT id FROM game_evaluations WHERE game_id/.test(text)) return Promise.resolve([{ id: 99 }])
+      return Promise.resolve([{ id: 99, game_id: 'g' }])
+    })
+    await post({ game_id: 'g', category_group: 'puzzle', bucket: '5min' })
+    const upd = calls.find(c => /UPDATE game_evaluations ge/.test(c.text))!
+    expect(upd.binds).toContain(99)
+  })
+})

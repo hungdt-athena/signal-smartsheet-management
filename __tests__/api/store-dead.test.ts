@@ -73,9 +73,13 @@ describe('POST /api/evaluations/store-dead', () => {
     const updAt = calls.findIndex((c) => /UPDATE game_evaluations ge SET/.test(c.text))
     expect(lockAt).toBeGreaterThanOrEqual(0)
     expect(updAt).toBeGreaterThan(lockAt)
-    const u = calls[updAt]
-    expect(u.binds).toContain('Link_dead')
-    expect(u.text).toMatch(/INSERT INTO evaluation_log/)
+    expect(calls[updAt].binds).toContain('Link_dead')
+    // the log is written AFTER the update, from a re-read of the row (post-trigger state)
+    const logAt = calls.findIndex((c) => /INSERT INTO evaluation_log/.test(c.text))
+    expect(logAt).toBeGreaterThan(updAt)
+    const u = calls[logAt]
+    expect(u.text).toMatch(/upd AS \(\s*SELECT \* FROM game_evaluations WHERE id = \$/)
+    expect(u.text).not.toMatch(/UPDATE game_evaluations/)
     expect(u.text).toMatch(/old\.batch, upd\.batch, 'store'/)
     expect((await res.json()).data.id).toBe(1)
   })
@@ -91,6 +95,7 @@ describe('POST /api/evaluations/store-dead', () => {
     const u = calls.find((c) => /UPDATE game_evaluations ge SET/.test(c.text))!
     expect(u.binds).toContain(null)
     expect(u.binds).not.toContain('Link_dead')
+    expect(u.text).toMatch(/evaluate_date = \$/)
   })
 
   it('400 on a missing id or a non-boolean dead; 404 when the row is gone', async () => {
