@@ -122,6 +122,20 @@ export function pairStoresOf(ev: EvalDetail): PairStore[] | null {
     : null
 }
 
+/** The pending link dead switches still worth keeping after the pair's rows were re-read: the
+ *  ones on a store of this pair whose row does not already say the same. Same object back
+ *  when nothing is dropped, so React skips the re-render. */
+export function keptDeadEdits(edits: Record<number, boolean>, stores: { eval_id: number; conclusion?: string | null }[]): Record<number, boolean> {
+  const next: Record<number, boolean> = {}
+  let dropped = false
+  for (const [k, dead] of Object.entries(edits)) {
+    const st = stores.find(x => x.eval_id === Number(k))
+    if (st && dead !== (st.conclusion === 'Link_dead')) next[Number(k)] = dead
+    else dropped = true
+  }
+  return dropped ? next : edits
+}
+
 // The Initial Conclusion an evaluator picks: Bypass (drop), List_Idea (keep →
 // buckets into a weekly batch), or Playtest & Bypass (playtest first, then drop).
 // Link_dead is set via the dead-link toggle, not this dropdown. Legacy sheet
@@ -715,7 +729,10 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     // A fresh open shows the store that was asked for; a refetch of the same game keeps the tab.
     setShownStore(prev => (sameGame && prev && data.pair?.stores.some(st => st.game_id === prev)
       ? prev : data.pair?.selected_game_id ?? null))
-    setDeadEdits({})
+    // Unsaved link dead switches belong to the game: a fresh open drops them, a refetch of the
+    // same game (background refresh, the re-read after a save) keeps every one that still
+    // differs from the store's row.
+    setDeadEdits(prev => (sameGame ? keptDeadEdits(prev, data.pair?.stores ?? []) : {}))
     setNoteParts(notePartsFromRow(data))
     setFinalNote(data.final_note || '')
     setFinalConclusion(data.final_conclusion || '')

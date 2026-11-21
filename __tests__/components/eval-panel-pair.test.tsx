@@ -288,6 +288,46 @@ describe('EvalDetailPanel, a linked pair', () => {
     expect(stores).toEqual([IOS, AND].map(({ os, game_id, eval_id, app_link, is_active, dead }) => ({ os, game_id, eval_id, app_link, is_active, dead })))
   })
 
+  it('a background refresh of the same game keeps an unsaved link dead switch', async () => {
+    // Back on a cached game, the panel paints the cached copy and re-reads it in the background;
+    // a fresh copy that differs is applied. That refresh must not drop a switch flipped meanwhile.
+    const OTHER = { ...IOS, game_id: 'com.other.game', eval_id: 30, title: 'Other Game', publisher_name: 'Other Co' }
+    let andGets = 0
+    let release: (() => void) | null = null
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      const json = (v: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => v })
+      const m = url.match(/^\/api\/evaluations\/([^/?]+)(\?.*)?$/)
+      if (m && method === 'GET') {
+        const gid = decodeURIComponent(m[1])
+        if (gid === OTHER.game_id) return json({ data: row(OTHER as Store), pair: null })
+        andGets++
+        const body = { data: row(AND, andGets > 1 ? { updated_at: '2026-11-03T00:00:00Z' } : {}), pair: { selected_game_id: gid, stores: [IOS, AND] } }
+        if (andGets < 2) return json(body)
+        // the background re-read after coming back: held until the switch is flipped
+        return new Promise(resolve => { release = () => resolve({ ok: true, status: 200, json: async () => body }) })
+      }
+      if (url.startsWith('/api/playtest-tags')) return json({ pending: [], existing: [] })
+      if (url.startsWith('/api/trends/options')) return json({ values: [], subValues: [] })
+      return json([])
+    }) as unknown as typeof fetch
+    const list = [{ game_id: AND.game_id, title: AND.title }, { game_id: OTHER.game_id, title: OTHER.title }]
+    render(<EvalDetailPanel initialGameId={AND.game_id} gameList={list} role="admin" userName="HungDT" logContext="evaluate" />)
+    await screen.findByText('Funbit Android Co')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Next game' })) })
+    await screen.findByText('Other Co')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Previous game' })) })
+    await screen.findByText('Funbit Android Co')
+    await waitFor(() => expect(release).not.toBeNull())
+    fireEvent.click(screen.getByRole('switch', { name: 'Android link dead' }))
+    expect(screen.getByRole('switch', { name: 'Android link dead' }).getAttribute('aria-checked')).toBe('true')
+    await act(async () => { release!() })
+    await waitFor(() => expect(andGets).toBe(2))
+    expect(screen.getByRole('switch', { name: 'Android link dead' }).getAttribute('aria-checked')).toBe('true')
+    expect(document.querySelector('.eval-savebar-note')?.textContent).toContain('Android link dead')
+  })
+
   it('reopening a dead store goes through store-dead with dead: false', async () => {
     const dIos = { ...IOS, dead: true, conclusion: 'Link_dead' }
     const calls = mockApi({ stores: [dIos, AND], front: AND })
