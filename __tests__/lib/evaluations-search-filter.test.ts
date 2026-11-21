@@ -35,6 +35,13 @@ describe('searchFilter', () => {
     expect(t).not.toContain('OR EXISTS')
   })
 
+  it('the twin branch matches the back store\'s title too, not only its id', () => {
+    const t = text('Carnival Sort')
+    const twin = t.slice(t.indexOf('UNION ALL'))
+    expect(twin).toContain('pe.pair_eval_id')
+    expect(twin).toMatch(/\(g\.title ILIKE \? OR g\.game_id ILIKE \?\) AND pe\.pair_eval_id IS NOT NULL/)
+  })
+
   it('escapes LIKE metacharacters in every bound pattern', () => {
     const f = searchFilter('100%_a') as unknown as { values: unknown[] }
     expect(f.values.length).toBeGreaterThanOrEqual(3)

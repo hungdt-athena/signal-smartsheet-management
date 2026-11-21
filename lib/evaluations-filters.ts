@@ -294,7 +294,11 @@ export function readSearch(searchParams: URLSearchParams): string {
  *  prod indexes added, 2026-11-21: 2-13ms became 42-64ms; on prod's 625k games that is
  *  the 1275ms scan above). Here every ILIKE is on a game_info column, so each branch
  *  starts from an index: the row's own game by title or id, then the front row of a
- *  twin whose store id matches (pair_eval_id points both ways). */
+ *  twin whose title or store id matches (pair_eval_id points both ways; the two stores
+ *  can carry different titles). The twin branch is a BitmapOr of both trigram indexes too
+ *  (sample DB with the prod indexes added inside a rolled-back transaction, 2026-11-21:
+ *  '%block%' 30ms, '%Carnival Sort%' 2.4ms, same as the id-only branch within noise, no
+ *  game_info scan). */
 export function searchFilter(term: string) {
   if (!term) return sql``
   const contains = `%${escapeLike(term)}%`
@@ -303,7 +307,7 @@ export function searchFilter(term: string) {
     WHERE g.title ILIKE ${contains} OR g.game_id ILIKE ${contains}
     UNION ALL
     SELECT pe.pair_eval_id FROM game_info g JOIN game_evaluations pe ON pe.game_id = g.game_id
-    WHERE g.game_id ILIKE ${contains} AND pe.pair_eval_id IS NOT NULL)`
+    WHERE (g.title ILIKE ${contains} OR g.game_id ILIKE ${contains}) AND pe.pair_eval_id IS NOT NULL)`
 }
 
 /** The whole ordering for a search, in three tiers.
