@@ -8,10 +8,12 @@ import { GameIcon } from './GameIcon'
 import { fmtDateVN } from '@/lib/format-date'
 
 export function GameCell({
-  icon, os, title, titleAfter, publisher, releaseDate, genres, extra, size = 40, minWidth = 220,
+  icon, os, hideMark, title, titleAfter, publisher, releaseDate, genres, extra, size = 40, minWidth = 220,
 }: {
   icon: string | null | undefined
   os?: string | null
+  /** No platform mark on the icon (the table has a Stores column). */
+  hideMark?: boolean
   title: ReactNode
   titleAfter?: ReactNode
   publisher?: string | null
@@ -25,7 +27,7 @@ export function GameCell({
   const meta = [publisher || null, releaseDate ? `Released ${fmtDateVN(releaseDate)}` : null].filter(Boolean) as string[]
   return (
     <div className="game-cell" style={{ minWidth }}>
-      <GameIcon src={icon} os={os} size={size} />
+      <GameIcon src={icon} os={os} hideMark={hideMark} size={size} />
       <div className="game-cell-text">
         <div className="game-cell-title">
           <span className="cell-name">{title}</span>
