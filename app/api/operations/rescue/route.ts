@@ -8,6 +8,7 @@ import { classifyRoster, waterfillQuotas, type RescueRow } from '@/lib/rescue-ru
 import { clampRescueConfig, type RescueConfig } from '@/lib/rescue-config'
 import { loadRescueConfig, saveRescueConfig } from '@/lib/rescue-config-db'
 import { writeAssignmentHistory } from '@/lib/assignment-history'
+import { twinGameIds } from '@/lib/eval-pairs-db'
 import { sourceBreakdowns, perEvaluatorPlatform, insertOperationRun } from '@/lib/operation-runs'
 import { getSession } from '@/lib/session'
 
@@ -202,6 +203,8 @@ export async function POST(req: NextRequest) {
 
     const session = await getSession()
     const createdBy = session?.user?.email ?? 'manual'
+    // Twins of moved pairs, one query for every source: history logs both store ids.
+    const pairGameIds = await twinGameIds(Array.from(movedIds, id => idToGameId.get(id)!))
 
     for (const s of perSourceView) {
       // One assignment_history row per (receiver, source) pair, written as 'reassign' so
@@ -221,6 +224,7 @@ export async function POST(req: NextRequest) {
         perEvaluator: gameIdsByReceiver,
         fromEvaluator: s.from,
         createdBy,
+        pairGameIds,
       })
 
       // One operation_runs row per source, kind='rescue', so the Rescue tab's history

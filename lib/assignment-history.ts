@@ -14,6 +14,10 @@ export interface HistoryInput {
   perEvaluator: Map<string, string[]>
   fromEvaluator?: string | null // source evaluator for reassign/handover
   createdBy?: string | null // session email, or 'cron' for scheduled runs
+  // front game_id -> back game_id of a linked pair (twinGameIds in lib/eval-pairs-db).
+  // A pair is one game: game_count counts the ids in perEvaluator, game_ids also
+  // carries each twin so the History of either store shows the move.
+  pairGameIds?: Map<string, string>
 }
 
 // Best-effort append; callers decide whether to await. Evaluators with an empty
@@ -22,13 +26,17 @@ export async function writeAssignmentHistory(input: HistoryInput): Promise<numbe
   let rows = 0
   for (const [name, gameIds] of Array.from(input.perEvaluator.entries())) {
     if (!gameIds || gameIds.length === 0) continue
+    const logged = gameIds.flatMap(id => {
+      const twin = input.pairGameIds?.get(id)
+      return twin ? [id, twin] : [id]
+    })
     await sql`
       INSERT INTO assignment_history
         (run_date, category_group, action, evaluator_name, from_evaluator, game_count, game_ids, created_by)
       VALUES (
         (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
         ${input.category}, ${input.action}, ${name},
-        ${input.fromEvaluator ?? null}, ${gameIds.length}, ${gameIds}, ${input.createdBy ?? null}
+        ${input.fromEvaluator ?? null}, ${gameIds.length}, ${logged}, ${input.createdBy ?? null}
       )
     `
     rows++

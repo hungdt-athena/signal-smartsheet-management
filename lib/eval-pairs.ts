@@ -71,6 +71,26 @@ export function storesSelect(q: Sql, alias = 'ge', giAlias = 'gi') {
   )`
 }
 
+/**
+ * SELECT expression for the `os` of an assign candidate: 'pair' for a linked pair whose
+ * two stores are both live, so any evaluator can take it and it counts as one game; else
+ * the row's own store. A pair where either row holds Link_dead / Stale_release is a
+ * one-store game for the live store: the twin keeps its own state and does not follow
+ * the assignment, so the specialist rule applies to the live store's os.
+ * Use it with listRowFilter: candidates are front rows only.
+ */
+export function assignOs(q: Sql, alias = 'ge', giAlias = 'gi') {
+  return q`CASE WHEN ${q(alias)}.pair_eval_id IS NOT NULL
+      AND ${q(alias)}.initial_conclusion IS DISTINCT FROM 'Link_dead'
+      AND ${q(alias)}.initial_conclusion IS DISTINCT FROM 'Stale_release'
+      AND NOT EXISTS (
+        SELECT 1 FROM game_evaluations t
+        WHERE t.id = ${q(alias)}.pair_eval_id
+          AND t.initial_conclusion IN ('Link_dead', 'Stale_release')
+      )
+    THEN 'pair' ELSE ${q(giAlias)}.os END`
+}
+
 /** iOS first, then Android; stable for equal os. */
 export function sortStores(s: PairStore[]): PairStore[] {
   const rank = (x: PairStore) => (x.os === 'ios' ? 0 : 1)

@@ -16,7 +16,7 @@
 // `assignGames` — the same function the cron calls — and repeats the same gate:
 // a genre runs only when its toggle is on AND somebody is available for it.
 
-import { assignGames } from '@/lib/assign-evaluators'
+import { assignGames, PAIR_OS } from '@/lib/assign-evaluators'
 import { BUCKETS, type Bucket } from '@/lib/buckets'
 import type { GenreTarget } from '@/lib/genre-config'
 import type { PushWindowConfig } from '@/lib/push-window'
@@ -27,10 +27,13 @@ import type { PushWindowConfig } from '@/lib/push-window'
  * `assignGames` only ever asks a game which platform it is, and a game is
  * interchangeable with any other of the same platform, so per-evaluator COUNTS
  * depend on the multiset and not on the order or the ids. That is what lets the
- * panel ship three numbers per genre instead of six thousand rows, and re-run
+ * panel ship four numbers per genre instead of six thousand rows, and re-run
  * the real algorithm in the browser on every checkbox click.
+ *
+ * `pair` is a linked pair (both stores live, migration 054): one game, which a
+ * specialist of either store can take, exactly as the cron's candidate query tags it.
  */
-export interface OsCounts { ios: number; android: number; other: number }
+export interface OsCounts { ios: number; android: number; other: number; pair: number }
 
 export interface CrewMember { name: string; platform: string; weight: number }
 
@@ -69,8 +72,9 @@ export interface PushPreview {
   windows?: PushWindowConfig
 }
 
-export const emptyOs = (): OsCounts => ({ ios: 0, android: 0, other: 0 })
-export const osTotal = (os: OsCounts): number => os.ios + os.android + os.other
+export const emptyOs = (): OsCounts => ({ ios: 0, android: 0, other: 0, pair: 0 })
+// `pair` is optional on read: a preview cached by an older build has no such key.
+export const osTotal = (os: OsCounts): number => os.ios + os.android + os.other + (os.pair ?? 0)
 
 /**
  * Does this parsed JSON actually look like a preview?
@@ -111,6 +115,7 @@ export function splitAmong(os: OsCounts, crew: CrewMember[]): {
   for (let i = 0; i < os.ios; i++) games.push({ id: id++, os: 'ios' })
   for (let i = 0; i < os.android; i++) games.push({ id: id++, os: 'android' })
   for (let i = 0; i < os.other; i++) games.push({ id: id++, os: null })
+  for (let i = 0; i < (os.pair ?? 0); i++) games.push({ id: id++, os: PAIR_OS })
 
   const assignment = assignGames(games, crew)
   const counts = new Map<string, number>()
@@ -154,6 +159,7 @@ export function buildPushPreview(
       ios: incomingOs.ios + waitingOs.ios,
       android: incomingOs.android + waitingOs.android,
       other: incomingOs.other + waitingOs.other,
+      pair: (incomingOs.pair ?? 0) + (waitingOs.pair ?? 0),
     }
     const pool = incoming + waiting
 

@@ -120,6 +120,89 @@ describe('assignGames', () => {
     expect(counts(assignGames(games, evals))).toEqual({ ALL: 3 })
   })
 
+  // ---- linked pairs (unified game, migration 054) ----
+  // A linked pair is one candidate with os 'pair': both stores, so a specialist of
+  // either store can take it. A single-store game keeps the specialist rule.
+
+  it('pair games go to specialists too', () => {
+    const games = [g(1, 'pair'), g(2, 'pair'), g(3, 'pair'), g(4, 'pair')]
+    const evals = [
+      { name: 'A', platform: 'ios', weight: 100 },
+      { name: 'B', platform: 'android', weight: 100 },
+    ]
+    expect(counts(assignGames(games, evals))).toEqual({ A: 2, B: 2 })
+  })
+
+  it('specialist short of own games fills from pairs', () => {
+    const games = [g(1, 'ios'), g(2, 'pair'), g(3, 'pair'), g(4, 'pair'), g(5, 'pair'), g(6, 'pair')]
+    const evals = [
+      { name: 'A', platform: 'ios', weight: 100 },
+      { name: 'B', platform: 'all', weight: 100 },
+    ]
+    const m = assignGames(games, evals)
+    expect(counts(m)).toEqual({ A: 3, B: 3 })
+    expect(m.get(1)).toBe('A')
+  })
+
+  it('single-store rule unchanged', () => {
+    const games = [g(1, 'android'), g(2, 'android')]
+    const evals = [{ name: 'A', platform: 'ios', weight: 100 }]
+    expect(assignGames(games, evals).size).toBe(0)
+  })
+
+  it('last specialist not starved', () => {
+    // The 2026-09-22 incident, cut down, with a few pairs in the pile.
+    const games = [
+      ...Array.from({ length: 8 }, (_, i) => g(i + 1, 'ios')),
+      g(101, 'pair'), g(102, 'pair'),
+    ]
+    const evals = [
+      { name: 'I1', platform: 'ios', weight: 100 },
+      { name: 'I2', platform: 'ios', weight: 100 },
+      { name: 'I3', platform: 'ios', weight: 100 },
+      { name: 'I4', platform: 'ios', weight: 100 },
+      { name: 'ALL', platform: 'all', weight: 100 },
+    ]
+    const c = counts(assignGames(games, evals))
+    for (const n of ['I1', 'I2', 'I3', 'I4', 'ALL']) expect(c[n] ?? 0).toBeGreaterThanOrEqual(1)
+    expect(Object.values(c).reduce((a, b) => a + b, 0)).toBe(10)
+  })
+
+  it('a short pair pool is shared by specialists of both stores, not taken by the first', () => {
+    // Two pairs are all that either specialist can take. Settling one store at a time
+    // would hand both to whoever is settled first; the pair pool is their shared limit.
+    const games = [g(1, 'pair'), g(2, 'pair'), ...Array.from({ length: 10 }, (_, i) => g(i + 10, null))]
+    const evals = [
+      { name: 'A', platform: 'ios', weight: 100 },
+      { name: 'B', platform: 'android', weight: 100 },
+      { name: 'C', platform: 'all', weight: 100 },
+    ]
+    const m = assignGames(games, evals)
+    expect(counts(m)).toEqual({ A: 1, B: 1, C: 10 })
+  })
+
+  it('a specialist takes its own store before any pair, and pairs before a generalist does', () => {
+    const games = [g(1, 'pair'), g(2, 'ios'), g(3, 'ios'), g(4, 'pair')]
+    const evals = [
+      { name: 'A', platform: 'ios', weight: 100 },
+      { name: 'B', platform: 'all', weight: 100 },
+    ]
+    const m = assignGames(games, evals)
+    expect([m.get(2), m.get(3)]).toEqual(['A', 'A'])
+    expect([m.get(1), m.get(4)]).toEqual(['B', 'B'])
+  })
+
+  it('pairs reach a specialist whose own store is empty while the generalists still get theirs', () => {
+    // 2 pairs + 6 android; ios specialist I, generalist G, all weight 100.
+    // Rate 4 each; I can reach only the 2 pairs, so I takes both and G takes the 6 android.
+    const games = [g(1, 'pair'), g(2, 'pair'), ...Array.from({ length: 6 }, (_, i) => g(i + 10, 'android'))]
+    const evals = [
+      { name: 'I', platform: 'ios', weight: 100 },
+      { name: 'G', platform: 'all', weight: 100 },
+    ]
+    expect(counts(assignGames(games, evals))).toEqual({ I: 2, G: 6 })
+  })
+
   it('throws on empty evaluator list', () => {
     expect(() => assignGames([g(1, 'ios')], [])).toThrow('evaluator list empty')
   })

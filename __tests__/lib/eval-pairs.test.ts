@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres'
-import { STORE_SPECIFIC, listRowFilter, notPairCopy, storesSelect, sortStores, PairStore } from '@/lib/eval-pairs'
+import { STORE_SPECIFIC, listRowFilter, notPairCopy, storesSelect, sortStores, assignOs, PairStore } from '@/lib/eval-pairs'
 
 // Fake tag: q`...` joins strings, q('alias') acts as the identifier helper.
 const q = ((strings: unknown, ...vals: unknown[]) => {
@@ -30,6 +30,17 @@ describe('eval-pairs', () => {
     const s = String(storesSelect(q, 'a', 'g'))
     expect(s).toContain('a.pair_eval_id')
     expect(s).toContain('g.os')
+  })
+  it('assignOs is pair only for a linked row with no store-only result on either side', () => {
+    const s = String(assignOs(q, 'a', 'g'))
+    expect(s).toContain("'pair'")
+    expect(s).toContain('a.pair_eval_id IS NOT NULL')
+    expect(s).toContain('a.initial_conclusion')
+    // the twin is read through pair_eval_id; a dead twin makes it a one-store game
+    expect(s).toMatch(/t\.id = a\.pair_eval_id/)
+    expect(s).toContain('Link_dead')
+    expect(s).toContain('Stale_release')
+    expect(s).toContain('ELSE g.os')
   })
   it('sortStores puts ios first without mutating', () => {
     const input = [st('android'), st('ios')]

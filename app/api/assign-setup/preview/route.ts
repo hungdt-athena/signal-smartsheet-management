@@ -25,7 +25,7 @@
 //     enough -- while the roster half (crew, availability, weights, waiting
 //     rows) is read fresh on every call, because that is what the operator is
 //     editing and expects to see move. ?fresh=1 skips the cache.
-import { notPairCopy } from '@/lib/eval-pairs'
+import { assignOs, notPairCopy } from '@/lib/eval-pairs'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
@@ -52,10 +52,10 @@ const INCOMING_TTL_MS = 60_000
 // immediately, not a minute later.
 let incomingCache: { at: number; key: string; data: Partial<Record<Bucket, OsCounts>> } | null = null
 
-/** 'ios' | 'android' | anything else (including null) → the OsCounts key. */
+/** 'ios' | 'android' | 'pair' | anything else (including null) → the OsCounts key. */
 function osKey(v: string | null): keyof OsCounts {
   const s = (v ?? '').toLowerCase()
-  return s === 'ios' || s === 'android' ? s : 'other'
+  return s === 'ios' || s === 'android' || s === 'pair' ? s : 'other'
 }
 
 function tally(rows: OsRow[]): Partial<Record<Bucket, OsCounts>> {
@@ -165,9 +165,10 @@ export async function GET(req: NextRequest) {
     const [incoming, waitingRows, crewRows] = await Promise.all([
       cacheHit ? Promise.resolve(incomingCache!.data) : loadIncoming(windows, running),
       // Step 2's leftovers: rows the last assign run did not place. Cheap, and
-      // it moves when the operator acts, so it is never cached.
+      // it moves when the operator acts, so it is never cached. A linked pair is one
+      // row with os 'pair', as the cron's candidate query sees it.
       sql<OsRow[]>`
-        SELECT ge.category_group, COALESCE(lower(gi.os), 'other') AS os, count(*)::text AS n
+        SELECT ge.category_group, COALESCE(lower(${assignOs(sql)}), 'other') AS os, count(*)::text AS n
         FROM game_evaluations ge
         JOIN game_info gi ON ge.game_id = gi.game_id
         WHERE ge.initial_evaluator IS NULL ${notPairCopy(sql)}

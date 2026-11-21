@@ -12,7 +12,7 @@ const target = (bucket: Bucket, enabled: boolean, available: number): GenreTarge
 const OFF: GenreTarget[] = [target('puzzle', false, 0), target('arcade', false, 0), target('simulation', false, 0)]
 const on = (bucket: Bucket, available: number) => [target(bucket, true, available), ...OFF.filter(t => t.bucket !== bucket)]
 
-const os = (ios = 0, android = 0, other = 0): OsCounts => ({ ios, android, other })
+const os = (ios = 0, android = 0, other = 0): OsCounts => ({ ios, android, other, pair: 0 })
 const who = (name: string, weight = 100, platform = 'all'): CrewMember => ({ name, platform, weight })
 const genre = (o: Partial<GenreInput>): GenreInput =>
   ({ incoming: emptyOs(), waiting: emptyOs(), crew: [], ...o })
@@ -132,7 +132,7 @@ describe('buildPushPreview', () => {
       on('puzzle', 1),
     )
     const puzzle = p.genres.find(g => g.bucket === 'puzzle')!
-    expect(puzzle.os).toEqual({ ios: 4, android: 6, other: 0 })
+    expect(puzzle.os).toEqual({ ios: 4, android: 6, other: 0, pair: 0 })
     expect(puzzle.crew).toEqual([{ name: 'A', platform: 'ios', weight: 70 }])
   })
 
@@ -169,5 +169,23 @@ describe('isPushPreview', () => {
     for (const bad of [null, undefined, 42, 'preview', {}, { genres: [] }, { initial: [], final: [] }]) {
       expect(isPushPreview(bad)).toBe(false)
     }
+  })
+})
+
+describe('linked pairs in the preview', () => {
+  it('splits pairs like the real run: a specialist of either store can take one', () => {
+    const r = splitAmong({ ...emptyOs(), pair: 4 }, [who('I', 100, 'ios'), who('A', 100, 'android')])
+    expect(r).toMatchObject({ assigned: 4, unmatched: 0 })
+    expect(r.perEvaluator).toEqual([{ name: 'A', count: 2 }, { name: 'I', count: 2 }])
+  })
+
+  it('a pair counts as 1 in the pool and has its own group', () => {
+    const p = buildPushPreview(
+      { puzzle: genre({ incoming: os(2, 3), waiting: { ...os(1, 0), pair: 2 }, crew: [who('A')] }) },
+      on('puzzle', 1),
+    )
+    const puzzle = p.genres.find(g => g.bucket === 'puzzle')!
+    expect(puzzle.os).toEqual({ ios: 3, android: 3, other: 0, pair: 2 })
+    expect(puzzle).toMatchObject({ incoming: 5, waiting: 3, pool: 8, assigned: 8 })
   })
 })

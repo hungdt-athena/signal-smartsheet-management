@@ -3,6 +3,7 @@ import { requireManager } from '@/lib/auth-guard'
 import { isBucket } from '@/lib/buckets'
 import { selectPendingGames, loadRoster, commitAssignment, distribute } from '@/lib/reassign-core'
 import { writeAssignmentHistory } from '@/lib/assignment-history'
+import { twinGameIds } from '@/lib/eval-pairs-db'
 import { sourceBreakdowns, perEvaluatorPlatform, insertOperationRun } from '@/lib/operation-runs'
 import { getSession } from '@/lib/session'
 
@@ -132,6 +133,7 @@ export async function POST(req: NextRequest) {
       perEvaluator: perEvaluatorGameIds,
       fromEvaluator: from,
       createdBy,
+      pairGameIds: await twinGameIds(Array.from(perEvaluatorGameIds.values()).flat()),
     })
 
     // Record the operation as one committed run (with its full snapshot for Details).

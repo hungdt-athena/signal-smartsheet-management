@@ -3,6 +3,8 @@ import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { assignGames } from '@/lib/assign-evaluators'
 import { writeAssignmentHistory } from '@/lib/assignment-history'
+import { assignOs, listRowFilter } from '@/lib/eval-pairs'
+import { twinGameIds } from '@/lib/eval-pairs-db'
 import { commitAssignment } from '@/lib/reassign-core'
 import { loadGenreTargets } from '@/lib/genre-config-db'
 
@@ -57,7 +59,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Roster: available initial evaluators whose category matches (blank = any).
-    // Unassigned rows of this category, with the game's platform.
+    // Unassigned rows of this category, with the game's platform. A linked pair is one
+    // candidate (its front row, os 'pair'); the 054 trigger copies the holder and the
+    // assign dates to the back row.
     const [roster, games] = await Promise.all([
       // Available evaluators registered for THIS bucket (per-bucket roster from
       // Assign Setup — migration 016 replaced the old game_category text match).
@@ -70,12 +74,13 @@ export async function POST(req: NextRequest) {
       ORDER BY sort_order NULLS LAST, name
     `,
       sql`
-      SELECT ge.id, ge.game_id, gi.os
+      SELECT ge.id, ge.game_id, ${assignOs(sql)} AS os
       FROM game_evaluations ge
       JOIN game_info gi ON ge.game_id = gi.game_id
       WHERE ge.category_group = ${category}
         AND ge.initial_evaluator IS NULL
         AND ge.initial_conclusion IS NULL   -- same predicate as commitAssignment's guard
+        ${listRowFilter(sql)}
       ORDER BY ge.imported_at
     `,
     ])
@@ -129,7 +134,8 @@ export async function POST(req: NextRequest) {
       moved = movedIds.size
       perEvaluator = Object.fromEntries(Array.from(byEvaluator, ([name, ids]) => [name, ids.length]))
       // Daily trace: one assignment_history row per evaluator (action = 'assign').
-      await writeAssignmentHistory({ category, action: 'assign', perEvaluator: byEvaluator, createdBy: 'cron' })
+      const pairGameIds = await twinGameIds(Array.from(byEvaluator.values()).flat())
+      await writeAssignmentHistory({ category, action: 'assign', perEvaluator: byEvaluator, createdBy: 'cron', pairGameIds })
     }
 
     return NextResponse.json({
