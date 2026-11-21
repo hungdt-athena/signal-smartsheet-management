@@ -6,6 +6,7 @@
 // that decide it are pure and live in lib/rescue-rules.ts; the moving itself is
 // delegated — commitAssignment() and assignGames() are reused untouched.
 
+import { notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import type { Candidate } from '@/lib/reassign-core'
 import type { RescueConfig } from '@/lib/rescue-config'
@@ -63,15 +64,16 @@ export async function scanRoster(opts: { category: string; config: RescueConfig;
                  AND ge.game_id NOT IN (SELECT game_id FROM cooled)
              )::int AS movable_all
       FROM game_evaluations ge
-      WHERE ge.category_group = ${opts.category}
+      WHERE ge.category_group = ${opts.category} ${notPairCopy(sql)}
         AND ge.initial_conclusion IS NULL
         AND ge.initial_evaluator IS NOT NULL
       GROUP BY 1
     ),
     act AS (
       SELECT initial_evaluator AS name, count(*)::int AS evaluated_recent
-      FROM game_evaluations
+      FROM game_evaluations ge
       WHERE category_group = ${opts.category}
+        ${notPairCopy(sql)}
         AND initial_conclusion IS NOT NULL
         AND evaluate_date >= (SELECT d FROM today) - (${activeDays} * INTERVAL '1 day')
       GROUP BY 1

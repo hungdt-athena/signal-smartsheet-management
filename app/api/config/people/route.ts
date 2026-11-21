@@ -8,6 +8,7 @@
 // Assign is deliberately absent: the roster lives in Team Ops.
 import { NextRequest, NextResponse } from 'next/server'
 import { requireManager } from '@/lib/auth-guard'
+import { notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { loadPeopleConfig, savePeopleConfig } from '@/lib/people-config-db'
 import { loadReportConfig, saveReportConfig } from '@/lib/report-config-db'
@@ -47,8 +48,9 @@ async function buildPeople(): Promise<{ people: Person[]; staleDays: number; noA
              MAX(evaluate_date) AS last_eval,
              COUNT(*) FILTER (WHERE evaluate_date >= NOW() - ${`${STALE_DAYS} days`}::interval)::int AS recent,
              COUNT(*)::int AS total
-      FROM game_evaluations
+      FROM game_evaluations ge
       WHERE initial_evaluator IS NOT NULL AND initial_evaluator <> ''
+        ${notPairCopy(sql)}
       GROUP BY lower(initial_evaluator)
     `,
     sql<{ key: string; title: string | null; active: boolean }[]>`

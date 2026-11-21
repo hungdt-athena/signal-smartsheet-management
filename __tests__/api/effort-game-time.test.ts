@@ -20,7 +20,7 @@ function setupSql(people: unknown[], rows: unknown[] = [], records: unknown[] = 
   queries = []
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
-    const text = (strings as string[]).join(' ')
+    const text = (Array.isArray(strings) ? (strings as string[]) : [String(strings)]).join(' ') // sql('ge') is an identifier call
     if (!/SELECT/.test(text)) return { fragment: text, binds }
     queries.push({ text, binds })
     if (text.includes('FROM dashboard_users')) return Promise.resolve(people)

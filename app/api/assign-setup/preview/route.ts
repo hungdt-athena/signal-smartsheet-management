@@ -25,6 +25,7 @@
 //     enough -- while the roster half (crew, availability, weights, waiting
 //     rows) is read fresh on every call, because that is what the operator is
 //     editing and expects to see move. ?fresh=1 skips the cache.
+import { notPairCopy } from '@/lib/eval-pairs'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
@@ -169,7 +170,7 @@ export async function GET(req: NextRequest) {
         SELECT ge.category_group, COALESCE(lower(gi.os), 'other') AS os, count(*)::text AS n
         FROM game_evaluations ge
         JOIN game_info gi ON ge.game_id = gi.game_id
-        WHERE ge.initial_evaluator IS NULL
+        WHERE ge.initial_evaluator IS NULL ${notPairCopy(sql)}
           AND ge.initial_conclusion IS NULL   -- same predicate as the cron
         GROUP BY 1, 2
       `,
