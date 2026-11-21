@@ -345,3 +345,80 @@ DO $$
 BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'verify_sabotage_no_pair_link'), 'sabotage rolled back';
 END $$;
+
+-- ===== forward_one_update: a save that changes media and evaluation columns reaches
+-- the twin in ONE UPDATE =====
+BEGIN;
+CREATE TABLE verify_twin_writes (id integer);
+CREATE FUNCTION verify_count_twin_writes() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN INSERT INTO verify_twin_writes VALUES (NEW.id); RETURN NULL; END $$;
+CREATE TRIGGER zz_verify_count AFTER UPDATE ON game_evaluations
+  FOR EACH ROW WHEN (pg_trigger_depth() > 0) EXECUTE FUNCTION verify_count_twin_writes();
+DO $$
+DECLARE p int[]; d text[];
+BEGIN
+  p := pg_temp.mkpair('17', '{"initial_evaluator": "ThuDT"}', '{}');
+  DELETE FROM verify_twin_writes;
+  UPDATE game_evaluations SET initial_note = 'note and link 1', drive_link = 'https://drive/17' WHERE id = p[1];
+  d := pg_temp.diff(p[1], p[2], eval_pair_eval_cols() || eval_pair_media_cols());
+  ASSERT d IS NULL, format('pair differs: %s', d);
+  ASSERT (SELECT count(*) FROM verify_twin_writes WHERE id = p[2]) = 1,
+    format('T written %s times', (SELECT count(*) FROM verify_twin_writes WHERE id = p[2]));
+END $$;
+ROLLBACK;
+
+-- ===== reopen_with_own_verdict: the dead store reopens with a verdict of its own =====
+DO $$
+DECLARE p int[]; d text[];
+BEGIN
+  -- T not judged yet: R's verdict is the pair's
+  p := pg_temp.mkpair('18', '{"initial_evaluator": "ThuDT", "assigned_date": "2026-11-19", "batch": "W4 Nov"}',
+    '{"initial_conclusion": "Link_dead", "initial_evaluator": "QuangVN", "initial_note": "dead link 1"}');
+  ASSERT pg_temp.back(p[2]), 'fixture: dead T is the back row';
+  UPDATE game_evaluations SET initial_conclusion = 'List_Idea', initial_note = 'works now, good 1',
+      evaluate_date = now(), updated_by = 'QuangVN' WHERE id = p[2];
+  ASSERT (SELECT initial_conclusion = 'List_Idea' AND initial_note = 'works now, good 1' AND initial_evaluator = 'QuangVN'
+          FROM game_evaluations WHERE id = p[2]), 'T keeps its own verdict';
+  d := pg_temp.diff(p[1], p[2], eval_pair_eval_cols());
+  ASSERT d IS NULL, format('pair differs after reopen with a verdict: %s', d);
+  ASSERT NOT pg_temp.back(p[1]) AND pg_temp.back(p[2]), 'lower id front again';
+
+  -- T already judged: the pair's verdict wins, as in a plain reopen
+  p := pg_temp.mkpair('19', '{"initial_conclusion": "List_Idea", "initial_evaluator": "ThuDT", "initial_note": "pair note 12345"}',
+    '{"initial_conclusion": "Link_dead", "initial_evaluator": "QuangVN"}');
+  UPDATE game_evaluations SET initial_conclusion = 'Bypass', initial_note = 'my own 12345' WHERE id = p[2];
+  ASSERT (SELECT initial_conclusion = 'List_Idea' AND initial_note = 'pair note 12345' FROM game_evaluations WHERE id = p[2]),
+    'T took the pair verdict';
+  ASSERT (SELECT initial_conclusion FROM game_evaluations WHERE id = p[1]) = 'List_Idea', 'R untouched';
+  d := pg_temp.diff(p[1], p[2], eval_pair_eval_cols());
+  ASSERT d IS NULL, format('pair differs: %s', d);
+END $$;
+
+-- ===== unlink_on_second_row: a second row for one store makes the pair invalid; the next
+-- write splits it (no game_info change involved) and logs each row =====
+DO $$
+DECLARE p int[];
+BEGIN
+  p := pg_temp.mkpair('20', '{"initial_evaluator": "ThuDT"}', '{}');
+  INSERT INTO game_evaluations (game_id, category_group) VALUES ('ti20', 'arcade');
+  ASSERT (SELECT pair_eval_id FROM game_evaluations WHERE id = p[2]) = p[1], 'fixture: still linked';
+  UPDATE game_evaluations SET initial_note = 'after second row' WHERE id = p[1];
+  ASSERT NOT EXISTS (SELECT 1 FROM game_evaluations WHERE id = ANY (p) AND (pair_eval_id IS NOT NULL OR pair_back)),
+    'both rows unlinked';
+  ASSERT (SELECT initial_note FROM game_evaluations WHERE id = p[2]) IS NULL, 'T did not take the note';
+  ASSERT (SELECT count(*) FROM evaluation_log l JOIN game_evaluations g ON g.id = l.game_evaluation_id
+          WHERE l.game_evaluation_id = ANY (p) AND l.kind = 'pair_unlink' AND l.actor = 'System'
+            AND l.pair_scope = 'store' AND l.source = 'other' AND l.game_id = g.game_id) = 2,
+    'one pair_unlink log per row';
+END $$;
+
+-- ===== delete_no_unlink_log: a delete splits the pair without a pair_unlink log =====
+DO $$
+DECLARE p int[];
+BEGIN
+  p := pg_temp.mkpair('21', '{"initial_evaluator": "ThuDT"}', '{}');
+  DELETE FROM game_evaluations WHERE id = p[2];
+  ASSERT (SELECT pair_eval_id IS NULL AND NOT pair_back FROM game_evaluations WHERE id = p[1]), 'R lone again';
+  ASSERT NOT EXISTS (SELECT 1 FROM evaluation_log WHERE game_id IN ('ra21', 'ti21') AND kind = 'pair_unlink'),
+    'no unlink log on delete';
+END $$;

@@ -28,16 +28,29 @@
 --     owner / owner_after = the new row's holder before / after. An error while linking
 --     is a WARNING, never a failed INSERT.
 --   - copy on update (trg_eval_pair_sync): every write to a linked row reaches its twin,
---     column by column (only the columns the write changed), with the Link_dead /
---     Stale_release exception and the reopen rule; pair_back is recomputed after each
+--     column by column (only the columns the write changed, in one UPDATE of the twin),
+--     with the Link_dead / Stale_release exception and the reopen rule (the reopened row
+--     takes the pair's result; if it reopens with a verdict of its own while the twin is
+--     not judged, that verdict becomes the pair's); pair_back is recomputed after each
 --     write; a pair that is no longer valid is unlinked instead.
 --   - delete (trg_eval_pair_delete): the twin of a deleted row is a lone game again.
+--   - unlink from game_info (trg_game_info_eval_pair_unlink): Signal Sense sets
+--     family_unlinked or changes family_id -> a pair no longer valid splits, data kept.
+--   - unlink_eval_pair(id): THE unlink, used by the copy trigger and the game_info
+--     trigger. Both rows go back to lone games and each gets one evaluation_log row
+--     (kind 'pair_unlink', actor 'System', pair_scope 'store'). To split a pair by hand,
+--     call it: a manual UPDATE that sets pair_eval_id = NULL on one row leaves the twin
+--     half-linked (still pointing, maybe still the back row and hidden from the lists).
 --   - updated_at: trg_game_evaluations_updated now runs game_evaluations_touch_updated(),
 --     which leaves updated_at alone when only pair_eval_id / pair_back change.
 --   - link the safe pairs already there (link_safe_eval_pairs(), run at the end): both
 --     rows unjudged, same category_group, and every shared column equal or empty on one
 --     side (batch, holder and media included). Everything else waits for phase 2.
--- Part 3 (unlink from game_info, ROLLBACK) follows.
+--
+-- SIGNAL SENSE: trg_game_info_eval_pair_unlink is a trigger on game_info, the table the
+-- Signal Sense repo (signal-deploy) owns. It runs inside Signal Sense's transactions, so
+-- tell that repo it exists (runbook). It cannot fail their UPDATE: any error in it is a
+-- WARNING. It fires only when family_id or family_unlinked actually change.
 --
 -- Trigger depth: the triggers' own writes run at pg_trigger_depth() > 1, and the copy
 -- trigger skips those, so a copy never copies back. link_safe_eval_pairs() is called by a
@@ -51,11 +64,41 @@
 -- Idempotent: columns/indexes IF NOT EXISTS, functions replaced, trigger dropped and
 -- recreated, the FK added only when missing, the safe-pair pass skips linked rows.
 --
--- ROLLBACK: (added with part 3). It must point trg_game_evaluations_updated back at
--- update_game_evaluations_timestamp() BEFORE dropping pair_eval_id / pair_back:
---   DROP TRIGGER IF EXISTS trg_game_evaluations_updated ON game_evaluations;
---   CREATE TRIGGER trg_game_evaluations_updated BEFORE UPDATE ON game_evaluations
---     FOR EACH ROW EXECUTE FUNCTION update_game_evaluations_timestamp();
+-- ROLLBACK: run the lines below up to END ROLLBACK, without their leading "-- ", in psql
+-- -- (scripts/verify-eval-pairs.sh extracts and runs them). trg_game_evaluations_updated
+-- -- goes back to the shared update_game_evaluations_timestamp() FIRST: with the pair
+-- -- columns gone, game_evaluations_touch_updated() would fail every UPDATE. The
+-- -- evaluation_log rows 054 wrote (pair_link / pair_unlink) stay, without pair_scope.
+-- BEGIN;
+-- DROP TRIGGER IF EXISTS trg_game_evaluations_updated ON game_evaluations;
+-- CREATE TRIGGER trg_game_evaluations_updated BEFORE UPDATE ON game_evaluations
+--   FOR EACH ROW EXECUTE FUNCTION update_game_evaluations_timestamp();
+-- DROP TRIGGER IF EXISTS trg_game_info_eval_pair_unlink ON game_info;
+-- DROP TRIGGER IF EXISTS trg_eval_pair_link_insert ON game_evaluations;
+-- DROP TRIGGER IF EXISTS trg_eval_pair_sync ON game_evaluations;
+-- DROP TRIGGER IF EXISTS trg_eval_pair_delete ON game_evaluations;
+-- DROP FUNCTION IF EXISTS game_info_eval_pair_unlink();
+-- DROP FUNCTION IF EXISTS link_safe_eval_pairs();
+-- DROP FUNCTION IF EXISTS eval_pair_safe(integer, integer);
+-- DROP FUNCTION IF EXISTS eval_pair_on_delete();
+-- DROP FUNCTION IF EXISTS eval_pair_sync();
+-- DROP FUNCTION IF EXISTS unlink_eval_pair(integer);
+-- DROP FUNCTION IF EXISTS eval_pair_copy(integer, game_evaluations, text[]);
+-- DROP FUNCTION IF EXISTS game_evaluations_touch_updated();
+-- DROP FUNCTION IF EXISTS eval_pair_link_on_insert();
+-- DROP FUNCTION IF EXISTS link_eval_pair(integer, integer);
+-- DROP FUNCTION IF EXISTS eval_pair_fill(integer, integer, text[]);
+-- DROP FUNCTION IF EXISTS eval_pair_refresh_back(integer, integer);
+-- DROP FUNCTION IF EXISTS eval_pair_valid(integer, integer);
+-- DROP FUNCTION IF EXISTS eval_pair_media_cols();
+-- DROP FUNCTION IF EXISTS eval_pair_eval_cols();
+-- DROP FUNCTION IF EXISTS eval_store_specific(text);
+-- DROP INDEX IF EXISTS uq_game_evaluations_pair_eval_id;
+-- ALTER TABLE game_evaluations DROP CONSTRAINT IF EXISTS game_evaluations_pair_eval_id_fkey;
+-- ALTER TABLE game_evaluations DROP COLUMN IF EXISTS pair_eval_id, DROP COLUMN IF EXISTS pair_back;
+-- ALTER TABLE evaluation_log DROP COLUMN IF EXISTS pair_scope;
+-- COMMIT;
+-- END ROLLBACK
 
 -- Two transactions, as 051: the first only adds columns (metadata only, the lock is
 -- held for milliseconds), the second installs the functions and links.
@@ -328,15 +371,48 @@ BEGIN
 END;
 $$;
 
+-- The one unlink (copy trigger on an invalid pair, game_info trigger, by hand): row a and
+-- every row pointing at a go back to lone games (pair_eval_id NULL, pair_back false), their
+-- data kept. A row that a points at but that points elsewhere belongs to another pair and is
+-- left alone. Also heals a half-linked pair (one side cleared by hand). One evaluation_log
+-- row per row it unlinks: kind 'pair_unlink', actor 'System', pair_scope 'store'. Returns
+-- whether it unlinked anything. A delete does not come here (trg_eval_pair_delete, no log).
+CREATE OR REPLACE FUNCTION unlink_eval_pair(a integer) RETURNS boolean
+LANGUAGE plpgsql AS $$
+DECLARE n integer;
+BEGIN
+  IF a IS NULL THEN RETURN false; END IF;
+  PERFORM 1 FROM game_evaluations WHERE id = a OR pair_eval_id = a ORDER BY id FOR UPDATE;
+  WITH gone AS (
+    UPDATE game_evaluations SET pair_eval_id = NULL, pair_back = false
+     WHERE (id = a OR pair_eval_id = a) AND (pair_eval_id IS NOT NULL OR pair_back)
+    RETURNING id, game_id, initial_evaluator, initial_conclusion, final_conclusion, batch
+  )
+  INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, owner_after, source, kind,
+    conclusion_before, conclusion_after, final_before, final_after, batch_before, batch_after,
+    changed, pair_scope)
+  SELECT id, game_id, 'System', initial_evaluator, initial_evaluator, 'other', 'pair_unlink',
+    initial_conclusion, initial_conclusion, final_conclusion, final_conclusion, batch, batch,
+    false, 'store'
+  FROM gone;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n > 0;
+END;
+$$;
+
 -- Copy on update (spec 6.2 a). R is the row just written, T its twin.
---   pair no longer valid (Unlink, family change, a second row) -> unlink both, copy nothing
+--   pair no longer valid (Unlink, family change, a second row) -> unlink_eval_pair (both
+--                rows split, one pair_unlink log each), copy nothing
 --   media group  -> always: the columns R just changed go to T
 --   evaluation group, by the store-only result (Link_dead / Stale_release):
 --     R just reopened (store-only -> not) -> R takes T's whole group, unless T is
 --                                            store-only too (a pending T gives its holder
 --                                            and assign dates, and clears what the dead
---                                            store had written)
---     R and T both without one             -> the columns R just changed go to T
+--                                            store had written). Exception: R reopens WITH
+--                                            a verdict and T is not judged -> R's whole
+--                                            group goes to T instead.
+--     R and T both without one             -> the columns R just changed go to T, media
+--                                            and evaluation in ONE UPDATE of T
 --     otherwise (R just went dead, R or T store-only) -> nothing
 --   then pair_back is recomputed.
 -- Only the columns R changed (OLD vs NEW) are copied, so two people saving two columns
@@ -348,6 +424,7 @@ CREATE OR REPLACE FUNCTION eval_pair_sync() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE t integer := NEW.pair_eval_id; rc game_evaluations; tr game_evaluations;
         jn jsonb := to_jsonb(NEW); jo jsonb := to_jsonb(OLD); media text[]; evals text[];
+        reopen boolean;
 BEGIN
   IF pg_trigger_depth() > 1 THEN RETURN NULL; END IF;
   SELECT array_agg(c) INTO media FROM unnest(eval_pair_media_cols()) c WHERE jn -> c IS DISTINCT FROM jo -> c;
@@ -361,23 +438,29 @@ BEGIN
   IF NOT FOUND THEN RETURN NULL; END IF;
   SELECT * INTO tr FROM game_evaluations WHERE id = t;
   IF NOT FOUND OR tr.pair_eval_id IS DISTINCT FROM NEW.id OR NOT eval_pair_valid(NEW.id, t) THEN
-    UPDATE game_evaluations SET pair_eval_id = NULL, pair_back = false
-     WHERE id = NEW.id OR (id = t AND pair_eval_id = NEW.id);
+    PERFORM unlink_eval_pair(NEW.id);
     RETURN NULL;
   END IF;
 
-  IF media IS NOT NULL THEN
-    PERFORM eval_pair_copy(t, rc, media);
-  END IF;
-
-  IF eval_store_specific(OLD.initial_conclusion) AND NOT eval_store_specific(rc.initial_conclusion) THEN
-    IF NOT eval_store_specific(tr.initial_conclusion) THEN
-      SELECT * INTO tr FROM game_evaluations WHERE id = t;
-      PERFORM eval_pair_copy(NEW.id, tr, eval_pair_eval_cols());
+  reopen := eval_store_specific(OLD.initial_conclusion) AND NOT eval_store_specific(rc.initial_conclusion);
+  IF NOT reopen AND NOT eval_store_specific(rc.initial_conclusion) AND NOT eval_store_specific(tr.initial_conclusion) THEN
+    -- the usual save: what R changed, media and evaluation alike, in one UPDATE of T
+    IF media || evals IS NOT NULL THEN
+      PERFORM eval_pair_copy(t, rc, media || evals);
     END IF;
-  ELSIF evals IS NOT NULL AND NOT eval_store_specific(rc.initial_conclusion)
-        AND NOT eval_store_specific(tr.initial_conclusion) THEN
-    PERFORM eval_pair_copy(t, rc, evals);
+  ELSE
+    IF media IS NOT NULL THEN
+      PERFORM eval_pair_copy(t, rc, media);
+    END IF;
+    IF reopen AND NOT eval_store_specific(tr.initial_conclusion) THEN
+      IF rc.initial_conclusion IS NOT NULL AND tr.initial_conclusion IS NULL THEN
+        -- reopened with a verdict of its own while the pair is not judged: R's is the pair's
+        PERFORM eval_pair_copy(t, rc, eval_pair_eval_cols());
+      ELSE
+        SELECT * INTO tr FROM game_evaluations WHERE id = t;
+        PERFORM eval_pair_copy(NEW.id, tr, eval_pair_eval_cols());
+      END IF;
+    END IF;
   END IF;
 
   PERFORM eval_pair_refresh_back(NEW.id, t);
@@ -410,6 +493,39 @@ CREATE TRIGGER trg_eval_pair_delete
   AFTER DELETE ON game_evaluations
   FOR EACH ROW WHEN (OLD.pair_eval_id IS NOT NULL)
   EXECUTE FUNCTION eval_pair_on_delete();
+
+-- Signal Sense unlinks a game or moves it to another family (spec 6.2 c): a linked pair of
+-- that game that is no longer valid splits, both rows keep their data. Never links (a
+-- family formed after both stores were judged is phase 2).
+-- This trigger runs inside Signal Sense's own transaction on ITS table game_info, so it
+-- must never fail Signal Sense's UPDATE: any error is a WARNING and its half-done work
+-- rolls back with the block. AFTER ROW triggers fire once the statement is done, so a
+-- statement that moves both stores to a new family together sees a valid pair and keeps it.
+CREATE OR REPLACE FUNCTION game_info_eval_pair_unlink() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE r record;
+BEGIN
+  BEGIN
+    FOR r IN SELECT id, pair_eval_id FROM game_evaluations
+              WHERE game_id = NEW.game_id AND pair_eval_id IS NOT NULL LOOP
+      IF NOT eval_pair_valid(r.id, r.pair_eval_id) THEN
+        PERFORM unlink_eval_pair(r.id);
+      END IF;
+    END LOOP;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING '054: game % changed family, its Playtest store pair was not split: % (%)',
+      NEW.game_id, SQLERRM, SQLSTATE;
+  END;
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_game_info_eval_pair_unlink ON game_info;
+CREATE TRIGGER trg_game_info_eval_pair_unlink
+  AFTER UPDATE OF family_id, family_unlinked ON game_info
+  FOR EACH ROW
+  WHEN (OLD.family_id IS DISTINCT FROM NEW.family_id OR OLD.family_unlinked IS DISTINCT FROM NEW.family_unlinked)
+  EXECUTE FUNCTION game_info_eval_pair_unlink();
 
 -- Pairs already there that can be linked with no judgment call (spec 6.2 d): f is the
 -- lower id (the front row, as neither is judged). True when the 2 games are the whole

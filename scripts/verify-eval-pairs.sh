@@ -18,15 +18,38 @@ P=(psql -h 127.0.0.1 -p "$PORT" -U postgres -X -q -v ON_ERROR_STOP=1)
 "${P[@]}" -d verify -f scripts/sql-verify/pairs-schema.sql
 "${P[@]}" -d verify -f migrations/046_evaluation_log.sql
 "${P[@]}" -d verify -f migrations/047_evaluation_log_demo_added.sql
+
+# The schema objects (functions, triggers + their function, indexes, columns, constraints),
+# to prove the ROLLBACK block removes everything 054 adds and nothing else.
+catalog() { "${P[@]}" -d verify -At -c "
+  SELECT 'fn ' || p.oid::regprocedure FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+  UNION ALL SELECT 'trg ' || tgrelid::regclass || ' ' || tgname || ' ' || tgfoid::regproc || ' ' || tgenabled::text
+    FROM pg_trigger WHERE NOT tgisinternal
+  UNION ALL SELECT 'idx ' || i.indexrelid::regclass FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
+    WHERE c.relnamespace = 'public'::regnamespace
+  UNION ALL SELECT 'col ' || a.attrelid::regclass || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
+                   || ' ' || a.attnotnull || ' ' || COALESCE(pg_get_expr(d.adbin, d.adrelid), '')
+    FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+    LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+    WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+  UNION ALL SELECT 'con ' || conrelid::regclass || ' ' || conname FROM pg_constraint
+    WHERE connamespace = 'public'::regnamespace
+  ORDER BY 1"; }
+catalog_before_054=$(catalog)
+
 # twice: the migration must be safe to re-run
 "${P[@]}" -d verify -f migrations/054_eval_pairs.sql
 "${P[@]}" -d verify -f migrations/054_eval_pairs.sql
+catalog_with_054=$(catalog)
 "${P[@]}" -d verify -f scripts/sql-verify/pairs-link-checks.sql
 "${P[@]}" -d verify -f scripts/sql-verify/pairs-sync-checks.sql
+"${P[@]}" -d verify -f scripts/sql-verify/pairs-unlink-checks.sql
 
 # Two-session checks. Session A writes, then holds its transaction open until it sees
 # session B waiting on a lock (or 10 s pass) and prints whether it saw B wait. The shell
-# starts B only once A holds its lock, so the order never depends on a sleep.
+# starts B only once A holds its lock AND A's write has finished (A runs its wait loop,
+# the DO statement), so A's triggers, e.g. the copy to the twin, are done before B starts.
+# The order never depends on a sleep.
 #   $1 the lock A must hold before B starts (SQL condition on pg_locks l, A's pid is a.pid)
 #   $2 A's write   $3 B's write
 two_sessions() {
@@ -42,7 +65,8 @@ two_sessions() {
   local held=0
   for _ in $(seq 1 400); do
     held=$("${P[@]}" -d verify -At -c "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-                                         WHERE a.application_name = 'verify_sess_a' AND l.granted AND ($1)")
+                                         WHERE a.application_name = 'verify_sess_a' AND a.query LIKE 'DO %'
+                                           AND l.granted AND ($1)")
     [ "$held" -gt 0 ] && break
     sleep 0.025
   done
@@ -84,5 +108,28 @@ snap() { "${P[@]}" -d verify -At -c "SELECT md5(string_agg(to_jsonb(g)::text, ',
 before=$(snap)
 "${P[@]}" -d verify -f migrations/054_eval_pairs.sql >/dev/null
 [ "$(snap)" = "$before" ] || { echo "re-running 054 changed game_evaluations or evaluation_log"; exit 1; }
+
+# rollback_block: the SQL in the "-- ROLLBACK:" block of 054 (each line behind "-- ", up to
+# "-- END ROLLBACK") removes everything 054 added, and game_evaluations still takes an
+# ordinary UPDATE (trg_game_evaluations_updated is back on the shared function). Then 054
+# applies again on the rolled-back DB.
+sed -n '/^-- ROLLBACK:/,/^-- END ROLLBACK/{/^-- ROLLBACK:/d;/^-- END ROLLBACK/d;s/^-- \{0,1\}//;p;}' \
+  migrations/054_eval_pairs.sql >"$TMP/rollback.sql"
+grep -q 'DROP COLUMN IF EXISTS pair_back' "$TMP/rollback.sql" || { echo "no ROLLBACK block found in 054"; exit 1; }
+"${P[@]}" -d verify -f "$TMP/rollback.sql"
+after_rollback=$(catalog)
+[ "$after_rollback" = "$catalog_before_054" ] || {
+  echo "ROLLBACK left the schema different from before 054:"; diff <(echo "$catalog_before_054") <(echo "$after_rollback"); exit 1; }
+"${P[@]}" -d verify -c "DO \$\$
+DECLARE i int;
+BEGIN
+  SELECT min(id) INTO i FROM game_evaluations;
+  UPDATE game_evaluations SET initial_note = 'after rollback 1', updated_at = '2026-01-01Z' WHERE id = i;
+  ASSERT (SELECT initial_note = 'after rollback 1' AND updated_at = now() FROM game_evaluations WHERE id = i),
+    'an ordinary UPDATE works and stamps updated_at after the rollback';
+END \$\$;"
+"${P[@]}" -d verify -f migrations/054_eval_pairs.sql >/dev/null
+[ "$(catalog)" = "$catalog_with_054" ] || {
+  echo "054 re-applied after the ROLLBACK differs:"; diff <(echo "$catalog_with_054") <(catalog); exit 1; }
 
 echo "eval pairs SQL checks: OK"
