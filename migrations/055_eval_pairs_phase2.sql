@@ -42,6 +42,8 @@
 --                  pair's result, holder and final, and flags for the review (see there).
 --   eval_pair_phase2_apply(run_id, max_pairs)   links them, a batch per call (see there). Not
 --                  run by this file. Its evaluation_log rows carry the run_id in `context`.
+--   eval_pair_phase2_rollback(run_id)   undoes a run (see there); scripts/phase2-rollback.sh
+--                  RUN_ID runs it and prints what it kept. Not run by this file.
 --   game_evaluations_touch_updated()   054's body behind one check: while the setting
 --                  eval_pairs.keep_updated_at is 'on' (only inside apply), updated_at stays.
 --
@@ -65,8 +67,10 @@
 -- -- (scripts/verify-eval-pairs.sh extracts and runs them). It puts back 054's
 -- -- eval_pair_refresh_back and game_evaluations_touch_updated verbatim, and drops the view,
 -- -- the snapshot table and credit (with them every snapshot and credit phase 2 wrote: undo the
--- -- phase 2 runs first).
+-- -- phase 2 runs first, each with scripts/phase2-rollback.sh RUN_ID; the runs left are
+-- -- SELECT DISTINCT run_id FROM eval_pair_merge_snapshots).
 -- BEGIN;
+-- DROP FUNCTION IF EXISTS eval_pair_phase2_rollback(text);
 -- DROP FUNCTION IF EXISTS eval_pair_phase2_apply(text, integer);
 -- CREATE OR REPLACE FUNCTION game_evaluations_touch_updated() RETURNS trigger
 -- LANGUAGE plpgsql AS $$
@@ -104,11 +108,11 @@
 -- COMMIT;
 -- END ROLLBACK
 
--- Four transactions: the first adds the column, the table and its indexes (metadata, an
+-- Five transactions: the first adds the column, the table and its indexes (metadata, an
 -- empty table, and a partial index built in one pass over game_evaluations: its write lock
 -- is held for milliseconds), the second
 -- replaces the front-row rule and creates the view, the third adds the plan functions, the
--- fourth the apply function and the updated_at check.
+-- fourth the apply function and the updated_at check, the fifth the rollback function.
 BEGIN;
 
 ALTER TABLE game_evaluations ADD COLUMN IF NOT EXISTS credit jsonb;
@@ -714,6 +718,133 @@ BEGIN
   END LOOP;
 
   RETURN QUERY SELECT c.key, (c.value ->> 0)::int, (c.value ->> 1)::int FROM jsonb_each(counts) c ORDER BY c.key;
+END;
+$$;
+
+COMMIT;
+
+-- ===== Rollback (spec 6.3): undo one run =====
+-- eval_pair_phase2_rollback(p_run_id) RETURNS TABLE(game_evaluation_id, kept_columns)
+-- Undoes every apply call made with p_run_id, from the run's snapshots, in the caller's
+-- transaction. Per family of the run, in family_id order: pg_advisory_xact_lock(54,
+-- hashtext(family_id)) (apply's lock), then the run's rows FOR UPDATE in id order. Per row:
+--   a column in `written` goes back to row_before's value only while the row still holds the
+--   value the run wrote; edited since (a new save, a video from n8n, an unlink) -> the current
+--   value stays. Columns not in `written` are never written. So pair_eval_id / pair_back /
+--   credit go back (unlink, credit cleared) unless changed since; pair_back also goes back
+--   whenever the row ends unlinked (no unlinked back row). A row linked since to ANOTHER row
+--   keeps that link.
+--   Values are compared as typed values (the snapshot is read back through the table's row
+--   type), so a run applied in one session time zone rolls back in another.
+--   No copy to a twin: every restoring UPDATE leaves the row unlinked while it writes
+--   (pair_eval_id changes, so trg_eval_pair_sync's WHEN clause skips it); a row linked to
+--   another row is detached for the write and relinked after.
+--   051's record_slots: record_confirmed_at / youtube_uploaded_at are never written (the
+--   trigger derives them from the bucket columns; writing them would carry a value into a
+--   kept bucket column); when a restored final_conclusion / record_bucket moves the Record
+--   bucket, the trigger re-freezes record_5min_batch / record_20min_batch: they are then put
+--   back to what the rollback meant, in a second UPDATE (as eval_pair_fill does).
+--   One result row: kept_columns = the written columns (updated_at aside) whose value after the
+--   rollback is not row_before's, in name order ('{}' = fully back); NULL when the row was
+--   deleted since the run.
+-- Then deletes the run's evaluation_log rows (context = p_run_id, kind pair_merge / pair_link)
+-- and, last, its snapshots. Writes no log row (no pair_unlink), and no row's updated_at
+-- changes (eval_pairs.keep_updated_at, as apply; the same guard on the touch function).
+-- One-shot: the snapshots are gone after a rollback, so a second call (or an unknown run_id)
+-- finds nothing, changes nothing and returns no rows. An empty run_id is an error. An error
+-- fails the whole call: nothing is rolled back.
+BEGIN;
+
+CREATE OR REPLACE FUNCTION eval_pair_phase2_rollback(p_run_id text)
+RETURNS TABLE(game_evaluation_id integer, kept_columns text[])
+LANGUAGE plpgsql
+SET eval_pairs.keep_updated_at = 'on'
+AS $$
+DECLARE
+  derived text[] := ARRAY['record_confirmed_at', 'youtube_uploaded_at'];
+  fam    text;
+  s      eval_pair_merge_snapshots;
+  cur jsonb; wn jsonb; bf jsonb; want jsonb; put jsonb; fin jsonb;
+  wr     game_evaluations;
+  relink boolean;
+BEGIN
+  IF COALESCE(p_run_id, '') = '' THEN
+    RAISE EXCEPTION '055: eval_pair_phase2_rollback needs a run_id';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_proc f ON f.oid = t.tgfoid
+                  WHERE t.tgrelid = 'game_evaluations'::regclass AND t.tgname = 'trg_game_evaluations_updated'
+                    AND f.proname = 'game_evaluations_touch_updated'
+                    AND position('eval_pairs.keep_updated_at' IN f.prosrc) > 0) THEN
+    RAISE EXCEPTION '055: game_evaluations_touch_updated() ignores eval_pairs.keep_updated_at (054 re-run after 055?): re-run 055 before rollback';
+  END IF;
+
+  FOR fam IN
+    SELECT DISTINCT ms.family_id FROM eval_pair_merge_snapshots ms WHERE ms.run_id = p_run_id ORDER BY 1
+  LOOP
+    PERFORM pg_advisory_xact_lock(54, hashtext(fam));
+    PERFORM 1 FROM game_evaluations g
+      WHERE g.id IN (SELECT ms.game_evaluation_id FROM eval_pair_merge_snapshots ms
+                      WHERE ms.run_id = p_run_id AND ms.family_id IS NOT DISTINCT FROM fam)
+      ORDER BY g.id FOR UPDATE;
+
+    FOR s IN
+      SELECT * FROM eval_pair_merge_snapshots ms
+       WHERE ms.run_id = p_run_id AND ms.family_id IS NOT DISTINCT FROM fam
+       ORDER BY ms.id DESC
+    LOOP
+      SELECT to_jsonb(g) INTO cur FROM game_evaluations g WHERE g.id = s.game_evaluation_id;
+      game_evaluation_id := s.game_evaluation_id;
+      IF cur IS NULL THEN
+        kept_columns := NULL;
+        RETURN NEXT;
+        CONTINUE;
+      END IF;
+      -- the snapshot through the row type, so values compare as values (time zone, formats)
+      wn := to_jsonb(jsonb_populate_record(NULL::game_evaluations, s.written));
+      bf := to_jsonb(jsonb_populate_record(NULL::game_evaluations, s.row_before));
+      -- the columns to put back: written, still holding the written value, not yet as before
+      SELECT COALESCE(jsonb_object_agg(k, bf -> k), '{}') INTO want
+        FROM jsonb_object_keys(s.written) k
+       WHERE k <> 'updated_at' AND k <> ALL (derived) AND cur ? k
+         AND cur -> k IS NOT DISTINCT FROM wn -> k AND cur -> k IS DISTINCT FROM bf -> k;
+      -- a row that ends unlinked is not a back row
+      IF (want ? 'pair_eval_id' OR cur -> 'pair_eval_id' = 'null')
+         AND s.written ? 'pair_back' AND cur -> 'pair_back' IS DISTINCT FROM bf -> 'pair_back' THEN
+        want := want || jsonb_build_object('pair_back', bf -> 'pair_back');
+      END IF;
+
+      IF want <> '{}' THEN
+        -- linked to another row since the run: detached while written, so no copy reaches it
+        relink := cur -> 'pair_eval_id' <> 'null' AND NOT want ? 'pair_eval_id';
+        put := want || CASE WHEN relink THEN '{"pair_eval_id": null, "pair_back": false}'::jsonb ELSE '{}' END;
+        wr := jsonb_populate_record(NULL::game_evaluations, cur || put);
+        EXECUTE format('UPDATE game_evaluations SET %s WHERE id = $2',
+                       (SELECT string_agg(format('%1$I = ($1).%1$I', k), ', ') FROM jsonb_object_keys(put) k))
+          USING wr, s.game_evaluation_id;
+        -- 051's record_slots re-froze the record batches if the bucket moved: as meant
+        UPDATE game_evaluations g
+           SET record_5min_batch = wr.record_5min_batch, record_20min_batch = wr.record_20min_batch
+         WHERE g.id = s.game_evaluation_id
+           AND (g.record_5min_batch IS DISTINCT FROM wr.record_5min_batch
+                OR g.record_20min_batch IS DISTINCT FROM wr.record_20min_batch);
+        IF relink THEN
+          UPDATE game_evaluations g
+             SET pair_eval_id = (cur ->> 'pair_eval_id')::integer, pair_back = (cur ->> 'pair_back')::boolean
+           WHERE g.id = s.game_evaluation_id;
+        END IF;
+      END IF;
+
+      SELECT to_jsonb(g) INTO fin FROM game_evaluations g WHERE g.id = s.game_evaluation_id;
+      SELECT COALESCE(array_agg(k ORDER BY k), '{}') INTO kept_columns
+        FROM jsonb_object_keys(s.written) k
+       WHERE k <> 'updated_at' AND fin -> k IS DISTINCT FROM bf -> k;
+      RETURN NEXT;
+    END LOOP;
+  END LOOP;
+
+  DELETE FROM evaluation_log l WHERE l.context = p_run_id AND l.kind IN ('pair_merge', 'pair_link');
+  DELETE FROM eval_pair_merge_snapshots ms WHERE ms.run_id = p_run_id;
+  RETURN;
 END;
 $$;
 

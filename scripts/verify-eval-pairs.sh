@@ -263,6 +263,28 @@ two_sessions "l.locktype = 'advisory' AND l.classid = 54 AND l.objid = hashtext(
             AND pair_eval_id IS NULL AND NOT pair_back) = 2, 'the family change after the commit split the pair';
 END \$\$;"
 
+# eval_pair_phase2_rollback: a run of its own with edits after it, then every run above
+"${P[@]}" -d verify -f scripts/sql-verify/phase2-rollback-checks.sql
+
+# scripts/phase2-rollback.sh: refuses without a run id; rolls back a run (the families the
+# checks above unlinked are linkable again) and prints its rows; a second call finds nothing.
+RB_URL="postgresql://postgres@127.0.0.1:$PORT/verify"
+rb_status=0
+DATABASE_URL="$RB_URL" bash scripts/phase2-rollback.sh >"$TMP/rb.out" 2>&1 || rb_status=$?
+[ "$rb_status" = 2 ] && grep -q usage "$TMP/rb.out" || { echo "phase2-rollback.sh ran without a run id: $(cat "$TMP/rb.out")"; exit 1; }
+rb_status=0
+env -u DATABASE_URL bash scripts/phase2-rollback.sh some_run >"$TMP/rb.out" 2>&1 || rb_status=$?
+[ "$rb_status" = 2 ] && grep -q DATABASE_URL "$TMP/rb.out" || { echo "phase2-rollback.sh ran without DATABASE_URL: $(cat "$TMP/rb.out")"; exit 1; }
+n_run=$("${P[@]}" -d verify -At -c "SELECT COALESCE(sum(linked), 0) FROM eval_pair_phase2_apply('p2s_run', 3)")
+[ "$n_run" = 3 ] || { echo "fixture: p2s_run linked $n_run pairs, want 3"; exit 1; }
+DATABASE_URL="$RB_URL" bash scripts/phase2-rollback.sh p2s_run >"$TMP/rb.out"
+grep -Eq '^ *p2s_run *\| *6 *\| *0 *$' "$TMP/rb.out" || { echo "phase2-rollback.sh p2s_run: $(cat "$TMP/rb.out")"; exit 1; }
+DATABASE_URL="$RB_URL" bash scripts/phase2-rollback.sh p2s_run >"$TMP/rb.out"
+grep -Eq '^ *p2s_run *\| *0 *\| *0 *$' "$TMP/rb.out" || { echo "phase2-rollback.sh p2s_run twice: $(cat "$TMP/rb.out")"; exit 1; }
+"${P[@]}" -d verify -c "DO \$\$ BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM eval_pair_merge_snapshots), 'phase2-rollback.sh left snapshots';
+END \$\$;"
+
 # rollback_block_055: the "-- ROLLBACK:" block of 055 leaves the schema exactly as 054 left it
 # (eval_pair_refresh_back's body back to 054's, byte for byte), then 055 applies again.
 sed -n '/^-- ROLLBACK:/,/^-- END ROLLBACK/{/^-- ROLLBACK:/d;/^-- END ROLLBACK/d;s/^-- \{0,1\}//;p;}' \
