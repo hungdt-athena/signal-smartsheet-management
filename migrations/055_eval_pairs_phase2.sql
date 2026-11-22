@@ -40,6 +40,10 @@
 --   eval_pair_phase2_classify(family_id) / eval_pair_phase2_plan()   read-only: which old
 --                  pairs phase 2 links, their group (spec 4: A..G), front / back row, the
 --                  pair's result, holder and final, and flags for the review (see there).
+--   eval_pair_phase2_apply(run_id, max_pairs)   links them, a batch per call (see there). Not
+--                  run by this file. Its evaluation_log rows carry the run_id in `context`.
+--   game_evaluations_touch_updated()   054's body behind one check: while the setting
+--                  eval_pairs.keep_updated_at is 'on' (only inside apply), updated_at stays.
 --
 -- KEEP eval_stats_rows IN STEP WITH THE TABLE: it lists the columns of game_evaluations one
 -- by one, in both branches (an override per column cannot be written with *). A later
@@ -48,19 +52,34 @@
 -- eval_row; CREATE OR REPLACE VIEW only appends). scripts/sql-verify/phase2-schema.sql fails until it is.
 --
 -- updated_at: writing credit is an ordinary UPDATE, so game_evaluations_touch_updated()
--- stamps updated_at. Whatever writes credit must keep updated_at itself (spec: phase 2 changes
--- no row's updated_at).
+-- stamps updated_at, unless eval_pairs.keep_updated_at is 'on': apply runs with it on (spec:
+-- phase 2 changes no row's updated_at).
 --
 -- ORDER: after 054. Additive: the build from before ignores the column, table and view.
 -- Re-running 054 after 055 puts back 054's eval_pair_refresh_back (lower id): re-run 055
--- after it. Rolling back 054 needs 055 rolled back first (the view reads pair_back).
+-- after it (054 also puts back its game_evaluations_touch_updated, and apply would then stamp
+-- updated_at). Rolling back 054 needs 055 rolled back first (the view reads pair_back).
 -- Idempotent: column / table / indexes IF NOT EXISTS, functions and view replaced.
 --
 -- ROLLBACK: run the lines below up to END ROLLBACK, without their leading "-- ", in psql
 -- -- (scripts/verify-eval-pairs.sh extracts and runs them). It puts back 054's
--- -- eval_pair_refresh_back verbatim, and drops the view, the snapshot table and credit
--- -- (with them every snapshot and credit phase 2 wrote: undo the phase 2 runs first).
+-- -- eval_pair_refresh_back and game_evaluations_touch_updated verbatim, and drops the view,
+-- -- the snapshot table and credit (with them every snapshot and credit phase 2 wrote: undo the
+-- -- phase 2 runs first).
 -- BEGIN;
+-- DROP FUNCTION IF EXISTS eval_pair_phase2_apply(text, integer);
+-- CREATE OR REPLACE FUNCTION game_evaluations_touch_updated() RETURNS trigger
+-- LANGUAGE plpgsql AS $$
+-- BEGIN
+--   IF (NEW.pair_eval_id IS DISTINCT FROM OLD.pair_eval_id OR NEW.pair_back IS DISTINCT FROM OLD.pair_back)
+--      AND to_jsonb(NEW) - ARRAY['pair_eval_id', 'pair_back', 'updated_at']
+--        = to_jsonb(OLD) - ARRAY['pair_eval_id', 'pair_back', 'updated_at'] THEN
+--     RETURN NEW;
+--   END IF;
+--   NEW.updated_at = NOW();
+--   RETURN NEW;
+-- END;
+-- $$;
 -- DROP FUNCTION IF EXISTS eval_pair_phase2_plan();
 -- DROP FUNCTION IF EXISTS eval_pair_phase2_classify(text);
 -- DROP VIEW IF EXISTS eval_stats_rows;
@@ -85,10 +104,11 @@
 -- COMMIT;
 -- END ROLLBACK
 
--- Three transactions: the first adds the column, the table and its indexes (metadata, an
+-- Four transactions: the first adds the column, the table and its indexes (metadata, an
 -- empty table, and a partial index built in one pass over game_evaluations: its write lock
 -- is held for milliseconds), the second
--- replaces the front-row rule and creates the view, the third adds the plan functions.
+-- replaces the front-row rule and creates the view, the third adds the plan functions, the
+-- fourth the apply function and the updated_at check.
 BEGIN;
 
 ALTER TABLE game_evaluations ADD COLUMN IF NOT EXISTS credit jsonb;
@@ -473,6 +493,184 @@ LANGUAGE sql STABLE AS $$
            GROUP BY g.family_id HAVING count(*) = 2) f
    CROSS JOIN LATERAL eval_pair_phase2_classify(f.family_id) c
    ORDER BY c.grp, c.family_id
+$$;
+
+COMMIT;
+
+-- ===== Apply (spec 5, 6.1, 6.2, 6.3): link the old pairs, a batch at a time =====
+-- eval_pair_phase2_apply(p_run_id, p_max_pairs DEFAULT 500) RETURNS TABLE(grp, linked, flagged)
+-- Links at most p_max_pairs families per call, in family_id order, all in the caller's
+-- transaction. Candidates: families with exactly 2 game_info rows of 2 os, neither
+-- family_unlinked, both games with an evaluation row, no row linked yet (pair_eval_id /
+-- pair_back) and no row with credit (a pair a person unlinked after an earlier run: relinking
+-- it is a person's call, and its credit must not be overwritten). Per family:
+--   1. pg_advisory_xact_lock(54, hashtext(family_id)) (the lock 054's insert trigger takes),
+--      then the family's evaluation rows FOR UPDATE in id order;
+--   2. eval_pair_phase2_classify(family_id) AFTER the locks: a row saved since the preview is
+--      classified by what it is now; nothing (no longer clean), or group G, -> skipped;
+--   3. the copies, every one while the two rows are still unlinked, so trg_eval_pair_sync
+--      (WHEN pair_eval_id is set and unchanged) never runs a copy of its own:
+--        A  holder_row's initial_evaluator, assigned_date, first_assigned_date, batch,
+--           category_group onto the other row; the rest of the eval group: the front fills
+--           its empty columns from the back, then the back takes the front's
+--        B  the judged row's whole eval_pair_eval_cols() onto the waiting row
+--        C  no eval column (each store keeps its result, holder and group)
+--        D/E/F  the front row's eval group is never touched (its final stays; E/F: it holds the
+--           pair's result by construction, checked: an error otherwise); the back row gets
+--           credit = to_jsonb(back row before the run, every column) + '_moved' (the media
+--           columns whose value moved from the back onto the empty front), then takes the
+--           front's eval_pair_eval_cols()
+--        every group, media: the front fills its empty media columns from the back, then the
+--           back takes the front's media (both set and different: the front's wins; the back's
+--           stays in the snapshot and, in D/E/F, in credit)
+--   4. the link: pair_eval_id both ways and pair_back = (row is the plan's back row) in ONE
+--      UPDATE (eval_pair_refresh_back would pick the lower id for a fresh link);
+--   5. one eval_pair_merge_snapshots row per row: row_before = the row before step 3,
+--      written = {column: value the run set} for every column whose value changed (updated_at
+--      never; pair_eval_id and pair_back always; credit when set);
+--   6. one evaluation_log row on the back row: kind 'pair_merge' when a shared column
+--      (eval_pair_eval_cols() + eval_pair_media_cols()) of the back row changed, else
+--      'pair_link'; actor 'System', source 'other', pair_scope 'store', CONTEXT = p_run_id
+--      (the rollback finds a run's log rows by it), owner / owner_after, conclusion, final and
+--      batch before / after, changed = initial_conclusion changed.
+-- updated_at: the function runs with eval_pairs.keep_updated_at = 'on' (its SET clause, so the
+-- setting ends with the call), and game_evaluations_touch_updated() leaves updated_at alone
+-- while it is on: no row's updated_at changes (spec 5).
+-- Returns one row per group with at least one linked pair: linked, and flagged = how many of
+-- those carry a plan flag. Nothing left: no rows, nothing written. The same run_id may be used
+-- for several calls (one rollback undoes them all); an empty run_id is an error.
+-- An error (e.g. the E/F check) fails the whole call: nothing of the batch is kept.
+BEGIN;
+
+-- 054's body behind one new first check. ROLLBACK above puts 054's back verbatim.
+CREATE OR REPLACE FUNCTION game_evaluations_touch_updated() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  -- eval_pair_phase2_apply (055) links old pairs: not an edit
+  IF current_setting('eval_pairs.keep_updated_at', true) = 'on' THEN
+    RETURN NEW;
+  END IF;
+  IF (NEW.pair_eval_id IS DISTINCT FROM OLD.pair_eval_id OR NEW.pair_back IS DISTINCT FROM OLD.pair_back)
+     AND to_jsonb(NEW) - ARRAY['pair_eval_id', 'pair_back', 'updated_at']
+       = to_jsonb(OLD) - ARRAY['pair_eval_id', 'pair_back', 'updated_at'] THEN
+    RETURN NEW;
+  END IF;
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION eval_pair_phase2_apply(p_run_id text, p_max_pairs integer DEFAULT 500)
+RETURNS TABLE(grp text, linked integer, flagged integer)
+LANGUAGE plpgsql
+SET eval_pairs.keep_updated_at = 'on'
+AS $$
+DECLARE
+  media  text[] := eval_pair_media_cols();
+  evals  text[] := eval_pair_eval_cols();
+  hold   text[] := ARRAY['initial_evaluator', 'assigned_date', 'first_assigned_date', 'batch', 'category_group'];
+  rest   text[];
+  fam    text;
+  p      record;
+  f0 game_evaluations; k0 game_evaluations; src game_evaluations; f1 game_evaluations;
+  fz game_evaluations; kz game_evaluations;
+  jf0 jsonb; jk0 jsonb; jf1 jsonb; jkz jsonb; moved jsonb;
+  other  integer;
+  n_done integer := 0;
+  counts jsonb := '{}';
+BEGIN
+  IF COALESCE(p_run_id, '') = '' THEN
+    RAISE EXCEPTION '055: eval_pair_phase2_apply needs a run_id';
+  END IF;
+  IF COALESCE(p_max_pairs, 0) <= 0 THEN RETURN; END IF;
+  SELECT array_agg(c ORDER BY o) INTO rest FROM unnest(evals) WITH ORDINALITY u(c, o) WHERE c <> ALL (hold);
+
+  FOR fam IN
+    SELECT g.family_id
+      FROM game_info g JOIN game_evaluations e ON e.game_id = g.game_id
+     WHERE g.family_id IS NOT NULL
+     GROUP BY g.family_id
+    HAVING count(DISTINCT g.game_id) = 2 AND count(DISTINCT g.os) = 2
+       AND NOT bool_or(COALESCE(g.family_unlinked, false))
+       AND NOT bool_or(e.pair_eval_id IS NOT NULL OR e.pair_back OR e.credit IS NOT NULL)
+       AND (SELECT count(*) FROM game_info x WHERE x.family_id = g.family_id) = 2
+     ORDER BY g.family_id
+  LOOP
+    EXIT WHEN n_done >= p_max_pairs;
+    PERFORM pg_advisory_xact_lock(54, hashtext(fam));
+    PERFORM 1 FROM game_evaluations e JOIN game_info g ON g.game_id = e.game_id
+      WHERE g.family_id = fam ORDER BY e.id FOR UPDATE OF e;
+    SELECT * INTO p FROM eval_pair_phase2_classify(fam);
+    CONTINUE WHEN NOT FOUND OR p.grp = 'G' OR p.front_id IS NULL OR p.back_id IS NULL;
+    -- saved since the cursor opened: credit is never overwritten
+    CONTINUE WHEN EXISTS (SELECT 1 FROM game_evaluations WHERE id IN (p.front_id, p.back_id) AND credit IS NOT NULL);
+
+    SELECT * INTO f0 FROM game_evaluations WHERE id = p.front_id;
+    SELECT * INTO k0 FROM game_evaluations WHERE id = p.back_id;
+    jf0 := to_jsonb(f0);
+    jk0 := to_jsonb(k0);
+    IF p.grp IN ('E', 'F') AND f0.initial_conclusion IS DISTINCT FROM p.result_conclusion THEN
+      RAISE EXCEPTION '055: family % (group %): front row % holds %, not %',
+        fam, p.grp, f0.id, f0.initial_conclusion, p.result_conclusion;
+    END IF;
+
+    -- the eval group (rows unlinked: no copy trigger)
+    IF p.grp IN ('A', 'B') THEN
+      SELECT * INTO src FROM game_evaluations WHERE id = p.holder_row;
+      other := CASE WHEN p.holder_row = p.front_id THEN p.back_id ELSE p.front_id END;
+      PERFORM eval_pair_copy(other, src, CASE p.grp WHEN 'A' THEN hold ELSE evals END);
+    END IF;
+    -- the front fills what it lacks from the back: media always, the rest of A's eval group
+    PERFORM eval_pair_fill(p.front_id, p.back_id, CASE WHEN p.grp = 'A' THEN rest || media ELSE media END);
+    SELECT * INTO f1 FROM game_evaluations WHERE id = p.front_id;
+    jf1 := to_jsonb(f1);
+
+    IF p.grp IN ('D', 'E', 'F') THEN
+      SELECT COALESCE(jsonb_agg(c ORDER BY o), '[]') INTO moved
+        FROM unnest(media) WITH ORDINALITY u(c, o)
+       WHERE COALESCE(jf0 ->> c, '') IN ('', '[]') AND COALESCE(jf1 ->> c, '') NOT IN ('', '[]')
+         AND jf1 -> c = jk0 -> c;
+      UPDATE game_evaluations SET credit = jk0 || jsonb_build_object('_moved', moved) WHERE id = p.back_id;
+    END IF;
+    -- the back row takes the front's shared columns
+    PERFORM eval_pair_copy(p.back_id, f1, CASE p.grp WHEN 'A' THEN rest || media
+                                                      WHEN 'B' THEN media
+                                                      WHEN 'C' THEN media
+                                                      ELSE evals || media END);
+
+    -- the link, front row as planned
+    UPDATE game_evaluations
+       SET pair_eval_id = CASE WHEN id = p.front_id THEN p.back_id ELSE p.front_id END,
+           pair_back    = (id = p.back_id)
+     WHERE id IN (p.front_id, p.back_id);
+
+    SELECT * INTO fz FROM game_evaluations WHERE id = p.front_id;
+    SELECT * INTO kz FROM game_evaluations WHERE id = p.back_id;
+    jkz := to_jsonb(kz);
+    INSERT INTO eval_pair_merge_snapshots (run_id, game_evaluation_id, family_id, pair_group, row_before, written)
+    SELECT p_run_id, r.id, fam, p.grp, r.before,
+           (SELECT COALESCE(jsonb_object_agg(a.key, a.value), '{}') FROM jsonb_each(r.after) a
+             WHERE a.key <> 'updated_at'
+               AND (a.key IN ('pair_eval_id', 'pair_back') OR a.value IS DISTINCT FROM r.before -> a.key))
+      FROM (VALUES (f0.id, jf0, to_jsonb(fz)), (k0.id, jk0, jkz)) r(id, before, after);
+
+    INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, owner_after, source, context, kind,
+      conclusion_before, conclusion_after, final_before, final_after, batch_before, batch_after,
+      changed, pair_scope)
+    VALUES (k0.id, k0.game_id, 'System', k0.initial_evaluator, kz.initial_evaluator, 'other', p_run_id,
+      CASE WHEN EXISTS (SELECT 1 FROM unnest(evals || media) c WHERE jk0 -> c IS DISTINCT FROM jkz -> c)
+           THEN 'pair_merge' ELSE 'pair_link' END,
+      k0.initial_conclusion, kz.initial_conclusion, k0.final_conclusion, kz.final_conclusion, k0.batch, kz.batch,
+      k0.initial_conclusion IS DISTINCT FROM kz.initial_conclusion, 'store');
+
+    n_done := n_done + 1;
+    counts := jsonb_set(counts, ARRAY[p.grp], jsonb_build_array(
+      COALESCE((counts -> p.grp ->> 0)::int, 0) + 1,
+      COALESCE((counts -> p.grp ->> 1)::int, 0) + (COALESCE(cardinality(p.flags), 0) > 0)::int));
+  END LOOP;
+
+  RETURN QUERY SELECT c.key, (c.value ->> 0)::int, (c.value ->> 1)::int FROM jsonb_each(counts) c ORDER BY c.key;
+END;
 $$;
 
 COMMIT;

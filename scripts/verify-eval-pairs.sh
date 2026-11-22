@@ -224,6 +224,27 @@ before=$(snap55)
 catalog_with_055=$(catalog)
 "${P[@]}" -d verify -f scripts/sql-verify/phase2-schema.sql
 "${P[@]}" -d verify -f scripts/sql-verify/phase2-plan-checks.sql
+"${P[@]}" -d verify -f scripts/sql-verify/phase2-apply-checks.sql
+
+# apply_reclassifies_under_lock: session A holds the family lock and judges one store of an
+# unjudged pair (group A when apply starts); apply in session B waits on that lock, then
+# classifies the pair as it is after A's commit (group B). A classify taken before the lock
+# would still see group A.
+"${P[@]}" -d verify -c "INSERT INTO game_info (game_id, os, initial_release) VALUES
+                          ('p2w_a', 'android', '2026-01-01'), ('p2w_i', 'ios', '2026-02-01')" \
+  -c "INSERT INTO game_evaluations (game_id, category_group, initial_evaluator, updated_at) VALUES
+        ('p2w_a', 'puzzle', 'P2wA', '2026-01-01Z'), ('p2w_i', 'puzzle', 'P2wI', '2026-01-01Z')" \
+  -c "UPDATE game_info SET family_id = 'fam.p2w' WHERE game_id IN ('p2w_a', 'p2w_i')" \
+  -c "DO \$\$ BEGIN ASSERT (SELECT grp FROM eval_pair_phase2_classify('fam.p2w')) = 'A', 'p2w starts as group A'; END \$\$"
+two_sessions "l.locktype = 'advisory' AND l.classid = 54 AND l.objid = hashtext('fam.p2w')::oid AND l.objsubid = 2" \
+  "SELECT pg_advisory_xact_lock(54, hashtext('fam.p2w')); UPDATE game_evaluations SET initial_conclusion = 'Bypass' WHERE game_id = 'p2w_a'" \
+  "DO \$\$ BEGIN PERFORM eval_pair_phase2_apply('p2w_run', 10); END \$\$"
+"${P[@]}" -d verify -c "DO \$\$ BEGIN
+  ASSERT (SELECT pair_group FROM eval_pair_merge_snapshots WHERE run_id = 'p2w_run' AND family_id = 'fam.p2w' LIMIT 1) = 'B',
+    'apply classified the pair after the lock (group B)';
+  ASSERT (SELECT count(*) FROM game_evaluations WHERE game_id IN ('p2w_a', 'p2w_i') AND pair_eval_id IS NOT NULL
+            AND initial_conclusion = 'Bypass' AND initial_evaluator = 'P2wA') = 2, 'p2w linked as group B';
+END \$\$;"
 
 # rollback_block_055: the "-- ROLLBACK:" block of 055 leaves the schema exactly as 054 left it
 # (eval_pair_refresh_back's body back to 054's, byte for byte), then 055 applies again.
