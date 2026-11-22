@@ -266,21 +266,35 @@ END \$\$;"
 # eval_pair_phase2_rollback: a run of its own with edits after it, then every run above
 "${P[@]}" -d verify -f scripts/sql-verify/phase2-rollback-checks.sql
 
-# scripts/phase2-rollback.sh: refuses without a run id; rolls back a run (the families the
-# checks above unlinked are linkable again) and prints its rows; a second call finds nothing.
+# scripts/phase2-rollback.sh: refuses without a run id or DATABASE_URL; --dry-run shows the
+# first batch and changes nothing; a real run goes batch by batch (2 families each) until the
+# run is gone; a second call finds nothing. (The families the checks above unlinked are
+# linkable again, so a fresh run p2s_run has 3 pairs.)
 RB_URL="postgresql://postgres@127.0.0.1:$PORT/verify"
-rb_status=0
-DATABASE_URL="$RB_URL" bash scripts/phase2-rollback.sh >"$TMP/rb.out" 2>&1 || rb_status=$?
-[ "$rb_status" = 2 ] && grep -q usage "$TMP/rb.out" || { echo "phase2-rollback.sh ran without a run id: $(cat "$TMP/rb.out")"; exit 1; }
+rb() { local st=0; DATABASE_URL="$RB_URL" bash scripts/phase2-rollback.sh "$@" >"$TMP/rb.out" 2>&1 || st=$?
+       [ "$st" = 0 ] || [ "${RB_MAY_FAIL:-}" = 1 ] || { echo "phase2-rollback.sh $* failed ($st): $(cat "$TMP/rb.out")"; exit 1; }
+       return "$st"; }
+rb_expect() { grep -qF "$1" "$TMP/rb.out" || { echo "phase2-rollback.sh: want '$1', got: $(cat "$TMP/rb.out")"; exit 1; }; }
+rb_status=0; RB_MAY_FAIL=1 rb || rb_status=$?
+[ "$rb_status" = 2 ] || { echo "phase2-rollback.sh ran without a run id"; exit 1; }; rb_expect usage
 rb_status=0
 env -u DATABASE_URL bash scripts/phase2-rollback.sh some_run >"$TMP/rb.out" 2>&1 || rb_status=$?
-[ "$rb_status" = 2 ] && grep -q DATABASE_URL "$TMP/rb.out" || { echo "phase2-rollback.sh ran without DATABASE_URL: $(cat "$TMP/rb.out")"; exit 1; }
+[ "$rb_status" = 2 ] || { echo "phase2-rollback.sh ran without DATABASE_URL"; exit 1; }; rb_expect "DATABASE_URL is not set"
+rb_status=0; RB_MAY_FAIL=1 PSQL=/nonexistent/psql rb some_run || rb_status=$?
+[ "$rb_status" != 0 ] || { echo "phase2-rollback.sh ignored PSQL"; exit 1; }
 n_run=$("${P[@]}" -d verify -At -c "SELECT COALESCE(sum(linked), 0) FROM eval_pair_phase2_apply('p2s_run', 3)")
 [ "$n_run" = 3 ] || { echo "fixture: p2s_run linked $n_run pairs, want 3"; exit 1; }
-DATABASE_URL="$RB_URL" bash scripts/phase2-rollback.sh p2s_run >"$TMP/rb.out"
-grep -Eq '^ *p2s_run *\| *6 *\| *0 *$' "$TMP/rb.out" || { echo "phase2-rollback.sh p2s_run: $(cat "$TMP/rb.out")"; exit 1; }
-DATABASE_URL="$RB_URL" bash scripts/phase2-rollback.sh p2s_run >"$TMP/rb.out"
-grep -Eq '^ *p2s_run *\| *0 *\| *0 *$' "$TMP/rb.out" || { echo "phase2-rollback.sh p2s_run twice: $(cat "$TMP/rb.out")"; exit 1; }
+state() { "${P[@]}" -d verify -At -c "SELECT md5((SELECT string_agg(to_jsonb(g)::text, ',' ORDER BY id) FROM game_evaluations g)
+  || (SELECT string_agg(to_jsonb(l)::text, ',' ORDER BY id) FROM evaluation_log l)
+  || (SELECT string_agg(to_jsonb(s)::text, ',' ORDER BY id) FROM eval_pair_merge_snapshots s))"; }
+before_dry=$(state)
+rb --dry-run p2s_run 2
+rb_expect "DRY RUN, nothing changed: run p2s_run, first batch (2 families max): 4 rows would be rolled back, 0 with kept columns, 0 still linked to another row"
+[ "$(state)" = "$before_dry" ] || { echo "phase2-rollback.sh --dry-run changed the DB"; exit 1; }
+rb p2s_run 2
+rb_expect "run p2s_run: 6 rows rolled back in 2 batches, 0 with kept columns, 0 still linked to another row"
+rb p2s_run
+rb_expect "run p2s_run: 0 rows rolled back in 0 batches, 0 with kept columns, 0 still linked to another row"
 "${P[@]}" -d verify -c "DO \$\$ BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM eval_pair_merge_snapshots), 'phase2-rollback.sh left snapshots';
 END \$\$;"

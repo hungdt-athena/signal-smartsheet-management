@@ -23,7 +23,7 @@ BEGIN
        || 'created_at timestamp with time zone default now()';
   ASSERT got = want, format('eval_pair_merge_snapshots columns: %s', got);
   ASSERT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'eval_pair_merge_snapshots'
-                   AND indexdef ILIKE '%USING btree (run_id)'), 'index on run_id';
+                   AND indexdef ILIKE '%USING btree (run_id, family_id, id)'), 'index on run_id, family_id, id';
   ASSERT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'eval_pair_merge_snapshots'
                    AND indexdef ILIKE '%USING btree (game_evaluation_id)'), 'index on game_evaluation_id';
   ASSERT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'eval_pair_merge_snapshots'::regclass

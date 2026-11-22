@@ -42,8 +42,9 @@
 --                  pair's result, holder and final, and flags for the review (see there).
 --   eval_pair_phase2_apply(run_id, max_pairs)   links them, a batch per call (see there). Not
 --                  run by this file. Its evaluation_log rows carry the run_id in `context`.
---   eval_pair_phase2_rollback(run_id)   undoes a run (see there); scripts/phase2-rollback.sh
---                  RUN_ID runs it and prints what it kept. Not run by this file.
+--   eval_pair_phase2_rollback(run_id, max_families)   undoes a run, a batch of families per
+--                  call (see there); scripts/phase2-rollback.sh RUN_ID calls it until the run is
+--                  gone and prints what it kept. Not run by this file.
 --   game_evaluations_touch_updated()   054's body behind one check: while the setting
 --                  eval_pairs.keep_updated_at is 'on' (only inside apply), updated_at stays.
 --
@@ -70,7 +71,8 @@
 -- -- phase 2 runs first, each with scripts/phase2-rollback.sh RUN_ID; the runs left are
 -- -- SELECT DISTINCT run_id FROM eval_pair_merge_snapshots).
 -- BEGIN;
--- DROP FUNCTION IF EXISTS eval_pair_phase2_rollback(text);
+-- DROP FUNCTION IF EXISTS eval_pair_phase2_rollback(text, integer);
+-- DROP INDEX IF EXISTS idx_eval_pair_merge_snapshots_run_family;
 -- DROP FUNCTION IF EXISTS eval_pair_phase2_apply(text, integer);
 -- CREATE OR REPLACE FUNCTION game_evaluations_touch_updated() RETURNS trigger
 -- LANGUAGE plpgsql AS $$
@@ -127,7 +129,9 @@ CREATE TABLE IF NOT EXISTS eval_pair_merge_snapshots (
   written            jsonb,
   created_at         timestamptz DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_eval_pair_merge_snapshots_run ON eval_pair_merge_snapshots (run_id);
+-- a run's snapshots, family by family (the rollback reads them per family)
+CREATE INDEX IF NOT EXISTS idx_eval_pair_merge_snapshots_run_family
+  ON eval_pair_merge_snapshots (run_id, family_id, id);
 CREATE INDEX IF NOT EXISTS idx_eval_pair_merge_snapshots_eval ON eval_pair_merge_snapshots (game_evaluation_id);
 -- The credited rows, for eval_stats_rows' second branch (a few hundred rows at most).
 CREATE INDEX IF NOT EXISTS idx_game_evaluations_credited ON game_evaluations (id) WHERE credit IS NOT NULL;
@@ -724,10 +728,14 @@ $$;
 COMMIT;
 
 -- ===== Rollback (spec 6.3): undo one run =====
--- eval_pair_phase2_rollback(p_run_id) RETURNS TABLE(game_evaluation_id, kept_columns)
--- Undoes every apply call made with p_run_id, from the run's snapshots, in the caller's
--- transaction. Per family of the run, in family_id order: pg_advisory_xact_lock(54,
--- hashtext(family_id)) (apply's lock), then the run's rows FOR UPDATE in id order. Per row:
+-- eval_pair_phase2_rollback(p_run_id, p_max_families DEFAULT 500)
+--   RETURNS TABLE(game_evaluation_id, kept_columns, linked_to)
+-- Undoes what apply calls made with p_run_id did, from the run's snapshots, at most
+-- p_max_families families per call (in family_id order), in the caller's transaction: call it
+-- (one transaction per call) until it returns no rows; each family's locks are held only to
+-- that call's commit. Per family: pg_advisory_xact_lock(54, hashtext(family_id)) (apply's
+-- lock), then the run's rows FOR UPDATE in id order; the family's snapshots are read through
+-- idx_eval_pair_merge_snapshots_run_family. Per row:
 --   a column in `written` goes back to row_before's value only while the row still holds the
 --   value the run wrote; edited since (a new save, a video from n8n, an unlink) -> the current
 --   value stays. Columns not in `written` are never written. So pair_eval_id / pair_back /
@@ -746,17 +754,22 @@ COMMIT;
 --   back to what the rollback meant, in a second UPDATE (as eval_pair_fill does).
 --   One result row: kept_columns = the written columns (updated_at aside) whose value after the
 --   rollback is not row_before's, in name order ('{}' = fully back); NULL when the row was
---   deleted since the run.
--- Then deletes the run's evaluation_log rows (context = p_run_id, kind pair_merge / pair_link)
--- and, last, its snapshots. Writes no log row (no pair_unlink), and no row's updated_at
--- changes (eval_pairs.keep_updated_at, as apply; the same guard on the touch function).
--- One-shot: the snapshots are gone after a rollback, so a second call (or an unknown run_id)
--- finds nothing, changes nothing and returns no rows. An empty run_id is an error. An error
--- fails the whole call: nothing is rolled back.
+--   deleted since the run. linked_to = the row it is still linked to (linked to another row
+--   since the run: that pair may now differ in its shared columns, a save on it re-syncs
+--   them; also a NOTICE), else NULL.
+-- Once a family is restored: its log rows of the run (context = p_run_id, kind pair_merge /
+-- pair_link, on one of the family's rows) and then its snapshots are deleted. When the run has
+-- no snapshot left, any log row of the run still there (its row deleted since) goes too.
+-- Writes no log row (no pair_unlink), and no row's updated_at changes
+-- (eval_pairs.keep_updated_at, as apply; the same guard on the touch function).
+-- One-shot: a restored family's snapshots are gone, so a later call skips it; once the run is
+-- done, a call (or one with an unknown run_id) finds nothing, changes nothing and returns no
+-- rows. An empty run_id is an error; p_max_families <= 0 does nothing. An error fails the
+-- whole call (that batch): nothing of it is rolled back, earlier committed batches stay.
 BEGIN;
 
-CREATE OR REPLACE FUNCTION eval_pair_phase2_rollback(p_run_id text)
-RETURNS TABLE(game_evaluation_id integer, kept_columns text[])
+CREATE OR REPLACE FUNCTION eval_pair_phase2_rollback(p_run_id text, p_max_families integer DEFAULT 500)
+RETURNS TABLE(game_evaluation_id integer, kept_columns text[], linked_to integer)
 LANGUAGE plpgsql
 SET eval_pairs.keep_updated_at = 'on'
 AS $$
@@ -778,24 +791,29 @@ BEGIN
     RAISE EXCEPTION '055: game_evaluations_touch_updated() ignores eval_pairs.keep_updated_at (054 re-run after 055?): re-run 055 before rollback';
   END IF;
 
+  IF COALESCE(p_max_families, 0) <= 0 THEN RETURN; END IF;
+
   FOR fam IN
-    SELECT DISTINCT ms.family_id FROM eval_pair_merge_snapshots ms WHERE ms.run_id = p_run_id ORDER BY 1
+    -- apply always writes family_id; '=' (not IS NOT DISTINCT FROM) so the index is used
+    SELECT DISTINCT ms.family_id FROM eval_pair_merge_snapshots ms WHERE ms.run_id = p_run_id AND ms.family_id IS NOT NULL
+     ORDER BY 1 LIMIT p_max_families
   LOOP
     PERFORM pg_advisory_xact_lock(54, hashtext(fam));
     PERFORM 1 FROM game_evaluations g
       WHERE g.id IN (SELECT ms.game_evaluation_id FROM eval_pair_merge_snapshots ms
-                      WHERE ms.run_id = p_run_id AND ms.family_id IS NOT DISTINCT FROM fam)
+                      WHERE ms.run_id = p_run_id AND ms.family_id = fam)
       ORDER BY g.id FOR UPDATE;
 
     FOR s IN
       SELECT * FROM eval_pair_merge_snapshots ms
-       WHERE ms.run_id = p_run_id AND ms.family_id IS NOT DISTINCT FROM fam
+       WHERE ms.run_id = p_run_id AND ms.family_id = fam
        ORDER BY ms.id DESC
     LOOP
       SELECT to_jsonb(g) INTO cur FROM game_evaluations g WHERE g.id = s.game_evaluation_id;
       game_evaluation_id := s.game_evaluation_id;
       IF cur IS NULL THEN
         kept_columns := NULL;
+        linked_to := NULL;
         RETURN NEXT;
         CONTINUE;
       END IF;
@@ -838,12 +856,25 @@ BEGIN
       SELECT COALESCE(array_agg(k ORDER BY k), '{}') INTO kept_columns
         FROM jsonb_object_keys(s.written) k
        WHERE k <> 'updated_at' AND fin -> k IS DISTINCT FROM bf -> k;
+      linked_to := (fin ->> 'pair_eval_id')::integer;
+      IF linked_to IS NOT NULL THEN
+        RAISE NOTICE '055 rollback %: row % stays linked to row % (linked since the run): save that pair to re-sync it',
+          p_run_id, game_evaluation_id, linked_to;
+      END IF;
       RETURN NEXT;
     END LOOP;
+
+    DELETE FROM evaluation_log l
+     WHERE l.game_evaluation_id IN (SELECT ms.game_evaluation_id FROM eval_pair_merge_snapshots ms
+                                     WHERE ms.run_id = p_run_id AND ms.family_id = fam)
+       AND l.context = p_run_id AND l.kind IN ('pair_merge', 'pair_link');
+    DELETE FROM eval_pair_merge_snapshots ms WHERE ms.run_id = p_run_id AND ms.family_id = fam;
   END LOOP;
 
-  DELETE FROM evaluation_log l WHERE l.context = p_run_id AND l.kind IN ('pair_merge', 'pair_link');
-  DELETE FROM eval_pair_merge_snapshots ms WHERE ms.run_id = p_run_id;
+  -- the run is done: its log rows on a row deleted since (game_evaluation_id set NULL) go too
+  IF NOT EXISTS (SELECT 1 FROM eval_pair_merge_snapshots ms WHERE ms.run_id = p_run_id) THEN
+    DELETE FROM evaluation_log l WHERE l.context = p_run_id AND l.kind IN ('pair_merge', 'pair_link');
+  END IF;
   RETURN;
 END;
 $$;

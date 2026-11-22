@@ -75,10 +75,13 @@ END $$;
 -- ===== signature =====
 DO $$
 BEGIN
-  ASSERT (SELECT pg_get_function_identity_arguments('eval_pair_phase2_rollback(text)'::regprocedure))
-       = 'p_run_id text', 'rollback signature';
-  ASSERT (SELECT pg_get_function_result('eval_pair_phase2_rollback(text)'::regprocedure))
-       = 'TABLE(game_evaluation_id integer, kept_columns text[])', 'rollback result';
+  ASSERT (SELECT pg_get_function_identity_arguments('eval_pair_phase2_rollback(text, integer)'::regprocedure))
+       = 'p_run_id text, p_max_families integer', 'rollback signature';
+  ASSERT (SELECT pg_get_function_arguments('eval_pair_phase2_rollback(text, integer)'::regprocedure))
+       = 'p_run_id text, p_max_families integer DEFAULT 500', 'rollback max_families defaults to 500';
+  ASSERT (SELECT pg_get_function_result('eval_pair_phase2_rollback(text, integer)'::regprocedure))
+       = 'TABLE(game_evaluation_id integer, kept_columns text[], linked_to integer)', 'rollback result';
+  ASSERT (SELECT count(*) FROM pg_proc WHERE proname = 'eval_pair_phase2_rollback') = 1, 'one rollback function';
 END $$;
 
 -- ===== part 1: run p2y_r1, edits after it, rollback =====
@@ -131,10 +134,39 @@ CREATE TRIGGER p2y_audit AFTER UPDATE ON game_evaluations FOR EACH ROW
   WHEN (NEW.pair_eval_id IS NOT NULL AND OLD.pair_eval_id IS NOT DISTINCT FROM NEW.pair_eval_id)
   EXECUTE FUNCTION p2y_audit();
 
--- rolled back in another time zone than the run: timestamps in the snapshot are compared as
--- values, not as text
+-- Rolled back in another time zone than the run (timestamps in the snapshot are compared as
+-- values, not as text), in batches of 4 families (6 families: 4, 2, then nothing), each call
+-- deleting the snapshots and log rows of the families it restored. The reference: the same
+-- rollback in ONE call, undone again (subtransaction); the batched one must end identical.
 SET TIME ZONE 'Asia/Ho_Chi_Minh';
-CREATE TEMP TABLE p2y_rb AS SELECT * FROM eval_pair_phase2_rollback('p2y_r1');
+CREATE TEMP TABLE p2y_rb (call integer, game_evaluation_id integer, kept_columns text[], linked_to integer);
+CREATE TEMP TABLE p2y_batch (call integer, n integer, snaps_left integer, logs_left integer);
+CREATE TEMP TABLE p2y_digest (one text, batched text);
+CREATE FUNCTION pg_temp.p2y_state() RETURNS text LANGUAGE sql AS $f$
+  SELECT md5((SELECT string_agg(to_jsonb(g)::text, ',' ORDER BY id) FROM game_evaluations g)
+             || (SELECT string_agg(to_jsonb(l)::text, ',' ORDER BY id) FROM evaluation_log l)
+             || (SELECT count(*) FROM eval_pair_merge_snapshots)::text)
+$f$;
+DO $$
+DECLARE one text; i integer := 0; n integer;
+BEGIN
+  BEGIN
+    PERFORM eval_pair_phase2_rollback('p2y_r1', 100000);
+    one := pg_temp.p2y_state();
+    RAISE EXCEPTION USING ERRCODE = 'P0099', MESSAGE = 'undo the one-call reference';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+  END;
+  ASSERT EXISTS (SELECT 1 FROM eval_pair_merge_snapshots WHERE run_id = 'p2y_r1'), 'the reference was undone';
+  LOOP
+    i := i + 1;
+    INSERT INTO p2y_rb SELECT i, x.* FROM eval_pair_phase2_rollback('p2y_r1', 4) x;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    INSERT INTO p2y_batch VALUES (i, n, (SELECT count(*) FROM eval_pair_merge_snapshots WHERE run_id = 'p2y_r1'),
+                                       (SELECT count(*) FROM evaluation_log WHERE context = 'p2y_r1'));
+    EXIT WHEN n = 0 OR i >= 10;
+  END LOOP;
+  INSERT INTO p2y_digest VALUES (one, pg_temp.p2y_state());
+END $$;
 SET TIME ZONE 'UTC';
 
 DROP TRIGGER p2y_audit ON game_evaluations;
@@ -153,6 +185,13 @@ $f$;
 
 DO $$
 BEGIN
+  ASSERT (SELECT one = batched FROM p2y_digest), 'the batched rollback ends identical to the one-call rollback';
+  ASSERT (SELECT string_agg(call || ':' || n || ':' || snaps_left || ':' || logs_left, ' ' ORDER BY call) FROM p2y_batch)
+       = '1:8:4:2 2:4:0:0 3:0:0:0',
+    format('batches (call:rows:snapshots left:log rows left): %s',
+           (SELECT string_agg(call || ':' || n || ':' || snaps_left || ':' || logs_left, ' ' ORDER BY call) FROM p2y_batch));
+  ASSERT (SELECT array_agg(DISTINCT s.family_id ORDER BY s.family_id) FROM p2y_rb r JOIN p2y_snaps s USING (game_evaluation_id)
+           WHERE r.call = 1) = '{fam.p2y_a,fam.p2y_b,fam.p2y_c,fam.p2y_d}', 'batch 1 took the first 4 families';
   ASSERT (SELECT count(*) FROM p2y_sync_audit) = 0,
     format('the copy trigger ran during the rollback: %s', (SELECT string_agg(id || '@' || depth, ',') FROM p2y_sync_audit));
   -- one result row per snapshot row
@@ -217,6 +256,9 @@ BEGIN
     format('X kept: %s / %s', pg_temp.p2y_kept('p2y_xa'), pg_temp.p2y_kept('p2y_xi'));
   ASSERT (SELECT pair_eval_id = pg_temp.p2y_id('p2y_lone') AND initial_evaluator = 'P2yXw' AND initial_conclusion IS NULL
             FROM game_evaluations WHERE game_id = 'p2y_xa'), 'X front: its own eval group, the new link kept';
+  -- linked_to names the row it is still linked to (that pair needs a save); NULL elsewhere
+  ASSERT (SELECT string_agg(r.game_evaluation_id || '>' || r.linked_to, ' ') FROM p2y_rb r WHERE r.linked_to IS NOT NULL)
+       = pg_temp.p2y_id('p2y_xa') || '>' || pg_temp.p2y_id('p2y_lone'), 'linked_to: only X''s front, to the lone row';
 END $$;
 
 -- ===== a second call, an unknown run, no run =====
@@ -229,6 +271,7 @@ DECLARE ran boolean := false;
 BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM eval_pair_phase2_rollback('p2y_r1')), 'a second rollback of the run returns nothing';
   ASSERT NOT EXISTS (SELECT 1 FROM eval_pair_phase2_rollback('p2y_no_such_run')), 'an unknown run returns nothing';
+  ASSERT NOT EXISTS (SELECT 1 FROM eval_pair_phase2_rollback('p2y_r1', 0)), 'max_families 0 returns nothing';
   ASSERT (SELECT md5(string_agg(to_jsonb(g)::text, ',' ORDER BY id)) FROM game_evaluations g) = (SELECT ge FROM p2y_snap),
     'second / unknown rollback changed game_evaluations';
   ASSERT (SELECT count(*) FROM evaluation_log) = (SELECT logs FROM p2y_snap), 'second / unknown rollback changed evaluation_log';
@@ -257,15 +300,22 @@ CREATE TEMP TABLE p2y_runs AS SELECT DISTINCT run_id FROM eval_pair_merge_snapsh
 CREATE TEMP TABLE p2y_snaps2 AS SELECT * FROM eval_pair_merge_snapshots;
 CREATE TEMP TABLE p2y_pre2 AS SELECT id, to_jsonb(g) AS j, updated_at FROM game_evaluations g;
 CREATE TEMP TABLE p2y_log2 AS SELECT count(*) AS n, max(id) AS max_id FROM evaluation_log;
-CREATE TEMP TABLE p2y_rb2 (run_id text, game_evaluation_id integer, kept_columns text[]);
+CREATE TEMP TABLE p2y_rb2 (run_id text, game_evaluation_id integer, kept_columns text[], linked_to integer);
 DO $$
-DECLARE r text;
+DECLARE r text; n integer; calls integer := 0;
 BEGIN
   ASSERT (SELECT array_agg(run_id ORDER BY run_id) FROM p2y_runs) = '{p2v_run,p2w_run,p2x_r1,p2x_r2}',
     format('fixture: the runs left by the apply checks: %s', (SELECT array_agg(run_id) FROM p2y_runs));
+  -- 3 families per call, until a call returns nothing
   FOR r IN SELECT run_id FROM p2y_runs ORDER BY run_id DESC LOOP
-    INSERT INTO p2y_rb2 SELECT r, x.* FROM eval_pair_phase2_rollback(r) x;
+    LOOP
+      INSERT INTO p2y_rb2 SELECT r, x.* FROM eval_pair_phase2_rollback(r, 3) x;
+      GET DIAGNOSTICS n = ROW_COUNT;
+      calls := calls + 1;
+      EXIT WHEN n = 0 OR calls > 100;
+    END LOOP;
   END LOOP;
+  ASSERT calls > (SELECT count(*) FROM p2y_runs) * 2, format('fixture: runs rolled back over several calls (%s)', calls);
 END $$;
 DO $$
 DECLARE bad text;
@@ -310,5 +360,5 @@ BEGIN
             AND initial_note = 'edited after the run') = 2, 'the note edited after the run stays on both rows';
 END $$;
 
-DROP TABLE p2y_before, p2y_apply, p2y_snaps, p2y_pre, p2y_log_pre, p2y_sync_audit, p2y_rb, p2y_snap,
+DROP TABLE p2y_before, p2y_apply, p2y_snaps, p2y_pre, p2y_log_pre, p2y_sync_audit, p2y_rb, p2y_batch, p2y_digest, p2y_snap,
            p2y_runs, p2y_snaps2, p2y_pre2, p2y_log2, p2y_rb2;
