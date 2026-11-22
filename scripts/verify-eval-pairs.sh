@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs migration 054 (Playtest store pairs) and its SQL checks against a THROWAWAY local
+# Runs migrations 054 + 055 (Playtest store pairs) and their SQL checks against a THROWAWAY local
 # Postgres. Never reads DATABASE_URL or .env files and never touches another database:
 # the schema it needs is the static scripts/sql-verify/pairs-schema.sql. Uses Homebrew
 # postgresql@16 when installed (the sample DB is 16), else whatever is on PATH.
@@ -19,10 +19,13 @@ P=(psql -h 127.0.0.1 -p "$PORT" -U postgres -X -q -v ON_ERROR_STOP=1)
 "${P[@]}" -d verify -f migrations/046_evaluation_log.sql
 "${P[@]}" -d verify -f migrations/047_evaluation_log_demo_added.sql
 
-# The schema objects (functions, triggers + their function, indexes, columns, constraints),
-# to prove the ROLLBACK block removes everything 054 adds and nothing else.
+# The schema objects (functions + a hash of their body, relations, triggers + their function,
+# indexes, columns, constraints), to prove each ROLLBACK block removes everything its migration
+# adds and nothing else, and puts back the function bodies it replaced.
 catalog() { "${P[@]}" -d verify -At -c "
-  SELECT 'fn ' || p.oid::regprocedure FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+  SELECT 'fn ' || p.oid::regprocedure || ' ' || md5(p.prosrc) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+  UNION ALL SELECT 'rel ' || c.oid::regclass || ' ' || c.relkind::text FROM pg_class c
+    WHERE c.relnamespace = 'public'::regnamespace
   UNION ALL SELECT 'trg ' || tgrelid::regclass || ' ' || tgname || ' ' || tgfoid::regproc || ' ' || tgenabled::text
     FROM pg_trigger WHERE NOT tgisinternal
   UNION ALL SELECT 'idx ' || i.indexrelid::regclass FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid
@@ -208,5 +211,29 @@ END \$\$;"
 "${P[@]}" -d verify -f migrations/054_eval_pairs.sql >/dev/null
 [ "$(catalog)" = "$catalog_with_054" ] || {
   echo "054 re-applied after the ROLLBACK differs:"; diff <(echo "$catalog_with_054") <(catalog); exit 1; }
+
+# ===== 055 (phase 2): credit column, merge snapshots, sticky front row, eval_stats_rows =====
+# Applied after every 054 check (whose front_moves case pins 054's own front-row rule), on a DB
+# full of linked, unlinked and rejected pairs. 055 itself changes no row and links nothing.
+snap55() { "${P[@]}" -d verify -At -c "SELECT md5(string_agg((to_jsonb(g) - 'credit')::text, ',' ORDER BY id)) FROM game_evaluations g" \
+                                    -c "SELECT count(*) FROM evaluation_log"; }
+before=$(snap55)
+"${P[@]}" -d verify -f migrations/055_eval_pairs_phase2.sql
+"${P[@]}" -d verify -f migrations/055_eval_pairs_phase2.sql
+[ "$(snap55)" = "$before" ] || { echo "applying 055 changed game_evaluations or evaluation_log"; exit 1; }
+catalog_with_055=$(catalog)
+"${P[@]}" -d verify -f scripts/sql-verify/phase2-schema.sql
+
+# rollback_block_055: the "-- ROLLBACK:" block of 055 leaves the schema exactly as 054 left it
+# (eval_pair_refresh_back's body back to 054's, byte for byte), then 055 applies again.
+sed -n '/^-- ROLLBACK:/,/^-- END ROLLBACK/{/^-- ROLLBACK:/d;/^-- END ROLLBACK/d;s/^-- \{0,1\}//;p;}' \
+  migrations/055_eval_pairs_phase2.sql >"$TMP/rollback55.sql"
+grep -q 'DROP COLUMN IF EXISTS credit' "$TMP/rollback55.sql" || { echo "no ROLLBACK block found in 055"; exit 1; }
+"${P[@]}" -d verify -f "$TMP/rollback55.sql"
+[ "$(catalog)" = "$catalog_with_054" ] || {
+  echo "055 ROLLBACK left the schema different from 054's:"; diff <(echo "$catalog_with_054") <(catalog); exit 1; }
+"${P[@]}" -d verify -f migrations/055_eval_pairs_phase2.sql
+[ "$(catalog)" = "$catalog_with_055" ] || {
+  echo "055 re-applied after its ROLLBACK differs:"; diff <(echo "$catalog_with_055") <(catalog); exit 1; }
 
 echo "eval pairs SQL checks: OK"
