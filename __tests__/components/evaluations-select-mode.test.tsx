@@ -384,12 +384,13 @@ describe('Short List select mode', () => {
     }
     // What the picker shows: a batch label, or 'Not set'.
     const pickerValue = () => { openPopover(); return pickerBtn()!.getAttribute('aria-label')!.replace(/^Current batch: /, '') }
-    // Open the picker outside act (an outer act would hold the renders back), then let the
-    // save settle inside it.
+    // Open the picker outside act (an outer act would hold the renders back), pick, then
+    // confirm (a pick alone saves nothing) and let the save settle inside act.
     const choose = async (v: string) => {
       openPopover()
-      const b = batchButton('Current batch', v)
-      await act(async () => { fireEvent.click(b) })
+      fireEvent.click(batchButton('Current batch', v))
+      const ok = screen.queryByRole('button', { name: /^(Change|Clear) batch$/ })
+      if (ok) await act(async () => { fireEvent.click(ok) })
     }
     const ALERT = "Couldn't save the batch. Try again."
     // A failed save is reported as a toast (the Toaster itself is mounted in the root layout).
@@ -405,7 +406,9 @@ describe('Short List select mode', () => {
       const calls = await open()
       const at = () => { openPopover(); return screen.getByLabelText('Starts at') as HTMLInputElement }
       await waitFor(() => expect(at().value).toBe('2026-10-06T11:28'))
-      await act(async () => { fireEvent.change(at(), { target: { value: '2026-10-07T09:00' } }) })
+      fireEvent.change(at(), { target: { value: '2026-10-07T09:00' } })
+      expect(post(calls)).toHaveLength(0) // typing saves nothing
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save start' })) })
       const sent = post(calls)
       expect(sent).toHaveLength(1)
       expect(JSON.parse(String(sent[0].init?.body))).toEqual({ batch: 'W2 Oct, 2026', starts_at: '2026-10-07T09:00' })
@@ -476,10 +479,23 @@ describe('Short List select mode', () => {
       })
     })
 
+    it('a pick alone saves nothing until it is confirmed', async () => {
+      const calls = await open()
+      await waitFor(() => expect(pickerValue()).toBe('W2 Oct, 2026'))
+      openPopover()
+      fireEvent.click(batchButton('Current batch', 'W3 Oct, 2026'))
+      expect(post(calls)).toHaveLength(0)
+      expect(screen.getByRole('alertdialog')).toHaveTextContent('W2 Oct, 2026')
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(post(calls)).toHaveLength(0)
+      expect(pickerValue()).toBe('W2 Oct, 2026')
+    })
+
     it('shows no message when the save works', async () => {
-      await open()
+      const calls = await open()
       await waitFor(() => expect(pickerValue()).toBe('W2 Oct, 2026'))
       await choose('W3 Oct, 2026')
+      expect(post(calls)).toHaveLength(1)
       expect(pickerValue()).toBe('W3 Oct, 2026')
       expect(toastError).not.toHaveBeenCalled()
     })
