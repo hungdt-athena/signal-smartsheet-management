@@ -53,7 +53,7 @@ jest.mock('@/hooks/useConfig', () => ({
 
 jest.mock('@/components/EvalDetailPanel', () => ({
   __esModule: true,
-  default: () => <div data-testid="eval-panel" />,
+  default: (p: { category?: string }) => <div data-testid="eval-panel" data-category={p.category ?? ''} />,
   weekBatches: () => [],
 }))
 jest.mock('@/components/QuickStatsModal', () => ({ QuickStatsModal: () => null }))
@@ -66,7 +66,7 @@ beforeEach(() => { window.history.replaceState(null, '', '/evaluations') })
 
 const APPLIED_MONTH = { year: 2026, month: 9 }
 
-interface Row { id: number; game_id: string; title: string }
+interface Row { id: number; game_id: string; title: string; category_group?: string }
 
 function stubFetch(
   rowsFor?: (url: string) => Row[],
@@ -99,7 +99,7 @@ function stubFetch(
 const rowCalls = (calls: string[]) => calls.filter(u => u.startsWith('/api/evaluations?'))
 const facetCalls = (calls: string[]) => calls.filter(u => u.startsWith('/api/evaluations/facets'))
 
-const box = () => screen.getByPlaceholderText('Search games')
+const box = () => screen.getByPlaceholderText('Search games (all groups)')
 
 /** The filter row's text, which is where the date pill lives. Read as a whole because
  *  the pill splits its label across text nodes, and the page subtitle mentions the
@@ -191,6 +191,32 @@ describe('searching on the Evaluate tab', () => {
     expect(url).not.toContain('q=')
     expect(url).toContain('from=2026-09-01')
     expect(url).toContain('to=2026-09-30')
+  })
+
+  it('labels each result with its category group: a search spans all of them', async () => {
+    const calls = stubFetch(url => url.includes('q=sloppy')
+      ? [{ id: 1, game_id: '6826657208', title: 'Sloppy', category_group: 'arcade' }]
+      : [{ id: 2, game_id: 'g2', title: 'Tile Hand', category_group: 'puzzle' }])
+    await open(calls)
+    expect(await screen.findByText('Tile Hand')).toBeTruthy()
+    // no search: the tab already says the group, no label on the row
+    expect(document.querySelector('.group-tag')).toBeNull()
+
+    await typeSearch('sloppy')
+    expect(await screen.findByText('Sloppy')).toBeTruthy()
+    const tag = document.querySelector('.group-tag')
+    expect(tag?.textContent).toBe('Arcade')
+  })
+
+  it('opens a result from another group with that group, so the panel finds its row', async () => {
+    const calls = stubFetch(url => url.includes('q=sloppy')
+      ? [{ id: 1, game_id: '6826657208', title: 'Sloppy', category_group: 'arcade' }]
+      : [])
+    await open(calls)
+    await typeSearch('sloppy')
+    fireEvent.click(await screen.findByText('Sloppy'))
+    const panel = await screen.findByTestId('eval-panel')
+    expect(panel.getAttribute('data-category')).toBe('arcade')
   })
 
   it('says the result count is a floor when the server capped it', async () => {

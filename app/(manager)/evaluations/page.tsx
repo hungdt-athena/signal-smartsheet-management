@@ -1328,7 +1328,7 @@ function conclusionBadge(c: string | null) {
 //
 // Now only the two rows whose `isActive` actually flipped re-render. `onOpen` is
 // kept stable by the parent (see openDetail) so this holds.
-const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen, term }: {
+const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen, term, showGroup }: {
   ev: Evaluation
   idx: number
   isActive: boolean
@@ -1337,6 +1337,8 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen,
   /** The live search term, '' when there is no search. A string keeps this row inside
    *  the memo: it only changes when the search does, and then the whole table redraws. */
   term: string
+  /** A search spans every category group, so each result says which one it is in. */
+  showGroup: boolean
 }) {
   const genres = [ev.genre_1, ev.genre_2].filter(Boolean) as string[]
   // The store id is not a column. When a search matched on it rather than on the title,
@@ -1354,10 +1356,15 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen,
         <td>
           <GameCell icon={ev.icon_url} os={ev.os} hideMark title={<Highlight text={ev.title} term={term} />}
             publisher={ev.publisher_name} releaseDate={ev.release_date} genres={genres}
-            extra={idMatched ? (
-              <span style={{ fontSize: 'var(--fs-11)', color: 'var(--faint)', fontFamily: 'var(--num)' }}>
-                <Highlight text={ev.game_id} term={term} />
-              </span>
+            extra={showGroup || idMatched ? (
+              <>
+                {showGroup && ev.category_group && <span className="badge neutral group-tag">{bucketLabel(ev.category_group)}</span>}
+                {idMatched && (
+                  <span style={{ fontSize: 'var(--fs-11)', color: 'var(--faint)', fontFamily: 'var(--num)' }}>
+                    <Highlight text={ev.game_id} term={term} />
+                  </span>
+                )}
+              </>
             ) : undefined} />
         </td>
         <td><StoresCell stores={storesOf(ev)} asLinks /></td>
@@ -1666,6 +1673,9 @@ function EvaluationsPageInner() {
     setActiveGameId(gameId)
   }, [])
 
+  // A search spans every group, so the open game's own group picks its row, not the tab's
+  // (the per-game read filters by category: an Arcade game asked for as Puzzle is a 404).
+  const detailCategory = data.find(d => d.game_id === detailGameId)?.category_group ?? category
   const handleNavigate = (gameId: string) => {
     setActiveGameId(gameId)
   }
@@ -1739,7 +1749,7 @@ function EvaluationsPageInner() {
             />
           )}
 
-          <SearchInput value={search} onChange={setSearch} placeholder="Search games" />
+          <SearchInput value={search} onChange={setSearch} placeholder="Search games (all groups)" />
 
           {/* A search overrides these, so they stop taking clicks while one is live --
               greyed out rather than hidden, so it is obvious they are coming back. */}
@@ -1837,7 +1847,7 @@ function EvaluationsPageInner() {
               )}
               {loading && data.length === 0 && <SkeletonRows widths={[20, 220, 50, 70, 70, 60, 150, 80, 120, 90, 50]} />}
               {!loadFailed && filtered.map((ev, idx) => (
-                <EvalRow key={ev.id} ev={ev} idx={idx} term={searchTerm}
+                <EvalRow key={ev.id} ev={ev} idx={idx} term={searchTerm} showGroup={searching}
                   isActive={ev.game_id === activeGameId}
                   activeRowRef={activeRowRef}
                   onOpen={openDetail} />
@@ -1871,7 +1881,7 @@ function EvaluationsPageInner() {
               logContext="evaluate"
               initialGameId={detailGameId}
               gameList={detailList}
-              category={category}
+              category={detailCategory}
               role={role}
               userName={userName}
               hideRecordSections={false}
