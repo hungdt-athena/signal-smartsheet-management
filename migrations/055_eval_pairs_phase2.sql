@@ -321,11 +321,13 @@ COMMIT;
 --   A  neither store judged. Front = release-first. holder_row = the row whose holder (+ its
 --      assign dates, batch, group) both rows take: an active holder (dashboard_users.active,
 --      matched on lower(name); a name with no user row counts as active) before an inactive
---      one, then the fewer pending games (initial_conclusion IS NULL, not a back row, same
---      initial_evaluator, at call time), then the earlier assigned_date, then the lower id.
+--      one, then (between active holders only) the fewer pending games (initial_conclusion IS
+--      NULL, not a back row, same initial_evaluator, at call time, counted across ALL category
+--      groups: the user's rule is "the person with fewer games", unlike Rescue's per-group
+--      count), then the earlier assigned_date, then the lower id.
 --      No active holder: the earlier assigned_date among the rows that have a holder, flagged
 --      both_holders_inactive (2 inactive holders) or no_active_holder (1 inactive, 1 empty).
---      Both empty: the front row, holder NULL.
+--      Both empty: holder NULL, holder_row = the front row (the back follows the front).
 --   B  one store judged. Front = release-first. holder_row = the judged row (its whole eval
 --      group goes to the waiting row), result = its verdict, final_from = it when it has a final.
 --   D  both judged, same result. Front = the store further down the pipeline, compared in
@@ -408,8 +410,10 @@ LANGUAGE sql STABLE AS $$
              CASE WHEN ev.n_rel = 2 THEN ev.rel END,
              CASE WHEN ev.n_fad = 2 THEN ev.first_assigned_date END,
              ev.id) AS pos,
+           -- the backlog compares active holders only: with no active holder, assigned_date decides
            row_number() OVER (ORDER BY (ev.h IS NOT NULL AND act.active) DESC, (ev.h IS NOT NULL) DESC,
-                              pend.n, ev.assigned_date NULLS LAST, ev.id) AS hpos
+                              CASE WHEN ev.h IS NOT NULL AND act.active THEN pend.n END NULLS LAST,
+                              ev.assigned_date NULLS LAST, ev.id) AS hpos
       FROM ev CROSS JOIN fam f
       LEFT JOIN LATERAL (SELECT COALESCE(bool_or(du.active), true) AS active
                            FROM dashboard_users du WHERE lower(du.name) = lower(ev.h)) act ON true
@@ -430,7 +434,7 @@ LANGUAGE sql STABLE AS $$
                      WHEN 'B' THEN CASE WHEN fr.c IS NOT NULL THEN fr.h ELSE bk.h END
                      WHEN 'G' THEN NULL
                      ELSE fr.h END)::text,
-         CASE f.grp WHEN 'A' THEN hr.id
+         CASE f.grp WHEN 'A' THEN CASE WHEN hr.h IS NULL THEN fr.id ELSE hr.id END
                     WHEN 'B' THEN CASE WHEN fr.c IS NOT NULL THEN fr.id ELSE bk.id END
                     WHEN 'D' THEN fr.id
                     WHEN 'E' THEN fr.id

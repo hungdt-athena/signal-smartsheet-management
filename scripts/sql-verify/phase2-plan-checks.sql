@@ -15,10 +15,15 @@ BEGIN
   -- P2pFree have no dashboard_users row, so they count as active.
   INSERT INTO dashboard_users (email, name, role, active) VALUES
     ('p2pgone@x', 'p2pgone', 'evaluator', false),
-    ('p2pgone2@x', 'P2pGone2', 'evaluator', false);
+    ('p2pgone2@x', 'P2pGone2', 'evaluator', false),
+    ('p2pold1@x', 'P2pOld1', 'evaluator', false), ('p2pold2@x', 'P2pOld2', 'evaluator', false);
   INSERT INTO game_info (game_id, os) VALUES ('p2p_busy1', 'android'), ('p2p_busy2', 'android'), ('p2p_busy3', 'android');
   INSERT INTO game_evaluations (game_id, category_group, initial_evaluator) VALUES
     ('p2p_busy1', 'puzzle', 'P2pBusy'), ('p2p_busy2', 'arcade', 'P2pBusy'), ('p2p_busy3', 'puzzle', 'P2pBusy');
+  -- deactivated P2pOld1 holds 2 more lone unjudged games, P2pOld2 none (A6)
+  INSERT INTO game_info (game_id, os) VALUES ('p2p_old1', 'android'), ('p2p_old2', 'android');
+  INSERT INTO game_evaluations (game_id, category_group, initial_evaluator) VALUES
+    ('p2p_old1', 'puzzle', 'P2pOld1'), ('p2p_old2', 'puzzle', 'P2pOld1');
   -- a judged game and a back row do not count as backlog
   INSERT INTO game_info (game_id, os) VALUES ('p2p_freedone', 'android');
   INSERT INTO game_evaluations (game_id, category_group, initial_evaluator, initial_conclusion)
@@ -33,6 +38,10 @@ BEGIN
     ('p2p_a3a', 'android', '2026-01-01', NULL, NULL, NULL), ('p2p_a3i', 'ios', '2026-02-01', NULL, NULL, NULL),
     -- A4: one deactivated holder, the other row unassigned
     ('p2p_a4a', 'android', '2026-01-01', NULL, NULL, NULL), ('p2p_a4i', 'ios', '2026-02-01', NULL, NULL, NULL),
+    -- A5: both unassigned, the front (earlier release) is the higher id
+    ('p2p_a5a', 'android', '2026-01-01', NULL, NULL, NULL), ('p2p_a5i', 'ios', '2026-02-01', NULL, NULL, NULL),
+    -- A6: both deactivated; the later assigned_date has the smaller backlog
+    ('p2p_a6a', 'android', '2026-01-01', NULL, NULL, NULL), ('p2p_a6i', 'ios', '2026-02-01', NULL, NULL, NULL),
     -- B: the judged row is the source; the front is the earlier release (the HIGHER id)
     ('p2p_bi', 'ios', '2026-01-20', NULL, NULL, NULL), ('p2p_ba', 'android', '2026-01-10', NULL, NULL, NULL),
     -- C: the Link_dead store (earlier release, lower id) is the back; the live one keeps its holder
@@ -75,6 +84,10 @@ BEGIN
     ('p2p_a3i', 'arcade', 'P2pGone2', '2026-03-01', '2026-03-01', NULL, NULL, NULL, NULL),
     ('p2p_a4a', 'puzzle', NULL,       NULL,         NULL,         NULL, NULL, NULL, NULL),
     ('p2p_a4i', 'puzzle', 'P2pGone2', '2026-03-01', '2026-03-01', NULL, NULL, NULL, NULL),
+    ('p2p_a5i', 'puzzle', NULL,       '2026-03-01', NULL,         NULL, NULL, NULL, NULL),
+    ('p2p_a5a', 'puzzle', NULL,       NULL,         NULL,         NULL, NULL, NULL, NULL),
+    ('p2p_a6a', 'puzzle', 'P2pOld1',  '2026-03-01', '2026-03-01', NULL, NULL, NULL, NULL),
+    ('p2p_a6i', 'puzzle', 'P2pOld2',  '2026-03-04', '2026-03-04', NULL, NULL, NULL, NULL),
     ('p2p_bi',  'puzzle', 'P2pJudge', '2026-03-01', '2026-03-01', 'Bypass', 'Bypass', NULL, NULL),
     ('p2p_ba',  'arcade', 'P2pWait',  '2026-03-02', '2026-03-02', NULL, NULL, NULL, NULL),
     ('p2p_ca',  'puzzle', 'P2pDead',  '2026-03-01', '2026-03-01', 'Link_dead', NULL, NULL, NULL),
@@ -112,7 +125,7 @@ BEGIN
     ('p2p_xea', 'puzzle', 'P2pX',     '2026-03-01', '2026-03-01', 'Bypass', NULL, NULL, NULL);
 
   UPDATE game_info SET family_id = 'fam.' || left(game_id, length(game_id) - 1)
-   WHERE game_id LIKE 'p2p\_%' AND game_id NOT LIKE 'p2p\_busy%' AND game_id <> 'p2p_freedone';
+   WHERE game_id LIKE 'p2p\_%' AND game_id NOT LIKE 'p2p\_busy%' AND game_id NOT LIKE 'p2p\_old%' AND game_id <> 'p2p_freedone';
   UPDATE game_info SET family_id = 'fam.p2p_x3' WHERE game_id = 'p2p_x3b';
   UPDATE game_info SET family_id = 'fam.p2p_xo' WHERE game_id = 'p2p_xob';
   UPDATE game_info SET family_unlinked = true WHERE game_id = 'p2p_xui';
@@ -166,6 +179,19 @@ BEGIN
   SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2p_a4');
   ASSERT r.grp = 'A' AND r.holder = 'P2pGone2' AND r.holder_row = (id_of ->> 'p2p_a4i:puzzle')::int
      AND r.flags = '{no_active_holder}', format('A4: %s', r);
+
+  -- A5: both unassigned: the holder row is the front (here the higher id, and the back row has
+  -- the earlier assigned_date), so the back follows the front's group
+  SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2p_a5');
+  ASSERT r.grp = 'A' AND r.front_id = (id_of ->> 'p2p_a5a:puzzle')::int AND r.front_id > r.back_id,
+    format('A5 front: %s', r);
+  ASSERT r.holder IS NULL AND r.holder_row = r.front_id AND r.flags = '{}', format('A5 holder row = front: %s', r);
+
+  -- A6: both deactivated: the earlier assigned_date wins although it has the bigger backlog
+  -- (P2pOld1 3 pending, P2pOld2 1)
+  SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2p_a6');
+  ASSERT r.grp = 'A' AND r.holder = 'P2pOld1' AND r.holder_row = (id_of ->> 'p2p_a6a:puzzle')::int
+     AND r.flags = '{both_holders_inactive}', format('A6 both inactive -> earlier assigned_date: %s', r);
 
   -- B: the judged row is the source of the eval group; the front is the earlier release
   SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2p_b');
@@ -260,14 +286,14 @@ DECLARE n_plan int; n_fam int; md_plan text; md_cls text;
 BEGIN
   SELECT count(*), md5(string_agg(p::text, ',' ORDER BY p.family_id)) INTO n_plan, md_plan
     FROM eval_pair_phase2_plan() p WHERE p.family_id LIKE 'fam.p2p\_%';
-  ASSERT n_plan = 17, format('plan lists the 17 present p2p families, got %s', n_plan);
+  ASSERT n_plan = 19, format('plan lists the 19 present p2p families, got %s', n_plan);
   SELECT md5(string_agg(c::text, ',' ORDER BY c.family_id)) INTO md_cls
     FROM (SELECT DISTINCT family_id FROM game_info WHERE family_id LIKE 'fam.p2p\_%') f,
          LATERAL eval_pair_phase2_classify(f.family_id) c;
   ASSERT md_plan = md_cls, 'plan = classify per family';
   ASSERT (SELECT string_agg(grp || count, ' ' ORDER BY grp)
             FROM (SELECT grp, count(*) FROM eval_pair_phase2_plan() WHERE family_id LIKE 'fam.p2p\_%' GROUP BY grp) g)
-       = 'A4 B1 C1 D6 E2 F1 G2', 'plan group counts';
+       = 'A6 B1 C1 D6 E2 F1 G2', 'plan group counts';
   -- one row per family over the whole DB
   SELECT count(*), count(DISTINCT family_id) INTO n_plan, n_fam FROM eval_pair_phase2_plan();
   ASSERT n_plan = n_fam, 'one row per family';
