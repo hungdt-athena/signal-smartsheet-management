@@ -34,12 +34,15 @@
 --                  come from the real row. A row without credit reads exactly as the table.
 --                  So credit must hold EVERY counted column of the back row, media included:
 --                  a counted column left out reads the pair's (copied) value and counts twice.
+--                  Built as two UNION ALL branches (credit IS NULL: the columns as they are;
+--                  credit IS NOT NULL: the overrides), so filters on the view still use the
+--                  table's indexes; idx_game_evaluations_credited finds the credited rows.
 --
 -- KEEP eval_stats_rows IN STEP WITH THE TABLE: it lists the columns of game_evaluations one
--- by one (an override per column cannot be written with *). A later migration that adds,
--- renames or drops a column of game_evaluations must change this view in the same migration
--- (a new column must be added at the end of the column list, before eval_row; CREATE OR
--- REPLACE VIEW only appends). scripts/sql-verify/phase2-schema.sql fails until it is.
+-- by one, in both branches (an override per column cannot be written with *). A later
+-- migration that adds, renames or drops a column of game_evaluations must change this view in
+-- the same migration (a new column goes at the end of the column list of BOTH branches, before
+-- eval_row; CREATE OR REPLACE VIEW only appends). scripts/sql-verify/phase2-schema.sql fails until it is.
 --
 -- updated_at: writing credit is an ordinary UPDATE, so game_evaluations_touch_updated()
 -- stamps updated_at. Whatever writes credit must keep updated_at itself (spec: phase 2 changes
@@ -71,13 +74,15 @@
 --    WHERE id IN (a, b) AND pair_back IS DISTINCT FROM (id <> front);
 -- END;
 -- $$;
+-- DROP INDEX IF EXISTS idx_game_evaluations_credited;
 -- DROP TABLE IF EXISTS eval_pair_merge_snapshots;
 -- ALTER TABLE game_evaluations DROP COLUMN IF EXISTS credit;
 -- COMMIT;
 -- END ROLLBACK
 
--- Two transactions: the first only adds the column, the table and its indexes (metadata
--- and an empty table, the lock on game_evaluations is held for milliseconds), the second
+-- Two transactions: the first adds the column, the table and its indexes (metadata, an
+-- empty table, and a partial index built in one pass over game_evaluations: its write lock
+-- is held for milliseconds), the second
 -- replaces the front-row rule and creates the view.
 BEGIN;
 
@@ -95,6 +100,8 @@ CREATE TABLE IF NOT EXISTS eval_pair_merge_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_eval_pair_merge_snapshots_run ON eval_pair_merge_snapshots (run_id);
 CREATE INDEX IF NOT EXISTS idx_eval_pair_merge_snapshots_eval ON eval_pair_merge_snapshots (game_evaluation_id);
+-- The credited rows, for eval_stats_rows' second branch (a few hundred rows at most).
+CREATE INDEX IF NOT EXISTS idx_game_evaluations_credited ON game_evaluations (id) WHERE credit IS NOT NULL;
 
 COMMIT;
 
@@ -125,108 +132,168 @@ END;
 $$;
 
 -- The rows the counting routes read (see the header): every row, credit applied, plus
--- eval_row / media_row. Columns in table order; a new game_evaluations column must be
--- added here in the same migration.
+-- eval_row / media_row. Two UNION ALL branches, so a filter on the view reaches the table's
+-- indexes: the rows without credit (nearly all) are the table columns as they are, and only
+-- the few credited rows (found by idx_game_evaluations_credited) carry the per-column
+-- overrides, which no index can see through. Columns in table order; a new
+-- game_evaluations column must be added to BOTH branches in the same migration.
 CREATE OR REPLACE VIEW eval_stats_rows AS
 SELECT
   ge.id,
   ge.game_id,
-  (CASE WHEN ge.credit IS NULL THEN ge.category_group WHEN (ge.credit -> '_moved') ? 'category_group' THEN NULL
+  ge.category_group,
+  ge.initial_evaluator,
+  ge.final_evaluator,
+  ge.assigned_date,
+  ge.initial_note,
+  ge.initial_conclusion,
+  ge.drive_link,
+  ge.youtube_link,
+  ge.imported_at,
+  ge.updated_at,
+  ge.genre_1,
+  ge.genre_2,
+  ge.evaluate_date,
+  ge.drive_date,
+  ge.record_assignee,
+  ge.record_assign_date,
+  ge.record_5min_assignee,
+  ge.record_5min_date,
+  ge.record_5min_drive,
+  ge.record_5min_drive_date,
+  ge.record_20min_assignee,
+  ge.record_20min_date,
+  ge.record_20min_drive,
+  ge.record_20min_drive_date,
+  ge.final_conclusion,
+  ge.batch,
+  ge.game_alike,
+  ge.final_note,
+  ge.record_confirmed_at,
+  ge.record_bucket,
+  ge.final_conclusion_date,
+  ge.updated_by,
+  ge.first_assigned_date,
+  ge.youtube_uploaded_at,
+  ge.initial_gameplay,
+  ge.initial_game_over,
+  ge.initial_level_complete,
+  ge.initial_self_note,
+  ge.record_5min_confirmed_at,
+  ge.record_20min_confirmed_at,
+  ge.youtube_5min_link,
+  ge.youtube_20min_link,
+  ge.youtube_5min_uploaded_at,
+  ge.youtube_20min_uploaded_at,
+  ge.record_5min_batch,
+  ge.record_20min_batch,
+  ge.pair_eval_id,
+  ge.pair_back,
+  ge.credit,
+  (NOT ge.pair_back OR eval_store_specific(ge.initial_conclusion)) AS eval_row,
+  (NOT ge.pair_back) AS media_row
+FROM game_evaluations ge
+WHERE ge.credit IS NULL
+UNION ALL
+SELECT
+  ge.id,
+  ge.game_id,
+  (CASE WHEN (ge.credit -> '_moved') ? 'category_group' THEN NULL
         WHEN ge.credit ? 'category_group' THEN (ge.credit ->> 'category_group')::character varying(20) ELSE ge.category_group END)::character varying(20) AS category_group,
-  (CASE WHEN ge.credit IS NULL THEN ge.initial_evaluator WHEN (ge.credit -> '_moved') ? 'initial_evaluator' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'initial_evaluator' THEN NULL
         WHEN ge.credit ? 'initial_evaluator' THEN (ge.credit ->> 'initial_evaluator')::character varying(100) ELSE ge.initial_evaluator END)::character varying(100) AS initial_evaluator,
-  (CASE WHEN ge.credit IS NULL THEN ge.final_evaluator WHEN (ge.credit -> '_moved') ? 'final_evaluator' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'final_evaluator' THEN NULL
         WHEN ge.credit ? 'final_evaluator' THEN (ge.credit ->> 'final_evaluator')::character varying(100) ELSE ge.final_evaluator END)::character varying(100) AS final_evaluator,
-  (CASE WHEN ge.credit IS NULL THEN ge.assigned_date WHEN (ge.credit -> '_moved') ? 'assigned_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'assigned_date' THEN NULL
         WHEN ge.credit ? 'assigned_date' THEN (ge.credit ->> 'assigned_date')::date ELSE ge.assigned_date END)::date AS assigned_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.initial_note WHEN (ge.credit -> '_moved') ? 'initial_note' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'initial_note' THEN NULL
         WHEN ge.credit ? 'initial_note' THEN (ge.credit ->> 'initial_note')::text ELSE ge.initial_note END)::text AS initial_note,
-  (CASE WHEN ge.credit IS NULL THEN ge.initial_conclusion WHEN (ge.credit -> '_moved') ? 'initial_conclusion' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'initial_conclusion' THEN NULL
         WHEN ge.credit ? 'initial_conclusion' THEN (ge.credit ->> 'initial_conclusion')::character varying(50) ELSE ge.initial_conclusion END)::character varying(50) AS initial_conclusion,
-  (CASE WHEN ge.credit IS NULL THEN ge.drive_link WHEN (ge.credit -> '_moved') ? 'drive_link' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'drive_link' THEN NULL
         WHEN ge.credit ? 'drive_link' THEN (ge.credit ->> 'drive_link')::text ELSE ge.drive_link END)::text AS drive_link,
-  (CASE WHEN ge.credit IS NULL THEN ge.youtube_link WHEN (ge.credit -> '_moved') ? 'youtube_link' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'youtube_link' THEN NULL
         WHEN ge.credit ? 'youtube_link' THEN (ge.credit ->> 'youtube_link')::text ELSE ge.youtube_link END)::text AS youtube_link,
   ge.imported_at,
   ge.updated_at,
-  (CASE WHEN ge.credit IS NULL THEN ge.genre_1 WHEN (ge.credit -> '_moved') ? 'genre_1' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'genre_1' THEN NULL
         WHEN ge.credit ? 'genre_1' THEN (ge.credit ->> 'genre_1')::character varying(50) ELSE ge.genre_1 END)::character varying(50) AS genre_1,
-  (CASE WHEN ge.credit IS NULL THEN ge.genre_2 WHEN (ge.credit -> '_moved') ? 'genre_2' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'genre_2' THEN NULL
         WHEN ge.credit ? 'genre_2' THEN (ge.credit ->> 'genre_2')::character varying(50) ELSE ge.genre_2 END)::character varying(50) AS genre_2,
-  (CASE WHEN ge.credit IS NULL THEN ge.evaluate_date WHEN (ge.credit -> '_moved') ? 'evaluate_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'evaluate_date' THEN NULL
         WHEN ge.credit ? 'evaluate_date' THEN (ge.credit ->> 'evaluate_date')::timestamp with time zone ELSE ge.evaluate_date END)::timestamp with time zone AS evaluate_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.drive_date WHEN (ge.credit -> '_moved') ? 'drive_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'drive_date' THEN NULL
         WHEN ge.credit ? 'drive_date' THEN (ge.credit ->> 'drive_date')::timestamp with time zone ELSE ge.drive_date END)::timestamp with time zone AS drive_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_assignee WHEN (ge.credit -> '_moved') ? 'record_assignee' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_assignee' THEN NULL
         WHEN ge.credit ? 'record_assignee' THEN (ge.credit ->> 'record_assignee')::character varying(100) ELSE ge.record_assignee END)::character varying(100) AS record_assignee,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_assign_date WHEN (ge.credit -> '_moved') ? 'record_assign_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_assign_date' THEN NULL
         WHEN ge.credit ? 'record_assign_date' THEN (ge.credit ->> 'record_assign_date')::timestamp with time zone ELSE ge.record_assign_date END)::timestamp with time zone AS record_assign_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_5min_assignee WHEN (ge.credit -> '_moved') ? 'record_5min_assignee' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_5min_assignee' THEN NULL
         WHEN ge.credit ? 'record_5min_assignee' THEN (ge.credit ->> 'record_5min_assignee')::character varying(100) ELSE ge.record_5min_assignee END)::character varying(100) AS record_5min_assignee,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_5min_date WHEN (ge.credit -> '_moved') ? 'record_5min_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_5min_date' THEN NULL
         WHEN ge.credit ? 'record_5min_date' THEN (ge.credit ->> 'record_5min_date')::timestamp with time zone ELSE ge.record_5min_date END)::timestamp with time zone AS record_5min_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_5min_drive WHEN (ge.credit -> '_moved') ? 'record_5min_drive' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_5min_drive' THEN NULL
         WHEN ge.credit ? 'record_5min_drive' THEN (ge.credit ->> 'record_5min_drive')::text ELSE ge.record_5min_drive END)::text AS record_5min_drive,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_5min_drive_date WHEN (ge.credit -> '_moved') ? 'record_5min_drive_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_5min_drive_date' THEN NULL
         WHEN ge.credit ? 'record_5min_drive_date' THEN (ge.credit ->> 'record_5min_drive_date')::timestamp with time zone ELSE ge.record_5min_drive_date END)::timestamp with time zone AS record_5min_drive_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_20min_assignee WHEN (ge.credit -> '_moved') ? 'record_20min_assignee' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_20min_assignee' THEN NULL
         WHEN ge.credit ? 'record_20min_assignee' THEN (ge.credit ->> 'record_20min_assignee')::character varying(100) ELSE ge.record_20min_assignee END)::character varying(100) AS record_20min_assignee,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_20min_date WHEN (ge.credit -> '_moved') ? 'record_20min_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_20min_date' THEN NULL
         WHEN ge.credit ? 'record_20min_date' THEN (ge.credit ->> 'record_20min_date')::timestamp with time zone ELSE ge.record_20min_date END)::timestamp with time zone AS record_20min_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_20min_drive WHEN (ge.credit -> '_moved') ? 'record_20min_drive' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_20min_drive' THEN NULL
         WHEN ge.credit ? 'record_20min_drive' THEN (ge.credit ->> 'record_20min_drive')::text ELSE ge.record_20min_drive END)::text AS record_20min_drive,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_20min_drive_date WHEN (ge.credit -> '_moved') ? 'record_20min_drive_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_20min_drive_date' THEN NULL
         WHEN ge.credit ? 'record_20min_drive_date' THEN (ge.credit ->> 'record_20min_drive_date')::timestamp with time zone ELSE ge.record_20min_drive_date END)::timestamp with time zone AS record_20min_drive_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.final_conclusion WHEN (ge.credit -> '_moved') ? 'final_conclusion' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'final_conclusion' THEN NULL
         WHEN ge.credit ? 'final_conclusion' THEN (ge.credit ->> 'final_conclusion')::character varying(50) ELSE ge.final_conclusion END)::character varying(50) AS final_conclusion,
-  (CASE WHEN ge.credit IS NULL THEN ge.batch WHEN (ge.credit -> '_moved') ? 'batch' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'batch' THEN NULL
         WHEN ge.credit ? 'batch' THEN (ge.credit ->> 'batch')::character varying(40) ELSE ge.batch END)::character varying(40) AS batch,
-  (CASE WHEN ge.credit IS NULL THEN ge.game_alike WHEN (ge.credit -> '_moved') ? 'game_alike' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'game_alike' THEN NULL
         WHEN ge.credit ? 'game_alike' THEN (ge.credit ->> 'game_alike')::jsonb ELSE ge.game_alike END)::jsonb AS game_alike,
-  (CASE WHEN ge.credit IS NULL THEN ge.final_note WHEN (ge.credit -> '_moved') ? 'final_note' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'final_note' THEN NULL
         WHEN ge.credit ? 'final_note' THEN (ge.credit ->> 'final_note')::text ELSE ge.final_note END)::text AS final_note,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_confirmed_at WHEN (ge.credit -> '_moved') ? 'record_confirmed_at' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_confirmed_at' THEN NULL
         WHEN ge.credit ? 'record_confirmed_at' THEN (ge.credit ->> 'record_confirmed_at')::timestamp with time zone ELSE ge.record_confirmed_at END)::timestamp with time zone AS record_confirmed_at,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_bucket WHEN (ge.credit -> '_moved') ? 'record_bucket' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_bucket' THEN NULL
         WHEN ge.credit ? 'record_bucket' THEN (ge.credit ->> 'record_bucket')::text ELSE ge.record_bucket END)::text AS record_bucket,
-  (CASE WHEN ge.credit IS NULL THEN ge.final_conclusion_date WHEN (ge.credit -> '_moved') ? 'final_conclusion_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'final_conclusion_date' THEN NULL
         WHEN ge.credit ? 'final_conclusion_date' THEN (ge.credit ->> 'final_conclusion_date')::timestamp with time zone ELSE ge.final_conclusion_date END)::timestamp with time zone AS final_conclusion_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.updated_by WHEN (ge.credit -> '_moved') ? 'updated_by' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'updated_by' THEN NULL
         WHEN ge.credit ? 'updated_by' THEN (ge.credit ->> 'updated_by')::text ELSE ge.updated_by END)::text AS updated_by,
-  (CASE WHEN ge.credit IS NULL THEN ge.first_assigned_date WHEN (ge.credit -> '_moved') ? 'first_assigned_date' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'first_assigned_date' THEN NULL
         WHEN ge.credit ? 'first_assigned_date' THEN (ge.credit ->> 'first_assigned_date')::date ELSE ge.first_assigned_date END)::date AS first_assigned_date,
-  (CASE WHEN ge.credit IS NULL THEN ge.youtube_uploaded_at WHEN (ge.credit -> '_moved') ? 'youtube_uploaded_at' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'youtube_uploaded_at' THEN NULL
         WHEN ge.credit ? 'youtube_uploaded_at' THEN (ge.credit ->> 'youtube_uploaded_at')::timestamp with time zone ELSE ge.youtube_uploaded_at END)::timestamp with time zone AS youtube_uploaded_at,
-  (CASE WHEN ge.credit IS NULL THEN ge.initial_gameplay WHEN (ge.credit -> '_moved') ? 'initial_gameplay' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'initial_gameplay' THEN NULL
         WHEN ge.credit ? 'initial_gameplay' THEN (ge.credit ->> 'initial_gameplay')::text ELSE ge.initial_gameplay END)::text AS initial_gameplay,
-  (CASE WHEN ge.credit IS NULL THEN ge.initial_game_over WHEN (ge.credit -> '_moved') ? 'initial_game_over' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'initial_game_over' THEN NULL
         WHEN ge.credit ? 'initial_game_over' THEN (ge.credit ->> 'initial_game_over')::text ELSE ge.initial_game_over END)::text AS initial_game_over,
-  (CASE WHEN ge.credit IS NULL THEN ge.initial_level_complete WHEN (ge.credit -> '_moved') ? 'initial_level_complete' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'initial_level_complete' THEN NULL
         WHEN ge.credit ? 'initial_level_complete' THEN (ge.credit ->> 'initial_level_complete')::text ELSE ge.initial_level_complete END)::text AS initial_level_complete,
-  (CASE WHEN ge.credit IS NULL THEN ge.initial_self_note WHEN (ge.credit -> '_moved') ? 'initial_self_note' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'initial_self_note' THEN NULL
         WHEN ge.credit ? 'initial_self_note' THEN (ge.credit ->> 'initial_self_note')::text ELSE ge.initial_self_note END)::text AS initial_self_note,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_5min_confirmed_at WHEN (ge.credit -> '_moved') ? 'record_5min_confirmed_at' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_5min_confirmed_at' THEN NULL
         WHEN ge.credit ? 'record_5min_confirmed_at' THEN (ge.credit ->> 'record_5min_confirmed_at')::timestamp with time zone ELSE ge.record_5min_confirmed_at END)::timestamp with time zone AS record_5min_confirmed_at,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_20min_confirmed_at WHEN (ge.credit -> '_moved') ? 'record_20min_confirmed_at' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_20min_confirmed_at' THEN NULL
         WHEN ge.credit ? 'record_20min_confirmed_at' THEN (ge.credit ->> 'record_20min_confirmed_at')::timestamp with time zone ELSE ge.record_20min_confirmed_at END)::timestamp with time zone AS record_20min_confirmed_at,
-  (CASE WHEN ge.credit IS NULL THEN ge.youtube_5min_link WHEN (ge.credit -> '_moved') ? 'youtube_5min_link' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'youtube_5min_link' THEN NULL
         WHEN ge.credit ? 'youtube_5min_link' THEN (ge.credit ->> 'youtube_5min_link')::text ELSE ge.youtube_5min_link END)::text AS youtube_5min_link,
-  (CASE WHEN ge.credit IS NULL THEN ge.youtube_20min_link WHEN (ge.credit -> '_moved') ? 'youtube_20min_link' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'youtube_20min_link' THEN NULL
         WHEN ge.credit ? 'youtube_20min_link' THEN (ge.credit ->> 'youtube_20min_link')::text ELSE ge.youtube_20min_link END)::text AS youtube_20min_link,
-  (CASE WHEN ge.credit IS NULL THEN ge.youtube_5min_uploaded_at WHEN (ge.credit -> '_moved') ? 'youtube_5min_uploaded_at' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'youtube_5min_uploaded_at' THEN NULL
         WHEN ge.credit ? 'youtube_5min_uploaded_at' THEN (ge.credit ->> 'youtube_5min_uploaded_at')::timestamp with time zone ELSE ge.youtube_5min_uploaded_at END)::timestamp with time zone AS youtube_5min_uploaded_at,
-  (CASE WHEN ge.credit IS NULL THEN ge.youtube_20min_uploaded_at WHEN (ge.credit -> '_moved') ? 'youtube_20min_uploaded_at' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'youtube_20min_uploaded_at' THEN NULL
         WHEN ge.credit ? 'youtube_20min_uploaded_at' THEN (ge.credit ->> 'youtube_20min_uploaded_at')::timestamp with time zone ELSE ge.youtube_20min_uploaded_at END)::timestamp with time zone AS youtube_20min_uploaded_at,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_5min_batch WHEN (ge.credit -> '_moved') ? 'record_5min_batch' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_5min_batch' THEN NULL
         WHEN ge.credit ? 'record_5min_batch' THEN (ge.credit ->> 'record_5min_batch')::text ELSE ge.record_5min_batch END)::text AS record_5min_batch,
-  (CASE WHEN ge.credit IS NULL THEN ge.record_20min_batch WHEN (ge.credit -> '_moved') ? 'record_20min_batch' THEN NULL
+  (CASE WHEN (ge.credit -> '_moved') ? 'record_20min_batch' THEN NULL
         WHEN ge.credit ? 'record_20min_batch' THEN (ge.credit ->> 'record_20min_batch')::text ELSE ge.record_20min_batch END)::text AS record_20min_batch,
   ge.pair_eval_id,
   ge.pair_back,
-
   ge.credit,
-  (NOT ge.pair_back OR eval_store_specific(ge.initial_conclusion) OR ge.credit IS NOT NULL) AS eval_row,
-  (NOT ge.pair_back OR ge.credit IS NOT NULL) AS media_row
-FROM game_evaluations ge;
+  true AS eval_row,
+  true AS media_row
+FROM game_evaluations ge
+WHERE ge.credit IS NOT NULL;
 
 COMMIT;

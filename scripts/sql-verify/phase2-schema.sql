@@ -208,3 +208,27 @@ BEGIN
   PERFORM eval_pair_refresh_back(lo, (SELECT id FROM game_evaluations WHERE game_id = 'p2s_ga'));
   ASSERT (SELECT pair_back FROM game_evaluations WHERE id = lo), 'refresh of a non-pair changes nothing';
 END $$;
+
+-- ===== stats_rows_use_indexes: a filter on the view reaches the table's indexes =====
+-- The rows without credit are the table columns as they are (first UNION ALL branch), so
+-- the counting routes' filters on evaluate_date / initial_evaluator still use the indexes;
+-- the credited rows come from idx_game_evaluations_credited. enable_seqscan off stands in
+-- for a full-size table (the throwaway one is small enough that a seq scan always wins).
+DO $$
+DECLARE pl text;
+BEGIN
+  ASSERT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'game_evaluations'
+                   AND indexname = 'idx_game_evaluations_credited'
+                   AND indexdef ILIKE '%USING btree (id) WHERE (credit IS NOT NULL)'), 'partial index on credited rows';
+  PERFORM set_config('enable_seqscan', 'off', true);
+  EXECUTE 'EXPLAIN (FORMAT JSON) SELECT count(*) FROM eval_stats_rows WHERE evaluate_date >= ''2026-11-01''' INTO pl;
+  ASSERT pl LIKE '%"Index Name": "idx_ge_evaluate_date"%', format('evaluate_date filter uses idx_ge_evaluate_date: %s', pl);
+  ASSERT pl LIKE '%"Index Name": "idx_game_evaluations_credited"%', format('credited rows by their index: %s', pl);
+  EXECUTE 'EXPLAIN (FORMAT JSON) SELECT count(*) FROM eval_stats_rows WHERE initial_evaluator = ''ThuDT''' INTO pl;
+  ASSERT pl LIKE '%"Index Name": "idx_game_evaluations_initial_evaluator"%',
+    format('initial_evaluator filter uses idx_game_evaluations_initial_evaluator: %s', pl);
+  -- the same answers as without the indexes
+  ASSERT (SELECT count(*) FROM eval_stats_rows WHERE initial_evaluator = 'HaNP')
+       = (SELECT count(*) FROM game_evaluations WHERE COALESCE(credit ->> 'initial_evaluator', initial_evaluator) = 'HaNP'),
+    'credited evaluator counted through the view';
+END $$;
