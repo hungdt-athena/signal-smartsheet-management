@@ -828,6 +828,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
 .hx-chg .lbl { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
 .hx-chg .name { color: var(--text); font-weight: 500; }
 .hx-note { margin-top: 3px; font-size: 12px; color: var(--faint); }
+.hx-oldnote { margin-top: 3px; font-size: 12px; color: var(--faint); }
+.hx-oldnote summary { cursor: pointer; }
+.hx-oldnote .hx-note { white-space: pre-wrap; }
 .hx-time { text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.45; }
 .hx-dur { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; padding: 1px 7px; border-radius: 999px;
   background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 600; }

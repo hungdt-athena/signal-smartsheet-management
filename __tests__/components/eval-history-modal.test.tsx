@@ -134,6 +134,15 @@ describe('EvalHistoryModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(onRetry).toHaveBeenCalledTimes(1)
   })
+  it('shows the old note of a merge collapsed under "Old note"', () => {
+    const merge: HistoryEvent = { key: 'log-m', at: '2026-10-11T07:32:00.000Z', who: 'System', type: 'seed', verb: 'merged iOS into the pair',
+      changes: [], time: null, seconds: null, note: 'was Bypass by HaNP', stores: ['ios'], oldNote: 'old text here' }
+    view({ events: [merge] })
+    const d = document.querySelector('details.hx-oldnote') as HTMLDetailsElement
+    expect(d.open).toBe(false)
+    expect(d.querySelector('summary')?.textContent).toBe('Old note')
+    expect(d.textContent).toContain('old text here')
+  })
   it('closes on the backdrop and the ✕, not on a click inside', () => {
     const onClose = jest.fn()
     view({ onClose })

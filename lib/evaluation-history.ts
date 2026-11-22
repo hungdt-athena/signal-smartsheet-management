@@ -30,6 +30,7 @@ export interface LogRow {
   os?: StoreOs | null // store of the game_info row the log row belongs to
   pair_scope?: 'pair' | 'store' | null // NULL reads as 'store'
   other_game_id?: string | null // the pair's other game_id (pair_link note)
+  old_note?: string | null // pair_merge: initial_note the row had before the merge (from its snapshot)
 }
 
 export interface AssignRow {
@@ -71,6 +72,7 @@ export interface HistoryEvent {
   time: string | null // panel time of this save, e.g. "12m"
   seconds: number | null
   note: string | null
+  oldNote?: string | null // pair_merge only: the note the store had before it was merged
   stores: StoreOs[] // both stores for an event of the whole pair, else the one store it touched
 }
 
@@ -185,6 +187,19 @@ function fromLogEvent(r: LogRow): Draft {
     if (r.owner_after != null && r.owner !== r.owner_after) changes.push({ kind: 'person', label: 'Evaluator', from: r.owner, to: r.owner_after })
     const note = r.other_game_id ? `${label} ${r.game_id} joined ${r.other_game_id}` : `${label} ${r.game_id} joined the pair`
     return { ...base, who: dash(r.actor), type: 'seed', verb: `linked ${label} to the pair`, changes, note, stores: oneStore(r.os) }
+  }
+
+  // Phase 2 merged a store's values into the pair's.
+  if (r.kind === 'pair_merge') {
+    const changes: Change[] = []
+    if (r.owner_after != null && r.owner !== r.owner_after) changes.push({ kind: 'person', label: 'Evaluator', from: r.owner, to: r.owner_after })
+    if (r.conclusion_before !== r.conclusion_after) changes.push({ kind: 'initial', from: r.conclusion_before, to: r.conclusion_after })
+    if (r.final_before !== r.final_after) changes.push({ kind: 'final', from: r.final_before, to: r.final_after })
+    if (r.batch_before !== r.batch_after) changes.push({ kind: 'batch', from: r.batch_before, to: r.batch_after })
+    const note = r.conclusion_before && r.owner ? `was ${r.conclusion_before} by ${r.owner}`
+      : r.conclusion_before ? `was ${r.conclusion_before}` : null
+    const old = r.old_note?.trim() ? r.old_note : null
+    return { ...base, who: dash(r.actor), type: 'seed', verb: `merged ${storeLabel(r.os)} into the pair`, changes, note, stores: oneStore(r.os), ...(old ? { oldNote: old } : {}) }
   }
 
   if (r.kind === 'record_add' || r.kind === 'record_assign' || r.kind === 'record_move' || r.kind === 'record_remove') {

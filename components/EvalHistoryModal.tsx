@@ -68,6 +68,12 @@ function Row({ e, last }: { e: HistoryEvent; last: boolean }) {
         </div>
         {e.changes.map((c, i) => <ChangeLine key={i} c={c} />)}
         {e.note && <div className="hx-note">{e.note}</div>}
+        {e.oldNote && (
+          <details className="hx-oldnote">
+            <summary>Old note</summary>
+            <div className="hx-note">{e.oldNote}</div>
+          </details>
+        )}
       </div>
       <div className="hx-time">
         {fmtClock(e.at)}

@@ -39,7 +39,12 @@ export async function GET(
                l.changed, l.view_s, l.confidence, l.batch_before, l.batch_after, l.demo_added,
                l.bucket_before, l.bucket_after, l.recorder_before, l.recorder_after, l.owner_after,
                l.game_id, l.pair_scope, gi.os,
-               (SELECT i.game_id FROM ids i WHERE i.game_id <> l.game_id LIMIT 1) AS other_game_id
+               (SELECT i.game_id FROM ids i WHERE i.game_id <> l.game_id LIMIT 1) AS other_game_id,
+               CASE WHEN l.kind = 'pair_merge' THEN
+                 (SELECT s.row_before ->> 'initial_note' FROM eval_pair_merge_snapshots s
+                   WHERE s.run_id = l.context AND s.game_evaluation_id = l.game_evaluation_id
+                   ORDER BY s.id LIMIT 1)
+               END AS old_note
         FROM evaluation_log l
         LEFT JOIN game_info gi ON gi.game_id = l.game_id
         WHERE l.game_id IN (SELECT game_id FROM ids)

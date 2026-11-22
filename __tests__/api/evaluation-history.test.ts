@@ -71,6 +71,16 @@ describe('GET /api/evaluations/[gameId]/history', () => {
     expect(asgCall.text).toMatch(/LIMIT 100/)
   })
 
+  it('reads the old note of a pair_merge in the same query and passes it through', async () => {
+    logRows = [{ ...LOG, kind: 'pair_merge', actor: 'System', game_id: 'com.foo', os: 'ios', pair_scope: 'store', owner: 'HaNP', conclusion_before: 'Bypass', old_note: 'old text' }]
+    const body = await (await get('com.foo')).json()
+    expect(body.events[0]).toMatchObject({ verb: 'merged iOS into the pair', note: 'was Bypass by HaNP', oldNote: 'old text' })
+    const logCalls = calls.filter(c => /FROM evaluation_log/.test(c.text))
+    expect(logCalls).toHaveLength(1)
+    expect(logCalls[0].text).toMatch(/eval_pair_merge_snapshots/)
+    expect(logCalls[0].text).toMatch(/initial_note/)
+  })
+
   it('passes a batch change through as a Batch line', async () => {
     logRows = [{ ...LOG, kind: 'revise', changed: false, conclusion_before: 'Bypass', conclusion_after: 'Bypass', batch_before: 'W1 Oct, 2026', batch_after: 'W2 Oct, 2026' }]
     const body = await (await get('com.foo')).json()

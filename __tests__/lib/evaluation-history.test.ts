@@ -363,6 +363,27 @@ describe('pair history', () => {
     expect(fromLog(log({ kind: 'revise', conclusion_before: 'Link_dead', conclusion_after: 'Bypass' })).verb).toBe('reopened the game')
   })
 
+  it('pair_merge: "merged iOS into the pair", was-note, one store, old note, change chips', () => {
+    const e = fromLog(log({
+      kind: 'pair_merge', actor: 'System', source: 'other', game_id: '111', os: 'ios', pair_scope: 'store',
+      owner: 'HaNP', owner_after: 'Alice', conclusion_before: 'Bypass', conclusion_after: 'Insight', changed: true,
+      final_before: null, final_after: 'Insight', old_note: 'looks fine',
+    }))
+    expect(e).toMatchObject({ who: 'System', verb: 'merged iOS into the pair', note: 'was Bypass by HaNP', stores: ['ios'], oldNote: 'looks fine' })
+    expect(e.changes).toEqual([
+      { kind: 'person', label: 'Evaluator', from: 'HaNP', to: 'Alice' },
+      { kind: 'initial', from: 'Bypass', to: 'Insight' },
+      { kind: 'final', from: null, to: 'Insight' },
+    ])
+  })
+  it('pair_merge without an old note (snapshot gone or note empty) has no oldNote', () => {
+    for (const old_note of [null, undefined, '  ']) {
+      const e = fromLog(log({ kind: 'pair_merge', os: 'android', pair_scope: 'store', owner: 'HaNP', conclusion_before: 'Bypass', old_note }))
+      expect(e.verb).toBe('merged Android into the pair')
+      expect(e.oldNote ?? null).toBeNull()
+    }
+  })
+
   it('pair_unlink is a seed event for the one store that was unlinked', () => {
     const e = fromLog(log({ kind: 'pair_unlink', actor: 'System', game_id: 'com.x', os: 'android', pair_scope: 'store', changed: false, view_s: null }))
     expect(e).toMatchObject({ type: 'seed', who: 'System', verb: 'unlinked Android from the pair', changes: [], stores: ['android'] })
