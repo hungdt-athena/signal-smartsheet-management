@@ -346,6 +346,23 @@ describe('pair history', () => {
     })
   })
 
+  it('a store marked Link dead says so, naming the store', () => {
+    const e = fromLog(log({ kind: 'revise', pair_scope: 'store', os: 'ios', conclusion_before: 'List_Idea', conclusion_after: 'Link_dead' }))
+    expect(e.verb).toBe('marked iOS Link dead')
+    expect(e.changes).toEqual([{ kind: 'initial', from: 'List_Idea', to: 'Link_dead' }])
+  })
+
+  it('a store taken off Link dead is "reopened", naming the store', () => {
+    const e = fromLog(log({ kind: 'revise', pair_scope: 'store', os: 'ios', conclusion_before: 'Link_dead', conclusion_after: 'List_Idea' }))
+    expect(e.verb).toBe('reopened iOS')
+    expect(e.changes).toEqual([{ kind: 'initial', from: 'Link_dead', to: 'List_Idea' }])
+  })
+
+  it('a single game going in or out of Link dead says "the game"', () => {
+    expect(fromLog(log({ kind: 'revise', conclusion_before: 'Bypass', conclusion_after: 'Link_dead' })).verb).toBe('marked the game Link dead')
+    expect(fromLog(log({ kind: 'revise', conclusion_before: 'Link_dead', conclusion_after: 'Bypass' })).verb).toBe('reopened the game')
+  })
+
   it('pair_unlink is a seed event for the one store that was unlinked', () => {
     const e = fromLog(log({ kind: 'pair_unlink', actor: 'System', game_id: 'com.x', os: 'android', pair_scope: 'store', changed: false, view_s: null }))
     expect(e).toMatchObject({ type: 'seed', who: 'System', verb: 'unlinked Android from the pair', changes: [], stores: ['android'] })

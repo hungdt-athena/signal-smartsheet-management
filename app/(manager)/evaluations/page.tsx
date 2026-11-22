@@ -1218,8 +1218,9 @@ function ShortListEvalTab() {
                         )}
                         {(item.publisher_name || item.release_date) && (
                           <div className="slg-meta" title={[item.publisher_name, item.release_date ? fmtDateVN(item.release_date) : null].filter(Boolean).join(' · ')}>
+                            {/* Date first: a long publisher is cut with "..." at the line's end, never leaving a gap before the date. */}
+                            {item.release_date && <span className="slg-date" style={item.publisher_name ? undefined : { marginRight: 0 }}>{fmtDateVN(item.release_date)}{item.publisher_name ? ' ·' : ''}</span>}
                             {item.publisher_name && <span className="slg-pub">{item.publisher_name}</span>}
-                            {item.release_date && <span className="slg-date" style={item.publisher_name ? undefined : { marginLeft: 0 }}>{item.publisher_name ? '· ' : ''}{fmtDateVN(item.release_date)}</span>}
                           </div>
                         )}
                       </div>

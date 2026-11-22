@@ -159,6 +159,14 @@ function verdictChange(r: LogRow): Change {
   return { kind: 'initial', from: arrow ? r.conclusion_before : null, to: r.conclusion_after }
 }
 
+/** Going into or out of Link_dead reads as an action on the store (or the game), not a verdict change. */
+function deadVerb(r: LogRow): string | null {
+  const target = r.pair_scope === 'store' && r.os ? STORE_LABEL[r.os] : 'the game'
+  if (r.conclusion_after === 'Link_dead') return `marked ${target} Link dead`
+  if (r.conclusion_before === 'Link_dead' && r.conclusion_after != null) return `reopened ${target}`
+  return null
+}
+
 export function fromLog(r: LogRow): HistoryEvent {
   const ev = fromLogEvent(r)
   return { ...ev, stores: ev.stores ?? (r.pair_scope === 'pair' ? BOTH_STORES : oneStore(r.os)) }
@@ -232,7 +240,7 @@ function fromLogEvent(r: LogRow): Draft {
         verb = 'changed the batch'
         changes = []
       } else {
-        verb = r.changed ? 'changed the verdict' : 'edited the evaluation'
+        verb = r.changed ? deadVerb(r) ?? 'changed the verdict' : 'edited the evaluation'
         changes = [verdictChange(r)]
       }
       break

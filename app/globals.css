@@ -3272,7 +3272,7 @@ a.store-ico:hover { border-color: var(--accent-border); background: var(--accent
 .slg-title .cell-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.3; }
 .slg-meta { display: flex; min-width: 0; font-size: var(--fs-12); color: var(--muted); margin-top: 2px; white-space: nowrap; }
 .slg-pub { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.slg-date { flex-shrink: 0; margin-left: 4px; }
+.slg-date { flex-shrink: 0; margin-right: 4px; }
 .slg-chips { display: flex; gap: 4px; margin-top: 3px; }
 .slg-chips .badge { padding: 1px 6px; }
 

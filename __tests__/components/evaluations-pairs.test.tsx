@@ -146,8 +146,11 @@ describe('Short List tab: pairs and compact game cell', () => {
     expect(within(chips).getByText('KhangNA')).toBeTruthy()
     const meta = text.children[2] as HTMLElement
     expect(meta.className).toContain('slg-meta')
-    expect(meta.querySelector('.slg-pub')?.textContent).toBe('Very Long Publisher Name Studio')
-    expect(meta.querySelector('.slg-date')?.textContent).toBe('· 05/10/26')
+    // date first, publisher last: the publisher's "..." ends the line, no gap before the date
+    expect(meta.children[0].className).toBe('slg-date')
+    expect(meta.children[0].textContent).toBe('05/10/26 ·')
+    expect(meta.children[1].className).toBe('slg-pub')
+    expect(meta.children[1].textContent).toBe('Very Long Publisher Name Studio')
     // the copy button is inside .slg (absolutely positioned by .slg .cell-copy)
     expect(slg.querySelector('.cell-copy')).toBeTruthy()
     // legacy row without stores still gets one icon
