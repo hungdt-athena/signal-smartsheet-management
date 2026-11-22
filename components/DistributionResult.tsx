@@ -14,8 +14,9 @@ export interface DistResult {
   unassignable?: number
   assigned?: number // present after a commit
   per_evaluator: Record<string, number>
-  per_evaluator_platform?: Record<string, { ios: number; android: number; other: number }>
-  by_platform?: { ios: number; android: number; other: number }
+  // pair = a linked pair, one game for both stores (absent on runs stored before pairs)
+  per_evaluator_platform?: Record<string, { ios: number; android: number; other: number; pair?: number }>
+  by_platform?: { ios: number; android: number; other: number; pair?: number }
   by_date?: { date: string; count: number }[]
   dryRun: boolean
 }
@@ -43,17 +44,21 @@ export function DistributionResult({ result, action }: { result: DistResult; act
   const rows = useMemo(() => {
     if (detail) {
       return Object.entries(detail)
-        .map(([name, p]) => ({ name, ios: p.ios, android: p.android, other: p.other, total: p.ios + p.android + p.other }))
+        .map(([name, p]) => {
+          const pair = p.pair ?? 0
+          return { name, ios: p.ios, android: p.android, other: p.other, pair, total: p.ios + p.android + p.other + pair }
+        })
         .sort((a, b) => b.total - a.total)
     }
     // Guard against a snapshot missing per_evaluator (e.g. legacy/malformed rows) so
     // the "Details" popup renders an empty distribution instead of throwing.
     return Object.entries(result.per_evaluator ?? {})
-      .map(([name, n]) => ({ name, ios: 0, android: 0, other: 0, total: n }))
+      .map(([name, n]) => ({ name, ios: 0, android: 0, other: 0, pair: 0, total: n }))
       .sort((a, b) => b.total - a.total)
   }, [detail, result.per_evaluator])
 
   const hasOther = rows.some(r => r.other > 0)
+  const hasPair = rows.some(r => r.pair > 0)
   const hasByDate = !!(result.by_date && result.by_date.length > 0)
   const moved = committed ? (result.assigned ?? 0) : (result.assignable ?? rows.reduce((s, r) => s + r.total, 0))
 
@@ -76,6 +81,7 @@ export function DistributionResult({ result, action }: { result: DistResult; act
           <>
             <Stat label="iOS" value={result.by_platform.ios} />
             <Stat label="Android" value={result.by_platform.android} />
+            {(result.by_platform.pair ?? 0) > 0 && <Stat label="Pairs" value={result.by_platform.pair ?? 0} />}
             {result.by_platform.other > 0 && <Stat label="Other" value={result.by_platform.other} />}
           </>
         )}
@@ -115,6 +121,7 @@ export function DistributionResult({ result, action }: { result: DistResult; act
                     <th>Evaluator</th>
                     {detail && <th className="tnum" style={{ width: 60 }}>iOS</th>}
                     {detail && <th className="tnum" style={{ width: 74 }}>Android</th>}
+                    {detail && hasPair && <th className="tnum" style={{ width: 60 }}>Pairs</th>}
                     {detail && hasOther && <th className="tnum" style={{ width: 60 }}>Other</th>}
                     <th className="tnum" style={{ width: 64 }}>Total</th>
                   </tr>
@@ -125,6 +132,7 @@ export function DistributionResult({ result, action }: { result: DistResult; act
                       <td className="cell-name">{r.name}</td>
                       {detail && <td className="tnum" style={{ color: r.ios ? undefined : 'var(--faint)' }}>{r.ios}</td>}
                       {detail && <td className="tnum" style={{ color: r.android ? undefined : 'var(--faint)' }}>{r.android}</td>}
+                      {detail && hasPair && <td className="tnum" style={{ color: r.pair ? undefined : 'var(--faint)' }}>{r.pair}</td>}
                       {detail && hasOther && <td className="tnum" style={{ color: r.other ? undefined : 'var(--faint)' }}>{r.other}</td>}
                       <td className="tnum" style={{ fontWeight: 700 }}>{r.total}</td>
                     </tr>

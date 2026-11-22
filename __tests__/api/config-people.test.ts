@@ -22,6 +22,7 @@ function req(body: unknown) {
 function mockReads({ hidden = [] as string[], excluded = [] as string[],
                     users = [{ key: 'mitt', title: 'Fulltime', active: true }] } = {}) {
   sqlMock.mockImplementation((strings: string[], ...args: unknown[]) => {
+    if (!Array.isArray(strings)) return {} // sql('ge'): identifier from notPairCopy
     const text = strings.join(' ')
     if (text.includes('SELECT value') && text.includes('app_config')) {
       if (args[0] === 'people_config') return Promise.resolve([{ value: JSON.stringify({ hiddenInFilters: hidden }) }])

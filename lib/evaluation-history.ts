@@ -25,6 +25,11 @@ export interface LogRow {
   changed: boolean
   view_s: number | null
   confidence: string | null
+  // Pair fields (migration 054). All optional: a row read before the pair existed has none.
+  game_id?: string
+  os?: StoreOs | null // store of the game_info row the log row belongs to
+  pair_scope?: 'pair' | 'store' | null // NULL reads as 'store'
+  other_game_id?: string | null // the pair's other game_id (pair_link note)
 }
 
 export interface AssignRow {
@@ -34,7 +39,16 @@ export interface AssignRow {
   evaluator_name: string
   from_evaluator: string | null
   by: string | null // user name, or the raw created_by ('cron', an email nobody owns)
+  // Pair fields: the run holds both game_ids of the pair / only `os`'s game.
+  pair_both?: boolean
+  os?: StoreOs | null
 }
+
+export type StoreOs = 'ios' | 'android'
+const BOTH_STORES: StoreOs[] = ['ios', 'android']
+const STORE_LABEL: Record<StoreOs, string> = { ios: 'iOS', android: 'Android' }
+const storeLabel = (os: StoreOs | null | undefined) => (os ? STORE_LABEL[os] : 'a store')
+const oneStore = (os: StoreOs | null | undefined): StoreOs[] => (os ? [os] : [])
 
 export type EventType = 'save' | 'final' | 'record' | 'assign' | 'seed'
 
@@ -57,7 +71,11 @@ export interface HistoryEvent {
   time: string | null // panel time of this save, e.g. "12m"
   seconds: number | null
   note: string | null
+  stores: StoreOs[] // both stores for an event of the whole pair, else the one store it touched
 }
+
+/** An event before its stores are filled in. */
+type Draft = Omit<HistoryEvent, 'stores'> & { stores?: StoreOs[] }
 
 const CONTEXT_LABEL: Record<string, string> = { shortlist: 'Short List', record: 'Record', tagging: 'Tagging' }
 const SEED_NOTE = 'Copied from the old record'
@@ -98,7 +116,7 @@ function batchNote(r: LogRow, showWas: boolean): string | null {
 const joinNote = (...parts: Array<string | null>) => parts.filter(Boolean).join(' · ') || null
 
 /** The four Record events: add, assign (confirm), move, remove. */
-function fromRecordLog(r: LogRow, base: Omit<HistoryEvent, 'who' | 'type' | 'verb' | 'changes'>): HistoryEvent {
+function fromRecordLog(r: LogRow, base: Omit<Draft, 'who' | 'type' | 'verb' | 'changes'>): Draft {
   const who = dash(r.actor)
   const type: EventType = 'record'
 
@@ -141,8 +159,33 @@ function verdictChange(r: LogRow): Change {
   return { kind: 'initial', from: arrow ? r.conclusion_before : null, to: r.conclusion_after }
 }
 
+/** Going into or out of Link_dead reads as an action on the store (or the game), not a verdict change. */
+function deadVerb(r: LogRow): string | null {
+  const target = r.pair_scope === 'store' && r.os ? STORE_LABEL[r.os] : 'the game'
+  if (r.conclusion_after === 'Link_dead') return `marked ${target} Link dead`
+  if (r.conclusion_before === 'Link_dead' && r.conclusion_after != null) return `reopened ${target}`
+  return null
+}
+
 export function fromLog(r: LogRow): HistoryEvent {
+  const ev = fromLogEvent(r)
+  return { ...ev, stores: ev.stores ?? (r.pair_scope === 'pair' ? BOTH_STORES : oneStore(r.os)) }
+}
+
+function fromLogEvent(r: LogRow): Draft {
   const base = { key: `log-${r.id}`, at: iso(r.at), time: null as string | null, seconds: null as number | null, note: null as string | null }
+
+  // The trigger's own rows (actor 'System'): a store joined a pair, or a pair split. One store each.
+  if (r.kind === 'pair_link' || r.kind === 'pair_unlink') {
+    const label = storeLabel(r.os)
+    if (r.kind === 'pair_unlink') {
+      return { ...base, who: dash(r.actor), type: 'seed', verb: `unlinked ${label} from the pair`, changes: [], stores: oneStore(r.os) }
+    }
+    const changes: Change[] = []
+    if (r.owner_after != null && r.owner !== r.owner_after) changes.push({ kind: 'person', label: 'Evaluator', from: r.owner, to: r.owner_after })
+    const note = r.other_game_id ? `${label} ${r.game_id} joined ${r.other_game_id}` : `${label} ${r.game_id} joined the pair`
+    return { ...base, who: dash(r.actor), type: 'seed', verb: `linked ${label} to the pair`, changes, note, stores: oneStore(r.os) }
+  }
 
   if (r.kind === 'record_add' || r.kind === 'record_assign' || r.kind === 'record_move' || r.kind === 'record_remove') {
     return fromRecordLog(r, base)
@@ -197,7 +240,7 @@ export function fromLog(r: LogRow): HistoryEvent {
         verb = 'changed the batch'
         changes = []
       } else {
-        verb = r.changed ? 'changed the verdict' : 'edited the evaluation'
+        verb = r.changed ? deadVerb(r) ?? 'changed the verdict' : 'edited the evaluation'
         changes = [verdictChange(r)]
       }
       break
@@ -210,17 +253,23 @@ export function fromLog(r: LogRow): HistoryEvent {
   return { ...base, ...timing, who, type, verb, changes, note }
 }
 
+/** An assign of the whole pair: "assigned the pair to Alice"; the other actions name the pair too. */
+function pairAssignVerb(r: AssignRow): string {
+  return r.action === 'assign' ? `assigned the pair to ${r.evaluator_name}` : `${ASSIGN_VERB[r.action] ?? r.action} the pair`
+}
+
 export function fromAssign(r: AssignRow): HistoryEvent {
   return {
     key: `asg-${r.id}`,
     at: iso(r.at),
     who: r.by === 'cron' ? 'Auto-assign' : dash(r.by),
     type: 'assign',
-    verb: ASSIGN_VERB[r.action] ?? r.action,
+    verb: r.pair_both ? pairAssignVerb(r) : ASSIGN_VERB[r.action] ?? r.action,
     changes: [{ kind: 'person', from: r.from_evaluator, to: r.evaluator_name }],
     time: null,
     seconds: null,
-    note: null,
+    note: r.pair_both ? 'Counts as 1 game' : null,
+    stores: r.pair_both ? BOTH_STORES : oneStore(r.os),
   }
 }
 

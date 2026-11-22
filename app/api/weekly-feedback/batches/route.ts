@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { weekLabelOrder } from '@/lib/weekly-feedback'
+import { listRowFilter } from '@/lib/eval-pairs'
 import { visibleEvaluators } from '@/lib/people-config'
 import { loadHiddenEvaluatorKeys } from '@/lib/people-config-db'
 
@@ -25,7 +26,7 @@ export async function GET() {
   // (game_evaluations) UNION weeks that already have feedback (incl. legacy).
   // Cards for weeks with no feedback yet render as faint "add…" prompts.
   const gameBatchRows = await sql<{ batch: string }[]>`
-    SELECT DISTINCT batch FROM game_evaluations WHERE batch IS NOT NULL
+    SELECT DISTINCT ge.batch FROM game_evaluations ge WHERE ge.batch IS NOT NULL ${listRowFilter(sql)}
   `
   const allBatches = Array.from(new Set([...batches, ...gameBatchRows.map(r => r.batch)])).sort(byOrder)
 

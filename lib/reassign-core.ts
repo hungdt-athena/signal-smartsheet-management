@@ -6,11 +6,12 @@
 
 import { sql } from '@/lib/db'
 import { assignGames } from '@/lib/assign-evaluators'
+import { assignOs, listRowFilter } from '@/lib/eval-pairs'
 
 export interface Candidate {
   id: number // game_evaluations.id
   game_id: string // game_info.game_id (for history / tracing)
-  os: string | null
+  os: string | null // game_info.os, or 'pair' for a linked pair (assignOs)
   assigned_date: string | null // YYYY-MM-DD (for the reassign preview day breakdown)
 }
 
@@ -22,7 +23,8 @@ export interface RosterRow {
 
 // Pending games currently held by `from` in `category`, optionally narrowed by an
 // assigned_date range and/or capped at `count` (oldest first). "Pending" = not yet
-// concluded, so we never move a game an evaluator already finished.
+// concluded, so we never move a game an evaluator already finished. A linked pair is
+// one candidate: its front row, os 'pair'; the back row follows via the 054 trigger.
 export async function selectPendingGames(opts: {
   category: string
   from: string
@@ -36,12 +38,13 @@ export async function selectPendingGames(opts: {
       : sql``
   const limit = opts.count && opts.count > 0 ? sql`LIMIT ${opts.count}` : sql``
   return (await sql`
-    SELECT ge.id, ge.game_id, gi.os, ge.assigned_date::text AS assigned_date
+    SELECT ge.id, ge.game_id, ${assignOs(sql)} AS os, ge.assigned_date::text AS assigned_date
     FROM game_evaluations ge
     JOIN game_info gi ON ge.game_id = gi.game_id
     WHERE ge.category_group = ${opts.category}
       AND ge.initial_evaluator = ${opts.from}
       AND ge.initial_conclusion IS NULL
+      ${listRowFilter(sql)}
       ${dateFilter}
     ORDER BY ge.assigned_date NULLS LAST, ge.id
     ${limit}

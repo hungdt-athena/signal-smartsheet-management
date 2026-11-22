@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { isManagerRole } from '@/lib/roles'
@@ -151,7 +152,7 @@ export async function GET(req: NextRequest) {
                  count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead,
                  count(*) FILTER (WHERE ge.initial_conclusion = 'Stale_release')::int AS stale_release
           FROM game_evaluations ge
-          WHERE ge.evaluate_date >= (${from}::timestamp AT TIME ZONE ${VN})
+          WHERE ge.evaluate_date >= (${from}::timestamp AT TIME ZONE ${VN}) ${notPairCopy(sql)}
             AND ge.evaluate_date < ((${to}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')
             AND lower(ge.initial_evaluator) = lower(${evaluator})
             ${catFilter}
@@ -228,7 +229,7 @@ export async function GET(req: NextRequest) {
       : sql`(
           SELECT max((g2.evaluate_date AT TIME ZONE ${VN})::date)
           FROM game_evaluations g2
-          WHERE g2.evaluate_date >= ${lo} AND g2.evaluate_date < ${hi}
+          WHERE g2.evaluate_date >= ${lo} AND g2.evaluate_date < ${hi} ${notPairCopy(sql, 'g2')}
             AND g2.initial_evaluator IS NOT NULL
             AND g2.initial_conclusion IS NOT NULL AND g2.initial_conclusion <> ''
             AND g2.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
@@ -256,7 +257,7 @@ export async function GET(req: NextRequest) {
                count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead,
                count(*) FILTER (WHERE ge.initial_conclusion = 'Stale_release')::int AS stale_release
         FROM game_evaluations ge
-        WHERE ge.evaluate_date >= ${lo} AND ge.evaluate_date < ${hi}
+        WHERE ge.evaluate_date >= ${lo} AND ge.evaluate_date < ${hi} ${notPairCopy(sql)}
           AND ge.initial_evaluator IS NOT NULL
           AND lower(ge.initial_evaluator) <> ALL(${excluded})
           ${catFilter}
@@ -275,6 +276,7 @@ export async function GET(req: NextRequest) {
                count(DISTINCT pt.game_id)::int AS tagged
         FROM playtest_tags pt
         JOIN dashboard_users du ON lower(du.email) = lower(pt.tagged_by)
+        -- No pair condition: a tag row is never a copy (playtest_tags has no twin mirror).
         JOIN game_evaluations ge ON ge.game_id = pt.game_id
         WHERE pt.tagged_at >= ${lo} AND pt.tagged_at < ${hi}
           AND pt.status <> 'removed'
@@ -324,7 +326,7 @@ export async function GET(req: NextRequest) {
                                     AND ge.initial_conclusion <> ''
                                     AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS total
           FROM game_evaluations ge
-          WHERE ge.evaluate_date >= (${from}::timestamp AT TIME ZONE ${VN})
+          WHERE ge.evaluate_date >= (${from}::timestamp AT TIME ZONE ${VN}) ${notPairCopy(sql)}
             AND ge.evaluate_date < ((${to}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')
             AND ge.initial_evaluator IS NOT NULL
             AND lower(ge.initial_evaluator) <> ALL(${excluded})

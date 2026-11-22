@@ -57,12 +57,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Game not found in catalog' }, { status: 404 })
     }
 
-    // Create the eval row if this game has never been evaluated in this category.
-    await sql`
-      INSERT INTO game_evaluations (game_id, category_group, batch)
-      VALUES (${game_id}, ${category_group}, ${batchVal})
-      ON CONFLICT (game_id, category_group) DO NOTHING
+    // The game's row, in any category_group (the asked one first). The row is found by id from
+    // here on, never by (game_id, category_group): linking moves a new store's row to its twin's
+    // category_group, so re-adding the game with the group it was first pulled in with must reuse
+    // that row, not insert a second one for the same game_id.
+    const findRow = () => sql`
+      SELECT id FROM game_evaluations WHERE game_id = ${game_id}
+      ORDER BY (category_group = ${category_group}) DESC, id LIMIT 1
     `
+    let rowId: number | undefined = (await findRow())[0]?.id
+    if (rowId === undefined) {
+      // Never evaluated: create the row (mirroring cron/push-evaluations). The batch is NOT
+      // written here: the link-on-insert trigger fills only the new row's empty columns from a
+      // linked twin, and the copy trigger copies only what an UPDATE changes. Written here, the
+      // UPDATE below would not change it and the twin (the row the lists show) would keep its
+      // old week. Left NULL, the UPDATE stamps it and the copy reaches the twin.
+      const inserted = await sql`
+        INSERT INTO game_evaluations (game_id, category_group)
+        VALUES (${game_id}, ${category_group})
+        ON CONFLICT (game_id, category_group) DO NOTHING
+        RETURNING id
+      `
+      rowId = inserted[0]?.id
+      // Lost a race with another insert of the same game: take that row.
+      if (rowId === undefined) rowId = (await findRow())[0]?.id
+    }
+    if (rowId === undefined) {
+      return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    }
 
     // Normalize the optional overrides: a non-empty string is applied, anything
     // else means "not provided" (leave the column untouched via COALESCE below).
@@ -108,7 +130,7 @@ export async function POST(req: NextRequest) {
         WITH old AS (
           SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date, batch
           FROM game_evaluations
-          WHERE game_id = ${game_id} AND category_group = ${category_group}
+          WHERE id = ${rowId}
           FOR NO KEY UPDATE
         ), upd AS (
           UPDATE game_evaluations ge
@@ -151,7 +173,7 @@ export async function POST(req: NextRequest) {
         WITH old AS (
           SELECT id, game_id, initial_conclusion, initial_evaluator, final_conclusion, evaluate_date, batch
           FROM game_evaluations
-          WHERE game_id = ${game_id} AND category_group = ${category_group}
+          WHERE id = ${rowId}
           FOR NO KEY UPDATE
         ), upd AS (
           UPDATE game_evaluations ge

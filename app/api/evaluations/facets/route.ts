@@ -4,6 +4,7 @@ import { getSession } from '@/lib/session'
 import { sql } from '@/lib/db'
 import { getConfigValues } from '@/lib/config'
 import { getCurrentBatch } from '@/lib/current-batch'
+import { listRowFilter } from '@/lib/eval-pairs'
 import { visibleEvaluators } from '@/lib/people-config'
 import { loadHiddenEvaluatorKeys } from '@/lib/people-config-db'
 import {
@@ -53,6 +54,7 @@ export async function GET(req: NextRequest) {
     const rangeFilter = rangeFilterFor(f.pickerDate, from, to)
 
     const filtersNoBatch = sql`
+      ${listRowFilter(sql)}
       ${f.evaluatorFilter}
       ${f.conclusionFilter}
       ${f.finalConclusionFilter}
@@ -91,6 +93,7 @@ export async function GET(req: NextRequest) {
           AND ge.initial_conclusion IS NOT NULL
           ${f.evaluatorFilter}
           ${rangeFilter}
+          ${listRowFilter(sql)}
       `,
       // Distinct batches present for this view — deliberately ignores the date range
       // and the batch filter so the Short List batch dropdown can offer every batch
@@ -103,6 +106,7 @@ export async function GET(req: NextRequest) {
           ${f.evaluatorFilter}
           ${f.conclusionFilter}
           ${f.finalConclusionFilter}
+          ${listRowFilter(sql)}
       `,
       getCurrentBatch(),
       sql<{ batch: string }[]>`

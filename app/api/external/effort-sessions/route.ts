@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { mediaRowFilter, notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { SYSTEM_LABEL_KEY_LIST } from '@/lib/system-accounts'
 import {
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
              ge.initial_conclusion AS status, ge.initial_note AS comment
       FROM game_evaluations ge
       LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-      WHERE lower(ge.initial_evaluator) = ANY(${keys})
+      WHERE lower(ge.initial_evaluator) = ANY(${keys}) ${notPairCopy(sql)}
         AND ge.evaluate_date >= (${p.from}::date)::timestamp AT TIME ZONE ${VN}
         AND ge.evaluate_date <  (${p.to}::date + 1)::timestamp AT TIME ZONE ${VN}
       ORDER BY ge.evaluate_date, ge.game_id
@@ -88,6 +89,7 @@ export async function GET(req: NextRequest) {
         WHERE s.confirmed_at IS NOT NULL
           AND s.assignee IS NOT NULL
           AND lower(s.assignee) = ANY(${keys})
+          ${mediaRowFilter(sql)}
       )
       SELECT lower(slot.assignee) AS assignee_key,
              to_char(slot.assigned_at AT TIME ZONE ${VN}, 'YYYY-MM-DD') AS date,

@@ -271,3 +271,37 @@ describe('resolveVideoMatches (Recorded vs Uploaded)', () => {
     expect(out.get(1)?.uploaded).toBe(false)
   })
 })
+
+describe('linked pair: one listed row stands for both stores', () => {
+  const pair = { key: 1, gameId: '111', title: 'Pair Game', bucket: '5min' as const, alt: { gameId: 'com.x.y', title: 'Zap Quest' } }
+  const row = (o: object) => ({ gameTitle: '', youtubeId: 'vid1', duration: '5mins', time: '2026-11-03T10:00:00Z', ...o })
+
+  it('an upload titled for the back store resolves to the pair', () => {
+    expect(resolveVideoMatches([pair], [row({ gameTitle: 'Zap Quest' })]).get(1)?.id).toBe('vid1')
+    expect(resolveYtMatches([pair], [row({ gameTitle: 'Zap Quest' })]).get(1)?.id).toBe('vid1')
+  })
+
+  it('a file named by record code for the back store game_id resolves to the pair', () => {
+    const rows = [row({ gameTitle: 'whatever', gameId: 'com.x.y' })]
+    expect(resolveVideoMatches([pair], rows).get(1)?.id).toBe('vid1')
+  })
+
+  it('the back store uploaded while the front store only has a queued file: the pair is Uploaded', () => {
+    const rows = [
+      row({ gameTitle: 'Pair Game', youtubeId: '', fileId: 'q1' }),   // front title, not on YouTube yet
+      row({ gameTitle: 'Zap Quest', youtubeId: 'vid9' }),             // back title, on YouTube
+    ]
+    expect(resolveVideoMatches([pair], rows).get(1)).toMatchObject({ uploaded: true, id: 'vid9' })
+  })
+
+  it('both stores uploaded: the front store\'s video stays', () => {
+    const rows = [row({ gameTitle: 'Pair Game', youtubeId: 'vidF' }), row({ gameTitle: 'Zap Quest', youtubeId: 'vidB' })]
+    expect(resolveVideoMatches([pair], rows).get(1)).toMatchObject({ uploaded: true, id: 'vidF' })
+  })
+
+  it('a pair without alt behaves as before and the virtual sibling never leaks into the result', () => {
+    const solo = { key: 2, gameId: '222', title: 'Solo', bucket: '5min' as const }
+    const out = resolveVideoMatches([pair, solo], [row({ gameTitle: 'Solo' })])
+    expect(Array.from(out.keys())).toEqual([2])
+  })
+})

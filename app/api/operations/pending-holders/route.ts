@@ -10,6 +10,7 @@
 // manager needs: these are the people you can move work away from, right now.
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth-guard'
+import { notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { isBucket } from '@/lib/buckets'
 import { getSession } from '@/lib/session'
@@ -29,8 +30,9 @@ export async function GET(req: NextRequest) {
 
   const rows = await sql<Holder[]>`
     SELECT initial_evaluator AS name, COUNT(*)::int AS pending
-    FROM game_evaluations
+    FROM game_evaluations ge
     WHERE category_group = ${category}
+      ${notPairCopy(sql)}
       AND initial_conclusion IS NULL
       AND initial_evaluator IS NOT NULL
       AND initial_evaluator <> ''

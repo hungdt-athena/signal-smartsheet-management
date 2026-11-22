@@ -6,6 +6,7 @@
 // that decide it are pure and live in lib/rescue-rules.ts; the moving itself is
 // delegated — commitAssignment() and assignGames() are reused untouched.
 
+import { assignOs, listRowFilter, notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import type { Candidate } from '@/lib/reassign-core'
 import type { RescueConfig } from '@/lib/rescue-config'
@@ -63,15 +64,16 @@ export async function scanRoster(opts: { category: string; config: RescueConfig;
                  AND ge.game_id NOT IN (SELECT game_id FROM cooled)
              )::int AS movable_all
       FROM game_evaluations ge
-      WHERE ge.category_group = ${opts.category}
+      WHERE ge.category_group = ${opts.category} ${notPairCopy(sql)}
         AND ge.initial_conclusion IS NULL
         AND ge.initial_evaluator IS NOT NULL
       GROUP BY 1
     ),
     act AS (
       SELECT initial_evaluator AS name, count(*)::int AS evaluated_recent
-      FROM game_evaluations
+      FROM game_evaluations ge
       WHERE category_group = ${opts.category}
+        ${notPairCopy(sql)}
         AND initial_conclusion IS NOT NULL
         AND evaluate_date >= (SELECT d FROM today) - (${activeDays} * INTERVAL '1 day')
       GROUP BY 1
@@ -117,7 +119,8 @@ export async function scanRoster(opts: { category: string; config: RescueConfig;
 
 // Stale, movable games held by `from`, oldest assigned_date first. Same shape as
 // reassign's Candidate so the whole downstream chain (breakdowns, assignGames,
-// commitAssignment, DistResult) is reused verbatim.
+// commitAssignment, DistResult) is reused verbatim. A linked pair is one candidate (its
+// front row, os 'pair'), as in selectPendingGames.
 export async function selectStaleGames(opts: {
   category: string
   from: string
@@ -135,12 +138,13 @@ export async function selectStaleGames(opts: {
       WHERE action IN ('reassign', 'handover', 'rescue')
         AND run_at > NOW() - (${cooldownDays} * INTERVAL '1 day')
     )
-    SELECT ge.id, ge.game_id, gi.os, ge.assigned_date::text AS assigned_date
+    SELECT ge.id, ge.game_id, ${assignOs(sql)} AS os, ge.assigned_date::text AS assigned_date
     FROM game_evaluations ge
     JOIN game_info gi ON ge.game_id = gi.game_id
     WHERE ge.category_group = ${opts.category}
       AND ge.initial_evaluator = ${opts.from}
       AND ge.initial_conclusion IS NULL
+      ${listRowFilter(sql)}
       AND ge.assigned_date IS NOT NULL
       AND (SELECT d FROM today) - ge.assigned_date > ${staleDays}
       ${inRange(opts.range)}

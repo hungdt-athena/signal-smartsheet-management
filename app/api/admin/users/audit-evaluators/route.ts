@@ -14,6 +14,7 @@
 // GET previews (nothing is written), POST applies.
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
+import { notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { SYSTEM_LABEL_KEY_LIST } from '@/lib/system-accounts'
 
@@ -32,6 +33,7 @@ async function findOrphans(): Promise<Orphan[]> {
            MAX(ge.evaluate_date) AS last_eval
     FROM game_evaluations ge
     WHERE ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
+      ${notPairCopy(sql)}
       AND lower(ge.initial_evaluator) <> ALL(${SYSTEM_LABEL_KEY_LIST})
       AND NOT EXISTS (
         SELECT 1 FROM dashboard_users du

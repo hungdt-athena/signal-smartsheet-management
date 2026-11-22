@@ -12,6 +12,11 @@ import { sql } from '@/lib/db'
 
 const sqlMock = sql as unknown as jest.Mock
 const sessionMock = getServerSession as unknown as jest.Mock
+// notPairCopy adds fragment calls (and an identifier call) before the SELECT; only the SELECT returns rows
+function rowsFor(rows: unknown[]) {
+  sqlMock.mockImplementation((s: unknown) =>
+    Array.isArray(s) && (s as string[]).join(' ').includes('SELECT') ? Promise.resolve(rows) : {})
+}
 function req(url: string) { return new NextRequest(`http://localhost${url}`) }
 
 describe('/api/operations/pending-holders', () => {
@@ -25,7 +30,7 @@ describe('/api/operations/pending-holders', () => {
   })
 
   it('trả người đang ôm game pending của đúng bucket, kèm số lượng', async () => {
-    sqlMock.mockResolvedValueOnce([
+    rowsFor([
       { name: 'HuyDD', pending: 1951 },
       { name: 'NhiLV', pending: 200 },
     ])
@@ -47,7 +52,7 @@ describe('/api/operations/pending-holders', () => {
 
   it('evaluator chỉ thấy dòng của chính họ', async () => {
     sessionMock.mockResolvedValue({ user: { name: 'NhiLV', role: 'evaluator' } })
-    sqlMock.mockResolvedValueOnce([
+    rowsFor([
       { name: 'HuyDD', pending: 1951 },
       { name: 'NhiLV', pending: 200 },
     ])

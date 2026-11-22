@@ -181,6 +181,36 @@ export interface YtGame {
   // title+bucket key and would look unclaimed: a game recorded 5' and pulled in for
   // 20' would take its own 5' video as the 20' one ("wrong duration" is allowed).
   heldVideo?: string | null
+  // A linked pair is listed as its front row only. Its other store keeps its own
+  // title and game_id, and an upload or a code-named file may carry either one.
+  alt?: { gameId?: string | null; title?: string | null }
+}
+
+// A pair becomes two games for matching (the shape it had before pairs were listed
+// once), and the answer is folded back onto the listed row.
+const ALT = '\u0000alt'
+function withAlts(games: YtGame[]): YtGame[] {
+  const out: YtGame[] = []
+  for (const g of games) {
+    out.push(g)
+    if (g.alt && (g.alt.title || g.alt.gameId)) {
+      out.push({ ...g, key: `${g.key}${ALT}`, title: g.alt.title || g.title, gameId: g.alt.gameId || undefined, alt: undefined })
+    }
+  }
+  return out
+}
+// The front store's answer wins, unless `better(alt, front)` says the other store's is
+// stronger (a video already on YouTube beats a file only queued in the YouTube tab).
+function foldAlts<T>(games: YtGame[], found: Map<number | string, T>,
+  better?: (alt: T, front: T) => boolean): Map<number | string, T> {
+  const out = new Map<number | string, T>()
+  for (const g of games) {
+    const front = found.get(g.key)
+    const alt = g.alt ? found.get(`${g.key}${ALT}`) : undefined
+    const hit = front && alt && better?.(alt, front) ? alt : front ?? alt
+    if (hit) out.set(g.key, hit)
+  }
+  return out
 }
 
 // Words that say nothing about which game it is. Tier B counts shared words, and
@@ -245,6 +275,10 @@ function similarity(game: string, upload: string, sameRecorder: boolean): 0 | 1 
  * recorder).
  */
 export function resolveYtMatches(games: YtGame[], rows: YtbMatchRow[]): Map<number | string, YtMatch> {
+  return foldAlts(games, resolveYtCore(withAlts(games), rows))
+}
+
+function resolveYtCore(games: YtGame[], rows: YtbMatchRow[]): Map<number | string, YtMatch> {
   const exactMap = buildYtMap(rows)
   const out = new Map<number | string, YtMatch>()
   const ownedKeys = new Set<string>()   // title|bucket keys some game already holds
@@ -355,13 +389,17 @@ function matchStage(games: YtGame[], rows: YtbMatchRow[], uploaded: boolean): Ma
   const pool = rows
     .filter(r => !used.has(r) && r.gameTitle)
     .map((r, i) => ({ ...r, youtubeId: uploaded ? r.youtubeId : `~queued:${r.fileId || i}` }))
-  for (const [key, m] of Array.from(resolveYtMatches(rest, pool))) {
+  for (const [key, m] of Array.from(resolveYtCore(rest, pool))) {
     out.set(key, { id: uploaded ? m.id : '', time: m.time, pic: m.pic, uploaded, ...(m.approx ? { approx: m.approx } : {}) })
   }
   return out
 }
 
 export function resolveVideoMatches(games: YtGame[], rows: YtbMatchRow[]): Map<number | string, VideoMatch> {
+  return foldAlts(games, resolveVideoCore(withAlts(games), rows), (alt, front) => alt.uploaded && !front.uploaded)
+}
+
+function resolveVideoCore(games: YtGame[], rows: YtbMatchRow[]): Map<number | string, VideoMatch> {
   const up = matchStage(games, rows.filter(r => r.youtubeId), true)
 
   const left = games.filter(g => !up.has(g.key))

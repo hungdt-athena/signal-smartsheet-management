@@ -3,6 +3,7 @@ import { requireManager } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { selectPendingGames, loadRoster, commitAssignment, distribute } from '@/lib/reassign-core'
 import { writeAssignmentHistory } from '@/lib/assignment-history'
+import { twinGameIds } from '@/lib/eval-pairs-db'
 import { sourceBreakdowns, perEvaluatorPlatform, type DistSnapshot } from '@/lib/operation-runs'
 import { getSession } from '@/lib/session'
 
@@ -109,6 +110,7 @@ export async function POST(req: NextRequest) {
       await writeAssignmentHistory({
         category, action: 'handover', perEvaluator: byEvaluator,
         fromEvaluator: from, createdBy: reviewer,
+        pairGameIds: await twinGameIds(Array.from(byEvaluator.values()).flat()),
       })
     }
 

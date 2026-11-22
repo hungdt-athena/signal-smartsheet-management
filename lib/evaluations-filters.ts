@@ -284,11 +284,30 @@ export function readSearch(searchParams: URLSearchParams): string {
   return q.length >= SEARCH_MIN_CHARS ? q : ''
 }
 
-/** Match the term against a game's title or its store id. */
+/** Match the term against a game's title or its store id. The row's twin counts too
+ *  (migration 054): the back row of a linked pair is hidden from lists, so a term that
+ *  is the back store's id must still land on the front row.
+ *
+ *  Written as `ge.id IN (... UNION ALL ...)` rather than one OR, for the trigram indexes
+ *  above: a twin branch on game_evaluations inside the same OR as the two game_info
+ *  ILIKEs stops the BitmapOr, and the planner scans all of game_info (sample DB with the
+ *  prod indexes added, 2026-11-21: 2-13ms became 42-64ms; on prod's 625k games that is
+ *  the 1275ms scan above). Here every ILIKE is on a game_info column, so each branch
+ *  starts from an index: the row's own game by title or id, then the front row of a
+ *  twin whose title or store id matches (pair_eval_id points both ways; the two stores
+ *  can carry different titles). The twin branch is a BitmapOr of both trigram indexes too
+ *  (sample DB with the prod indexes added inside a rolled-back transaction, 2026-11-21:
+ *  '%block%' 30ms, '%Carnival Sort%' 2.4ms, same as the id-only branch within noise, no
+ *  game_info scan). */
 export function searchFilter(term: string) {
   if (!term) return sql``
   const contains = `%${escapeLike(term)}%`
-  return sql`AND (gi.title ILIKE ${contains} OR gi.game_id ILIKE ${contains})`
+  return sql`AND ge.id IN (
+    SELECT e.id FROM game_info g JOIN game_evaluations e ON e.game_id = g.game_id
+    WHERE g.title ILIKE ${contains} OR g.game_id ILIKE ${contains}
+    UNION ALL
+    SELECT pe.pair_eval_id FROM game_info g JOIN game_evaluations pe ON pe.game_id = g.game_id
+    WHERE (g.title ILIKE ${contains} OR g.game_id ILIKE ${contains}) AND pe.pair_eval_id IS NOT NULL)`
 }
 
 /** The whole ordering for a search, in three tiers.
@@ -316,7 +335,9 @@ export function searchOrder(term: string) {
     : sql``
 
   return sql`
-    CASE WHEN gi.game_id = ${term} THEN 0
+    CASE WHEN gi.game_id = ${term}
+           OR EXISTS (SELECT 1 FROM game_evaluations pe
+                      WHERE pe.id = ge.pair_eval_id AND pe.game_id = ${term}) THEN 0
          WHEN lower(gi.title) = lower(${term}) THEN 1
          WHEN gi.title ILIKE ${prefix} THEN 2
          ${wordTier}

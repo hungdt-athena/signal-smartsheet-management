@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { notPairCopy } from '@/lib/eval-pairs'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
@@ -74,7 +75,7 @@ export async function GET(req: NextRequest) {
           count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL)::int AS done,
           count(*) FILTER (WHERE ge.drive_link IS NOT NULL AND ge.drive_link <> '')::int AS drive_links
         FROM game_evaluations ge
-        WHERE ${baseWhere}
+        WHERE ${baseWhere} ${notPairCopy(sql)}
         GROUP BY lower(ge.initial_evaluator)
         ORDER BY total DESC, 2
       `,
@@ -83,7 +84,7 @@ export async function GET(req: NextRequest) {
           ge.initial_conclusion AS conclusion,
           count(*)::int AS n
         FROM game_evaluations ge
-        WHERE ${baseWhere}
+        WHERE ${baseWhere} ${notPairCopy(sql)}
           AND ge.initial_conclusion IS NOT NULL
           AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
         GROUP BY lower(ge.initial_evaluator), ge.initial_conclusion
@@ -94,7 +95,7 @@ export async function GET(req: NextRequest) {
           count(*)::int AS n
         FROM game_evaluations ge
         JOIN game_info gi ON ge.game_id = gi.game_id
-        WHERE ${baseWhere}
+        WHERE ${baseWhere} ${notPairCopy(sql)}
         GROUP BY lower(ge.initial_evaluator), lower(COALESCE(gi.os, 'unknown'))
       `,
     ])

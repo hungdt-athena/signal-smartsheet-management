@@ -58,14 +58,14 @@ describe('PATCH /api/evaluations — evaluation_log', () => {
     await patch({ id: 1, initial_note: 'a real note here', view_s: 5, context: 'evaluate' })
     const t = writeCall().text
     expect(t).toMatch(/\$::text, \$::text, old\.initial_evaluator, \$::text, \$::text/)
-    expect(t).toMatch(/\$::int, \$::int, \$::int,\s+old\.batch, upd\.batch,\s+COALESCE\(old\.drive_link, ''\) = '' AND COALESCE\(upd\.drive_link, ''\) <> ''\s+FROM old JOIN upd/)
+    expect(t).toMatch(/\$::int, \$::int, \$::int,\s+old\.batch, upd\.batch,\s+COALESCE\(old\.drive_link, ''\) = '' AND COALESCE\(upd\.drive_link, ''\) <> '',[\s\S]*?THEN 'pair' ELSE 'store' END\s+FROM old JOIN upd/)
   })
 
   it('records the batch before and after the write, from the locked row and the updated row', async () => {
     routeSql()
     await patch({ id: 1, initial_note: 'a real note here', view_s: 5, context: 'evaluate' })
     const t = writeCall().text
-    expect(t).toMatch(/INSERT INTO evaluation_log \([^)]*batch_before, batch_after, demo_added\)/)
+    expect(t).toMatch(/INSERT INTO evaluation_log \([^)]*batch_before, batch_after, demo_added, pair_scope\)/)
     expect(t).toMatch(/old\.batch, upd\.batch/)
     expect(t).toMatch(/evaluate_date, batch, drive_link,\s+record_5min_assignee/) // old CTE selects batch
   })

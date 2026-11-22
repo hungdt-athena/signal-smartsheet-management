@@ -32,6 +32,11 @@ describe('unsavedFields', () => {
     expect(unsavedFields({ ...same, conclusion: 'List_Idea', batch: 'W2 Oct, 2026' }, { ...row, initial_conclusion: 'List_Idea' }, none))
       .toEqual(['Batch'])
   })
+  it('names a flipped link dead switch of a linked pair, per store, before the form fields', () => {
+    expect(unsavedFields(same, row, { ...none, deadSwitched: ['ios'] })).toEqual(['iOS link dead'])
+    expect(unsavedFields({ ...same, noteParts: { ...row.noteParts, self_note: 'new note' } }, row, { ...none, deadSwitched: ['ios', 'android'] }))
+      .toEqual(['iOS link dead', 'Android link dead', 'Self note'])
+  })
   it('compares game alike by content, not identity', () => {
     const alike = [{ game_id: 'g1', title: 'Merge Whale' }]
     expect(unsavedFields({ ...same, gameAlike: [...alike] }, { ...row, game_alike: alike }, none)).toEqual([])

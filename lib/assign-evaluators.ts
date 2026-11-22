@@ -3,8 +3,13 @@
 
 export interface AssignableGame {
   id: number
-  os: string | null // game_info.os: 'ios' | 'android' | other/null
+  // game_info.os: 'ios' | 'android' | other/null, or PAIR_OS for a linked pair
+  // (both stores live, migration 054), which a specialist of either store can take.
+  os: string | null
 }
+
+/** The os a candidate query gives a linked pair (see assignOs in lib/eval-pairs). */
+export const PAIR_OS = 'pair'
 
 export interface RosterEvaluator {
   name: string
@@ -42,16 +47,32 @@ export function splitByWeight(weights: number[], total: number): number[] {
 // split between them by weight, and drop out - then the rate is recomputed for
 // everyone still in, which is what lets the surplus reach the other specialists and
 // the generalists together instead of only the generalists.
+//
+// Linked pairs (os 'pair', migration 054) are one shared pool: a specialist of
+// either store can take a pair, so a specialist can reach its own store's pool PLUS
+// the pairs. "Cannot cover what its specialists are owed" is then a question about
+// SETS of stores, because two stores' specialists draw on the same pairs: for every
+// set S of specialist stores, what S's specialists can reach is the sum of their own
+// pools plus the pair pool. The tightest set (fewest reachable games per unit of
+// weight) is settled first - its specialists take everything they can reach, split
+// by weight, which empties the pair pool - and the rest is re-rated. With no pairs
+// the tightest set is always a single store, which is the rule above unchanged.
+// Drawing: a specialist takes its own store first, then pairs; generalists take
+// what is left, oldest first.
 export function assignGames(
   games: AssignableGame[],
   roster: { name: string; platform?: string | null; weight?: number | null }[],
 ): Map<number, string> {
   const evaluators = roster
-    .map(e => ({
-      name: String(e.name ?? '').trim(),
-      platform: String(e.platform ?? 'all').trim().toLowerCase() || 'all',
-      weight: Number(e.weight) || 100,
-    }))
+    .map(e => {
+      const platform = String(e.platform ?? 'all').trim().toLowerCase() || 'all'
+      return {
+        name: String(e.name ?? '').trim(),
+        // 'pair' is a kind of game, not a store anyone specialises in.
+        platform: platform === PAIR_OS ? 'all' : platform,
+        weight: Number(e.weight) || 100,
+      }
+    })
     .filter(e => e.name)
   if (evaluators.length === 0) throw new Error('evaluator list empty')
 
@@ -64,7 +85,9 @@ export function assignGames(
     if (list) list.push(g); else pools.set(k, [g])
   }
   const supply = new Map<string, number>()
-  for (const [k, v] of Array.from(pools)) supply.set(k, v.length)
+  for (const [k, v] of Array.from(pools)) if (k !== PAIR_OS) supply.set(k, v.length)
+  // Pairs: reachable by every specialist, so they are not one store's supply.
+  let shared = pools.get(PAIR_OS)?.length ?? 0
   // A specialist whose platform brought nothing still has a pool - an empty one -
   // or it would never be found over-subscribed and would sit in the split holding a
   // share it can never take.
@@ -78,15 +101,26 @@ export function assignGames(
     if (totalWeight <= 0 || left <= 0) break
     const rate = left / totalWeight // games per unit of weight, if nothing were scarce
 
-    // The pool whose own specialists are owed the most beyond what it holds. They
-    // have nowhere else to draw from, so it is settled first and the rest re-rated.
-    let worst: string | null = null
-    let gap = 1e-9
-    for (const [p, n] of Array.from(supply)) {
-      const sw = active.reduce((s, e) => (e.platform === p ? s + e.weight : s), 0)
+    // The set of stores whose specialists can reach the fewest games per unit of
+    // weight. If even that set is not short at `rate`, nothing is scarce. Otherwise
+    // its specialists have nowhere else to draw from, so it is settled first and the
+    // rest re-rated. Every set is tried; there are only as many stores as the roster
+    // names (in practice ios and android, so at most three sets).
+    const stores = Array.from(new Set(active.filter(e => e.platform !== 'all').map(e => e.platform)))
+    let worst: string[] | null = null
+    let worstReach = 0
+    let worstRatio = rate * (1 - 1e-9)
+    for (let mask = 1; mask < 1 << stores.length; mask++) {
+      const set = stores.filter((_, i) => mask & (1 << i))
+      const sw = active.reduce((s, e) => (set.includes(e.platform) ? s + e.weight : s), 0)
       if (sw <= 0) continue
-      const over = rate * sw - n
-      if (over > gap) { gap = over; worst = p }
+      const reach = set.reduce((s, p) => s + (supply.get(p) ?? 0), shared)
+      const ratio = reach / sw
+      // Strictly tighter wins; on a tie the larger set, so tied stores settle together.
+      const tie = worst !== null && Math.abs(ratio - worstRatio) <= 1e-12
+      if ((ratio < worstRatio && !tie) || (tie && set.length > worst!.length)) {
+        worst = set; worstReach = reach; worstRatio = ratio
+      }
     }
 
     if (!worst) {
@@ -95,13 +129,14 @@ export function assignGames(
       break
     }
 
-    const held = supply.get(worst) ?? 0
-    const spec = active.filter(e => e.platform === worst)
+    const settled = worst
+    const spec = active.filter(e => settled.includes(e.platform))
     const sw = spec.reduce((s, e) => s + e.weight, 0)
-    for (const e of spec) quota.set(e.name, (held * e.weight) / sw)
-    active = active.filter(e => e.platform !== worst)
-    supply.set(worst, 0)
-    left -= held
+    for (const e of spec) quota.set(e.name, (worstReach * e.weight) / sw)
+    active = active.filter(e => !settled.includes(e.platform))
+    for (const p of settled) supply.set(p, 0)
+    shared = 0 // a settled set takes everything it can reach, every pair included
+    left -= worstReach
   }
 
   // Real shares to whole games. splitByWeight IS largest-remainder rounding when the
@@ -112,10 +147,16 @@ export function assignGames(
   const assignment = new Map<number, string>()
   const rest = new Map<string, AssignableGame[]>()
   for (const [k, v] of Array.from(pools)) rest.set(k, v.slice())
-  // Specialists draw from their own pool; by construction it holds enough.
+  // Specialists draw from their own pool, then from the pairs. By construction the
+  // two together hold enough: for every set of stores, what its specialists are owed
+  // fits in their own pools plus the pairs, so taking own-store first never leaves
+  // another store's specialist short of pairs.
+  const pairs = rest.get(PAIR_OS) ?? []
   evaluators.forEach((e, i) => {
     if (e.platform === 'all') return
-    for (const g of (rest.get(e.platform) ?? []).splice(0, counts[i])) assignment.set(g.id, e.name)
+    const own = (rest.get(e.platform) ?? []).splice(0, counts[i])
+    const fill = pairs.splice(0, counts[i] - own.length)
+    for (const g of own.concat(fill)) assignment.set(g.id, e.name)
   })
   // Generalists take what is left, oldest first, whatever platform it is.
   const leftovers = games.filter(g => !assignment.has(g.id))

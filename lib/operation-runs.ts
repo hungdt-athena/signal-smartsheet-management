@@ -24,25 +24,33 @@ export interface DistSnapshot {
   unassignable?: number
   assigned?: number
   per_evaluator: Record<string, number>
-  per_evaluator_platform?: Record<string, { ios: number; android: number; other: number }>
-  by_platform?: { ios: number; android: number; other: number }
+  per_evaluator_platform?: Record<string, PlatformSplit>
+  by_platform?: PlatformSplit
   by_date?: { date: string; count: number }[]
   dryRun: boolean
+}
+
+// Per-platform tally. `pair` = a linked pair (os 'pair', one game for both stores);
+// optional because snapshots stored before pairs existed have no such key.
+export interface PlatformSplit { ios: number; android: number; other: number; pair?: number }
+
+function bump(p: PlatformSplit, os: string) {
+  if (os === 'ios') p.ios++
+  else if (os === 'android') p.android++
+  else if (os === 'pair') p.pair = (p.pair ?? 0) + 1
+  else p.other++
 }
 
 // Source-pool breakdowns: platform totals + games grouped by their original
 // assigned_date (newest first, '—' for null-date games last).
 export function sourceBreakdowns(candidates: Candidate[]): {
-  by_platform: { ios: number; android: number; other: number }
+  by_platform: PlatformSplit
   by_date: { date: string; count: number }[]
 } {
-  const by_platform = { ios: 0, android: 0, other: 0 }
+  const by_platform: PlatformSplit = { ios: 0, android: 0, other: 0, pair: 0 }
   const dateCounts = new Map<string, number>()
   for (const c of candidates) {
-    const os = (c.os || '').toLowerCase()
-    if (os === 'ios') by_platform.ios++
-    else if (os === 'android') by_platform.android++
-    else by_platform.other++
+    bump(by_platform, (c.os || '').toLowerCase())
     const d = c.assigned_date ?? '—'
     dateCounts.set(d, (dateCounts.get(d) || 0) + 1)
   }
@@ -56,15 +64,11 @@ export function sourceBreakdowns(candidates: Candidate[]): {
 export function perEvaluatorPlatform(
   candidates: Candidate[],
   assignment: Map<number, string>,
-): Record<string, { ios: number; android: number; other: number }> {
+): Record<string, PlatformSplit> {
   const osById = new Map(candidates.map(c => [c.id, (c.os || '').toLowerCase()]))
-  const out: Record<string, { ios: number; android: number; other: number }> = {}
+  const out: Record<string, PlatformSplit> = {}
   assignment.forEach((name, id) => {
-    const p = (out[name] ??= { ios: 0, android: 0, other: 0 })
-    const os = osById.get(id)
-    if (os === 'ios') p.ios++
-    else if (os === 'android') p.android++
-    else p.other++
+    bump((out[name] ??= { ios: 0, android: 0, other: 0, pair: 0 }), osById.get(id) ?? '')
   })
   return out
 }

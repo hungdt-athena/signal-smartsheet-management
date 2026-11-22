@@ -41,6 +41,8 @@ import { FilterBar, FilterSpacer, ClearFilters, FilterCount } from '@/components
 import { SearchInput } from '@/components/ui/SearchInput'
 import { GameCell } from '@/components/ui/GameCell'
 import { GameIcon } from '@/components/ui/GameIcon'
+import { StoresCell } from '@/components/ui/StoreIcons'
+import type { PairStore } from '@/lib/eval-pairs'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/ui/States'
 
@@ -65,6 +67,8 @@ interface Evaluation {
   release_date: string | null
   publisher_name: string | null
   tags: GameTrendTag[] | null
+  /** The row's stores, iOS first: 2 for a linked pair, 1 otherwise. */
+  stores?: PairStore[]
 }
 
 
@@ -80,11 +84,11 @@ const FINAL_CONCLUSION_NONE = '(none)'
 const bucketLabel = (b: string) => b.charAt(0).toUpperCase() + b.slice(1)
 const BUCKET_OPTIONS = BUCKETS.map(b => ({ value: b as string, label: bucketLabel(b) }))
 
-function osLabel(os: string) {
-  const o = (os || '').toLowerCase()
-  if (o === 'ios') return 'iOS'
-  if (o === 'android') return 'Android'
-  return os ? os.toUpperCase() : '—'
+// The row's stores. Rows without `stores` (an older cached response) fall back to the row's own store.
+function storesOf(r: { stores?: PairStore[]; os: string; game_id: string; app_link: string | null }): PairStore[] {
+  if (r.stores && r.stores.length) return r.stores
+  const os = (r.os || '').toLowerCase() === 'android' ? 'android' : 'ios'
+  return [{ os, game_id: r.game_id, eval_id: 0, app_link: r.app_link || null, is_active: true, dead: false }]
 }
 
 // Tiny per-cell copy button. Reveals on row hover; copies the given text
@@ -148,6 +152,7 @@ interface ShortListItem {
   evaluate_date: string | null
   category_group: string
   tags: GameTrendTag[] | null
+  stores?: PairStore[]
 }
 
 // Dashed accent pill for empty editable cells ("+ Set" / "+ Add note").
@@ -1164,7 +1169,7 @@ function ShortListEvalTab() {
                 )}
                 <th style={{ width: 36 }}>#</th>
                 <th style={{ width: 280 }}>Game</th>
-                <th style={{ width: 110 }}>Link</th>
+                <th style={{ width: 80 }}>Stores</th>
                 <th style={{ width: 90 }}>Demo Video</th>
                 <th style={{ width: 220 }}>Initial Note</th>
                 <th style={{ width: 150 }}>Final Conclusion</th>
@@ -1197,51 +1202,32 @@ function ShortListEvalTab() {
                   )}
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 230 }}>
-                      <GameIcon src={item.icon_url} os={item.os} size={40} />
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <span className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</span>
+                    <div className="slg">
+                      <GameIcon src={item.icon_url} hideMark size={40} />
+                      <div className="slg-text">
+                        <div className="slg-title">
+                          <span className="cell-name" title={item.title}>{item.title}</span>
                           <CopyBtn text={item.title} />
                         </div>
-                        <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-                          {item.batch && <span className="badge info">{item.batch}</span>}
-                          {item.initial_evaluator && <span className="badge neutral">{item.initial_evaluator}</span>}
-                          {view === 'monthly' && <span className="badge neutral">{bucketLabel(item.category_group)}</span>}
-                        </div>
+                        {(item.batch || item.initial_evaluator || view === 'monthly') && (
+                          <div className="slg-chips">
+                            {item.batch && <span className="badge info">{item.batch}</span>}
+                            {item.initial_evaluator && <span className="badge neutral">{item.initial_evaluator}</span>}
+                            {view === 'monthly' && <span className="badge neutral">{bucketLabel(item.category_group)}</span>}
+                          </div>
+                        )}
                         {(item.publisher_name || item.release_date) && (
-                          <div style={{ display: 'flex', alignItems: 'center', marginTop: 2 }}>
-                            {item.publisher_name && (
-                              <>
-                                <span className="game-cell-meta" style={{ maxWidth: 230 }} title={item.publisher_name}>{item.publisher_name}</span>
-                                <CopyBtn text={item.publisher_name} />
-                              </>
-                            )}
-                            {item.release_date && (
-                              <span className="game-cell-meta" style={{ marginLeft: item.publisher_name ? 4 : 0 }}>
-                                {item.publisher_name ? '· ' : ''}Released {fmtDateVN(item.release_date)}
-                              </span>
-                            )}
+                          <div className="slg-meta" title={[item.publisher_name, item.release_date ? fmtDateVN(item.release_date) : null].filter(Boolean).join(' · ')}>
+                            {/* Date first: a long publisher is cut with "..." at the line's end, never leaving a gap before the date. */}
+                            {item.release_date && <span className="slg-date" style={item.publisher_name ? undefined : { marginRight: 0 }}>{fmtDateVN(item.release_date)}{item.publisher_name ? ' ·' : ''}</span>}
+                            {item.publisher_name && <span className="slg-pub">{item.publisher_name}</span>}
                           </div>
                         )}
                       </div>
                     </div>
                   </td>
                   <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      {item.app_link ? (
-                        <a href={item.app_link} target="_blank" rel="noopener" onClick={e => e.stopPropagation()}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>
-                          {osLabel(item.os)}
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
-                          </svg>
-                        </a>
-                      ) : (
-                        <span style={{ fontSize: 13, color: 'var(--faint)' }}>{osLabel(item.os)}</span>
-                      )}
-                      <CopyBtn text={item.app_link} />
-                    </span>
+                    <StoresCell stores={storesOf(item)} asLinks />
                   </td>
                   <td onClick={e => e.stopPropagation()}>
                     <DemoVideoCell item={item} onSaved={handleDriveLinkSaved} />
@@ -1366,7 +1352,7 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen,
           {idx + 1}
         </td>
         <td>
-          <GameCell icon={ev.icon_url} os={ev.os} title={<Highlight text={ev.title} term={term} />}
+          <GameCell icon={ev.icon_url} os={ev.os} hideMark title={<Highlight text={ev.title} term={term} />}
             publisher={ev.publisher_name} releaseDate={ev.release_date} genres={genres}
             extra={idMatched ? (
               <span style={{ fontSize: 'var(--fs-11)', color: 'var(--faint)', fontFamily: 'var(--num)' }}>
@@ -1374,6 +1360,7 @@ const EvalRow = memo(function EvalRow({ ev, idx, isActive, activeRowRef, onOpen,
               </span>
             ) : undefined} />
         </td>
+        <td><StoresCell stores={storesOf(ev)} asLinks /></td>
         <td style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', color: ev.initial_evaluator ? 'var(--text)' : 'var(--faint)' }}>
           {ev.initial_evaluator || '—'}
         </td>
@@ -1826,6 +1813,7 @@ function EvaluationsPageInner() {
               <tr>
                 <th style={{ width: 36 }}>#</th>
                 <th>Game</th>
+                <th style={{ width: 80 }}>Stores</th>
                 <th>Initial</th>
                 <th>Final</th>
                 <th>Assigned</th>
@@ -1838,16 +1826,16 @@ function EvaluationsPageInner() {
             </thead>
             <tbody>
               {loadFailed && !loading && (
-                <tr><td colSpan={10}><ErrorState onRetry={() => fetchPage(1, false)}>Could not load the games.</ErrorState></td></tr>
+                <tr><td colSpan={11}><ErrorState onRetry={() => fetchPage(1, false)}>Could not load the games.</ErrorState></td></tr>
               )}
               {!loadFailed && filtered.length === 0 && !loading && (
-                <tr><td colSpan={10}>
+                <tr><td colSpan={11}>
                   <EmptyState action={filtersOn ? { label: 'Clear filters', onClick: clearFilters } : undefined}>
                     {search ? 'No games match your search.' : filtersOn ? 'No games match these filters.' : 'No games assigned in this period.'}
                   </EmptyState>
                 </td></tr>
               )}
-              {loading && data.length === 0 && <SkeletonRows widths={[20, 220, 70, 70, 60, 150, 80, 120, 90, 50]} />}
+              {loading && data.length === 0 && <SkeletonRows widths={[20, 220, 50, 70, 70, 60, 150, 80, 120, 90, 50]} />}
               {!loadFailed && filtered.map((ev, idx) => (
                 <EvalRow key={ev.id} ev={ev} idx={idx} term={searchTerm}
                   isActive={ev.game_id === activeGameId}
@@ -1889,9 +1877,16 @@ function EvaluationsPageInner() {
               hideRecordSections={false}
               onClose={handleClose}
               onNavigate={handleNavigate}
-              onSaved={(fresh: EvalDetail) => {
-                setData(prev => prev.map(d => d.game_id === fresh.game_id
-                  ? { ...d, initial_conclusion: fresh.initial_conclusion, initial_note: fresh.initial_note, evaluate_date: fresh.evaluate_date, drive_link: fresh.drive_link }
+              onSaved={(fresh: EvalDetail, stores: PairStore[] | null) => {
+                // A pair: the list row is the pair's front row as it was loaded, which a link dead
+                // switch can turn into the back row, so match it by either store's id too. Its
+                // `stores` take the saved state, so a store marked dead shows without a reload.
+                const pairIds = new Set((stores ?? []).map(st => st.eval_id))
+                setData(prev => prev.map(d => d.game_id === fresh.game_id || pairIds.has(d.id)
+                  ? {
+                      ...d, initial_conclusion: fresh.initial_conclusion, initial_note: fresh.initial_note, evaluate_date: fresh.evaluate_date, drive_link: fresh.drive_link,
+                      ...(stores ? { stores } : {}),
+                    }
                   : d
                 ))
               }}

@@ -32,6 +32,10 @@ import { startView, onVisibility, onInput, snapshot, restartAfterSave, type View
 import type { LogContext } from '@/lib/evaluation-log'
 import { GameIcon } from '@/components/ui/GameIcon'
 import { CodeChip, fetchDemoCode } from '@/components/CodeChip'
+import { StoreTabs } from '@/components/StoreTabs'
+import { StoreMark } from '@/components/ui/StoreIcons'
+import type { PanelStore } from '@/app/api/evaluations/[gameId]/route'
+import { STORE_SPECIFIC, type PairStore } from '@/lib/eval-pairs'
 import {
   EMPTY_NOTE_PARTS, NOTE_MIN_LEN, isLegacyNote, missingNoteParts, notePartsFromRow, notePartsRequirementError,
   type NoteParts,
@@ -99,9 +103,38 @@ export interface EvalDetail {
   content_rating: string | null
   publisher_name: string | null
   publisher_link: string | null
+  /** A linked iOS + Android pair (the row above is its front row); null for a single-store game. */
+  pair?: EvalPair | null
+}
+
+/** Both stores of a linked pair, iOS first, and the store whose game_id the panel was opened with. */
+export interface EvalPair {
+  selected_game_id: string
+  stores: PanelStore[]
 }
 
 export interface EvalListItem { game_id: string; title: string }
+
+/** A pair's stores as the lists carry them (PairStore), from the panel's richer PanelStore. */
+export function pairStoresOf(ev: EvalDetail): PairStore[] | null {
+  return ev.pair
+    ? ev.pair.stores.map(({ os, game_id, eval_id, app_link, is_active, dead }) => ({ os, game_id, eval_id, app_link, is_active, dead }))
+    : null
+}
+
+/** The pending link dead switches still worth keeping after the pair's rows were re-read: the
+ *  ones on a store of this pair whose row does not already say the same. Same object back
+ *  when nothing is dropped, so React skips the re-render. */
+export function keptDeadEdits(edits: Record<number, boolean>, stores: { eval_id: number; conclusion?: string | null }[]): Record<number, boolean> {
+  const next: Record<number, boolean> = {}
+  let dropped = false
+  for (const [k, dead] of Object.entries(edits)) {
+    const st = stores.find(x => x.eval_id === Number(k))
+    if (st && dead !== (st.conclusion === 'Link_dead')) next[Number(k)] = dead
+    else dropped = true
+  }
+  return dropped ? next : edits
+}
 
 // The Initial Conclusion an evaluator picks: Bypass (drop), List_Idea (keep →
 // buckets into a weekly batch), or Playtest & Bypass (playtest first, then drop).
@@ -128,7 +161,7 @@ export async function fetchEvalByGameId(gameId: string, category?: string): Prom
     const res = await fetch(`/api/evaluations/${encodeURIComponent(gameId)}${qs}`)
     if (!res.ok) return null
     const json = await res.json()
-    return json.data as EvalDetail
+    return { ...(json.data as EvalDetail), pair: (json.pair ?? null) as EvalPair | null }
   } catch { return null }
 }
 
@@ -491,7 +524,9 @@ interface Props {
    *  be split by screen. Required so a new mount cannot forget it. */
   logContext: LogContext
   onNavigate?: (gameId: string) => void
-  onSaved?: (ev: EvalDetail) => void
+  /** `stores`: a pair's stores after the save (PairStore, iOS first), so a host list can show the
+   *  new link dead state without reloading; null for a single-store game. */
+  onSaved?: (ev: EvalDetail, stores: PairStore[] | null) => void
   onClose?: () => void
 }
 
@@ -595,6 +630,11 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   const [recorders, setRecorders] = useState<string[]>([])
   const [deadLink, setDeadLink] = useState(false)
   const [dirty, setDirty] = useState(false)
+  // A linked pair: the store whose info the Game Info card shows (game_id), and the link dead
+  // switches flipped and not saved yet, by that store's eval_id. Switching stores only changes
+  // the Game Info card; the form is the pair's either way.
+  const [shownStore, setShownStore] = useState<string | null>(null)
+  const [deadEdits, setDeadEdits] = useState<Record<number, boolean>>({})
   // Manual screenshots staged in the child card. Folded into the unified save so
   // there's no separate "Save screenshots" click (and auto-save picks them up).
   const screenshotRef = useRef<ManualScreenshotsHandle>(null)
@@ -680,9 +720,19 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     })
   }, [])
 
-  const applyData = useCallback((data: EvalDetail) => {
-    shownGameRef.current = data.game_id
+  // `key` is the game_id the panel asked for. A linked pair answers with its front row whichever
+  // store was asked for, so for a pair opened by its back game_id the key is not data.game_id.
+  const applyData = useCallback((data: EvalDetail, key: string = data.game_id) => {
+    const sameGame = shownGameRef.current === key
+    shownGameRef.current = key
     setEv(data)
+    // A fresh open shows the store that was asked for; a refetch of the same game keeps the tab.
+    setShownStore(prev => (sameGame && prev && data.pair?.stores.some(st => st.game_id === prev)
+      ? prev : data.pair?.selected_game_id ?? null))
+    // Unsaved link dead switches belong to the game: a fresh open drops them, a refetch of the
+    // same game (background refresh, the re-read after a save) keeps every one that still
+    // differs from the store's row.
+    setDeadEdits(prev => (sameGame ? keptDeadEdits(prev, data.pair?.stores ?? []) : {}))
     setNoteParts(notePartsFromRow(data))
     setFinalNote(data.final_note || '')
     setFinalConclusion(data.final_conclusion || '')
@@ -698,14 +748,13 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     setRec20Assignee(data.record_20min_assignee || '')
     setDirty(false)
     trendsTouchedRef.current = false
-    generateQR(data.app_link)
-  }, [generateQR])
+  }, [])
 
   const loadGame = useCallback(async (gameId: string) => {
     const gen = ++loadGameGen.current
     const cached = cacheRef.current.get(gameId)
     if (cached) {
-      applyData(cached)
+      applyData(cached, gameId)
       setLoading(false)
     } else {
       setLoading(true)
@@ -726,7 +775,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
       if (dirtyRef.current) return
       if (JSON.stringify(data) === JSON.stringify(cached)) return
     }
-    applyData(data)
+    applyData(data, gameId)
     setLoading(false)
   }, [applyData, category])
 
@@ -776,6 +825,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     setTrendTagsError(false)
     trendTagsLoadedFor.current = gameId
   }, [])
+
+  // Trends tags live in playtest_tags per game_id, with no copy on the twin store. A pair keeps
+  // them under its front row's game_id (ev.game_id) whichever store the panel was opened with,
+  // so both stores show and save the same set. Until the asked-for game is on screen this is
+  // the asked-for id (a single-store game, the common case, loads without waiting).
+  const tagGameId = ev?.pair && shownGameRef.current === currentGameId ? ev.game_id : currentGameId
 
   const loadTrendTags = useCallback((gameId: string, force = false) => {
     const gen = ++trendTagsGen.current
@@ -841,16 +896,16 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // the form depends on that list, so the section is all that moves -- and it
   // moves from the response, not from a re-read.
   const onExistingChanged = useCallback((change: ExistingTagChange) => {
-    trendTagsCacheRef.current.delete(currentGameId)
+    trendTagsCacheRef.current.delete(tagGameId)
     setExistingTrends(prev => applyExistingChange(prev, change))
-  }, [currentGameId])
+  }, [tagGameId])
 
   useEffect(() => {
-    loadTrendTags(currentGameId)
+    loadTrendTags(tagGameId)
     // Bump the generation on unmount / game change so an in-flight response is
     // dropped instead of landing on the next game.
     return () => { trendTagsGen.current++ }
-  }, [currentGameId, loadTrendTags])
+  }, [tagGameId, loadTrendTags])
 
   useEffect(() => {
     if (!hasNav) return
@@ -980,9 +1035,30 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // Any editable surface → show the save button.
   const canEdit = canEditEval || canEdit5 || canEdit20 || canEditAssignee
     || canEditManagerFields || canEditFinalNote
+  // A linked pair (spec 6.4). A store is dead when its own row is Link_dead, or its switch says
+  // so now; the switches are local until Save, like every other field.
+  const pair = ev?.pair ?? null
+  const storeDead = (st: PanelStore) => deadEdits[st.eval_id] ?? st.conclusion === 'Link_dead'
+  const pairStores = pair ? pair.stores.map(st => ({ ...st, dead: storeDead(st) })) : []
+  const shown = pairStores.find(st => st.game_id === shownStore) ?? pairStores.find(st => st.game_id === ev?.game_id) ?? null
+  const liveStores = pairStores.filter(st => !st.dead)
+  const deadStores = pairStores.filter(st => st.dead)
+  // The form's row has to take the pair's result: a store whose own row holds a store-only
+  // result (Link_dead, or Stale_release, which has no switch) cannot. Only Link_dead is drawn red.
+  // `dead` is the switch (pending flips applied), so a Link_dead row being reopened counts as live.
+  const storeOnly = (st: PanelStore) => st.dead
+    || (st.conclusion !== 'Link_dead' && (STORE_SPECIFIC as readonly string[]).includes(st.conclusion ?? ''))
+  const formStores = pairStores.filter(st => !storeOnly(st))
+  const storeName = (os: string) => (os === 'ios' ? 'iOS' : 'Android')
+  // Flipped switches, in store order (iOS first): what Save sends to store-dead before the form.
+  const deadSwitched = pair ? pair.stores.filter(st => st.eval_id in deadEdits) : []
+  // The row the form PATCH goes to: the one live store when only one is, else the front row
+  // (both live: the DB copies to the twin; both dead: both rows keep their own result).
+  const formRowId = pair && formStores.length === 1 ? formStores[0].eval_id : ev?.id
   // The eval editor's Save button also flushes staged screenshots, so staged
   // shots count as unsaved work for it (the card hides its own button then).
-  const needsSave = dirty || (canEditEval && stagedShots > 0)
+  const formPending = dirty || (canEditEval && stagedShots > 0)
+  const needsSave = formPending || deadSwitched.length > 0
   // A written note has to be a real note, on every save — reopening a game whose
   // stored note is short blocks Save until it is filled in, even when the edit is
   // to some other field. Link_dead is exempt.
@@ -991,7 +1067,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   const noteRule = { parts: noteParts, conclusion, legacy: !!ev && isLegacyNote(ev) }
   const noteError = canEditEval ? notePartsRequirementError(noteRule) : null
   const missingParts = canEditEval ? missingNoteParts(noteRule) : []
-  const noteTooShort = !!noteError
+  // A pair whose only change is a link dead switch sends no form, so the note rule does not hold it up.
+  const noteTooShort = !!noteError && (!pair || formPending)
   // Who gets the Save bar: anyone who can change something on this panel, in this
   // context (final conclusion only shows on Short List, record cards only where the
   // host shows them).
@@ -1012,11 +1089,15 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
         record_5min_drive: ev.record_5min_drive, record_20min_drive: ev.record_20min_drive,
         record_5min_assignee: ev.record_5min_assignee, record_20min_assignee: ev.record_20min_assignee,
       },
-      { trendsTouched: trendsTouchedRef.current, stagedShots },
+      { trendsTouched: trendsTouchedRef.current, stagedShots, deadSwitched: deadSwitched.map(st => st.os) },
     )
     return fields.length > 0 ? fields : ['Other changes']
   }
   const pendingFields = needsSave ? currentUnsavedFields() : []
+
+  // The QR follows the store on screen: a pair's store tab switches it without a request.
+  const qrLink = shown?.app_link ?? ev?.app_link ?? null
+  useEffect(() => { generateQR(qrLink) }, [qrLink, generateQR])
 
   useEffect(() => {
     if (!canEditAssignee) return
@@ -1024,6 +1105,16 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   }, [canEditAssignee])
 
   const recOpts = [{ value: '', label: '—' }, ...recorders.map(r => ({ value: r, label: r }))]
+
+  // A pair's per-store switch: local until Save. Flipping it back to what the row says drops the edit.
+  const toggleStoreDead = (st: PanelStore, dead: boolean) => {
+    setDeadEdits(d => {
+      const n = { ...d }
+      if (dead === (st.conclusion === 'Link_dead')) delete n[st.eval_id]
+      else n[st.eval_id] = dead
+      return n
+    })
+  }
 
   const toggleDeadLink = (checked: boolean) => {
     setDeadLink(checked)
@@ -1036,96 +1127,146 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   // evaluation and any staged screenshots), so a caller can tell if it may move on.
   const save = async (): Promise<boolean> => {
     if (!ev || !canEdit) return false
+    // The game on screen as the panel asked for it. A pair opened by its back game_id shows its
+    // front row (key !== ev.game_id); the timer, the tags and the refetch all go by the key.
+    const key = shownGameRef.current ?? ev.game_id
     // Taken now, before any await: Prev/Next stay enabled while the screenshot flush
     // and tag PUT run, so by PATCH time the timer may belong to the next game.
-    const snap = snapshot(viewRef.current, ev.game_id, Date.now())
-    if (noteError) {
-      showToast(noteError, true)
+    const snap = snapshot(viewRef.current, key, Date.now())
+    if (noteTooShort) {
+      showToast(noteError ?? '', true)
       return false
     }
+    // A linked pair: each flipped link dead switch goes first, one store-dead call per store
+    // (iOS first), then the form, to the row that is live once they are applied (formRowId).
+    // A pair sends the form only when it changed. Panel time rides on one request only: the
+    // form, else the first switch.
+    const switches = deadSwitched.map(st => ({ st, dead: !!deadEdits[st.eval_id] }))
+    const sendForm = !pair || formPending
+    const formId = formRowId ?? ev.id
+    const timing = snap ? { view_s: snap.view_s, hidden_s: snap.hidden_s, idle_s: snap.idle_s, context: logContext } : null
     let saved = false
     setSaving(true)
     try {
-      // Flush staged screenshots first so one Save persists both. Silent success —
-      // the eval PATCH below shows the single "Saved" toast; the refetch picks up
-      // the new screenshot URLs from the server. A failure here must survive that
-      // toast: the card's own error message is about to be overwritten, and the
-      // refetch renders server state with none of the staged shots in it, so
-      // swallowing the result reports "Saved" over screenshots that never landed.
-      const shotsOk = canEditEval && screenshotRef.current?.hasStaged()
-        ? await screenshotRef.current.flush()
-        : true
-      shotsFailedRef.current = !shotsOk
-      // Trends tags are their own resource (they stage for admin review, they are not
-      // evaluation columns), so they save alongside the eval rather than inside it.
-      // Only PUT what we actually loaded: the endpoint replaces the game's whole
-      // pending set, so sending the empty state of a failed or still-in-flight
-      // load would silently delete the evaluator's proposals.
-      if (canEditGameAlike && trendTagsLoadedFor.current === ev.game_id) {
-        const tagRes = await fetch('/api/playtest-tags', {
-          method: 'PUT',
+      for (let i = 0; i < switches.length; i++) {
+        const { st, dead } = switches[i]
+        const res = await fetch('/api/evaluations/store-dead', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ game_id: ev.game_id, tags: trendTags }),
+          body: JSON.stringify({ id: st.eval_id, dead, ...(i === 0 && !sendForm && timing ? timing : {}) }),
         })
-        if (!tagRes.ok) {
-          const err = await tagRes.json().catch(() => ({}))
-          showToast(err.error || 'Failed to save trend tags', true)
+        const out = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          showToast(out.error || `Failed to save the ${storeName(st.os)} link`, true)
           setSaving(false)
           return false
         }
-        // The pending set just changed; the cached copy is the pre-save one.
-        trendTagsCacheRef.current.delete(ev.game_id)
+        // Landed: the store's own row now says what the switch says, so a failure further on
+        // never sends this switch again (a second reopen would be refused).
+        const now = out.data && 'initial_conclusion' in out.data ? out.data.initial_conclusion : (dead ? 'Link_dead' : null)
+        setDeadEdits(d => { const n = { ...d }; delete n[st.eval_id]; return n })
+        setEv(prev => (prev?.pair ? {
+          ...prev,
+          pair: { ...prev.pair, stores: prev.pair.stores.map(x => (x.eval_id === st.eval_id ? { ...x, dead, conclusion: now } : x)) },
+        } : prev))
       }
-      const body: Record<string, unknown> = { id: ev.id }
-      if (canEditEval) {
-        // Always send these so an emptied field clears the column (see PATCH handler).
-        body.initial_note_parts = noteParts
-        body.drive_link = driveLink
-        // Initial Conclusion (+ batch) freezes once a final conclusion exists.
-        if (canEditInitialConc) {
-          body.initial_conclusion = conclusion
-          // Batch only applies to List_Idea games. Managers pick freely; evaluators
-          // are forced into the team's current batch (set by a manager).
-          if (conclusion === 'List_Idea') {
-            const effBatch = isManager ? batch : (ev.current_batch || '')
-            if (effBatch && effBatch !== (ev.batch || '')) body.batch = effBatch
+
+      let ok = true
+      if (sendForm) {
+        // Flush staged screenshots first so one Save persists both. Silent success —
+        // the eval PATCH below shows the single "Saved" toast; the refetch picks up
+        // the new screenshot URLs from the server. A failure here must survive that
+        // toast: the card's own error message is about to be overwritten, and the
+        // refetch renders server state with none of the staged shots in it, so
+        // swallowing the result reports "Saved" over screenshots that never landed.
+        const shotsOk = canEditEval && screenshotRef.current?.hasStaged()
+          ? await screenshotRef.current.flush()
+          : true
+        shotsFailedRef.current = !shotsOk
+        // Trends tags are their own resource (they stage for admin review, they are not
+        // evaluation columns), so they save alongside the eval rather than inside it.
+        // Only PUT what we actually loaded: the endpoint replaces the game's whole
+        // pending set, so sending the empty state of a failed or still-in-flight
+        // load would silently delete the evaluator's proposals.
+        // A pair's tags sit under its front row's game_id (see tagGameId).
+        const tagKey = ev.pair ? ev.game_id : key
+        if (canEditGameAlike && trendTagsLoadedFor.current === tagKey) {
+          const tagRes = await fetch('/api/playtest-tags', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ game_id: tagKey, tags: trendTags }),
+          })
+          if (!tagRes.ok) {
+            const err = await tagRes.json().catch(() => ({}))
+            showToast(err.error || 'Failed to save trend tags', true)
+            setSaving(false)
+            return false
+          }
+          // The pending set just changed; the cached copy is the pre-save one.
+          trendTagsCacheRef.current.delete(tagKey)
+        }
+        const body: Record<string, unknown> = { id: formId }
+        if (canEditEval) {
+          // Always send these so an emptied field clears the column (see PATCH handler).
+          body.initial_note_parts = noteParts
+          body.drive_link = driveLink
+          // Initial Conclusion (+ batch) freezes once a final conclusion exists. On a pair a
+          // Link_dead store opens and closes only by its switch: the form never sends Link_dead,
+          // and never writes a conclusion into a row that stays dead.
+          const formRowLive = !pair || formStores.some(st => st.eval_id === formId)
+          if (canEditInitialConc && formRowLive && !(pair && conclusion === 'Link_dead')) {
+            body.initial_conclusion = conclusion
+            // Batch only applies to List_Idea games. Managers pick freely; evaluators
+            // are forced into the team's current batch (set by a manager).
+            if (conclusion === 'List_Idea') {
+              const effBatch = isManager ? batch : (ev.current_batch || '')
+              if (effBatch && effBatch !== (ev.batch || '')) body.batch = effBatch
+            }
           }
         }
-      }
-      // Game Alike: evaluator or manager, never frozen by a stage lock.
-      if (canEditGameAlike) body.game_alike = gameAlike
-      if (canEditFinalNote) body.final_note = finalNote
-      if (canEditFinalConc && finalConclusion !== (ev.final_conclusion || '')) body.final_conclusion = finalConclusion
-      if (canEdit5 && drive5 && drive5 !== ev.record_5min_drive) body.record_5min_drive = drive5
-      if (canEdit20 && drive20 && drive20 !== ev.record_20min_drive) body.record_20min_drive = drive20
-      if (canEditAssignee && rec5Assignee && rec5Assignee !== (ev.record_5min_assignee || '')) body.record_5min_assignee = rec5Assignee
-      if (canEditAssignee && rec20Assignee && rec20Assignee !== (ev.record_20min_assignee || '')) body.record_20min_assignee = rec20Assignee
-      if (snap) Object.assign(body, { view_s: snap.view_s, hidden_s: snap.hidden_s, idle_s: snap.idle_s, context: logContext })
-      const res = await fetch('/api/evaluations', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        showToast(err.error || 'Failed', true)
+        // Game Alike: evaluator or manager, never frozen by a stage lock.
+        if (canEditGameAlike) body.game_alike = gameAlike
+        if (canEditFinalNote) body.final_note = finalNote
+        if (canEditFinalConc && finalConclusion !== (ev.final_conclusion || '')) body.final_conclusion = finalConclusion
+        if (canEdit5 && drive5 && drive5 !== ev.record_5min_drive) body.record_5min_drive = drive5
+        if (canEdit20 && drive20 && drive20 !== ev.record_20min_drive) body.record_20min_drive = drive20
+        if (canEditAssignee && rec5Assignee && rec5Assignee !== (ev.record_5min_assignee || '')) body.record_5min_assignee = rec5Assignee
+        if (canEditAssignee && rec20Assignee && rec20Assignee !== (ev.record_20min_assignee || '')) body.record_20min_assignee = rec20Assignee
+        if (snap) Object.assign(body, { view_s: snap.view_s, hidden_s: snap.hidden_s, idle_s: snap.idle_s, context: logContext })
+        const res = await fetch('/api/evaluations', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) {
+          const err = await res.json()
+          showToast(err.error || 'Failed', true)
+          ok = false
+        } else {
+          // The evaluation itself is saved either way; only the wording changes, so
+          // a screenshot outage can never make an evaluator think their note was lost.
+          if (shotsOk) showToast('Saved')
+          else showToast('Evaluation saved — screenshots failed to upload', true)
+          saved = shotsOk
+          trendsTouchedRef.current = false
+          if (snap) viewRef.current = restartAfterSave(viewRef.current, snap, document.hidden)
+        }
       } else {
-        // The evaluation itself is saved either way; only the wording changes, so
-        // a screenshot outage can never make an evaluator think their note was lost.
-        if (shotsOk) showToast('Saved')
-        else showToast('Evaluation saved — screenshots failed to upload', true)
-        saved = shotsOk
-        trendsTouchedRef.current = false
+        // Only link dead switches changed, and all of them landed.
+        showToast('Saved')
+        saved = true
         if (snap) viewRef.current = restartAfterSave(viewRef.current, snap, document.hidden)
-        const fresh = await fetchEvalByGameId(ev.game_id, category)
+      }
+      if (ok) {
+        const fresh = await fetchEvalByGameId(key, category)
         if (fresh) {
-          cacheRef.current.set(ev.game_id, fresh)
+          cacheRef.current.set(key, fresh)
           // The user may have pressed Next while this save was in flight; painting the
           // saved game now would put its data under the new game's id.
-          if (currentGameIdRef.current === ev.game_id) applyData(fresh)
+          if (currentGameIdRef.current === key) applyData(fresh, key)
           // Old game still on screen and already saved: clear dirty so auto-save does not fire again.
-          else if (shownGameRef.current === ev.game_id) setDirty(false)
-          onSaved?.(fresh)
+          else if (shownGameRef.current === key) setDirty(false)
+          onSaved?.(fresh, pairStoresOf(fresh))
         }
       }
     } catch { showToast('Network error', true) }
@@ -1145,11 +1286,12 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
         body: JSON.stringify({ ids: [ev.id], unset: true }),
       })
       if (!res.ok) { showToast('Failed to reset', true); return }
-      const fresh = await fetchEvalByGameId(ev.game_id, category)
+      const key = shownGameRef.current ?? ev.game_id
+      const fresh = await fetchEvalByGameId(key, category)
       if (fresh) {
-        cacheRef.current.set(ev.game_id, fresh)
-        if (currentGameIdRef.current === ev.game_id) applyData(fresh)
-        onSaved?.(fresh)
+        cacheRef.current.set(key, fresh)
+        if (currentGameIdRef.current === key) applyData(fresh, key)
+        onSaved?.(fresh, pairStoresOf(fresh))
       }
     } catch { showToast('Network error', true) }
   }
@@ -1211,7 +1353,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
     autoSaveTimer.current = setTimeout(() => { saveRef.current() }, 1500)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSave, needsSave, saving, canEdit, noteTooShort, currentGameId, noteParts, conclusion, driveLink, deadLink, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots, trendTags])
+  }, [autoSave, needsSave, saving, canEdit, noteTooShort, currentGameId, noteParts, conclusion, driveLink, deadLink, deadEdits, batch, finalNote, finalConclusion, drive5, drive20, rec5Assignee, rec20Assignee, stagedShots, trendTags])
 
   const clearField = (f: 'conclusion' | 'drive') => {
     if (!canEditEval) return
@@ -1234,11 +1376,33 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
   if (loading && !ev) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>Loading…</div>
   if (!ev) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>Not found</div>
 
-  const screenshots = ev.screenshot_urls || []
+  // Game Info shows the store on screen: on a pair the tab picks it (all from pair.stores, no
+  // request); a single-store game is its own row. Assigned, the evaluated dates and the form
+  // never change with the tab.
+  const gi = shown ? {
+    game_id: shown.game_id, os: shown.os, title: shown.title || ev.title, app_link: shown.app_link, icon_url: shown.icon_url,
+    subtitle: (shown.subtitle as string | null) ?? null, content_rating: (shown.content_rating as string | null) ?? null,
+    publisher_name: shown.publisher_name, release_date: shown.release_date,
+    description: (shown.description as string | null) ?? null,
+    screenshots: Array.isArray(shown.screenshot_urls) ? (shown.screenshot_urls as string[]) : [],
+  } : {
+    game_id: ev.game_id, os: ev.os, title: ev.title, app_link: ev.app_link, icon_url: ev.icon_url,
+    subtitle: ev.subtitle, content_rating: ev.content_rating, publisher_name: ev.publisher_name, release_date: ev.release_date,
+    description: ev.description, screenshots: ev.screenshot_urls || [],
+  }
+  const screenshots = gi.screenshots
   const manualShots = ev.manual_screenshot_urls || []
+  // Manual uploads belong to the row's own game. On a pair the card stays mounted while the
+  // other store is on screen (hidden), so shots staged for Save survive a tab switch.
+  const hasManualCard = (ev.screenshot_urls || []).length === 0
+  const manualCardShown = hasManualCard && screenshots.length === 0 && gi.game_id === ev.game_id
+  const deadName = deadStores.length === 1 ? storeName(deadStores[0].os) : ''
+  const liveName = liveStores.length === 1 ? storeName(liveStores[0].os) : ''
   // Manual uploads: admin or the assigned evaluator (matches the API rule).
   const canEditShots = !readOnly && (isManager || ev.initial_evaluator === userName)
   const cats = ev.categories || []
+  // A subtitle that only repeats a category chip below it (iOS often sets it to the genre) is noise.
+  const showSubtitle = !!gi.subtitle && !cats.some(c => String(c).trim().toLowerCase() === String(gi.subtitle).trim().toLowerCase())
 
   return (
     <>
@@ -1311,47 +1475,72 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             <div className="card-head">
               <span className="card-label">Game Info</span>
             </div>
+            {shown && (
+              <>
+                <StoreTabs stores={pairStores} selected={shown.game_id} onSelect={setShownStore} />
+                {shown.dead && liveStores.length === 1 && (
+                  <div className="pair-note">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }}>
+                      <circle cx="12" cy="12" r="10" /><path d="M12 8v4" /><path d="M12 16h.01" />
+                    </svg>
+                    <span>
+                      The {deadName} link is dead, so {deadName} keeps <b>Link dead</b>. The evaluation on the right is {liveName} only.
+                      {' '}When the {deadName} link works again, {deadName} reopens and takes the pair&apos;s result.
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
 
             <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
               {/* alignSelf: in this flex row the default `stretch` would stretch the icon
                   to the text column's height. */}
-              <span style={{ alignSelf: 'flex-start' }}><GameIcon src={ev.icon_url} os={ev.os} size={56} /></span>
+              <span style={{ alignSelf: 'flex-start' }}><GameIcon src={gi.icon_url} os={gi.os} size={56} /></span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  {ev.app_link ? (
-                    <a href={ev.app_link} target="_blank" rel="noopener"
+                  {gi.app_link ? (
+                    <a href={gi.app_link} target="_blank" rel="noopener"
                       style={{ color: 'var(--accent)', textDecoration: 'none', display: 'inline' }}>
-                      {ev.title}
+                      {gi.title}
                       {' '}
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
                         strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', opacity: 0.7, marginLeft: 4 }}>
                         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
                       </svg>
                     </a>
-                  ) : ev.title}
-                  <TitleCopyButton title={ev.title} />
+                  ) : gi.title}
+                  <TitleCopyButton title={gi.title} />
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  <span style={{ wordBreak: 'break-all' }}>{ev.game_id}</span>
-                  <TitleCopyButton title={ev.game_id} label="game ID" />
+                  <span style={{ wordBreak: 'break-all' }}>{gi.game_id}</span>
+                  <TitleCopyButton title={gi.game_id} label="game ID" />
                 </div>
-                {ev.subtitle && <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 5 }}>{ev.subtitle}</div>}
+                {showSubtitle && <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 5 }}>{gi.subtitle}</div>}
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                   {/* Labels, not chips anyone can click: .badge (see C3). */}
-                  <span className="badge neutral">{ev.os?.toUpperCase()}</span>
+                  {/* A pair names its store on the tabs above; only a single store keeps the chip. */}
+                  {!shown && <span className="badge neutral">{gi.os?.toUpperCase()}</span>}
                   {cats.map((c, i) => (
                     <span key={i} className="badge info">{c}</span>
                   ))}
-                  {ev.content_rating && <span className="badge neutral">{ev.content_rating}</span>}
+                  {gi.content_rating && <span className="badge neutral">{gi.content_rating}</span>}
                 </div>
               </div>
+              {/* Per store, red when on. Sent on Save, before the form (POST /api/evaluations/store-dead). */}
+              {shown && (
+                <span style={{ alignSelf: 'flex-start', paddingTop: 4 }}>
+                  <Switch checked={shown.dead} onChange={v => toggleStoreDead(shown, v)} tone="danger"
+                    label={`${storeName(shown.os)} link dead`} title="Mark this store link as invalid"
+                    disabled={!canEditInitialConc} />
+                </span>
+              )}
             </div>
 
             {/* Info grid with QR */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '10px 10px' }}>
-              <InfoField label="Publisher" value={ev.publisher_name} copyValue={ev.publisher_name || ''} />
+              <InfoField label="Publisher" value={gi.publisher_name} copyValue={gi.publisher_name || ''} />
               <InfoField label="Assigned" value={fmtDateVN(ev.assigned_date)} />
-              {ev.app_link ? (
+              {gi.app_link ? (
                 <div 
                   onClick={() => qrDataUrl && setExpandedImg(qrDataUrl)}
                   title="Click to zoom QR Code"
@@ -1385,7 +1574,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   </span>
                 </div>
               ) : <div />}
-              <InfoField label="Release Date" value={fmtDateVN(ev.release_date)} copyValue={ev.release_date ? fmtDateVN(ev.release_date) : ''} />
+              <InfoField label="Release Date" value={fmtDateVN(gi.release_date)} copyValue={gi.release_date ? fmtDateVN(gi.release_date) : ''} />
               <InfoField label="Initial Evaluated" value={ev.evaluate_date ? `${fmtDateTimeVN(ev.evaluate_date)}${ev.initial_evaluator ? ` · ${ev.initial_evaluator}` : ''}` : '—'} />
               <InfoField label="Genre" value={[ev.genre_1, ev.genre_2].filter(Boolean).join(' / ') || '—'} />
               <InfoField label="Final Evaluated" value={ev.final_conclusion_date ? `${fmtDateTimeVN(ev.final_conclusion_date)}${ev.final_evaluator ? ` · ${ev.final_evaluator}` : ''}` : '—'} />
@@ -1397,7 +1586,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           {screenshots.length > 0 && (
             <div className="card" style={{ margin: 0 }}>
               <div className="card-head">
-                <span className="card-label">StoreKit ({screenshots.length})</span>
+                <span className="card-label">{shown ? `StoreKit · ${storeName(shown.os)} (${screenshots.length})` : `StoreKit (${screenshots.length})`}</span>
                 <button className="btn btn-sm btn-ghost" onClick={() => setExpandedImg(screenshots[0])}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
@@ -1419,7 +1608,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           )}
 
           {/* Manual screenshots — only when StoreKit hasn't arrived */}
-          {screenshots.length === 0 && (
+          {hasManualCard && (
+            <div hidden={!manualCardShown} style={{ display: manualCardShown ? 'contents' : 'none' }}>
             <ManualScreenshotsCard
               key={ev.game_id}
               ref={screenshotRef}
@@ -1432,17 +1622,18 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
               deferSave={canEditEval}
               onStagedChange={setStagedShots}
             />
+            </div>
           )}
 
           {/* Description */}
-          {ev.description && (
+          {gi.description && (
             <div className="card" style={{ margin: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div className="card-head">
                 <span className="card-label">Description</span>
               </div>
               <div
                 style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--muted)', flex: 1, minHeight: 0, overflowY: 'auto' }}
-                dangerouslySetInnerHTML={{ __html: ev.description }}
+                dangerouslySetInnerHTML={{ __html: gi.description }}
               />
             </div>
           )}
@@ -1453,6 +1644,14 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
           <div className="card" style={{ margin: 0 }}>
             <div className="card-head">
               <span className="card-label">Initial Evaluation</span>
+              {pair && deadStores.length === 0 && (
+                <span className="shared-hint"><StoreMark os="android" /><StoreMark os="ios" />Saved to both stores</span>
+              )}
+              {pair && deadStores.length === 1 && liveStores.length === 1 && (
+                <span className="shared-hint">
+                  <StoreMark os={liveStores[0].os} />{`${liveName} only while the ${deadName} link is dead`}
+                </span>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
                 {canEditInitialConc && (
                   // Two clicks: the first arms it (red, for 3s), the second clears.
@@ -1472,7 +1671,8 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   <span className="label">Initial Conclusion</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     {canEditInitialConc && conclusion && !deadLink && <ClearBtn onClick={() => clearField('conclusion')} />}
-                    {canEditInitialConc && (
+                    {/* A pair has a switch per store in Game Info instead. */}
+                    {canEditInitialConc && !pair && (
                       <Switch checked={deadLink} onChange={toggleDeadLink} label="Dead link" title="Mark the store link as invalid" />
                     )}
                   </div>
@@ -1582,7 +1782,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
               <div className="field">
                 <span className="label">Trends Tags</span>
                 <TrendTagsField
-                  gameId={currentGameId}
+                  gameId={tagGameId}
                   value={trendTags}
                   existing={existingTrends}
                   options={trendOptions}
@@ -1594,7 +1794,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
                   optionsError={trendOptionsError}
                   onRetryOptions={loadTrendOptions}
                   loadError={trendTagsError}
-                  onRetryLoad={() => loadTrendTags(currentGameId, true)}
+                  onRetryLoad={() => loadTrendTags(tagGameId, true)}
                   review={pendingReview}
                   canReview={isManager}
                   onReviewed={onTagReviewed}
@@ -1765,7 +1965,7 @@ export default function EvalDetailPanel({ initialGameId, gameList, category, rol
             <div className="eval-savebar">
               <span className="eval-savebar-note" aria-live="polite">
                 {saving ? '' : noteTooShort && needsSave ? (noteError ?? '')
-                  : needsSave ? `Unsaved: ${pendingFields.join(', ')}`
+                  : needsSave ? `Unsaved: ${pendingFields.join(', ')}${pair && deadStores.length === 0 && formPending ? ' · saves Android and iOS together' : ''}`
                   : autoSave ? 'Auto-save is on' : 'All changes saved'}
               </span>
               <button className={`btn ${needsSave ? 'btn-primary' : ''}`} onClick={save} disabled={saving || !needsSave || noteTooShort}>

@@ -809,6 +809,8 @@ interface ShortListItem {
   category_group: string
   batch: string | null
   app_link: string | null
+  /** A linked pair lists its row once; both stores here, iOS first. Absent on older rows. */
+  stores?: { os: string }[]
 }
 
 // ── Extract Chat Text Modal ──────────────────────────────────────────────────
@@ -1066,7 +1068,7 @@ function RecordTable({
                   <td className="num" style={{ color: 'var(--faint)', fontSize: 12 }}>{idx + 1}</td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 160 }}>
-                      <GameIcon src={item.icon_url} os={item.os} size={40} />
+                      <GameIcon src={item.icon_url} os={item.os} oses={item.stores && item.stores.length === 2 ? item.stores.map(s => s.os) : undefined} size={40} />
                       <div style={{ minWidth: 0 }}>
                         {/* Row 1: title */}
                         <div className="cell-name" style={{ fontSize: 13, lineHeight: 1.3 }}>{item.title}</div>
@@ -1703,7 +1705,7 @@ function RecordTab() {
     const games = new Map<number | string, YtGame>(recordGames.map(g => [g.key, g]))
     for (const d of data) {
       const known = games.get(d.id)
-      games.set(d.id, { key: d.id, gameId: d.game_id, title: d.title, bucket: effectiveBucket(d), recorder: recorderOf(d), since: known?.since, heldVideo: known?.heldVideo })
+      games.set(d.id, { key: d.id, gameId: d.game_id, title: d.title, bucket: effectiveBucket(d), recorder: recorderOf(d), since: known?.since, heldVideo: known?.heldVideo, alt: known?.alt })
     }
     return resolveVideoMatches(Array.from(games.values()), ytRows)
   }, [recordGames, data, ytRows])

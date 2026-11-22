@@ -16,6 +16,7 @@ const sessionMock = getServerSession as unknown as jest.Mock
 
 type Binds = unknown[]
 let gameQueries: { text: string; binds: Binds }[] = []
+let fragments: string[] = []
 
 function game(over: Record<string, unknown>) {
   return {
@@ -31,10 +32,14 @@ function db(config: { key: string; value: string | null }[], games: Record<strin
   /** reject any game query that mentions this table, with Postgres 42P01 (undefined_table) */
   missingTable?: string) {
   gameQueries = []
+  fragments = []
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: unknown, ...binds: Binds) => {
     const text = Array.isArray(strings) ? (strings as string[]).join(' ') : ''
+    if (!Array.isArray(strings)) return []   // sql('ge'): an identifier, not a query
     if (text.includes('app_config')) return Promise.resolve(config)
+    // listRowFilter fragment: not a query of its own, but it proves the pair filter is there
+    if (text.includes('.pair_back') && !text.includes('SELECT')) { fragments.push(text); return Promise.resolve([]) }
     gameQueries.push({ text, binds })
     if (missingTable && text.includes(missingTable)) {
       return Promise.reject(Object.assign(new Error(`relation "${missingTable}" does not exist`), { code: '42P01' }))
@@ -67,6 +72,7 @@ describe('GET /api/evaluations/missing-demo', () => {
   it('asks only for the signed-in user\'s own List_Idea games with no demo link', async () => {
     db(CFG, [game({})])
     await GET(req())
+    expect(fragments.join(' ')).toContain('.pair_back')
     expect(gameQueries).toHaveLength(1)
     const { text, binds } = gameQueries[0]
     expect(text).toMatch(/initial_conclusion\s*=\s*'List_Idea'/)
@@ -167,6 +173,9 @@ describe('GET /api/evaluations/missing-demo', () => {
       sqlMock.mockImplementation((strings: unknown) => {
         const text = Array.isArray(strings) ? (strings as string[]).join(' ') : ''
         if (text.includes('app_config')) return Promise.resolve(CFG)
+        // a nested fragment (listRowFilter) is built eagerly and never awaited: only a
+        // real query rejects, or the rejection would be unhandled
+        if (!text.includes('FROM')) return Promise.resolve([])
         return Promise.reject(Object.assign(new Error('boom'), { code: '57014' }))
       })
       const res = await GET(req())

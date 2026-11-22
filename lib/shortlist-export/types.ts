@@ -23,6 +23,9 @@ export interface ExportGame {
   /** from game_info.os, lower-cased; anything else -> null */
   platform: 'android' | 'ios' | null
   storeUrl: string | null
+  /** every store of a linked pair (one entry for an unlinked game); the sheet's android / ios
+   *  columns read from here. Absent: fall back to platform + storeUrl. */
+  stores?: { os: 'android' | 'ios'; link: string | null }[]
   iconUrl: string | null
   /** 'YYYY-MM-DD' from game_info.initial_release */
   releaseDate: string | null

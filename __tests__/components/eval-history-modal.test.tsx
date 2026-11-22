@@ -8,11 +8,11 @@ const EVENTS: HistoryEvent[] = [
   {
     key: 'log-2', at: '2026-10-11T07:32:00.000Z', who: 'Alice', type: 'save', verb: 'changed the verdict',
     changes: [{ kind: 'initial', from: 'Bypass', to: 'List_Idea' }, { kind: 'final', from: null, to: 'Priority IV' }],
-    time: '12m', seconds: 720, note: 'From Short List',
+    time: '12m', seconds: 720, note: 'From Short List', stores: [],
   },
   {
     key: 'asg-1', at: '2026-10-10T02:00:00.000Z', who: 'Auto-assign', type: 'assign', verb: 'reassigned',
-    changes: [{ kind: 'person', from: 'Bob', to: 'Alice' }], time: null, seconds: null, note: null,
+    changes: [{ kind: 'person', from: 'Bob', to: 'Alice' }], time: null, seconds: null, note: null, stores: [],
   },
 ]
 const noop = () => {}
@@ -69,7 +69,7 @@ describe('EvalHistoryModal', () => {
     const rec: HistoryEvent = {
       key: 'log-9', at: '2026-10-11T07:32:00.000Z', who: 'VinhTD', type: 'record', verb: 'added to Record · 5 min',
       changes: [{ kind: 'person', label: 'Evaluator', from: 'Alice', to: 'Shortcut' }, { kind: 'initial', from: 'Bypass', to: 'List_Idea' }, { kind: 'final', from: null, to: 'Insight' }],
-      time: null, seconds: null, note: 'Batch W2 Oct, 2026',
+      time: null, seconds: null, note: 'Batch W2 Oct, 2026', stores: [],
     }
     view({ events: [rec, EVENTS[1]] })
     const [r0, r1] = screen.getAllByTestId('history-row')
@@ -87,7 +87,7 @@ describe('EvalHistoryModal', () => {
   })
   it('shows a Record event that has no change lines as the sentence and the note only', () => {
     const ev: HistoryEvent = { key: 'log-8', at: '2026-10-11T07:32:00.000Z', who: 'VinhTD', type: 'record',
-      verb: 'reassigned Record · 20 min from MyTL to Bob', changes: [], time: null, seconds: null, note: 'Batch W2 Oct, 2026' }
+      verb: 'reassigned Record · 20 min from MyTL to Bob', changes: [], time: null, seconds: null, note: 'Batch W2 Oct, 2026', stores: [] }
     view({ events: [ev] })
     const row = screen.getByTestId('history-row')
     expect(row.querySelector('.hx-chg')).toBeNull()
@@ -109,6 +109,24 @@ describe('EvalHistoryModal', () => {
     expect(screen.getByText('Saves are not logged yet.')).toBeTruthy()
     rerender(<EvalHistoryModal events={null} logReady error onClose={noop} onRetry={noop} />)
     expect(screen.getByText('Could not load the history')).toBeTruthy()
+  })
+  it('marks each event with its stores: two for the whole pair, one for a single store', () => {
+    const pairSave: HistoryEvent = { ...EVENTS[0], key: 'log-p', stores: ['android', 'ios'] }
+    const dead: HistoryEvent = { ...EVENTS[0], key: 'log-d', verb: 'marked the link dead', stores: ['ios'] }
+    const assign: HistoryEvent = { ...EVENTS[1], key: 'asg-p', verb: 'assigned the pair to ThuDT', note: 'Counts as 1 game', stores: ['android', 'ios'] }
+    const linked: HistoryEvent = { ...EVENTS[1], key: 'seed-l', type: 'seed', who: 'System', verb: 'linked iOS to the pair', changes: [], stores: ['ios'] }
+    view({ events: [pairSave, dead, assign, linked] })
+    const rows = screen.getAllByTestId('history-row')
+    const marks = (r: HTMLElement) => Array.from(r.querySelectorAll('.hx-line .hx-stores [role="img"]')).map(m => m.getAttribute('aria-label'))
+    expect(marks(rows[0])).toEqual(['Android', 'iOS'])
+    expect(marks(rows[1])).toEqual(['iOS'])
+    expect(marks(rows[2])).toEqual(['Android', 'iOS'])
+    expect(rows[2].querySelector('.hx-note')?.textContent).toBe('Counts as 1 game')
+    expect(rows[3].textContent).toContain('System linked iOS to the pair')
+    expect(marks(rows[3])).toEqual(['iOS'])
+    // no stores, no mark group
+    view({ events: [EVENTS[1]] })
+    expect(screen.getAllByTestId('history-row').at(-1)!.querySelector('.hx-stores')).toBeNull()
   })
   it('offers Try again on an error', () => {
     const onRetry = jest.fn()

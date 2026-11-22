@@ -8,12 +8,18 @@ import { loadExportGames, listExportLabels, countExportGames } from '@/lib/short
 
 const sqlMock = sql as unknown as jest.Mock
 let queries: { text: string; binds: unknown[] }[] = []
+let fragments: string[] = []
 
 function db(rows: Record<string, unknown>[]) {
   queries = []
+  fragments = []
   sqlMock.mockReset()
   sqlMock.mockImplementation((strings: unknown, ...binds: unknown[]) => {
     const text = Array.isArray(strings) ? (strings as string[]).join(' ') : ''
+    // nested fragments (listRowFilter, storesSelect) are template calls of their own
+    if (text.includes('.pair_back') && !text.includes('SELECT')) { fragments.push(text); return Promise.resolve([]) }
+    if (text.includes('json_agg')) { fragments.push(text); return Promise.resolve([]) }
+    if (!text.includes('SELECT')) return Promise.resolve([])
     queries.push({ text, binds })
     return Promise.resolve(rows)
   })
@@ -42,6 +48,9 @@ describe('loadExportGames', () => {
     expect(binds).toContainEqual(['Insight', 'Priority IV'])
     expect(binds).toContainEqual(['W3 Oct, 2026'])
     expect(text).toContain('DISTINCT ON (ge.game_id)')
+    // one row per pair: the back row is out, and both stores ride along
+    expect(fragments.join(' ')).toContain('.pair_back')
+    expect(fragments.join(' ')).toContain('pair_eval_id')
     expect(text).toContain('ORDER BY ge.game_id, ge.evaluate_date DESC')
   })
 
