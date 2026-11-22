@@ -22,7 +22,7 @@ function req(body: unknown) {
 function mockReads({ hidden = [] as string[], excluded = [] as string[],
                     users = [{ key: 'mitt', title: 'Fulltime', active: true }] } = {}) {
   sqlMock.mockImplementation((strings: string[], ...args: unknown[]) => {
-    if (!Array.isArray(strings)) return {} // sql('ge'): identifier from notPairCopy
+    if (!Array.isArray(strings)) return {} // sql('ge'): identifier call
     const text = strings.join(' ')
     if (text.includes('SELECT value') && text.includes('app_config')) {
       if (args[0] === 'people_config') return Promise.resolve([{ value: JSON.stringify({ hiddenInFilters: hidden }) }])
@@ -30,7 +30,7 @@ function mockReads({ hidden = [] as string[], excluded = [] as string[],
       return Promise.resolve([])
     }
     if (text.includes('evaluator_roster')) return Promise.resolve([{ key: 'mitt', name: 'MiTT' }])
-    if (text.includes('game_evaluations')) return Promise.resolve([
+    if (text.includes('eval_stats_rows')) return Promise.resolve([  // history counts read the view (055)
       { key: 'mitt', name: 'MiTT', last_eval: '2026-09-05T00:00:00Z', recent: 12, total: 400 },
       { key: 'shortcut', name: 'Shortcut', last_eval: '2026-09-01T00:00:00Z', recent: 0, total: 24 },
       { key: 'oldguy', name: 'OldGuy', last_eval: '2026-04-01T00:00:00Z', recent: 0, total: 5 },

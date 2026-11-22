@@ -59,6 +59,17 @@ export function mediaRowFilter(q: Sql, alias = 'ge') {
 }
 
 /**
+ * The category a row COUNTS under, for a query that joins game_evaluations only to pick the
+ * category (Trends tags, panel time) and so does not read eval_stats_rows: joining the view
+ * there would scan the whole view. Same rule as the view for this column: a row with credit
+ * (phase 2, migration 055) counts under the category frozen in its credit, because phase 2
+ * copies the front row's columns, category_group included, onto the back row.
+ */
+export function statsCategory(q: Sql, alias = 'ge') {
+  return q`COALESCE(${q(alias)}.credit ->> 'category_group', ${q(alias)}.category_group)`
+}
+
+/**
  * SELECT expression for a `stores` column: json array of PairStore, the row's own store
  * plus the twin's (via pair_eval_id), iOS first. Self-contained scalar subquery, so the
  * caller needs no extra JOIN and no extra round-trip.

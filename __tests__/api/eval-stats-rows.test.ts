@@ -7,8 +7,11 @@
 //   evaluation counts: FROM eval_stats_rows ge ... AND ge.eval_row   (was notPairCopy)
 //   media counts:      FROM eval_stats_rows ge ... AND ge.media_row  (was mediaRowFilter)
 // The view applies the row rule, so these statements carry no pair_back condition of their own.
-// Work-queue routes (assign preview, rescue, pending holders, people config, evaluator audit)
-// stay on game_evaluations + notPairCopy: a back row is not work, credited or not.
+// People config totals and the evaluator-name audit are history too (controller ruling R10).
+// Work-queue routes (assign preview, rescue, pending holders) stay on game_evaluations +
+// notPairCopy: a back row is not work, credited or not.
+// Joins that read game_evaluations only to pick the category (Trends tags, panel time) take the
+// credit's category: COALESCE(ge.credit ->> 'category_group', ge.category_group).
 // The mock composes nested fragments into one text, so checks run on the whole statement.
 import { NextRequest } from 'next/server'
 
@@ -57,6 +60,7 @@ jest.mock('@/lib/push-window-db', () => ({ loadPushWindowConfig: jest.fn(async (
 jest.mock('@/lib/genre-config-db', () => ({ loadGenreTargets: jest.fn(async () => []) }))
 
 import { sql } from '@/lib/db'
+import { getSession } from '@/lib/session'
 import { GET as quickStats } from '@/app/api/evaluations/quick-stats/route'
 import { GET as report } from '@/app/api/report/route'
 import { GET as reportDaily } from '@/app/api/report/daily/route'
@@ -85,6 +89,7 @@ const TABLE = /(FROM|JOIN) game_evaluations (ge|g2)\b/
 const viewReads = () => statements().filter(t => VIEW.test(t))
 const count = (t: string, s: string) => t.split(s).length - 1
 const isRescue = (t: string) => /WITH today AS/.test(t)
+const CREDIT_CAT = "COALESCE(ge.credit ->> 'category_group', ge.category_group)"
 
 function expectEval(q: string, alias = 'ge') {
   expect(q).toMatch(new RegExp(`FROM eval_stats_rows ${alias}\\b`))
@@ -168,6 +173,10 @@ describe('counting routes read eval_stats_rows', () => {
     const tags = tagParts(all)
     expect(tags).toHaveLength(1)
     expect(tags[0]).toContain('JOIN game_evaluations ge ON ge.game_id = pt.game_id')
+    // the tag row's bucket is the row's counted category (its credit's, after phase 2)
+    const tg = day.slice(day.indexOf('tg AS'))
+    expect(tg).toContain(`${CREDIT_CAT} AS bucket`)
+    expect(tg).not.toContain('ge.category_group AS bucket')
     const index = all.filter(t => t.includes('HAVING'))
     expect(index).toHaveLength(1)
     expectEval(index[0])
@@ -178,6 +187,20 @@ describe('counting routes read eval_stats_rows', () => {
     const q = statements().find(t => t.includes('WITH ev AS'))!
     expectEval(q.slice(0, q.indexOf('tg AS')))
     expect(tagParts([q])[0]).toContain('JOIN game_evaluations ge ON ge.game_id = pt.game_id')
+  })
+
+  it('report daily, one category: the eval reads filter the view column, the tag joins the credit category', async () => {
+    await reportDaily(req('/api/report/daily?from=2026-11-01&to=2026-11-07&category=puzzle'))
+    const day = statements().find(t => t.includes('day_vn'))!
+    const ev = day.slice(0, day.indexOf('tg AS'))
+    expect(ev).toContain('AND ge.category_group = ?')
+    const tag = tagParts([day])[0]
+    expect(tag).toContain(`AND ${CREDIT_CAT} = ?`)
+    expect(tag).not.toContain('AND ge.category_group =')
+    await reportDaily(req('/api/report/daily?from=2026-11-01&to=2026-11-07&evaluator=ThuDT&by=day&category=puzzle'))
+    const byDay = statements().find(t => t.includes('WITH ev AS') && t.includes('tg AS') && !t.includes('day_vn'))!
+    expect(tagParts([byDay])[0]).toContain(`AND ${CREDIT_CAT} = ?`)
+    expect(tagParts([byDay])[0]).not.toContain('AND ge.category_group =')
   })
 
   it('report rollup: the evaluation and the recording INSERT ... SELECT', async () => {
@@ -210,6 +233,43 @@ describe('counting routes read eval_stats_rows', () => {
     const panel = statements().filter(t => t.includes('FROM evaluation_log l'))
     expect(panel).toHaveLength(1)
     expect(panel[0]).toContain('LEFT JOIN game_evaluations ge ON ge.id = ev.ge_id')
+    expect(panel[0]).toContain(`${CREDIT_CAT} AS genre`)
+    expect(panel[0]).not.toContain('ge.category_group AS genre')
+  })
+
+  // Review Focus 5 (was in pair-counts.test.ts): an evaluator sees only their own rows; the
+  // own-only condition survives the move to the view.
+  it('quick stats scoped to the evaluator keeps the own-only condition on the view', async () => {
+    ;(getSession as jest.Mock).mockResolvedValueOnce({ user: { name: 'NhiLV', role: 'evaluator' } })
+    const prev = process.env.SKIP_AUTH
+    process.env.SKIP_AUTH = 'false'
+    try { await quickStats(req('/api/evaluations/quick-stats?category=puzzle')) } finally { process.env.SKIP_AUTH = prev }
+    const qs = viewReads()
+    expect(qs).toHaveLength(3)
+    for (const q of qs) {
+      expectEval(q)
+      expect(q).toContain('lower(ge.initial_evaluator) = lower(')
+    }
+  })
+
+  it('report daily scoped to the evaluator (by day) keeps the own-only condition on the view', async () => {
+    ;(getSession as jest.Mock).mockResolvedValueOnce({ user: { name: 'NhiLV', role: 'evaluator' } })
+    const prev = process.env.SKIP_AUTH
+    process.env.SKIP_AUTH = 'false'
+    try { await reportDaily(req('/api/report/daily?from=2026-11-01&to=2026-11-07&evaluator=SomeoneElse&by=day')) } finally { process.env.SKIP_AUTH = prev }
+    const q = statements().find(t => t.includes('WITH ev AS'))!
+    const ev = q.slice(0, q.indexOf('tg AS'))
+    expectEval(ev)
+    expect(ev).toContain('lower(ge.initial_evaluator) = lower(')
+  })
+
+  it('people config totals and the evaluator-name audit (history, R10)', async () => {
+    await (configPeople as () => Promise<unknown>)()
+    await auditEvaluators()
+    const qs = statements().filter(t => t.includes('mode() WITHIN GROUP') && VIEW.test(t))
+    expect(qs).toHaveLength(2)
+    for (const q of qs) expectEval(q)
+    expect(statements().filter(t => TABLE.test(t))).toHaveLength(0)
   })
 })
 
@@ -239,12 +299,6 @@ describe('work-queue routes stay on game_evaluations + notPairCopy', () => {
     const qs = statements().filter(t => /WITH today AS/.test(t))
     expectQueue(qs, 1)
     expect(count(qs[0], NOT_PAIR_COPY)).toBe(2)
-  })
-
-  it('people config totals and the evaluator-name audit', async () => {
-    await (configPeople as () => Promise<unknown>)()
-    await auditEvaluators()
-    expectQueue(statements().filter(t => t.includes('mode() WITHIN GROUP') && TABLE.test(t)), 2)
   })
 
   it('no statement anywhere mixes the view with notPairCopy', async () => {

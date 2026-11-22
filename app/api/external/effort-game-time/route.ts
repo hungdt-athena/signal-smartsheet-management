@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
+import { statsCategory } from '@/lib/eval-pairs'
 import { SYSTEM_LABEL_KEY_LIST } from '@/lib/system-accounts'
 import { PANEL_CAP_S } from '@/lib/evaluation-hours'
 import { parseParams, hasValidApiKey, type Person, type RecordRow } from '@/lib/effort-sessions'
@@ -7,7 +8,8 @@ import { groupGameTime, type GameTimeRow } from '@/lib/effort-game-time'
 // Counts read the view eval_stats_rows (migration 055), not game_evaluations: a back row
 // that phase 2 linked keeps counting with its frozen credit. Evaluation counts filter on
 // ge.eval_row, recording counts on ge.media_row (see lib/eval-pairs.ts).
-// The panel-time join to game_evaluations (by the log's row id) only picks the category.
+// The panel-time join to game_evaluations (by the log's row id) only picks the category,
+// with the credit rule (statsCategory), so it needs no scan of the view.
 
 export const dynamic = 'force-dynamic'
 
@@ -81,7 +83,7 @@ export async function GET(req: NextRequest) {
       )
       SELECT ev.who AS person_key,
              to_char(ev.created_at AT TIME ZONE ${VN}, 'YYYY-MM-DD') AS date,
-             ev.game_id, gi.title AS game, ge.category_group AS genre,
+             ev.game_id, gi.title AS game, ${statsCategory(sql)} AS genre,
              CASE WHEN count(ev.s) = 0 THEN NULL ELSE sum(ev.s)::int END AS duration_s
       FROM ev
       LEFT JOIN game_info gi ON gi.game_id = ev.game_id

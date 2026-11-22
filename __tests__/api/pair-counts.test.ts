@@ -4,8 +4,8 @@
 // Task 6 (unified playtest): work counts count a linked pair once. The WORK-QUEUE routes read
 // `game_evaluations ge` with notPairCopy (a back row that is only a copy is dropped; a back row
 // holding Link_dead / Stale_release is real work and stays). The routes that count history
-// (Report, report daily, rollup, Quick stats, Effort) moved to the view eval_stats_rows in
-// phase 2 (migration 055): see eval-stats-rows.test.ts.
+// (Report, report daily, rollup, Quick stats, Effort, people config, evaluator audit) moved to
+// the view eval_stats_rows in phase 2 (migration 055): see eval-stats-rows.test.ts.
 // The mock composes nested fragments into one text, so "this query has pair_back" is checked on
 // the whole statement, not on a fragment next to it.
 import { NextRequest } from 'next/server'
@@ -56,8 +56,6 @@ jest.mock('@/lib/genre-config-db', () => ({ loadGenreTargets: jest.fn(async () =
 import { sql } from '@/lib/db'
 import { GET as pendingHolders } from '@/app/api/operations/pending-holders/route'
 import { GET as assignPreview } from '@/app/api/assign-setup/preview/route'
-import { GET as configPeople } from '@/app/api/config/people/route'
-import { GET as auditEvaluators } from '@/app/api/admin/users/audit-evaluators/route'
 import { scanRoster } from '@/lib/rescue-core'
 
 const sqlMock = sql as unknown as jest.Mock
@@ -100,11 +98,4 @@ describe('work counts drop the copy row of a linked pair', () => {
     expect((qs[0].match(/pair_back/g) || []).length).toBe(2)
   })
 
-  it('people config totals and the evaluator-name audit', async () => {
-    await (configPeople as () => Promise<unknown>)()
-    await auditEvaluators()
-    const qs = geQueries().filter(t => t.includes('mode() WITHIN GROUP'))
-    expect(qs).toHaveLength(2)
-    expectAllCarry(qs)
-  })
 })

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
+import { statsCategory } from '@/lib/eval-pairs'
 import { getSession } from '@/lib/session'
 import { isManagerRole } from '@/lib/roles'
 import { loadReportConfig } from '@/lib/report-config-db'
@@ -8,7 +9,7 @@ import { BUCKETS } from '@/lib/buckets'
 // Counts read the view eval_stats_rows (migration 055), not game_evaluations: a back row
 // that phase 2 linked keeps counting with its frozen credit. Evaluation counts filter on
 // ge.eval_row, recording counts on ge.media_row (see lib/eval-pairs.ts).
-// The Trends-tag join to game_evaluations only picks the row's category; it counts tags.
+// The Trends-tag joins to game_evaluations only pick the row's category (statsCategory); they count tags.
 
 export const dynamic = 'force-dynamic'
 
@@ -118,6 +119,9 @@ export async function GET(req: NextRequest) {
     const cat = (searchParams.get('category') || 'all').toLowerCase()
     const category = (BUCKETS as readonly string[]).includes(cat) ? cat : 'all'
     const catFilter = category === 'all' ? sql`` : sql`AND ge.category_group = ${category}`
+    // The Trends-tag joins read game_evaluations (not the view) only for the category, so they
+    // take the row's counted category: its credit's if phase 2 froze one (lib/eval-pairs).
+    const tagCatFilter = category === 'all' ? sql`` : sql`AND ${statsCategory(sql)} = ${category}`
 
     const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
     const today = new Date()
@@ -172,7 +176,7 @@ export async function GET(req: NextRequest) {
             AND pt.tagged_at < ((${to}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')
             AND pt.status <> 'removed'
             AND lower(du.name) = lower(${evaluator})
-            ${catFilter}
+            ${tagCatFilter}
           GROUP BY 1
         )
         SELECT COALESCE(e.d, t.d)::text AS date,
@@ -273,7 +277,7 @@ export async function GET(req: NextRequest) {
       -- "11 tags across 6 games" is the only way to read tag density.
       tg AS (
         SELECT (pt.tagged_at AT TIME ZONE ${VN})::date AS day_vn,
-               ge.category_group AS bucket, du.name AS evaluator,
+               ${statsCategory(sql)} AS bucket, du.name AS evaluator,
                lower(du.name) AS k,
                count(*)::int AS tag_rows,
                count(DISTINCT pt.game_id)::int AS tagged
@@ -284,7 +288,7 @@ export async function GET(req: NextRequest) {
         WHERE pt.tagged_at >= ${lo} AND pt.tagged_at < ${hi}
           AND pt.status <> 'removed'
           AND lower(du.name) <> ALL(${excluded})
-          ${catFilter}
+          ${tagCatFilter}
           AND (pt.tagged_at AT TIME ZONE ${VN})::date = ${targetDay}
         GROUP BY 1, 2, 3, 4
       )

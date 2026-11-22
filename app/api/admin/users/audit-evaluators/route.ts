@@ -14,7 +14,6 @@
 // GET previews (nothing is written), POST applies.
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
-import { notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { SYSTEM_LABEL_KEY_LIST } from '@/lib/system-accounts'
 
@@ -23,6 +22,8 @@ export const dynamic = 'force-dynamic'
 interface Orphan { key: string; name: string; total: number; last_eval: string | null }
 
 // A name in game_evaluations with no dashboard_users row of the same name.
+// Counted from eval_stats_rows (migration 055): a name that only survives in a phase-2 credit
+// still shows up, with its old total.
 // Matching is on lower(name), never on email — an existing user's address does
 // not have to follow the name@athena.studio shape.
 async function findOrphans(): Promise<Orphan[]> {
@@ -31,9 +32,9 @@ async function findOrphans(): Promise<Orphan[]> {
            mode() WITHIN GROUP (ORDER BY ge.initial_evaluator) AS name,
            COUNT(*)::int AS total,
            MAX(ge.evaluate_date) AS last_eval
-    FROM game_evaluations ge
+    FROM eval_stats_rows ge
     WHERE ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
-      ${notPairCopy(sql)}
+      AND ge.eval_row
       AND lower(ge.initial_evaluator) <> ALL(${SYSTEM_LABEL_KEY_LIST})
       AND NOT EXISTS (
         SELECT 1 FROM dashboard_users du
