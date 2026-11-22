@@ -2,7 +2,7 @@
 -- game_evaluations is `pg_dump -s -t game_evaluations` of the local sample DB
 -- (postgres://127.0.0.1:54330/sample, 2026-11-21) without owner/grant/comment lines, so
 -- every column the pair copy touches is real. game_info is owned by the Signal Sense repo:
--- only the columns 054 reads are copied. dashboard_users and playtest_tags are stubs that
+-- only the columns 054 / 055 read are copied. dashboard_users and playtest_tags are stubs that
 -- the 046 seed queries need. The two BEFORE UPDATE triggers on game_evaluations are the
 -- real ones: update_game_evaluations_timestamp (sample DB) and game_evaluations_record_slots
 -- (verbatim from migrations/051_record_per_bucket.sql), because the pair copy runs through them.
@@ -16,7 +16,9 @@ CREATE TABLE game_info (
   is_active boolean DEFAULT true,
   demo_code text UNIQUE,
   record_code text UNIQUE,
-  title text
+  title text,
+  initial_release date,
+  temp_release date
 );
 CREATE INDEX idx_game_info_family_id ON game_info (family_id) WHERE family_id IS NOT NULL;
 

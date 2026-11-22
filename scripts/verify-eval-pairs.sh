@@ -223,6 +223,7 @@ before=$(snap55)
 [ "$(snap55)" = "$before" ] || { echo "applying 055 changed game_evaluations or evaluation_log"; exit 1; }
 catalog_with_055=$(catalog)
 "${P[@]}" -d verify -f scripts/sql-verify/phase2-schema.sql
+"${P[@]}" -d verify -f scripts/sql-verify/phase2-plan-checks.sql
 
 # rollback_block_055: the "-- ROLLBACK:" block of 055 leaves the schema exactly as 054 left it
 # (eval_pair_refresh_back's body back to 054's, byte for byte), then 055 applies again.
