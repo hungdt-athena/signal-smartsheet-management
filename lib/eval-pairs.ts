@@ -4,6 +4,18 @@
 // Pure: no DB import at runtime (the postgres import is type-only). Each helper takes the
 // tag `q` (the caller passes `sql`) and returns a fragment, so it can be unit-tested with
 // a fake tag. Aliases are emitted as identifiers via `q(alias)`, never interpolated raw.
+//
+// Which rule for which query (phase 2, spec 2026-11-23 6.1):
+//   COUNTING history (per person / date / conclusion: Report, report-rollup, report daily,
+//     Quick stats, Effort sessions / game-time) reads the VIEW, not these helpers:
+//       evaluation counts: FROM eval_stats_rows ge ... AND ge.eval_row
+//       media counts:      FROM eval_stats_rows ge ... AND ge.media_row
+//     (migration 055: the view applies the same row rule as notPairCopy / mediaRowFilter
+//     below, and also counts a back row that phase 2 linked, with its frozen credit.)
+//   WORK QUEUES (assign, assign-setup preview, rescue, pending holders, people config,
+//     evaluator audit) stay on game_evaluations + notPairCopy: a back row is not work.
+//   LISTS and panels: game_evaluations + listRowFilter.
+//   Never point an UPDATE / INSERT at the view.
 import type { Sql } from 'postgres'
 
 /** Conclusions that belong to one store only and are never copied to the twin row. */
@@ -25,8 +37,9 @@ export function listRowFilter(q: Sql, alias = 'ge') {
 }
 
 /**
- * Work-count queries: drop the back row only when it is a copy. Emits a leading `AND`. A back row that is
- * Link_dead / Stale_release is real work of the person who marked it, so it still counts.
+ * Work-queue queries on game_evaluations: drop the back row only when it is a copy. Emits a
+ * leading `AND`. A back row that is Link_dead / Stale_release is real work of the person who
+ * marked it, so it still counts. Counting routes use eval_stats_rows.eval_row instead (header).
  */
 export function notPairCopy(q: Sql, alias = 'ge') {
   return q`AND NOT (${q(alias)}.pair_back
@@ -38,7 +51,8 @@ export function notPairCopy(q: Sql, alias = 'ge') {
  * Media queries (Record slots, recordings, uploads): drop EVERY back row. Emits a leading `AND`.
  * The media columns (recorders, Confirm, videos) are copied onto the back row even when it holds
  * Link_dead / Stale_release, so notPairCopy would count one recording twice. Use notPairCopy for
- * evaluation work and this for recording work.
+ * evaluation work and this for recording work. Recording COUNTS use eval_stats_rows.media_row
+ * instead (header); no route uses this one today, it stays for a media queue on the table.
  */
 export function mediaRowFilter(q: Sql, alias = 'ge') {
   return q`AND NOT ${q(alias)}.pair_back`

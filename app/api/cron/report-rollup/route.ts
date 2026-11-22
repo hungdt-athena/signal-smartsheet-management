@@ -1,10 +1,12 @@
 import type postgres from 'postgres'
-import { mediaRowFilter, notPairCopy } from '@/lib/eval-pairs'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 import { recordSlot } from '@/lib/record-slots'
+// Counts read the view eval_stats_rows (migration 055), not game_evaluations: a back row
+// that phase 2 linked keeps counting with its frozen credit. Evaluation counts filter on
+// ge.eval_row, recording counts on ge.media_row (see lib/eval-pairs.ts).
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -92,8 +94,8 @@ export async function POST(req: NextRequest) {
             ge.category_group AS cat,
             ge.assigned_date AS adate,
             ge.initial_conclusion AS concl
-          FROM game_evaluations ge
-          WHERE ge.evaluate_date IS NOT NULL ${notPairCopy(sql)}
+          FROM eval_stats_rows ge
+          WHERE ge.evaluate_date IS NOT NULL AND ge.eval_row
             AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
             AND lower(ge.initial_evaluator) <> ALL(${EXCLUDED})
             AND ${sourcePred(sql`ge.evaluate_date`)}
@@ -148,8 +150,8 @@ export async function POST(req: NextRequest) {
             ${weekOf(s.doneAt)} AS wk,
             lower(${s.assignee}) AS ekey, ${s.assignee} AS ename,
             ge.category_group AS cat, ${slot}::text AS bucket
-          FROM game_evaluations ge
-          WHERE ${s.doneAt} IS NOT NULL ${mediaRowFilter(sql)}
+          FROM eval_stats_rows ge
+          WHERE ${s.doneAt} IS NOT NULL AND ge.media_row
             AND ${s.assignee} IS NOT NULL AND ${s.assignee} <> ''
             AND lower(${s.assignee}) <> ALL(${EXCLUDED}) ${s.credited}
             AND ${sourcePred(s.doneAt)}`

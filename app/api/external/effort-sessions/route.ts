@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { mediaRowFilter, notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { SYSTEM_LABEL_KEY_LIST } from '@/lib/system-accounts'
 import {
   parseParams, hasValidApiKey, groupByPerson,
   type Person, type EventRow, type RecordRow,
 } from '@/lib/effort-sessions'
+// Counts read the view eval_stats_rows (migration 055), not game_evaluations: a back row
+// that phase 2 linked keeps counting with its frozen credit. Evaluation counts filter on
+// ge.eval_row, recording counts on ge.media_row (see lib/eval-pairs.ts).
 
 export const dynamic = 'force-dynamic'
 
@@ -64,9 +66,9 @@ export async function GET(req: NextRequest) {
              to_char(ge.evaluate_date AT TIME ZONE ${VN}, 'HH24:MI:SS') AS time,
              ge.game_id, gi.title AS game, ge.category_group AS genre,
              ge.initial_conclusion AS status, ge.initial_note AS comment
-      FROM game_evaluations ge
+      FROM eval_stats_rows ge
       LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-      WHERE lower(ge.initial_evaluator) = ANY(${keys}) ${notPairCopy(sql)}
+      WHERE lower(ge.initial_evaluator) = ANY(${keys}) AND ge.eval_row
         AND ge.evaluate_date >= (${p.from}::date)::timestamp AT TIME ZONE ${VN}
         AND ge.evaluate_date <  (${p.to}::date + 1)::timestamp AT TIME ZONE ${VN}
       ORDER BY ge.evaluate_date, ge.game_id
@@ -81,7 +83,7 @@ export async function GET(req: NextRequest) {
         SELECT ge.game_id, ge.category_group,
                s.assignee, s.duration_min,
                COALESCE(s.assigned_at, s.confirmed_at) AS assigned_at
-        FROM game_evaluations ge
+        FROM eval_stats_rows ge
         CROSS JOIN LATERAL (VALUES
           (ge.record_5min_assignee, ge.record_5min_date, 5, ge.record_5min_confirmed_at),
           (ge.record_20min_assignee, ge.record_20min_date, 20, ge.record_20min_confirmed_at)
@@ -89,7 +91,7 @@ export async function GET(req: NextRequest) {
         WHERE s.confirmed_at IS NOT NULL
           AND s.assignee IS NOT NULL
           AND lower(s.assignee) = ANY(${keys})
-          ${mediaRowFilter(sql)}
+          AND ge.media_row
       )
       SELECT lower(slot.assignee) AS assignee_key,
              to_char(slot.assigned_at AT TIME ZONE ${VN}, 'YYYY-MM-DD') AS date,

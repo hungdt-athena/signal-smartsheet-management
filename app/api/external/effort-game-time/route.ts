@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { mediaRowFilter } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { SYSTEM_LABEL_KEY_LIST } from '@/lib/system-accounts'
 import { PANEL_CAP_S } from '@/lib/evaluation-hours'
 import { parseParams, hasValidApiKey, type Person, type RecordRow } from '@/lib/effort-sessions'
 import { groupGameTime, type GameTimeRow } from '@/lib/effort-game-time'
+// Counts read the view eval_stats_rows (migration 055), not game_evaluations: a back row
+// that phase 2 linked keeps counting with its frozen credit. Evaluation counts filter on
+// ge.eval_row, recording counts on ge.media_row (see lib/eval-pairs.ts).
+// The panel-time join to game_evaluations (by the log's row id) only picks the category.
 
 export const dynamic = 'force-dynamic'
 
@@ -93,7 +96,7 @@ export async function GET(req: NextRequest) {
         SELECT ge.game_id, ge.category_group,
                s.assignee, s.duration_min,
                COALESCE(s.assigned_at, s.confirmed_at) AS assigned_at
-        FROM game_evaluations ge
+        FROM eval_stats_rows ge
         CROSS JOIN LATERAL (VALUES
           (ge.record_5min_assignee, ge.record_5min_date, 5, ge.record_5min_confirmed_at),
           (ge.record_20min_assignee, ge.record_20min_date, 20, ge.record_20min_confirmed_at)
@@ -101,7 +104,7 @@ export async function GET(req: NextRequest) {
         WHERE s.confirmed_at IS NOT NULL
           AND s.assignee IS NOT NULL
           AND lower(s.assignee) = ANY(${keys})
-          ${mediaRowFilter(sql)}
+          AND ge.media_row
       )
       SELECT lower(slot.assignee) AS assignee_key,
              to_char(slot.assigned_at AT TIME ZONE ${VN}, 'YYYY-MM-DD') AS date,

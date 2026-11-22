@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { notPairCopy } from '@/lib/eval-pairs'
 import { requireAuth } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 import { isManagerRole } from '@/lib/roles'
 import { getSession } from '@/lib/session'
+// Counts read the view eval_stats_rows (migration 055), not game_evaluations: a back row
+// that phase 2 linked keeps counting with its frozen credit. Evaluation counts filter on
+// ge.eval_row, recording counts on ge.media_row (see lib/eval-pairs.ts).
 
 export const dynamic = 'force-dynamic'
 
@@ -74,8 +76,8 @@ export async function GET(req: NextRequest) {
           count(*)::int AS total,
           count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL)::int AS done,
           count(*) FILTER (WHERE ge.drive_link IS NOT NULL AND ge.drive_link <> '')::int AS drive_links
-        FROM game_evaluations ge
-        WHERE ${baseWhere} ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ${baseWhere} AND ge.eval_row
         GROUP BY lower(ge.initial_evaluator)
         ORDER BY total DESC, 2
       `,
@@ -83,8 +85,8 @@ export async function GET(req: NextRequest) {
         SELECT lower(ge.initial_evaluator) AS k,
           ge.initial_conclusion AS conclusion,
           count(*)::int AS n
-        FROM game_evaluations ge
-        WHERE ${baseWhere} ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ${baseWhere} AND ge.eval_row
           AND ge.initial_conclusion IS NOT NULL
           AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
         GROUP BY lower(ge.initial_evaluator), ge.initial_conclusion
@@ -93,9 +95,9 @@ export async function GET(req: NextRequest) {
         SELECT lower(ge.initial_evaluator) AS k,
           lower(COALESCE(gi.os, 'unknown')) AS os,
           count(*)::int AS n
-        FROM game_evaluations ge
+        FROM eval_stats_rows ge
         JOIN game_info gi ON ge.game_id = gi.game_id
-        WHERE ${baseWhere} ${notPairCopy(sql)}
+        WHERE ${baseWhere} AND ge.eval_row
         GROUP BY lower(ge.initial_evaluator), lower(COALESCE(gi.os, 'unknown'))
       `,
     ])

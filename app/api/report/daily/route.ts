@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { notPairCopy } from '@/lib/eval-pairs'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { isManagerRole } from '@/lib/roles'
 import { loadReportConfig } from '@/lib/report-config-db'
 import { SYSTEM_EVALUATOR_KEY_LIST } from '@/lib/system-accounts'
 import { BUCKETS } from '@/lib/buckets'
+// Counts read the view eval_stats_rows (migration 055), not game_evaluations: a back row
+// that phase 2 linked keeps counting with its frozen credit. Evaluation counts filter on
+// ge.eval_row, recording counts on ge.media_row (see lib/eval-pairs.ts).
+// The Trends-tag join to game_evaluations only picks the row's category; it counts tags.
 
 export const dynamic = 'force-dynamic'
 
@@ -151,8 +154,8 @@ export async function GET(req: NextRequest) {
                  count(*) FILTER (WHERE ge.initial_conclusion = 'Bypass')::int AS bypass,
                  count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead,
                  count(*) FILTER (WHERE ge.initial_conclusion = 'Stale_release')::int AS stale_release
-          FROM game_evaluations ge
-          WHERE ge.evaluate_date >= (${from}::timestamp AT TIME ZONE ${VN}) ${notPairCopy(sql)}
+          FROM eval_stats_rows ge
+          WHERE ge.evaluate_date >= (${from}::timestamp AT TIME ZONE ${VN}) AND ge.eval_row
             AND ge.evaluate_date < ((${to}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')
             AND lower(ge.initial_evaluator) = lower(${evaluator})
             ${catFilter}
@@ -228,8 +231,8 @@ export async function GET(req: NextRequest) {
       ? sql`${day}::date`
       : sql`(
           SELECT max((g2.evaluate_date AT TIME ZONE ${VN})::date)
-          FROM game_evaluations g2
-          WHERE g2.evaluate_date >= ${lo} AND g2.evaluate_date < ${hi} ${notPairCopy(sql, 'g2')}
+          FROM eval_stats_rows g2
+          WHERE g2.evaluate_date >= ${lo} AND g2.evaluate_date < ${hi} AND g2.eval_row
             AND g2.initial_evaluator IS NOT NULL
             AND g2.initial_conclusion IS NOT NULL AND g2.initial_conclusion <> ''
             AND g2.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
@@ -256,8 +259,8 @@ export async function GET(req: NextRequest) {
                count(*) FILTER (WHERE ge.initial_conclusion = 'Bypass')::int AS bypass,
                count(*) FILTER (WHERE ge.initial_conclusion = 'Link_dead')::int AS link_dead,
                count(*) FILTER (WHERE ge.initial_conclusion = 'Stale_release')::int AS stale_release
-        FROM game_evaluations ge
-        WHERE ge.evaluate_date >= ${lo} AND ge.evaluate_date < ${hi} ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ge.evaluate_date >= ${lo} AND ge.evaluate_date < ${hi} AND ge.eval_row
           AND ge.initial_evaluator IS NOT NULL
           AND lower(ge.initial_evaluator) <> ALL(${excluded})
           ${catFilter}
@@ -325,8 +328,8 @@ export async function GET(req: NextRequest) {
                  count(*) FILTER (WHERE ge.initial_conclusion IS NOT NULL
                                     AND ge.initial_conclusion <> ''
                                     AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release'))::int AS total
-          FROM game_evaluations ge
-          WHERE ge.evaluate_date >= (${from}::timestamp AT TIME ZONE ${VN}) ${notPairCopy(sql)}
+          FROM eval_stats_rows ge
+          WHERE ge.evaluate_date >= (${from}::timestamp AT TIME ZONE ${VN}) AND ge.eval_row
             AND ge.evaluate_date < ((${to}::timestamp AT TIME ZONE ${VN}) + INTERVAL '1 day')
             AND ge.initial_evaluator IS NOT NULL
             AND lower(ge.initial_evaluator) <> ALL(${excluded})

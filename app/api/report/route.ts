@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { mediaRowFilter, notPairCopy } from '@/lib/eval-pairs'
 import { requireRole } from '@/lib/auth-guard'
 import { sql } from '@/lib/db'
 import { loadBatchSpans } from '@/lib/report-batches'
@@ -20,6 +19,9 @@ import type { AssignedRange } from '@/lib/rescue-range'
 import type { RescueConfig } from '@/lib/rescue-config'
 import { BUCKETS } from '@/lib/buckets'
 import { recordSlot } from '@/lib/record-slots'
+// Counts read the view eval_stats_rows (migration 055), not game_evaluations: a back row
+// that phase 2 linked keeps counting with its frozen credit. Evaluation counts filter on
+// ge.eval_row, recording counts on ge.media_row (see lib/eval-pairs.ts).
 
 export const dynamic = 'force-dynamic'
 
@@ -368,8 +370,8 @@ export async function GET(req: NextRequest) {
     // One bucket's done recordings in the window, per recorder.
     const recDoneRows = (s: ReturnType<typeof recordSlot>, slot: '5min' | '20min') => sql`
           SELECT lower(${s.assignee}) AS k, ${s.assignee} AS name, ${slot}::text AS slot
-          FROM game_evaluations ge
-          WHERE ${s.doneAt} IS NOT NULL AND ${s.assignee} IS NOT NULL AND ${s.assignee} <> '' ${mediaRowFilter(sql)}
+          FROM eval_stats_rows ge
+          WHERE ${s.doneAt} IS NOT NULL AND ${s.assignee} IS NOT NULL AND ${s.assignee} <> '' AND ge.media_row
             ${recOk(s.assigneeCol)} ${s.credited}
             ${catF}
             ${recWinOn(s)}`
@@ -377,8 +379,8 @@ export async function GET(req: NextRequest) {
     const recQueueRows = (s: ReturnType<typeof recordSlot>, slot: '5min' | '20min') => sql`
           SELECT lower(${s.assignee}) AS k, ${slot}::text AS slot, ge.game_id, gi.title, gi.os,
                  ${s.batch} AS batch, ${s.confirmedAt} AS record_confirmed_at, ${s.videoLink} AS youtube_link, ${s.doneAt} AS rec_at
-          FROM game_evaluations ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
-          WHERE ${s.assignee} IS NOT NULL AND ${s.assignee} <> '' ${recOk(s.assigneeCol)} ${s.credited} ${catF} ${mediaRowFilter(sql)}`
+          FROM eval_stats_rows ge LEFT JOIN game_info gi ON gi.game_id = ge.game_id
+          WHERE ${s.assignee} IS NOT NULL AND ${s.assignee} <> '' ${recOk(s.assigneeCol)} ${s.credited} ${catF} AND ge.media_row`
 
     // "Judged" as every other number on the report counts it. Link_dead and
     // Stale_release are housekeeping, not decisions, and leaving them in made the
@@ -387,8 +389,8 @@ export async function GET(req: NextRequest) {
       AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')`
 
     const evalBase = sql`
-      FROM game_evaluations ge
-      WHERE ge.evaluate_date IS NOT NULL ${notPairCopy(sql)}
+      FROM eval_stats_rows ge
+      WHERE ge.evaluate_date IS NOT NULL AND ge.eval_row
         AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
         ${notSystem}
         ${catF} ${winF}`
@@ -402,8 +404,8 @@ export async function GET(req: NextRequest) {
         SELECT count(*)::int AS n,
                min((ge.evaluate_date AT TIME ZONE ${VN})::date)::text AS first,
                max((ge.evaluate_date AT TIME ZONE ${VN})::date)::text AS last
-        FROM game_evaluations ge
-        WHERE ge.evaluate_date IS NOT NULL ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ge.evaluate_date IS NOT NULL AND ge.eval_row
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
           AND ge.batch = ${winLabel}
@@ -424,8 +426,8 @@ export async function GET(req: NextRequest) {
         count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date BETWEEN 4 AND 7)::int AS a1,
         count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date BETWEEN 8 AND 14)::int AS a2,
         count(*) FILTER (WHERE CURRENT_DATE - (ge.imported_at AT TIME ZONE ${VN})::date > 14)::int AS a3
-      FROM game_evaluations ge
-      WHERE ge.evaluate_date IS NULL AND ge.initial_conclusion IS NULL ${catF} ${notPairCopy(sql)}`
+      FROM eval_stats_rows ge
+      WHERE ge.evaluate_date IS NULL AND ge.initial_conclusion IS NULL ${catF} AND ge.eval_row`
 
 
     // Pipeline flow (game-level, NOT person-level): games entering the pipeline
@@ -440,8 +442,8 @@ export async function GET(req: NextRequest) {
           SELECT (ge.imported_at AT TIME ZONE ${VN})::date AS in_day,
                  (ge.evaluate_date AT TIME ZONE ${VN})::date AS eval_day,
                  (ge.initial_conclusion IS NOT NULL) AS done
-          FROM game_evaluations ge
-          WHERE ge.imported_at IS NOT NULL ${catF} ${notPairCopy(sql)}
+          FROM eval_stats_rows ge
+          WHERE ge.imported_at IS NOT NULL ${catF} AND ge.eval_row
         ), ev AS (
           SELECT in_day AS day, count(*)::int AS new_n, 0 AS eval_n, 0 AS out_n FROM r GROUP BY 1
           UNION ALL
@@ -482,8 +484,8 @@ export async function GET(req: NextRequest) {
                    WHEN ge.initial_conclusion IS NOT NULL THEN (ge.imported_at AT TIME ZONE ${VN})::date
                    ELSE NULL
                  END AS out_day
-          FROM game_evaluations ge
-          WHERE ge.imported_at IS NOT NULL ${catF} ${notPairCopy(sql)}
+          FROM eval_stats_rows ge
+          WHERE ge.imported_at IS NOT NULL ${catF} AND ge.eval_row
         ), b AS (
           SELECT COALESCE(${win.from ?? null}::date, (SELECT min(in_day) FROM r)) AS f,
                  -- never snapshot past today: a future day would age the stock that
@@ -523,8 +525,8 @@ export async function GET(req: NextRequest) {
         WITH r AS (
           SELECT (ge.imported_at AT TIME ZONE ${VN})::date AS in_day,
                  (ge.evaluate_date AT TIME ZONE ${VN})::date AS eval_day
-          FROM game_evaluations ge
-          WHERE ge.imported_at IS NOT NULL AND ge.evaluate_date IS NOT NULL ${catF} ${notPairCopy(sql)}
+          FROM eval_stats_rows ge
+          WHERE ge.imported_at IS NOT NULL AND ge.evaluate_date IS NOT NULL ${catF} AND ge.eval_row
         )
         SELECT date_trunc(${unit}, eval_day)::date::text AS b,
           count(*) FILTER (WHERE eval_day - in_day <= 3)::int AS a0,
@@ -552,9 +554,9 @@ export async function GET(req: NextRequest) {
                              AND ge.initial_conclusion NOT IN ('Link_dead', 'Stale_release')
                              AND ge.initial_conclusion NOT ILIKE '%bypass%')::int AS shortlisted,
           count(*) FILTER (WHERE ge.final_conclusion IN ('Priority IV', 'Insight'))::int AS final_priority
-        FROM game_evaluations ge
+        FROM eval_stats_rows ge
         JOIN game_info gi ON gi.game_id = ge.game_id
-        WHERE ge.imported_at IS NOT NULL ${catF} ${notPairCopy(sql)}
+        WHERE ge.imported_at IS NOT NULL ${catF} AND ge.eval_row
           ${win.from ? sql`AND ge.imported_at >= ${vnBound(win.from)}` : sql``}
           ${win.to ? sql`AND ge.imported_at < ${vnBound(win.to)}` : sql``}
         GROUP BY 1, 2 ORDER BY 1, 2`,
@@ -578,8 +580,8 @@ export async function GET(req: NextRequest) {
                    WHEN ge.initial_conclusion IS NOT NULL THEN (ge.imported_at AT TIME ZONE ${VN})::date
                    ELSE NULL
                  END AS out_day
-          FROM game_evaluations ge
-          WHERE ge.imported_at IS NOT NULL ${catF} ${notPairCopy(sql)}
+          FROM eval_stats_rows ge
+          WHERE ge.imported_at IS NOT NULL ${catF} AND ge.eval_row
         ), x AS (
           SELECT r.in_day + v.off AS cross_day, v.band
           FROM r, (VALUES (4, 'a1'), (8, 'a2'), (15, 'a3')) AS v(off, band)
@@ -636,8 +638,8 @@ export async function GET(req: NextRequest) {
         count(DISTINCT (lower(ge.initial_evaluator), (ge.evaluate_date AT TIME ZONE ${VN})::date))::int AS person_days,
         count(DISTINCT CASE WHEN lower(ge.initial_evaluator) = ${selfMatchKey}
                 THEN (ge.evaluate_date AT TIME ZONE ${VN})::date END)::int AS self_active_days
-      FROM game_evaluations ge
-      WHERE ge.evaluate_date IS NOT NULL ${notPairCopy(sql)}
+      FROM eval_stats_rows ge
+      WHERE ge.evaluate_date IS NOT NULL AND ge.eval_row
         AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
         ${notSystem} ${catF}
         AND ge.evaluate_date >= ${vnBound(f)}
@@ -666,8 +668,8 @@ export async function GET(req: NextRequest) {
                  WHEN ge.initial_conclusion IS NOT NULL THEN ge.assigned_date
                  ELSE NULL
                END AS out_day
-        FROM game_evaluations ge
-        WHERE ge.assigned_date IS NOT NULL ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ge.assigned_date IS NOT NULL AND ge.eval_row
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
       ), ev AS (
@@ -718,8 +720,8 @@ export async function GET(req: NextRequest) {
         SELECT lower(ge.initial_evaluator) AS k,
           mode() WITHIN GROUP (ORDER BY ge.initial_evaluator) AS name,
           count(*)::int AS assigned
-        FROM game_evaluations ge
-        WHERE ge.assigned_date IS NOT NULL ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ge.assigned_date IS NOT NULL AND ge.eval_row
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
           ${winOn(sql`
@@ -732,8 +734,8 @@ export async function GET(req: NextRequest) {
       // migration 033. Per-person series below keep assigned_date on purpose.
       sql`
         SELECT date_trunc(${unit}, ge.first_assigned_date)::date::text AS b, count(*)::int AS n
-        FROM game_evaluations ge
-        WHERE ge.first_assigned_date IS NOT NULL ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ge.first_assigned_date IS NOT NULL AND ge.eval_row
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
           ${winOn(sql`
@@ -745,8 +747,8 @@ export async function GET(req: NextRequest) {
       // assigned_date axis and therefore include games received via reassign.
       sql`
         SELECT count(*)::int AS n
-        FROM game_evaluations ge
-        WHERE ge.first_assigned_date IS NOT NULL ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ge.first_assigned_date IS NOT NULL AND ge.eval_row
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
           ${winOn(sql`
@@ -801,8 +803,8 @@ export async function GET(req: NextRequest) {
       // per-evaluator assigned per bucket (assigned_date axis, for the same chart)
       sql`
         SELECT lower(ge.initial_evaluator) AS k, date_trunc(${unit}, ge.assigned_date)::date::text AS b, count(*)::int AS n
-        FROM game_evaluations ge
-        WHERE ge.assigned_date IS NOT NULL ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ge.assigned_date IS NOT NULL AND ge.eval_row
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
           ${winOn(sql`
@@ -910,8 +912,8 @@ export async function GET(req: NextRequest) {
                    WHEN ge.initial_conclusion IS NOT NULL THEN ge.assigned_date
                    ELSE NULL
                  END AS out_day
-          FROM game_evaluations ge
-          WHERE ge.assigned_date IS NOT NULL ${notPairCopy(sql)}
+          FROM eval_stats_rows ge
+          WHERE ge.assigned_date IS NOT NULL AND ge.eval_row
             AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
             ${notSystem} ${catF}
         ), x AS (
@@ -951,8 +953,8 @@ export async function GET(req: NextRequest) {
           -- Rescue's own threshold, not the fixed 14-day band above: this is what
           -- selfStale reads, so a contractor's own count matches the Rescue panel.
           count(*) FILTER (WHERE CURRENT_DATE - ge.assigned_date > ${rescueCfg.staleDays})::int AS stale
-        FROM game_evaluations ge
-        WHERE ge.evaluate_date IS NULL AND ge.initial_conclusion IS NULL ${notPairCopy(sql)}
+        FROM eval_stats_rows ge
+        WHERE ge.evaluate_date IS NULL AND ge.initial_conclusion IS NULL AND ge.eval_row
           AND ge.assigned_date IS NOT NULL
           AND ge.initial_evaluator IS NOT NULL AND ge.initial_evaluator <> ''
           ${notSystem} ${catF}
