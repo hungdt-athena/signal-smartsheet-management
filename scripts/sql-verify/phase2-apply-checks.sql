@@ -172,9 +172,42 @@ CREATE TRIGGER p2x_audit AFTER UPDATE ON game_evaluations FOR EACH ROW
   WHEN (NEW.pair_eval_id IS NOT NULL AND OLD.pair_eval_id IS NOT DISTINCT FROM NEW.pair_eval_id)
   EXECUTE FUNCTION p2x_audit();
 
+-- ===== no SET clause with eval_pairs.keep_updated_at on any function =====
+-- A SET clause on CREATE FUNCTION for a custom setting needs superuser (or GRANT SET, PG15+):
+-- Neon's owner role got "permission denied to set parameter" applying 055. apply / rollback
+-- set it with set_config at run time instead.
+DO $$
+BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proconfig) c
+                      WHERE p.pronamespace = 'public'::regnamespace AND c LIKE 'eval_pairs.%'),
+    format('a function SETs eval_pairs.*: %s', (SELECT string_agg(p.oid::regprocedure::text || ' ' || array_to_string(p.proconfig, ','), '; ')
+                                                  FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+                                                   AND p.proconfig::text LIKE '%eval_pairs.%'));
+END $$;
+
 -- ===== run 1: two pairs; run 2: the rest =====
+-- each in a transaction of its own that goes on after the call: the setting is back to what it
+-- was before the call (run 1: never set in this session; run 2: 'off', set by the caller)
+BEGIN;
+DO $$ BEGIN
+  ASSERT COALESCE(current_setting('eval_pairs.keep_updated_at', true), '') = '',
+    format('run 1: the setting starts unset: %s', current_setting('eval_pairs.keep_updated_at', true));
+END $$;
 CREATE TEMP TABLE p2x_res1 AS SELECT * FROM eval_pair_phase2_apply('p2x_r1', 2);
+DO $$ BEGIN
+  ASSERT (SELECT sum(linked) FROM p2x_res1) = 2, 'run 1 wrote (the setting was on while it did)';
+  ASSERT COALESCE(current_setting('eval_pairs.keep_updated_at', true), '') = '',
+    format('run 1: the setting is back to unset in the caller''s transaction: %s', current_setting('eval_pairs.keep_updated_at', true));
+END $$;
+COMMIT;
+BEGIN;
+SELECT set_config('eval_pairs.keep_updated_at', 'off', true) \g /dev/null
 CREATE TEMP TABLE p2x_res2 AS SELECT * FROM eval_pair_phase2_apply('p2x_r2', 100000);
+DO $$ BEGIN
+  ASSERT current_setting('eval_pairs.keep_updated_at', true) = 'off',
+    format('run 2: the caller''s value is back: %s', current_setting('eval_pairs.keep_updated_at', true));
+END $$;
+COMMIT;
 
 DROP TRIGGER p2x_audit ON game_evaluations;
 DROP FUNCTION p2x_audit();

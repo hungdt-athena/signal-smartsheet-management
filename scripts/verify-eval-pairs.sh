@@ -311,4 +311,39 @@ grep -q 'DROP COLUMN IF EXISTS credit' "$TMP/rollback55.sql" || { echo "no ROLLB
 [ "$(catalog)" = "$catalog_with_055" ] || {
   echo "055 re-applied after its ROLLBACK differs:"; diff <(echo "$catalog_with_055") <(catalog); exit 1; }
 
+# non_superuser_owner: prod (Neon) applies the migrations as the database owner, NOT a
+# superuser. A SET clause on CREATE FUNCTION for a custom setting (eval_pairs.*) fails there
+# with "permission denied to set parameter"; everything above runs as the superuser postgres
+# and would not see it. Apply 054 + 055 on a fresh database owned by a plain role, as that role,
+# then link and roll back one pair as it.
+"${P[@]}" -d postgres -c "CREATE ROLE verify_owner LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE" \
+  -c "CREATE DATABASE verify_owner_db OWNER verify_owner"
+"${P[@]}" -d verify_owner_db -c "ALTER SCHEMA public OWNER TO verify_owner"
+O=(psql -h 127.0.0.1 -p "$PORT" -U verify_owner -X -q -v ON_ERROR_STOP=1 -d verify_owner_db)
+[ "$("${O[@]}" -At -c "SELECT rolsuper FROM pg_roles WHERE rolname = current_user")" = f ] || {
+  echo "verify_owner is a superuser"; exit 1; }
+for f in scripts/sql-verify/pairs-schema.sql migrations/046_evaluation_log.sql migrations/047_evaluation_log_demo_added.sql \
+         migrations/054_eval_pairs.sql migrations/055_eval_pairs_phase2.sql migrations/055_eval_pairs_phase2.sql; do
+  "${O[@]}" -f "$f" >"$TMP/owner.out" 2>&1 || { echo "as a non-superuser owner, $f failed: $(cat "$TMP/owner.out")"; exit 1; }
+done
+"${O[@]}" -c "INSERT INTO game_info (game_id, os) VALUES ('noa', 'android'), ('noi', 'ios')" \
+  -c "INSERT INTO game_evaluations (game_id, category_group, initial_evaluator, initial_conclusion, updated_at)
+        VALUES ('noa', 'puzzle', 'NoA', 'List_Idea', '2026-01-01Z'), ('noi', 'puzzle', NULL, NULL, '2026-01-01Z')" \
+  -c "UPDATE game_info SET family_id = 'fam.no' WHERE game_id IN ('noa', 'noi')" \
+  -c "BEGIN" \
+  -c "CREATE TEMP TABLE no_res AS SELECT * FROM eval_pair_phase2_apply('no_run', 10)" \
+  -c "DO \$\$ BEGIN
+        ASSERT (SELECT sum(linked) FROM no_res) = 1, 'non-superuser apply linked the pair';
+        ASSERT COALESCE(current_setting('eval_pairs.keep_updated_at', true), '') = '', 'non-superuser apply put the setting back';
+        ASSERT NOT EXISTS (SELECT 1 FROM game_evaluations WHERE game_id IN ('noa', 'noi') AND updated_at <> '2026-01-01Z'),
+          'non-superuser apply moved updated_at';
+      END \$\$" \
+  -c "COMMIT" \
+  -c "DO \$\$ BEGIN
+        PERFORM eval_pair_phase2_rollback('no_run', 10);
+        ASSERT NOT EXISTS (SELECT 1 FROM game_evaluations WHERE game_id IN ('noa', 'noi') AND (pair_eval_id IS NOT NULL OR updated_at <> '2026-01-01Z')),
+          'non-superuser rollback unlinked without moving updated_at';
+        ASSERT COALESCE(current_setting('eval_pairs.keep_updated_at', true), '') = '', 'non-superuser rollback put the setting back';
+      END \$\$" >"$TMP/owner.out" 2>&1 || { echo "non-superuser apply / rollback failed: $(cat "$TMP/owner.out")"; exit 1; }
+
 echo "eval pairs SQL checks: OK"

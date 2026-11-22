@@ -46,7 +46,7 @@
 --                  call (see there); scripts/phase2-rollback.sh RUN_ID calls it until the run is
 --                  gone and prints what it kept. Not run by this file.
 --   game_evaluations_touch_updated()   054's body behind one check: while the setting
---                  eval_pairs.keep_updated_at is 'on' (only inside apply), updated_at stays.
+--                  eval_pairs.keep_updated_at is 'on' (only inside apply / rollback), updated_at stays.
 --
 -- KEEP eval_stats_rows IN STEP WITH THE TABLE: it lists the columns of game_evaluations one
 -- by one, in both branches (an override per column cannot be written with *). A later
@@ -555,9 +555,13 @@ COMMIT;
 --      columns changed, else 'pair_link' (on the back row); actor 'System', source 'other', pair_scope 'store', CONTEXT = p_run_id
 --      (the rollback finds a run's log rows by it), owner / owner_after, conclusion, final and
 --      batch before / after, changed = initial_conclusion changed.
--- updated_at: the function runs with eval_pairs.keep_updated_at = 'on' (its SET clause, so the
--- setting ends with the call), and game_evaluations_touch_updated() leaves updated_at alone
--- while it is on: no row's updated_at changes (spec 5).
+-- updated_at: the function turns eval_pairs.keep_updated_at 'on' (set_config, local) before its
+-- first write and puts the caller's value back before it returns, and
+-- game_evaluations_touch_updated() leaves updated_at alone while it is on: no row's updated_at
+-- changes (spec 5). Not a SET clause on CREATE FUNCTION: for a custom setting that needs
+-- superuser (or GRANT SET, PG15+), and the owner role on Neon has neither ("permission denied to
+-- set parameter"); set_config at run time needs nothing. On an error the transaction (or the
+-- caller's savepoint) is aborted, which undoes the set_config too.
 -- Returns one row per group with at least one linked pair: linked, and flagged = how many of
 -- those carry a plan flag. Nothing left: no rows, nothing written. The same run_id may be used
 -- for several calls (one rollback undoes them all); an empty run_id is an error.
@@ -585,7 +589,6 @@ $$;
 CREATE OR REPLACE FUNCTION eval_pair_phase2_apply(p_run_id text, p_max_pairs integer DEFAULT 500)
 RETURNS TABLE(grp text, linked integer, flagged integer)
 LANGUAGE plpgsql
-SET eval_pairs.keep_updated_at = 'on'
 AS $$
 DECLARE
   media  text[] := eval_pair_media_cols();
@@ -601,6 +604,7 @@ DECLARE
   f_chg boolean; k_chg boolean; log_front boolean;
   n_done integer := 0;
   counts jsonb := '{}';
+  prev   text;
 BEGIN
   IF COALESCE(p_run_id, '') = '' THEN
     RAISE EXCEPTION '055: eval_pair_phase2_apply needs a run_id';
@@ -614,6 +618,9 @@ BEGIN
     RAISE EXCEPTION '055: game_evaluations_touch_updated() ignores eval_pairs.keep_updated_at (054 re-run after 055?): re-run 055 before apply';
   END IF;
   IF COALESCE(p_max_pairs, 0) <= 0 THEN RETURN; END IF;
+  -- before the first write: the touch function leaves updated_at alone (put back before RETURN)
+  prev := current_setting('eval_pairs.keep_updated_at', true);
+  PERFORM set_config('eval_pairs.keep_updated_at', 'on', true);
   SELECT array_agg(c ORDER BY o) INTO rest FROM unnest(evals) WITH ORDINALITY u(c, o) WHERE c <> ALL (hold);
 
   FOR fam IN
@@ -721,6 +728,7 @@ BEGIN
       COALESCE((counts -> p.grp ->> 1)::int, 0) + (COALESCE(cardinality(p.flags), 0) > 0)::int));
   END LOOP;
 
+  PERFORM set_config('eval_pairs.keep_updated_at', COALESCE(prev, ''), true);
   RETURN QUERY SELECT c.key, (c.value ->> 0)::int, (c.value ->> 1)::int FROM jsonb_each(counts) c ORDER BY c.key;
 END;
 $$;
@@ -761,7 +769,8 @@ COMMIT;
 -- pair_link, on one of the family's rows) and then its snapshots are deleted. When the run has
 -- no snapshot left, any log row of the run still there (its row deleted since) goes too.
 -- Writes no log row (no pair_unlink), and no row's updated_at changes
--- (eval_pairs.keep_updated_at, as apply; the same guard on the touch function).
+-- (eval_pairs.keep_updated_at set and put back at run time, as apply; the same guard on the
+-- touch function).
 -- One-shot: a restored family's snapshots are gone, so a later call skips it; once the run is
 -- done, a call (or one with an unknown run_id) finds nothing, changes nothing and returns no
 -- rows. An empty run_id is an error; p_max_families <= 0 does nothing. An error fails the
@@ -771,7 +780,6 @@ BEGIN;
 CREATE OR REPLACE FUNCTION eval_pair_phase2_rollback(p_run_id text, p_max_families integer DEFAULT 500)
 RETURNS TABLE(game_evaluation_id integer, kept_columns text[], linked_to integer)
 LANGUAGE plpgsql
-SET eval_pairs.keep_updated_at = 'on'
 AS $$
 DECLARE
   derived text[] := ARRAY['record_confirmed_at', 'youtube_uploaded_at'];
@@ -780,6 +788,7 @@ DECLARE
   cur jsonb; wn jsonb; bf jsonb; want jsonb; put jsonb; fin jsonb;
   wr     game_evaluations;
   relink boolean;
+  prev   text;
 BEGIN
   IF COALESCE(p_run_id, '') = '' THEN
     RAISE EXCEPTION '055: eval_pair_phase2_rollback needs a run_id';
@@ -792,6 +801,9 @@ BEGIN
   END IF;
 
   IF COALESCE(p_max_families, 0) <= 0 THEN RETURN; END IF;
+  -- before the first write: the touch function leaves updated_at alone (put back before RETURN)
+  prev := current_setting('eval_pairs.keep_updated_at', true);
+  PERFORM set_config('eval_pairs.keep_updated_at', 'on', true);
 
   FOR fam IN
     -- apply always writes family_id; '=' (not IS NOT DISTINCT FROM) so the index is used
@@ -875,6 +887,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM eval_pair_merge_snapshots ms WHERE ms.run_id = p_run_id) THEN
     DELETE FROM evaluation_log l WHERE l.context = p_run_id AND l.kind IN ('pair_merge', 'pair_link');
   END IF;
+  PERFORM set_config('eval_pairs.keep_updated_at', COALESCE(prev, ''), true);
   RETURN;
 END;
 $$;

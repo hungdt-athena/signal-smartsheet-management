@@ -159,8 +159,12 @@ BEGIN
   ASSERT EXISTS (SELECT 1 FROM eval_pair_merge_snapshots WHERE run_id = 'p2y_r1'), 'the reference was undone';
   LOOP
     i := i + 1;
+    PERFORM set_config('eval_pairs.keep_updated_at', 'before' || i, true);
     INSERT INTO p2y_rb SELECT i, x.* FROM eval_pair_phase2_rollback('p2y_r1', 4) x;
     GET DIAGNOSTICS n = ROW_COUNT;
+    -- set at run time, not by a SET clause: the caller's value is back after each call
+    ASSERT current_setting('eval_pairs.keep_updated_at', true) = 'before' || i,
+      format('rollback call %s: setting not put back: %s', i, current_setting('eval_pairs.keep_updated_at', true));
     INSERT INTO p2y_batch VALUES (i, n, (SELECT count(*) FROM eval_pair_merge_snapshots WHERE run_id = 'p2y_r1'),
                                        (SELECT count(*) FROM evaluation_log WHERE context = 'p2y_r1'));
     EXIT WHEN n = 0 OR i >= 10;
