@@ -333,8 +333,10 @@ COMMIT;
 -- neither family_unlinked, each store with at least one game_evaluations row, and no row of
 -- the family linked yet (pair_eval_id / pair_back). Then:
 --   G  a store has more than one row (flag multi_row), or both stores are judged with two
---      results outside D / E / F (flag unsupported_results). front_id / back_id NULL:
---      listed in the preview, never linked.
+--      results outside D / E / F (flag unsupported_results), or a row already carries credit
+--      (flag credited: a pair unlinked after an earlier phase 2 run; relinking it is a person's
+--      call, and its credit must not be overwritten). front_id / back_id NULL: listed in the
+--      preview, never linked. So the preview's A..F counts are what apply links.
 --   C  a store carries Link_dead / Stale_release. Front = the live store. Each store keeps
 --      its result: result_conclusion = the front's own, holder = the front's own holder,
 --      holder_row NULL (no eval group is copied).
@@ -360,7 +362,7 @@ COMMIT;
 -- Release-first: the earlier COALESCE(initial_release, temp_release)::date when both stores
 -- have one and they differ; else the earlier first_assigned_date when both have one and they
 -- differ; else the lower id.
--- Flags (text[], in this order): multi_row, unsupported_results, two_demo_codes,
+-- Flags (text[], in this order): multi_row, unsupported_results, credited, two_demo_codes,
 -- two_record_codes (both game_info rows carry a code), final_conflict (two different finals),
 -- final_only_on_back, media_conflict (a link column, drive / record drive / YouTube, set on
 -- both rows with different values), group_differs (category_group), both_holders_inactive,
@@ -392,12 +394,15 @@ LANGUAGE sql STABLE AS $$
            ARRAY[NULLIF(e.drive_link, ''), NULLIF(e.record_5min_drive, ''), NULLIF(e.record_20min_drive, ''),
                  NULLIF(e.youtube_link, ''), NULLIF(e.youtube_5min_link, ''), NULLIF(e.youtube_20min_link, '')] AS links,
            (e.pair_eval_id IS NOT NULL OR e.pair_back) AS linked,
+           (e.credit IS NOT NULL) AS credited,
            count(gi.rel) OVER () AS n_rel,
            count(e.first_assigned_date) OVER () AS n_fad
       FROM gi JOIN game_evaluations e ON e.game_id = gi.game_id
   ),
   fam AS (
-    SELECT s.n_ev,
+    SELECT r.n_ev, r.credited, r.res_grp, CASE WHEN r.credited THEN 'G' ELSE r.res_grp END AS grp
+      FROM (
+    SELECT s.n_ev, s.credited,
            CASE WHEN s.n_ev > 2 THEN 'G'
                 WHEN s.n_store_only > 0 THEN 'C'
                 WHEN s.n_judged = 0 THEN 'A'
@@ -405,9 +410,10 @@ LANGUAGE sql STABLE AS $$
                 WHEN s.n_results = 1 THEN 'D'
                 WHEN s.has_li AND (s.has_bp OR s.has_pb) THEN 'E'
                 WHEN s.has_bp AND s.has_pb THEN 'F'
-                ELSE 'G' END AS grp
+                ELSE 'G' END AS res_grp
       FROM (SELECT count(*) AS n_ev, count(DISTINCT ev.game_id) AS n_games,
                    COALESCE(bool_or(ev.linked), false) AS any_linked,
+                   COALESCE(bool_or(ev.credited), false) AS credited,
                    count(ev.c) AS n_judged,
                    count(*) FILTER (WHERE eval_store_specific(ev.c)) AS n_store_only,
                    count(DISTINCT ev.c) AS n_results,
@@ -417,6 +423,7 @@ LANGUAGE sql STABLE AS $$
               FROM ev) s
      WHERE s.n_games = 2 AND NOT s.any_linked
        AND (SELECT count(*) = 2 AND count(DISTINCT gi.os) = 2 AND NOT bool_or(gi.unlinked) FROM gi)
+      ) r
   ),
   ranked AS (
     SELECT ev.*, f.grp, f.n_ev,
@@ -464,7 +471,8 @@ LANGUAGE sql STABLE AS $$
               WHEN f.grp IN ('D', 'E', 'F') AND fr.fin IS NOT NULL THEN fr.id END,
          CASE WHEN f.n_ev > 2 THEN ARRAY['multi_row']::text[]
               ELSE array_remove(ARRAY[
-                CASE WHEN f.grp = 'G' THEN 'unsupported_results' END,
+                CASE WHEN f.res_grp = 'G' THEN 'unsupported_results' END,
+                CASE WHEN f.credited THEN 'credited' END,
                 CASE WHEN fr.demo_code IS NOT NULL AND bk.demo_code IS NOT NULL THEN 'two_demo_codes' END,
                 CASE WHEN fr.record_code IS NOT NULL AND bk.record_code IS NOT NULL THEN 'two_record_codes' END,
                 CASE WHEN fr.fin <> bk.fin THEN 'final_conflict' END,
@@ -500,20 +508,25 @@ COMMIT;
 -- ===== Apply (spec 5, 6.1, 6.2, 6.3): link the old pairs, a batch at a time =====
 -- eval_pair_phase2_apply(p_run_id, p_max_pairs DEFAULT 500) RETURNS TABLE(grp, linked, flagged)
 -- Links at most p_max_pairs families per call, in family_id order, all in the caller's
--- transaction. Candidates: families with exactly 2 game_info rows of 2 os, neither
--- family_unlinked, both games with an evaluation row, no row linked yet (pair_eval_id /
--- pair_back) and no row with credit (a pair a person unlinked after an earlier run: relinking
--- it is a person's call, and its credit must not be overwritten). Per family:
+-- transaction. First it checks that game_evaluations_touch_updated() honors
+-- eval_pairs.keep_updated_at (an error otherwise: 054 re-run after 055 puts back one that does
+-- not). Candidates: families with exactly 2 game_info rows of 2 os, neither family_unlinked,
+-- both games with an evaluation row, no row linked yet (pair_eval_id / pair_back) and no row
+-- with credit (classify makes those G, flag credited). Per family:
 --   1. pg_advisory_xact_lock(54, hashtext(family_id)) (the lock 054's insert trigger takes),
---      then the family's evaluation rows FOR UPDATE in id order;
+--      the family's game_info rows FOR SHARE (a Signal Sense family change waits for the
+--      batch's commit), then the family's evaluation rows FOR UPDATE in id order;
 --   2. eval_pair_phase2_classify(family_id) AFTER the locks: a row saved since the preview is
 --      classified by what it is now; nothing (no longer clean), or group G, -> skipped;
 --   3. the copies, every one while the two rows are still unlinked, so trg_eval_pair_sync
 --      (WHEN pair_eval_id is set and unchanged) never runs a copy of its own:
 --        A  holder_row's initial_evaluator, assigned_date, first_assigned_date, batch,
---           category_group onto the other row; the rest of the eval group: the front fills
---           its empty columns from the back, then the back takes the front's
+--           category_group onto the other row; the rest of the eval group: the holder row
+--           fills its empty columns from the other, then the other takes the holder's
 --        B  the judged row's whole eval_pair_eval_cols() onto the waiting row
+--        A/B with the front as the receiving row: the front's record_5min_batch /
+--           record_20min_batch are put back after that copy (a moved Record bucket re-sets
+--           them), so the media step decides them from the front's own
 --        C  no eval column (each store keeps its result, holder and group)
 --        D/E/F  the front row's eval group is never touched (its final stays; E/F: it holds the
 --           pair's result by construction, checked: an error otherwise); the back row gets
@@ -528,9 +541,10 @@ COMMIT;
 --   5. one eval_pair_merge_snapshots row per row: row_before = the row before step 3,
 --      written = {column: value the run set} for every column whose value changed (updated_at
 --      never; pair_eval_id and pair_back always; credit when set);
---   6. one evaluation_log row on the back row: kind 'pair_merge' when a shared column
---      (eval_pair_eval_cols() + eval_pair_media_cols()) of the back row changed, else
---      'pair_link'; actor 'System', source 'other', pair_scope 'store', CONTEXT = p_run_id
+--   6. one evaluation_log row per pair, on the row whose shared columns (eval_pair_eval_cols()
+--      + eval_pair_media_cols()) changed; both changed -> the one whose holder changed; neither,
+--      or both holders changed -> the back row. kind 'pair_merge' when that row's shared
+--      columns changed, else 'pair_link' (on the back row); actor 'System', source 'other', pair_scope 'store', CONTEXT = p_run_id
 --      (the rollback finds a run's log rows by it), owner / owner_after, conclusion, final and
 --      batch before / after, changed = initial_conclusion changed.
 -- updated_at: the function runs with eval_pairs.keep_updated_at = 'on' (its SET clause, so the
@@ -573,14 +587,23 @@ DECLARE
   fam    text;
   p      record;
   f0 game_evaluations; k0 game_evaluations; src game_evaluations; f1 game_evaluations;
-  fz game_evaluations; kz game_evaluations;
-  jf0 jsonb; jk0 jsonb; jf1 jsonb; jkz jsonb; moved jsonb;
+  fz game_evaluations; kz game_evaluations; lb game_evaluations; la game_evaluations;
+  jf0 jsonb; jk0 jsonb; jf1 jsonb; jfz jsonb; jkz jsonb; moved jsonb;
   other  integer;
+  f_chg boolean; k_chg boolean; log_front boolean;
   n_done integer := 0;
   counts jsonb := '{}';
 BEGIN
   IF COALESCE(p_run_id, '') = '' THEN
     RAISE EXCEPTION '055: eval_pair_phase2_apply needs a run_id';
+  END IF;
+  -- 054 re-run after 055 puts back a touch function that ignores the setting: every row
+  -- apply writes would get a new updated_at
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_proc f ON f.oid = t.tgfoid
+                  WHERE t.tgrelid = 'game_evaluations'::regclass AND t.tgname = 'trg_game_evaluations_updated'
+                    AND f.proname = 'game_evaluations_touch_updated'
+                    AND position('eval_pairs.keep_updated_at' IN f.prosrc) > 0) THEN
+    RAISE EXCEPTION '055: game_evaluations_touch_updated() ignores eval_pairs.keep_updated_at (054 re-run after 055?): re-run 055 before apply';
   END IF;
   IF COALESCE(p_max_pairs, 0) <= 0 THEN RETURN; END IF;
   SELECT array_agg(c ORDER BY o) INTO rest FROM unnest(evals) WITH ORDINALITY u(c, o) WHERE c <> ALL (hold);
@@ -598,12 +621,13 @@ BEGIN
   LOOP
     EXIT WHEN n_done >= p_max_pairs;
     PERFORM pg_advisory_xact_lock(54, hashtext(fam));
+    -- the family's games: a Signal Sense family change waits for this batch's commit
+    PERFORM 1 FROM game_info WHERE family_id = fam ORDER BY game_id FOR SHARE;
     PERFORM 1 FROM game_evaluations e JOIN game_info g ON g.game_id = e.game_id
       WHERE g.family_id = fam ORDER BY e.id FOR UPDATE OF e;
     SELECT * INTO p FROM eval_pair_phase2_classify(fam);
+    -- G includes a family with credit (flag credited): credit is never overwritten
     CONTINUE WHEN NOT FOUND OR p.grp = 'G' OR p.front_id IS NULL OR p.back_id IS NULL;
-    -- saved since the cursor opened: credit is never overwritten
-    CONTINUE WHEN EXISTS (SELECT 1 FROM game_evaluations WHERE id IN (p.front_id, p.back_id) AND credit IS NOT NULL);
 
     SELECT * INTO f0 FROM game_evaluations WHERE id = p.front_id;
     SELECT * INTO k0 FROM game_evaluations WHERE id = p.back_id;
@@ -619,9 +643,25 @@ BEGIN
       SELECT * INTO src FROM game_evaluations WHERE id = p.holder_row;
       other := CASE WHEN p.holder_row = p.front_id THEN p.back_id ELSE p.front_id END;
       PERFORM eval_pair_copy(other, src, CASE p.grp WHEN 'A' THEN hold ELSE evals END);
+      IF p.grp = 'A' THEN
+        -- the rest of A's eval group: the holder row's wins; it fills what it lacks from the other
+        PERFORM eval_pair_fill(p.holder_row, other, rest);
+        SELECT * INTO src FROM game_evaluations WHERE id = p.holder_row;
+        PERFORM eval_pair_copy(other, src, rest);
+      END IF;
+      IF other = p.front_id THEN
+        -- a copy that moves the front's Record bucket (B: final_conclusion) re-sets its record
+        -- batches (eval_pair_copy, 051's record_slots): put the front's own back; the media
+        -- step below decides them, as for every front
+        UPDATE game_evaluations
+           SET record_5min_batch = f0.record_5min_batch, record_20min_batch = f0.record_20min_batch
+         WHERE id = p.front_id
+           AND (record_5min_batch IS DISTINCT FROM f0.record_5min_batch
+                OR record_20min_batch IS DISTINCT FROM f0.record_20min_batch);
+      END IF;
     END IF;
-    -- the front fills what it lacks from the back: media always, the rest of A's eval group
-    PERFORM eval_pair_fill(p.front_id, p.back_id, CASE WHEN p.grp = 'A' THEN rest || media ELSE media END);
+    -- media: the front fills what it lacks from the back
+    PERFORM eval_pair_fill(p.front_id, p.back_id, media);
     SELECT * INTO f1 FROM game_evaluations WHERE id = p.front_id;
     jf1 := to_jsonb(f1);
 
@@ -633,10 +673,7 @@ BEGIN
       UPDATE game_evaluations SET credit = jk0 || jsonb_build_object('_moved', moved) WHERE id = p.back_id;
     END IF;
     -- the back row takes the front's shared columns
-    PERFORM eval_pair_copy(p.back_id, f1, CASE p.grp WHEN 'A' THEN rest || media
-                                                      WHEN 'B' THEN media
-                                                      WHEN 'C' THEN media
-                                                      ELSE evals || media END);
+    PERFORM eval_pair_copy(p.back_id, f1, CASE WHEN p.grp IN ('D', 'E', 'F') THEN evals || media ELSE media END);
 
     -- the link, front row as planned
     UPDATE game_evaluations
@@ -646,22 +683,29 @@ BEGIN
 
     SELECT * INTO fz FROM game_evaluations WHERE id = p.front_id;
     SELECT * INTO kz FROM game_evaluations WHERE id = p.back_id;
+    jfz := to_jsonb(fz);
     jkz := to_jsonb(kz);
     INSERT INTO eval_pair_merge_snapshots (run_id, game_evaluation_id, family_id, pair_group, row_before, written)
     SELECT p_run_id, r.id, fam, p.grp, r.before,
            (SELECT COALESCE(jsonb_object_agg(a.key, a.value), '{}') FROM jsonb_each(r.after) a
              WHERE a.key <> 'updated_at'
                AND (a.key IN ('pair_eval_id', 'pair_back') OR a.value IS DISTINCT FROM r.before -> a.key))
-      FROM (VALUES (f0.id, jf0, to_jsonb(fz)), (k0.id, jk0, jkz)) r(id, before, after);
+      FROM (VALUES (f0.id, jf0, jfz), (k0.id, jk0, jkz)) r(id, before, after);
 
+    -- the log row goes on the row whose shared values changed; both changed -> the one whose
+    -- holder changed; otherwise (neither, or both holders changed) the back row
+    f_chg := EXISTS (SELECT 1 FROM unnest(evals || media) c WHERE jf0 -> c IS DISTINCT FROM jfz -> c);
+    k_chg := EXISTS (SELECT 1 FROM unnest(evals || media) c WHERE jk0 -> c IS DISTINCT FROM jkz -> c);
+    log_front := f_chg AND (NOT k_chg OR (f0.initial_evaluator IS DISTINCT FROM fz.initial_evaluator
+                                          AND k0.initial_evaluator IS NOT DISTINCT FROM kz.initial_evaluator));
+    IF log_front THEN lb := f0; la := fz; ELSE lb := k0; la := kz; END IF;
     INSERT INTO evaluation_log (game_evaluation_id, game_id, actor, owner, owner_after, source, context, kind,
       conclusion_before, conclusion_after, final_before, final_after, batch_before, batch_after,
       changed, pair_scope)
-    VALUES (k0.id, k0.game_id, 'System', k0.initial_evaluator, kz.initial_evaluator, 'other', p_run_id,
-      CASE WHEN EXISTS (SELECT 1 FROM unnest(evals || media) c WHERE jk0 -> c IS DISTINCT FROM jkz -> c)
-           THEN 'pair_merge' ELSE 'pair_link' END,
-      k0.initial_conclusion, kz.initial_conclusion, k0.final_conclusion, kz.final_conclusion, k0.batch, kz.batch,
-      k0.initial_conclusion IS DISTINCT FROM kz.initial_conclusion, 'store');
+    VALUES (lb.id, lb.game_id, 'System', lb.initial_evaluator, la.initial_evaluator, 'other', p_run_id,
+      CASE WHEN log_front OR k_chg THEN 'pair_merge' ELSE 'pair_link' END,
+      lb.initial_conclusion, la.initial_conclusion, lb.final_conclusion, la.final_conclusion, lb.batch, la.batch,
+      lb.initial_conclusion IS DISTINCT FROM la.initial_conclusion, 'store');
 
     n_done := n_done + 1;
     counts := jsonb_set(counts, ARRAY[p.grp], jsonb_build_array(

@@ -16,6 +16,7 @@ BEGIN
     ('p2x_a2a', 'android', '2026-01-01'), ('p2x_a2i', 'ios', '2026-02-01'),
     ('p2x_b1a', 'android', '2026-01-10'), ('p2x_b1i', 'ios', '2026-01-20'),
     ('p2x_b2a', 'android', '2026-01-10'), ('p2x_b2i', 'ios', '2026-01-20'),
+    ('p2x_b3a', 'android', '2026-01-10'), ('p2x_b3i', 'ios', '2026-01-20'),
     ('p2x_ca',  'android', '2026-01-01'), ('p2x_ci',  'ios', '2026-02-01'),
     ('p2x_da',  'android', '2026-01-01'), ('p2x_di',  'ios', '2026-03-01'),
     ('p2x_ea',  'android', '2026-01-01'), ('p2x_ei',  'ios', '2026-03-01'),
@@ -28,12 +29,15 @@ BEGIN
       batch, initial_note, initial_conclusion, evaluate_date, final_conclusion, final_evaluator,
       drive_link, youtube_link, record_5min_assignee, record_5min_drive, updated_at) VALUES
     -- A1: equal backlogs (1 pending each) -> the earlier assigned_date: the BACK row holds.
-    --     Front lacks the draft note and the demo link: it takes them; the back row changes nothing.
-    ('p2x_a1a', 'puzzle', 'P2xA1f', '2026-03-05', '2026-03-05', 'W1', NULL, NULL, NULL, NULL, NULL,
+    --     Both have a draft note: the holder's wins. The front lacks the demo link: it takes it.
+    --     Only the front changes: the log row is on the front.
+    ('p2x_a1a', 'puzzle', 'P2xA1f', '2026-03-05', '2026-03-05', 'W1', 'front draft a1', NULL, NULL, NULL, NULL,
        NULL, NULL, NULL, NULL, '2026-01-01Z'),
     ('p2x_a1i', 'arcade', 'P2xA1b', '2026-03-01', '2026-02-28', 'W0', 'draft from back', NULL, NULL, NULL, NULL,
        'https://x/a1', NULL, NULL, NULL, '2026-01-01Z'),
-    -- A2: the FRONT row holds; the notes differ: the front's wins, the back's is in the snapshot
+    -- A2: the FRONT row holds; the notes differ: the holder's (front) wins, the back's is in the
+    --     snapshot; the holder lacks the gameplay brief: it takes the back's (below). Both rows
+    --     change, the back's holder changes: the log row is on the back.
     ('p2x_a2a', 'puzzle', 'P2xA2f', '2026-03-01', '2026-03-01', 'W5', 'front note', NULL, NULL, NULL, NULL,
        NULL, NULL, NULL, NULL, '2026-01-01Z'),
     ('p2x_a2i', 'puzzle', 'P2xA2b', '2026-03-04', '2026-03-04', 'W6', 'back note', NULL, NULL, NULL, NULL,
@@ -48,6 +52,12 @@ BEGIN
        NULL, NULL, NULL, NULL, NULL, NULL, '2026-01-01Z'),
     ('p2x_b2i', 'puzzle', 'P2xB2w', '2026-03-02', '2026-03-02', 'W2', NULL, NULL, NULL, NULL, NULL,
        NULL, NULL, NULL, NULL, '2026-01-01Z'),
+    -- B3: the waiting front has a frozen 5' record batch; the judged back row's Priority IV final
+    --     moves the front's Record bucket: the front's 5' batch stays its own (batches below)
+    ('p2x_b3a', 'puzzle', 'P2xB3w', '2026-03-02', '2026-03-02', 'W2', NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL, '2026-01-01Z'),
+    ('p2x_b3i', 'puzzle', 'P2xB3j', '2026-03-01', '2026-03-01', 'W1', 'judged note 3', 'List_Idea', '2026-03-05 10:00Z',
+       'Priority IV', 'P2xMgr', NULL, NULL, NULL, NULL, '2026-01-01Z'),
     -- C: the Link_dead store (earlier release) is the back; the live front keeps its holder and
     --    group, and takes the dead store's recording (media)
     ('p2x_ca',  'puzzle', 'P2xCd', '2026-03-01', '2026-03-01', 'W1', 'dead', 'Link_dead', '2026-03-02 10:00Z',
@@ -89,6 +99,12 @@ BEGIN
 
   UPDATE game_evaluations SET credit = '{"initial_evaluator": "P2xCrOld", "initial_conclusion": "List_Idea"}'
    WHERE game_id = 'p2x_cri';
+  UPDATE game_evaluations SET initial_gameplay = 'gp back' WHERE game_id = 'p2x_a2i';
+  UPDATE game_evaluations SET record_5min_batch = 'WF5' WHERE game_id = 'p2x_b3a';
+  UPDATE game_evaluations SET record_20min_batch = 'WJ20' WHERE game_id = 'p2x_b3i';
+  ASSERT (SELECT record_5min_batch = 'WF5' AND record_20min_batch IS NULL FROM game_evaluations WHERE game_id = 'p2x_b3a')
+     AND (SELECT record_5min_batch IS NULL AND record_20min_batch = 'WJ20' FROM game_evaluations WHERE game_id = 'p2x_b3i'),
+    'fixture B3 batches';
   UPDATE game_info SET family_id = 'fam.' || left(game_id, length(game_id) - 1) WHERE game_id LIKE 'p2x\_%';
 END $$;
 
@@ -113,6 +129,9 @@ BEGIN
      AND r.holder_row = r.back_id, format('fixture B1: %s', r);
   SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2x_b2');
   ASSERT r.grp = 'B' AND r.holder_row = r.front_id, format('fixture B2: %s', r);
+  SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2x_b3');
+  ASSERT r.grp = 'B' AND r.front_id = (SELECT id FROM game_evaluations WHERE game_id = 'p2x_b3a')
+     AND r.holder_row = r.back_id, format('fixture B3: %s', r);
   SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2x_c');
   ASSERT r.grp = 'C' AND r.back_id = (SELECT id FROM game_evaluations WHERE game_id = 'p2x_ca'), format('fixture C: %s', r);
   SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2x_d');
@@ -127,21 +146,20 @@ BEGIN
   ASSERT r.grp = 'A', format('fixture G is group A in the preview: %s', r);
   SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2x_z');
   ASSERT r.grp = 'G', format('fixture Z: %s', r);
-  -- the credited family is clean for the plan (preview lists it), apply skips it
-  ASSERT EXISTS (SELECT 1 FROM eval_pair_phase2_classify('fam.p2x_cr')), 'fixture CR listed by the plan';
+  -- a family with credit: listed by the preview as G (flag credited), never linked
+  SELECT * INTO STRICT r FROM eval_pair_phase2_classify('fam.p2x_cr');
+  ASSERT r.grp = 'G' AND r.front_id IS NULL AND r.back_id IS NULL AND r.flags = '{credited}', format('fixture CR: %s', r);
 END $$;
 
 -- edited between the preview and the apply: G's android row is judged (a normal save of a lone row)
 UPDATE game_evaluations SET initial_conclusion = 'Bypass', evaluate_date = '2026-03-09 10:00Z', initial_note = 'judged late'
  WHERE game_id = 'p2x_ga';
 
--- What apply should do, from the plan as it is now (credited families skipped), and the state
--- every row is in before it runs.
+-- What apply should do: the plan's A..F as it is now; and the state every row is in before it runs.
 CREATE TEMP TABLE p2x_expected AS
   SELECT p.*, row_number() OVER (ORDER BY p.family_id) AS ord
     FROM eval_pair_phase2_plan() p
-   WHERE p.grp <> 'G'
-     AND NOT EXISTS (SELECT 1 FROM game_evaluations e WHERE e.id IN (p.front_id, p.back_id) AND e.credit IS NOT NULL);
+   WHERE p.grp <> 'G';
 CREATE TEMP TABLE p2x_before AS SELECT id, to_jsonb(g) AS j, updated_at FROM game_evaluations g;
 CREATE TEMP TABLE p2x_log_before AS SELECT max(id) AS max_id FROM evaluation_log;
 
@@ -251,31 +269,50 @@ BEGIN
                         WHERE m <> ALL (eval_pair_media_cols())))),
     'credit = the back row before + _moved (media columns)';
 
-  -- evaluation_log: one row per pair, on the back row, context = run_id
+  -- evaluation_log: one row per pair, context = run_id, on the row whose shared values changed
+  -- (both: the one whose holder changed; neither, or both holders: the back row)
   ASSERT (SELECT count(*) FROM evaluation_log WHERE id > (SELECT max_id FROM p2x_log_before))
        = (SELECT count(*) FROM p2x_expected), 'one evaluation_log row per pair, nothing else';
+  CREATE TEMP TABLE p2x_logpick AS
+    SELECT x.family_id, x.front_id, x.back_id,
+           CASE WHEN c.f_chg AND (NOT c.k_chg OR (c.f_own AND NOT c.k_own)) THEN x.front_id ELSE x.back_id END AS log_id,
+           (c.f_chg OR c.k_chg) AS any_chg,
+           c.f_chg AND (NOT c.k_chg OR (c.f_own AND NOT c.k_own)) AS on_front, c.k_chg
+      FROM p2x_expected x
+      JOIN p2x_before fb ON fb.id = x.front_id JOIN game_evaluations f ON f.id = x.front_id
+      JOIN p2x_before kb ON kb.id = x.back_id JOIN game_evaluations k ON k.id = x.back_id
+      CROSS JOIN LATERAL (SELECT
+        EXISTS (SELECT 1 FROM unnest(eval_pair_eval_cols() || eval_pair_media_cols()) c WHERE fb.j -> c IS DISTINCT FROM to_jsonb(f) -> c) AS f_chg,
+        EXISTS (SELECT 1 FROM unnest(eval_pair_eval_cols() || eval_pair_media_cols()) c WHERE kb.j -> c IS DISTINCT FROM to_jsonb(k) -> c) AS k_chg,
+        (fb.j ->> 'initial_evaluator') IS DISTINCT FROM f.initial_evaluator AS f_own,
+        (kb.j ->> 'initial_evaluator') IS DISTINCT FROM k.initial_evaluator AS k_own) c;
   ASSERT NOT EXISTS (
-    SELECT 1 FROM p2x_expected x
+    SELECT 1 FROM p2x_logpick x
      WHERE (SELECT count(*) FROM evaluation_log l
-             WHERE l.id > (SELECT max_id FROM p2x_log_before) AND l.game_evaluation_id = x.back_id
+             WHERE l.id > (SELECT max_id FROM p2x_log_before) AND l.game_evaluation_id = x.log_id
                AND l.context IN ('p2x_r1', 'p2x_r2') AND l.actor = 'System' AND l.source = 'other'
-               AND l.pair_scope = 'store') <> 1), 'the log row is on the back row';
+               AND l.pair_scope = 'store') <> 1), 'the log row is on the row that changed';
+  ASSERT EXISTS (SELECT 1 FROM p2x_logpick WHERE on_front) AND EXISTS (SELECT 1 FROM p2x_logpick WHERE NOT on_front),
+    'fixture: log rows on fronts and on backs';
   ASSERT NOT EXISTS (
-    SELECT 1 FROM p2x_expected x
-      JOIN evaluation_log l ON l.game_evaluation_id = x.back_id AND l.id > (SELECT max_id FROM p2x_log_before)
-      JOIN p2x_before b ON b.id = x.back_id JOIN game_evaluations g ON g.id = x.back_id
-     WHERE l.kind IS DISTINCT FROM CASE WHEN EXISTS (
-             SELECT 1 FROM unnest(eval_pair_eval_cols() || eval_pair_media_cols()) c
-              WHERE b.j -> c IS DISTINCT FROM to_jsonb(g) -> c) THEN 'pair_merge' ELSE 'pair_link' END
+    SELECT 1 FROM p2x_logpick x
+      JOIN evaluation_log l ON l.game_evaluation_id = x.log_id AND l.id > (SELECT max_id FROM p2x_log_before)
+      JOIN p2x_before b ON b.id = x.log_id JOIN game_evaluations g ON g.id = x.log_id
+     WHERE l.kind IS DISTINCT FROM CASE WHEN x.any_chg THEN 'pair_merge' ELSE 'pair_link' END
         OR l.owner IS DISTINCT FROM b.j ->> 'initial_evaluator' OR l.owner_after IS DISTINCT FROM g.initial_evaluator
         OR l.conclusion_before IS DISTINCT FROM b.j ->> 'initial_conclusion' OR l.conclusion_after IS DISTINCT FROM g.initial_conclusion
         OR l.final_before IS DISTINCT FROM b.j ->> 'final_conclusion' OR l.final_after IS DISTINCT FROM g.final_conclusion
         OR l.batch_before IS DISTINCT FROM b.j ->> 'batch' OR l.batch_after IS DISTINCT FROM g.batch
         OR l.changed IS DISTINCT FROM (b.j ->> 'initial_conclusion' IS DISTINCT FROM g.initial_conclusion)),
     'log kind / before / after';
+  DROP TABLE p2x_logpick;
 END $$;
 
 -- ===== per case =====
+CREATE FUNCTION pg_temp.p2x_log(fam text) RETURNS evaluation_log LANGUAGE sql AS $f$
+  SELECT l.* FROM evaluation_log l JOIN game_info g ON g.game_id = l.game_id
+   WHERE g.family_id = fam AND l.context IN ('p2x_r1', 'p2x_r2') ORDER BY l.id DESC LIMIT 1
+$f$;
 DO $$
 DECLARE f game_evaluations; b game_evaluations; v eval_stats_rows; l evaluation_log; s eval_pair_merge_snapshots;
 BEGIN
@@ -285,10 +322,12 @@ BEGIN
   SELECT * INTO b FROM game_evaluations WHERE game_id = 'p2x_a1i';
   ASSERT f.initial_evaluator = 'P2xA1b' AND f.assigned_date = '2026-03-01' AND f.first_assigned_date = '2026-02-28'
      AND f.batch = 'W0' AND f.category_group = 'arcade', format('A1 front took the holder row: %s', to_jsonb(f));
-  ASSERT f.initial_note = 'draft from back' AND f.drive_link = 'https://x/a1', 'A1 front filled from the back';
+  ASSERT f.initial_note = 'draft from back' AND b.initial_note = 'draft from back' AND f.drive_link = 'https://x/a1',
+    'A1 the holder''s draft wins, the front fills the demo link';
   ASSERT NOT f.pair_back AND b.pair_back AND f.credit IS NULL AND b.credit IS NULL, 'A1 link, no credit';
-  SELECT * INTO l FROM evaluation_log WHERE game_evaluation_id = b.id AND kind LIKE 'pair_%' ORDER BY id DESC LIMIT 1;
-  ASSERT l.kind = 'pair_link' AND l.owner = 'P2xA1b' AND l.owner_after = 'P2xA1b', format('A1 log: %s', to_jsonb(l));
+  SELECT * INTO l FROM pg_temp.p2x_log('fam.p2x_a1');
+  ASSERT l.game_evaluation_id = f.id AND l.kind = 'pair_merge' AND l.owner = 'P2xA1f' AND l.owner_after = 'P2xA1b'
+     AND l.batch_before = 'W1' AND l.batch_after = 'W0', format('A1 log on the front: %s', to_jsonb(l));
   SELECT * INTO s FROM eval_pair_merge_snapshots WHERE game_evaluation_id = f.id;
   ASSERT s.pair_group = 'A' AND s.family_id = 'fam.p2x_a1'
      AND s.written - ARRAY['pair_eval_id', 'pair_back'] = jsonb_build_object(
@@ -302,8 +341,9 @@ BEGIN
   SELECT * INTO b FROM game_evaluations WHERE game_id = 'p2x_a2i';
   ASSERT b.initial_evaluator = 'P2xA2f' AND b.assigned_date = '2026-03-01' AND b.batch = 'W5'
      AND b.initial_note = 'front note' AND f.initial_note = 'front note', format('A2: %s', to_jsonb(b));
-  SELECT * INTO l FROM evaluation_log WHERE game_evaluation_id = b.id AND kind LIKE 'pair_%' ORDER BY id DESC LIMIT 1;
-  ASSERT l.kind = 'pair_merge' AND l.owner = 'P2xA2b' AND l.owner_after = 'P2xA2f'
+  ASSERT f.initial_gameplay = 'gp back' AND b.initial_gameplay = 'gp back', 'A2 the holder fills what it lacks';
+  SELECT * INTO l FROM pg_temp.p2x_log('fam.p2x_a2');
+  ASSERT l.game_evaluation_id = b.id AND l.kind = 'pair_merge' AND l.owner = 'P2xA2b' AND l.owner_after = 'P2xA2f'
      AND l.batch_before = 'W6' AND l.batch_after = 'W5' AND NOT l.changed, format('A2 log: %s', to_jsonb(l));
   SELECT * INTO s FROM eval_pair_merge_snapshots WHERE game_evaluation_id = b.id;
   ASSERT s.row_before ->> 'initial_note' = 'back note' AND s.written ->> 'initial_note' = 'front note', 'A2 snapshot keeps the back note';
@@ -315,8 +355,10 @@ BEGIN
      AND f.final_evaluator = 'P2xMgr' AND f.initial_note = 'judged note 1' AND f.evaluate_date = '2026-03-03 10:00Z'
      AND f.category_group = 'puzzle' AND f.batch = 'W1' AND f.assigned_date = '2026-03-01', format('B1 front: %s', to_jsonb(f));
   ASSERT NOT f.pair_back AND b.pair_back AND f.credit IS NULL AND b.credit IS NULL, 'B1 link, no credit';
-  SELECT * INTO l FROM evaluation_log WHERE game_evaluation_id = b.id AND kind LIKE 'pair_%' ORDER BY id DESC LIMIT 1;
-  ASSERT l.kind = 'pair_link' AND l.owner = 'P2xB1j' AND l.owner_after = 'P2xB1j', format('B1 log: %s', to_jsonb(l));
+  SELECT * INTO l FROM pg_temp.p2x_log('fam.p2x_b1');
+  ASSERT l.game_evaluation_id = f.id AND l.kind = 'pair_merge' AND l.owner = 'P2xB1w' AND l.owner_after = 'P2xB1j'
+     AND l.conclusion_before IS NULL AND l.conclusion_after = 'Bypass' AND l.changed
+     AND l.final_before IS NULL AND l.final_after = 'Watch List', format('B1 log on the waiting front: %s', to_jsonb(l));
   -- the counts: the judged work now counts on the front row, once
   ASSERT (SELECT count(*) FROM eval_stats_rows WHERE game_id IN ('p2x_b1a', 'p2x_b1i') AND eval_row
             AND initial_evaluator = 'P2xB1j' AND initial_conclusion = 'Bypass') = 1, 'B1 counted once';
@@ -325,10 +367,19 @@ BEGIN
   SELECT * INTO b FROM game_evaluations WHERE game_id = 'p2x_b2i';
   ASSERT b.initial_evaluator = 'P2xB2j' AND b.initial_conclusion = 'List_Idea' AND b.initial_note = 'judged note 2',
     format('B2 back: %s', to_jsonb(b));
-  SELECT * INTO l FROM evaluation_log WHERE game_evaluation_id = b.id AND kind LIKE 'pair_%' ORDER BY id DESC LIMIT 1;
-  ASSERT l.kind = 'pair_merge' AND l.owner = 'P2xB2w' AND l.owner_after = 'P2xB2j'
+  SELECT * INTO l FROM pg_temp.p2x_log('fam.p2x_b2');
+  ASSERT l.game_evaluation_id = b.id AND l.kind = 'pair_merge' AND l.owner = 'P2xB2w' AND l.owner_after = 'P2xB2j'
      AND l.conclusion_before IS NULL AND l.conclusion_after = 'List_Idea' AND l.changed AND l.context = 'p2x_r2',
     format('B2 log: %s', to_jsonb(l));
+
+  -- B3: the front keeps its own frozen 5' batch; its empty 20' batch is filled from the back
+  SELECT * INTO f FROM game_evaluations WHERE game_id = 'p2x_b3a';
+  SELECT * INTO b FROM game_evaluations WHERE game_id = 'p2x_b3i';
+  ASSERT f.final_conclusion = 'Priority IV' AND f.initial_conclusion = 'List_Idea', format('B3 front judged: %s', to_jsonb(f));
+  ASSERT f.record_5min_batch = 'WF5' AND f.record_20min_batch = 'WJ20'
+     AND b.record_5min_batch = 'WF5' AND b.record_20min_batch = 'WJ20',
+    format('B3 record batches: front %s/%s back %s/%s', f.record_5min_batch, f.record_20min_batch,
+           b.record_5min_batch, b.record_20min_batch);
 
   -- C: each store keeps its result, holder and group; the live front takes the dead store's recording
   SELECT * INTO f FROM game_evaluations WHERE game_id = 'p2x_ci';
@@ -339,8 +390,9 @@ BEGIN
      AND b.initial_note = 'dead', format('C back keeps its result: %s', to_jsonb(b));
   ASSERT f.record_5min_assignee = 'P2xRec' AND f.record_5min_drive = 'https://r/c', 'C media filled from the dead store';
   ASSERT NOT f.pair_back AND b.pair_back AND f.credit IS NULL AND b.credit IS NULL, 'C link, no credit';
-  SELECT * INTO l FROM evaluation_log WHERE game_evaluation_id = b.id AND kind LIKE 'pair_%' ORDER BY id DESC LIMIT 1;
-  ASSERT l.kind = 'pair_link', format('C log: %s', to_jsonb(l));
+  SELECT * INTO l FROM pg_temp.p2x_log('fam.p2x_c');
+  ASSERT l.game_evaluation_id = f.id AND l.kind = 'pair_merge' AND l.owner = 'P2xCl' AND l.owner_after = 'P2xCl'
+     AND NOT l.changed, format('C log on the front (it took the recording): %s', to_jsonb(l));
 
   -- D: front's final and demo link kept; the back's YouTube link moved to the front; the back
   -- row takes the front's group; its own work lives on in credit
@@ -361,8 +413,8 @@ BEGIN
     format('D back counts as before, the moved video once: %s', to_jsonb(v));
   ASSERT (SELECT count(*) FROM eval_stats_rows WHERE game_id IN ('p2x_da', 'p2x_di') AND media_row
             AND youtube_link = 'https://y/b') = 1, 'D the moved YouTube link counted once';
-  SELECT * INTO l FROM evaluation_log WHERE game_evaluation_id = b.id AND kind LIKE 'pair_%' ORDER BY id DESC LIMIT 1;
-  ASSERT l.kind = 'pair_merge' AND l.owner = 'P2xDb' AND l.owner_after = 'P2xDf'
+  SELECT * INTO l FROM pg_temp.p2x_log('fam.p2x_d');
+  ASSERT l.game_evaluation_id = b.id AND l.kind = 'pair_merge' AND l.owner = 'P2xDb' AND l.owner_after = 'P2xDf'
      AND l.final_before = 'Insight' AND l.final_after = 'Watch List' AND l.batch_before = 'W0' AND l.batch_after = 'W1'
      AND NOT l.changed, format('D log: %s', to_jsonb(l));
   SELECT * INTO s FROM eval_pair_merge_snapshots WHERE game_evaluation_id = b.id;
@@ -381,8 +433,8 @@ BEGIN
   SELECT * INTO v FROM eval_stats_rows WHERE id = b.id;
   ASSERT v.initial_conclusion = 'Bypass' AND v.initial_evaluator = 'P2xEb' AND v.evaluate_date = '2026-03-02 10:00Z',
     'E back counts as the Bypass it was';
-  SELECT * INTO l FROM evaluation_log WHERE game_evaluation_id = b.id AND kind LIKE 'pair_%' ORDER BY id DESC LIMIT 1;
-  ASSERT l.kind = 'pair_merge' AND l.conclusion_before = 'Bypass' AND l.conclusion_after = 'List_Idea' AND l.changed
+  SELECT * INTO l FROM pg_temp.p2x_log('fam.p2x_e');
+  ASSERT l.game_evaluation_id = b.id AND l.kind = 'pair_merge' AND l.conclusion_before = 'Bypass' AND l.conclusion_after = 'List_Idea' AND l.changed
      AND l.final_before = 'Bypass' AND l.final_after IS NULL, format('E log: %s', to_jsonb(l));
 
   -- F: the back store becomes Playtest & Bypass
@@ -417,6 +469,38 @@ BEGIN
   ASSERT b.credit ->> 'initial_evaluator' = 'P2xDb', 'credit survives a later save';
   ASSERT NOT f.pair_back AND b.pair_back, 'the front row stays (sticky)';
   ASSERT COALESCE(current_setting('eval_pairs.keep_updated_at', true), '') <> 'on', 'the setting is local to apply';
+END $$;
+
+-- ===== apply refuses to run when the touch function ignores the setting (054 re-run) =====
+DO $$
+DECLARE msg text; ran boolean := false;
+BEGIN
+  BEGIN
+    -- 054's body, as a re-run of 054 would put it back
+    EXECUTE $q$CREATE OR REPLACE FUNCTION game_evaluations_touch_updated() RETURNS trigger
+      LANGUAGE plpgsql AS $f$
+      BEGIN
+        IF (NEW.pair_eval_id IS DISTINCT FROM OLD.pair_eval_id OR NEW.pair_back IS DISTINCT FROM OLD.pair_back)
+           AND to_jsonb(NEW) - ARRAY['pair_eval_id', 'pair_back', 'updated_at']
+             = to_jsonb(OLD) - ARRAY['pair_eval_id', 'pair_back', 'updated_at'] THEN
+          RETURN NEW;
+        END IF;
+        NEW.updated_at = NOW();
+        RETURN NEW;
+      END;
+      $f$ $q$;
+    BEGIN
+      PERFORM eval_pair_phase2_apply('p2x_guard', 10);
+      ran := true;
+    EXCEPTION WHEN raise_exception THEN
+      msg := SQLERRM;
+    END;
+    RAISE EXCEPTION USING ERRCODE = 'P0099', MESSAGE = 'undo the replaced touch function';
+  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
+  END;
+  ASSERT NOT ran AND msg LIKE '%eval_pairs.keep_updated_at%', format('apply guard: ran %s, %s', ran, msg);
+  ASSERT (SELECT position('eval_pairs.keep_updated_at' IN prosrc) > 0 FROM pg_proc
+           WHERE oid = 'game_evaluations_touch_updated()'::regprocedure), 'the 055 touch function is back';
 END $$;
 
 -- ===== a third run finds nothing and writes nothing =====

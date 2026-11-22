@@ -246,6 +246,23 @@ two_sessions "l.locktype = 'advisory' AND l.classid = 54 AND l.objid = hashtext(
             AND initial_conclusion = 'Bypass' AND initial_evaluator = 'P2wA') = 2, 'p2w linked as group B';
 END \$\$;"
 
+# apply_holds_game_info: apply locks the family's game_info rows FOR SHARE, so a Signal Sense
+# family change (session B) waits for the batch's commit (session A), then splits the pair
+# through 054's game_info trigger, instead of changing the family under a running batch.
+"${P[@]}" -d verify -c "INSERT INTO game_info (game_id, os, initial_release) VALUES
+                          ('p2v_a', 'android', '2026-01-01'), ('p2v_i', 'ios', '2026-02-01')" \
+  -c "INSERT INTO game_evaluations (game_id, category_group, initial_evaluator) VALUES
+        ('p2v_a', 'puzzle', 'P2vA'), ('p2v_i', 'puzzle', 'P2vI')" \
+  -c "UPDATE game_info SET family_id = 'fam.p2v' WHERE game_id IN ('p2v_a', 'p2v_i')"
+two_sessions "l.locktype = 'advisory' AND l.classid = 54 AND l.objid = hashtext('fam.p2v')::oid AND l.objsubid = 2" \
+  "DO \$\$ BEGIN PERFORM eval_pair_phase2_apply('p2v_run', 10); END \$\$" \
+  "UPDATE game_info SET family_id = 'fam.p2v_moved' WHERE game_id = 'p2v_i'"
+"${P[@]}" -d verify -c "DO \$\$ BEGIN
+  ASSERT (SELECT count(*) FROM eval_pair_merge_snapshots WHERE run_id = 'p2v_run') = 2, 'p2v linked by apply';
+  ASSERT (SELECT count(*) FROM game_evaluations WHERE game_id IN ('p2v_a', 'p2v_i')
+            AND pair_eval_id IS NULL AND NOT pair_back) = 2, 'the family change after the commit split the pair';
+END \$\$;"
+
 # rollback_block_055: the "-- ROLLBACK:" block of 055 leaves the schema exactly as 054 left it
 # (eval_pair_refresh_back's body back to 054's, byte for byte), then 055 applies again.
 sed -n '/^-- ROLLBACK:/,/^-- END ROLLBACK/{/^-- ROLLBACK:/d;/^-- END ROLLBACK/d;s/^-- \{0,1\}//;p;}' \
